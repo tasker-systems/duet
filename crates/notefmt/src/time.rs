@@ -1,0 +1,543 @@
+//! Musical time: bar.beat.tick positions, time signatures, keys, and the map from
+//! positions to absolute MIDI ticks.
+
+use std::fmt;
+use std::str::FromStr;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::error::{Error, Result};
+
+macro_rules! string_serde {
+    ($ty:ty) => {
+        impl Serialize for $ty {
+            fn serialize<S: Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                serializer.collect_str(self)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $ty {
+            fn deserialize<D: Deserializer<'de>>(
+                deserializer: D,
+            ) -> std::result::Result<Self, D::Error> {
+                let s = String::deserialize(deserializer)?;
+                s.parse().map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+/// A position as bar, beat and tick, all counted the way a DAW shows them.
+///
+/// `bar` and `beat` start at 1. A beat is one unit of the time signature's denominator
+/// (a quarter in 4/4, an eighth in 6/8). `tick` is the offset into that beat in the
+/// file's own ticks, so `1.2.240` at 480 ticks per quarter is an eighth after beat 2.
+/// Written as `bar.beat.tick`; `bar.beat` alone means tick 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Position {
+    pub bar: u32,
+    pub beat: u32,
+    pub tick: u32,
+}
+
+impl Position {
+    pub fn new(bar: u32, beat: u32, tick: u32) -> Self {
+        Position { bar, beat, tick }
+    }
+
+    /// The start of a bar.
+    pub fn bar(bar: u32) -> Self {
+        Position::new(bar, 1, 0)
+    }
+}
+
+impl fmt::Display for Position {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.bar, self.beat, self.tick)
+    }
+}
+
+impl FromStr for Position {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let bad = || Error::invalid(format!("'{s}' is not a position like 3.2.240"));
+        let parts: Vec<&str> = s.split('.').collect();
+        if !(2..=3).contains(&parts.len()) {
+            return Err(bad());
+        }
+        let num = |p: &str| p.parse::<u32>().map_err(|_| bad());
+        let bar = num(parts[0])?;
+        let beat = num(parts[1])?;
+        let tick = if parts.len() == 3 { num(parts[2])? } else { 0 };
+        if bar == 0 || beat == 0 {
+            return Err(Error::invalid(format!(
+                "position '{s}': bars and beats start at 1"
+            )));
+        }
+        Ok(Position { bar, beat, tick })
+    }
+}
+
+string_serde!(Position);
+
+/// A time signature such as 4/4 or 6/8.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TimeSig {
+    pub num: u8,
+    pub den: u8,
+}
+
+impl TimeSig {
+    pub fn new(num: u8, den: u8) -> Result<Self> {
+        if num == 0 {
+            return Err(Error::invalid("a time signature needs at least one beat"));
+        }
+        if !den.is_power_of_two() || den > 64 {
+            return Err(Error::invalid(format!(
+                "time signature denominator {den} is not 1, 2, 4, 8, 16, 32 or 64"
+            )));
+        }
+        Ok(TimeSig { num, den })
+    }
+
+    /// The denominator as the power of two MIDI stores (4 is 2, 8 is 3).
+    pub fn den_power(self) -> u8 {
+        self.den.trailing_zeros() as u8
+    }
+}
+
+impl Default for TimeSig {
+    fn default() -> Self {
+        TimeSig { num: 4, den: 4 }
+    }
+}
+
+impl fmt::Display for TimeSig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.num, self.den)
+    }
+}
+
+impl FromStr for TimeSig {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let bad = || Error::invalid(format!("'{s}' is not a time signature like 4/4"));
+        let (num, den) = s.split_once('/').ok_or_else(bad)?;
+        TimeSig::new(
+            num.trim().parse().map_err(|_| bad())?,
+            den.trim().parse().map_err(|_| bad())?,
+        )
+    }
+}
+
+string_serde!(TimeSig);
+
+const MAJOR_KEYS: [&str; 15] = [
+    "Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#",
+];
+const MINOR_KEYS: [&str; 15] = [
+    "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#", "G#", "D#", "A#",
+];
+
+/// A key signature, stored the way MIDI does: sharps (positive) or flats (negative),
+/// and major or minor. Written as `D minor` or `Bb major`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Key {
+    pub sharps: i8,
+    pub minor: bool,
+}
+
+impl Key {
+    pub fn new(sharps: i8, minor: bool) -> Result<Self> {
+        if !(-7..=7).contains(&sharps) {
+            return Err(Error::invalid(format!(
+                "a key has between 7 flats and 7 sharps, not {sharps}"
+            )));
+        }
+        Ok(Key { sharps, minor })
+    }
+
+    /// The key's tonic, such as `D` or `Bb`.
+    pub fn tonic(self) -> &'static str {
+        let names = if self.minor { &MINOR_KEYS } else { &MAJOR_KEYS };
+        names[(self.sharps + 7) as usize]
+    }
+
+    /// Whether a black key (pitch class 0 to 11, C = 0) should be spelled as a flat in this
+    /// key. Notes of the scale (the major scale, or harmonic minor so the leading tone is
+    /// raised) are spelled as the scale spells them, so D minor has Bb and C#. Other black
+    /// keys follow the key signature: flats in flat keys, sharps otherwise.
+    pub fn spells_flat(self, pitch_class: u8) -> bool {
+        const NATURAL: [u8; 7] = [0, 2, 4, 5, 7, 9, 11]; // C D E F G A B
+        const MAJOR: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
+        const HARMONIC_MINOR: [u8; 7] = [0, 2, 3, 5, 7, 8, 11];
+        let tonic = self.tonic();
+        let letter = match tonic.as_bytes()[0] {
+            b'C' => 0,
+            b'D' => 1,
+            b'E' => 2,
+            b'F' => 3,
+            b'G' => 4,
+            b'A' => 5,
+            _ => 6,
+        };
+        let shift: i32 = tonic[1..]
+            .chars()
+            .map(|c| if c == '#' { 1 } else { -1 })
+            .sum();
+        let tonic_pc = (i32::from(NATURAL[letter]) + shift).rem_euclid(12);
+        let steps = if self.minor { &HARMONIC_MINOR } else { &MAJOR };
+        for (degree, step) in steps.iter().enumerate() {
+            let pc = (tonic_pc + i32::from(*step)).rem_euclid(12);
+            if pc == i32::from(pitch_class % 12) {
+                let natural = i32::from(NATURAL[(letter + degree) % 7]);
+                let accidental = (pc - natural + 18).rem_euclid(12) - 6;
+                return accidental < 0;
+            }
+        }
+        self.sharps < 0
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mode = if self.minor { "minor" } else { "major" };
+        write!(f, "{} {}", self.tonic(), mode)
+    }
+}
+
+impl FromStr for Key {
+    type Err = Error;
+
+    /// Parses `D minor`, `Dm`, `D min`, `Bb major`, `Bb maj` or plain `Bb` (major).
+    fn from_str(s: &str) -> Result<Self> {
+        let bad = || Error::invalid(format!("'{s}' is not a key like D minor or Bb major"));
+        let s = s.trim();
+        let mut chars = s.chars();
+        let letter = chars.next().ok_or_else(bad)?.to_ascii_uppercase();
+        let rest = chars.as_str();
+        let accidental_len = rest
+            .chars()
+            .take_while(|c| *c == '#' || *c == 'b')
+            .map(char::len_utf8)
+            .sum::<usize>();
+        // A lone "b" after the letter could be a flat ("Bb") or nothing else, since no
+        // mode word starts with "b"; so accidentals are unambiguous.
+        let (accidental, mode) = rest.split_at(accidental_len);
+        let tonic = format!("{letter}{accidental}");
+        let minor = match mode.trim().to_ascii_lowercase().as_str() {
+            "" | "major" | "maj" => false,
+            "m" | "min" | "minor" => true,
+            _ => return Err(bad()),
+        };
+        let names = if minor { &MINOR_KEYS } else { &MAJOR_KEYS };
+        let index = names.iter().position(|n| *n == tonic).ok_or_else(|| {
+            Error::invalid(format!(
+                "'{s}' has no standard key signature; use a key like {} instead",
+                if minor {
+                    "D# minor or Eb minor"
+                } else {
+                    "Db major"
+                }
+            ))
+        })?;
+        Key::new(index as i8 - 7, minor)
+    }
+}
+
+string_serde!(Key);
+
+/// One stretch of the song in a single time signature.
+#[derive(Debug, Clone, Copy)]
+struct Segment {
+    start_tick: u64,
+    start_bar: u32,
+    sig: TimeSig,
+}
+
+/// Converts between absolute ticks and bar.beat.tick positions.
+///
+/// A time signature change starts a new bar where it falls. If it falls in the middle of
+/// a bar, that bar is cut short and the next bar number begins at the change, which is
+/// how DAWs treat it too.
+#[derive(Debug, Clone)]
+pub struct TimeMap {
+    tpq: u32,
+    segments: Vec<Segment>,
+}
+
+impl TimeMap {
+    pub fn new(ticks_per_quarter: u16, initial: TimeSig) -> Result<Self> {
+        if ticks_per_quarter == 0 {
+            return Err(Error::invalid("ticks per quarter must be above 0"));
+        }
+        let map = TimeMap {
+            tpq: u32::from(ticks_per_quarter),
+            segments: vec![Segment {
+                start_tick: 0,
+                start_bar: 1,
+                sig: initial,
+            }],
+        };
+        map.beat_ticks(initial)?;
+        Ok(map)
+    }
+
+    fn beat_ticks(&self, sig: TimeSig) -> Result<u64> {
+        let whole = self.tpq * 4;
+        if !whole.is_multiple_of(u32::from(sig.den)) {
+            return Err(Error::invalid(format!(
+                "{} ticks per quarter cannot divide into beats of 1/{}",
+                self.tpq, sig.den
+            )));
+        }
+        Ok(u64::from(whole / u32::from(sig.den)))
+    }
+
+    /// The position of an absolute tick.
+    pub fn position(&self, tick: u64) -> Position {
+        let seg = self
+            .segments
+            .iter()
+            .rev()
+            .find(|s| s.start_tick <= tick)
+            .expect("the first segment starts at tick 0");
+        // Every segment's signature was checked by beat_ticks when it was added.
+        let beat_ticks = self.beat_ticks(seg.sig).unwrap_or(1);
+        let bar_ticks = beat_ticks * u64::from(seg.sig.num);
+        let offset = tick - seg.start_tick;
+        let bars = offset / bar_ticks;
+        let in_bar = offset % bar_ticks;
+        Position {
+            bar: seg.start_bar + bars as u32,
+            beat: (in_bar / beat_ticks) as u32 + 1,
+            tick: (in_bar % beat_ticks) as u32,
+        }
+    }
+
+    /// The absolute tick of a position. Tick offsets past the end of a beat, and beats
+    /// past the end of a bar, simply carry on into the next ones.
+    pub fn tick(&self, pos: Position) -> Result<u64> {
+        if pos.bar == 0 || pos.beat == 0 {
+            return Err(Error::invalid(format!(
+                "position {pos}: bars and beats start at 1"
+            )));
+        }
+        let seg = self
+            .segments
+            .iter()
+            .rev()
+            .find(|s| s.start_bar <= pos.bar)
+            .expect("the first segment starts at bar 1");
+        let beat_ticks = self.beat_ticks(seg.sig)?;
+        let bar_ticks = beat_ticks * u64::from(seg.sig.num);
+        Ok(seg.start_tick
+            + u64::from(pos.bar - seg.start_bar) * bar_ticks
+            + u64::from(pos.beat - 1) * beat_ticks
+            + u64::from(pos.tick))
+    }
+
+    /// Adds a time signature change at an absolute tick, and returns where it falls
+    /// (its position just before the change takes effect). Changes must come in order.
+    pub fn change_at_tick(&mut self, tick: u64, sig: TimeSig) -> Result<Position> {
+        self.beat_ticks(sig)?;
+        let last = *self.segments.last().expect("never empty");
+        if tick < last.start_tick {
+            return Err(Error::invalid(format!(
+                "time signature change at tick {tick} comes before an earlier change"
+            )));
+        }
+        let at = self.position(tick);
+        if tick == last.start_tick {
+            self.segments.last_mut().expect("never empty").sig = sig;
+        } else {
+            let start_bar = if at.beat == 1 && at.tick == 0 {
+                at.bar
+            } else {
+                at.bar + 1
+            };
+            self.segments.push(Segment {
+                start_tick: tick,
+                start_bar,
+                sig,
+            });
+        }
+        Ok(at)
+    }
+
+    /// Adds a time signature change at a position, read against the changes before it.
+    pub fn change_at(&mut self, at: Position, sig: TimeSig) -> Result<u64> {
+        let tick = self.tick(at)?;
+        self.change_at_tick(tick, sig)?;
+        Ok(tick)
+    }
+}
+
+/// The shortest decimal near `value` (up to 9 places) that `fits` accepts.
+fn shortest_decimal(value: f64, fits: impl Fn(f64) -> bool) -> f64 {
+    for places in 0..=9 {
+        let candidate: f64 = format!("{value:.places$}").parse().unwrap_or(value);
+        if fits(candidate) {
+            return candidate;
+        }
+    }
+    value
+}
+
+/// A length in ticks as quarter notes, using the shortest decimal that converts back to
+/// exactly the same number of ticks.
+pub fn beats_from_ticks(ticks: u64, tpq: u16) -> f64 {
+    let tpq = f64::from(tpq);
+    shortest_decimal(ticks as f64 / tpq, |b| (b * tpq).round() == ticks as f64)
+}
+
+/// A length in quarter notes as ticks, rounded to the nearest tick.
+pub fn ticks_from_beats(beats: f64, tpq: u16) -> Result<u64> {
+    if !beats.is_finite() || beats < 0.0 {
+        return Err(Error::invalid(format!(
+            "length {beats} is not zero or a positive number of beats"
+        )));
+    }
+    Ok((beats * f64::from(tpq)).round() as u64)
+}
+
+/// A tempo in microseconds per quarter as beats per minute, using the shortest decimal
+/// that converts back to exactly the same microseconds.
+pub fn bpm_from_micros(micros: u32) -> f64 {
+    shortest_decimal(60_000_000.0 / f64::from(micros), |bpm| {
+        (60_000_000.0 / bpm).round() == f64::from(micros)
+    })
+}
+
+/// A tempo in beats per minute as microseconds per quarter, as MIDI stores it.
+pub fn micros_from_bpm(bpm: f64) -> Result<u32> {
+    if !bpm.is_finite() || bpm <= 0.0 {
+        return Err(Error::invalid(format!("tempo {bpm} is not a positive bpm")));
+    }
+    let micros = (60_000_000.0 / bpm).round();
+    if !(1.0..=16_777_215.0).contains(&micros) {
+        return Err(Error::invalid(format!(
+            "tempo {bpm} bpm is outside what MIDI can store"
+        )));
+    }
+    Ok(micros as u32)
+}
+
+/// Parses a length in quarter notes, as a decimal (`0.5`) or a fraction (`1/3`).
+pub fn parse_beats(s: &str) -> Result<f64> {
+    let bad = || Error::invalid(format!("'{s}' is not a length like 1, 0.5 or 1/3"));
+    let value = match s.split_once('/') {
+        Some((n, d)) => {
+            let n: f64 = n.parse().map_err(|_| bad())?;
+            let d: f64 = d.parse().map_err(|_| bad())?;
+            if d == 0.0 {
+                return Err(bad());
+            }
+            n / d
+        }
+        None => s.parse().map_err(|_| bad())?,
+    };
+    if !value.is_finite() || value < 0.0 {
+        return Err(bad());
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positions_round_trip_through_ticks() {
+        let mut map = TimeMap::new(480, TimeSig::new(4, 4).unwrap()).unwrap();
+        // 6/8 from bar 3, then 3/4 in the middle of a 6/8 bar.
+        map.change_at(Position::bar(3), TimeSig::new(6, 8).unwrap())
+            .unwrap();
+        map.change_at(Position::new(4, 4, 0), TimeSig::new(3, 4).unwrap())
+            .unwrap();
+        for tick in (0..20_000).step_by(7) {
+            assert_eq!(map.tick(map.position(tick)).unwrap(), tick);
+        }
+        assert_eq!(map.position(0), Position::bar(1));
+        assert_eq!(map.position(480 * 4 + 240), Position::new(2, 1, 240));
+        assert_eq!(map.position(480 * 8), Position::bar(3));
+        assert_eq!(map.position(480 * 8 + 240), Position::new(3, 2, 0));
+        // Bar 4 is cut short after three eighths, and bar 5 starts in 3/4.
+        let cut = 480 * 8 + 240 * 6 + 240 * 3;
+        assert_eq!(map.position(cut), Position::bar(5));
+        assert_eq!(map.position(cut - 1), Position::new(4, 3, 239));
+    }
+
+    #[test]
+    fn decimals_are_exact() {
+        for tpq in [96u16, 384, 480, 960] {
+            for ticks in 0..2000u64 {
+                let beats = beats_from_ticks(ticks, tpq);
+                assert_eq!(ticks_from_beats(beats, tpq).unwrap(), ticks);
+                let text: f64 = beats.to_string().parse().unwrap();
+                assert_eq!(text, beats);
+            }
+        }
+        assert_eq!(beats_from_ticks(240, 480), 0.5);
+        assert_eq!(beats_from_ticks(160, 480), 0.333);
+        for micros in (200_000..1_500_000).step_by(997) {
+            assert_eq!(micros_from_bpm(bpm_from_micros(micros)).unwrap(), micros);
+        }
+        assert_eq!(bpm_from_micros(652_174), 92.0);
+    }
+
+    #[test]
+    fn keys() {
+        assert_eq!(
+            "D minor".parse::<Key>().unwrap(),
+            Key::new(-1, true).unwrap()
+        );
+        assert_eq!("Dm".parse::<Key>().unwrap(), Key::new(-1, true).unwrap());
+        assert_eq!("Bb".parse::<Key>().unwrap(), Key::new(-2, false).unwrap());
+        assert_eq!(
+            "F# major".parse::<Key>().unwrap(),
+            Key::new(6, false).unwrap()
+        );
+        assert!("D# major".parse::<Key>().is_err());
+        for sharps in -7..=7 {
+            for minor in [false, true] {
+                let key = Key::new(sharps, minor).unwrap();
+                assert_eq!(key.to_string().parse::<Key>().unwrap(), key);
+            }
+        }
+    }
+
+    #[test]
+    fn spelling_follows_the_key() {
+        let spell = |key: &str| -> Vec<bool> {
+            let key: Key = key.parse().unwrap();
+            [1u8, 3, 6, 8, 10]
+                .iter()
+                .map(|pc| key.spells_flat(*pc))
+                .collect()
+        };
+        // C#/Db, D#/Eb, F#/Gb, G#/Ab, A#/Bb
+        assert_eq!(spell("D minor"), [false, true, true, true, true]); // C#, then flats
+        assert_eq!(spell("A minor"), [false; 5]); // G#, then sharps
+        assert_eq!(spell("C minor"), [true; 5]); // Eb, Ab, Bb, then flats
+        assert_eq!(spell("Bb major"), [true; 5]);
+        assert_eq!(spell("E major"), [false; 5]);
+        assert_eq!(spell("F major"), [true; 5]); // Bb, then flats
+    }
+
+    #[test]
+    fn fractions() {
+        assert_eq!(parse_beats("1/3").unwrap(), 1.0 / 3.0);
+        assert_eq!(
+            ticks_from_beats(parse_beats("1/3").unwrap(), 480).unwrap(),
+            160
+        );
+        assert!(parse_beats("-1").is_err());
+        assert!(parse_beats("1/0").is_err());
+    }
+}
