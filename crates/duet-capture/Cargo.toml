@@ -1,0 +1,22 @@
+[package]
+name = "duet-capture"
+version = "0.2.0"
+description = "duet capture: audio in, analysis events out, as a stream of stages that settle their output as they go."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["midi", "music", "audio", "llm"]
+categories = ["multimedia::audio"]
+include = ["src/**", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"

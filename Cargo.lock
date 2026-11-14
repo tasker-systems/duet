@@ -363,6 +363,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "duet-capture"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "duet-cli"
 version = "0.2.1"
 dependencies = [
