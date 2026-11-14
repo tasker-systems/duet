@@ -2,7 +2,7 @@
 //! exact forms, text → grid → text, and the refusals that keep every conversion exact.
 
 use duet_core::{Grid, Note, Position, Song, TimeChange, TimeSig, Track};
-use duet_drums::{Bar, DrumGrid, Lane, LaneMap, Levels};
+use duet_drums::{Bar, DrumGrid, Lane, LaneMap, LanePatch, Levels};
 use duet_midi::Midi;
 
 /// A small deterministic generator, so every run tests the same grids.
@@ -616,4 +616,187 @@ fn a_rendered_grid_states_its_end() {
     );
     grid.end = Some("2.3.0".parse().expect("position"));
     assert_eq!(end(&grid).as_deref(), Some("2.3.0"));
+}
+
+/// Config-style patches over gm, varied by the generator: new lanes on free keys, gm
+/// lanes moved to free keys, and new aliases, in every allowed group.
+fn random_patches(rng: &mut Lcg, gm: &LaneMap) -> Vec<(String, LanePatch)> {
+    let mut used: Vec<u8> = gm.lanes().map(|l| l.key).collect();
+    let mut free_key = |rng: &mut Lcg| loop {
+        let k = rng.below(128) as u8;
+        if !used.contains(&k) {
+            used.push(k);
+            return k;
+        }
+    };
+    let groups = [
+        "cymbals",
+        "hats",
+        "toms",
+        "snare",
+        "kick",
+        "percussion",
+        "other",
+    ];
+    let mut patches = Vec::new();
+    for i in 0..1 + rng.below(4) {
+        let mut patch = LanePatch::key(free_key(rng));
+        if rng.below(2) == 0 {
+            patch.group = Some(groups[rng.below(groups.len() as u64) as usize].to_owned());
+        }
+        if rng.below(2) == 0 {
+            patch.aliases = Some(vec![format!("cfg{i}x{}", rng.below(1000))]);
+        }
+        patches.push((format!("cfg-{i}"), patch));
+    }
+    let names: Vec<String> = gm.lanes().map(|l| l.name.clone()).collect();
+    for _ in 0..1 + rng.below(3) {
+        let name = names[rng.below(names.len() as u64) as usize].clone();
+        if patches.iter().any(|(n, _)| *n == name) {
+            continue;
+        }
+        let mut patch = LanePatch::key(free_key(rng));
+        if rng.below(2) == 0 {
+            patch.aliases = Some(vec![format!("moved{}", rng.below(1000))]);
+        }
+        patches.push((name, patch));
+    }
+    patches
+}
+
+/// Witness that a written .drums file is self-contained: a grid read or made under a
+/// user's config (lanes added, gm lanes moved, aliases added) and written as text reads
+/// back as the same grid with no config, and with the config too. Rows a person writes
+/// by hand under the config may use its names and aliases with no `lane` line, and the
+/// grid's song reads back under the config. The generator varies the lanes, keys,
+/// aliases and groups the config sets, and the test checks config lanes were in play.
+#[test]
+fn a_grid_written_under_a_config_reads_the_same_with_none() {
+    let gm = LaneMap::gm();
+    let mut rng = Lcg(0xc0f1);
+    let (mut grids, mut config_lanes, mut aliased) = (0, 0, 0);
+    for _ in 0..16 {
+        let patches = random_patches(&mut rng, &gm);
+        let config = gm.patched(&patches).expect("a valid config");
+        for shape in shapes() {
+            let grid = random_grid(&mut rng, &config, shape).snapped_to_levels();
+            let touched: Vec<&Lane> = grid
+                .lanes
+                .iter()
+                .filter(|l| patches.iter().any(|(n, _)| *n == l.name))
+                .collect();
+            config_lanes += touched.len();
+
+            let text = grid.to_text().expect("text");
+            assert_eq!(
+                DrumGrid::from_text(&text).expect("no config"),
+                grid,
+                "{text}"
+            );
+            assert_eq!(
+                DrumGrid::from_text_in(&text, &config).expect("config"),
+                grid
+            );
+            for lane in &touched {
+                let named = gm.lanes().any(|l| l.name == lane.name && l.key == lane.key);
+                assert!(!named, "a config lane is not gm's on its key");
+                assert!(text.contains(&format!("\nlane {} {}\n", lane.name, lane.key)));
+            }
+
+            // By hand, under the config: no lane lines, and rows by their config alias.
+            let mut hand: String = text
+                .lines()
+                .filter(|l| !l.starts_with("lane "))
+                .map(|l| format!("{l}\n"))
+                .collect();
+            for (name, patch) in &patches {
+                if let Some([alias]) = patch.aliases.as_deref()
+                    && grid.lanes.iter().any(|l| &l.name == name)
+                {
+                    hand = hand.replace(&format!("\n{name} "), &format!("\n{alias} "));
+                    aliased += 1;
+                }
+            }
+            let read =
+                DrumGrid::from_text_in(&hand, &config).unwrap_or_else(|e| panic!("{e}\n{hand}"));
+            assert_eq!(read, grid, "hand-written under the config\n{hand}");
+
+            let song = grid.to_song().expect("song");
+            let back = DrumGrid::from_song(&song, grid.grid, &config, None, None).expect("back");
+            assert_eq!(back, grid, "grid → song → grid under the config");
+            grids += 1;
+        }
+    }
+    assert_eq!(grids, 96);
+    assert!(
+        config_lanes >= 30 && aliased >= 10,
+        "{config_lanes} config lanes, {aliased} aliased"
+    );
+}
+
+/// Patches change only what they set, add lanes, never remove one, and refuse by name
+/// what would break the map.
+#[test]
+fn a_patch_changes_what_it_sets_and_refuses_what_breaks_the_map() {
+    let gm = LaneMap::gm();
+    let patch = |name: &str, p: LanePatch| (name.to_owned(), p);
+    let mut aliases = LanePatch::default();
+    aliases.aliases = Some(vec!["boom".into()]);
+    let map = gm
+        .patched(&[
+            patch("kick", aliases),
+            patch("shaker-2", LanePatch::key(82)),
+        ])
+        .expect("valid");
+    let kick = map.lookup("boom").expect("the new alias");
+    assert_eq!(
+        (kick.name.as_str(), kick.key),
+        ("kick", 36),
+        "the key is kept"
+    );
+    assert!(map.lookup("bd").is_none(), "aliases are replaced");
+    assert_eq!(
+        map.lookup("shaker-2").map(|l| l.group.as_str()),
+        Some("other")
+    );
+    assert_eq!(
+        map.lanes().count(),
+        gm.lanes().count() + 1,
+        "nothing removed"
+    );
+
+    let cases = [
+        (
+            vec![patch("kick", LanePatch::key(38))],
+            "lanes kick and snare both play key 38",
+        ),
+        (
+            vec![patch("new-one", LanePatch::default())],
+            "lane new-one is not in the gm map, so it needs a key",
+        ),
+        (
+            vec![patch("Bad", LanePatch::key(90))],
+            "'Bad' is not a lane name",
+        ),
+        (
+            vec![patch("x-1", {
+                let mut p = LanePatch::key(90);
+                p.group = Some("bells".into());
+                p
+            })],
+            "lane x-1: group 'bells' is not one of",
+        ),
+    ];
+    for (patches, want) in cases {
+        let err = gm.patched(&patches).expect_err(want).to_string();
+        assert!(err.contains(want), "{err}\nshould say: {want}");
+    }
+    // Moving two lanes at once is fine, as long as the result is a valid map.
+    let moved = gm
+        .patched(&[
+            patch("kick", LanePatch::key(35)),
+            patch("kick-2", LanePatch::key(90)),
+        ])
+        .expect("both moved");
+    assert_eq!(moved.by_key(35).map(|l| l.name.as_str()), Some("kick"));
 }

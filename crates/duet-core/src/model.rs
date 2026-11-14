@@ -83,6 +83,20 @@ pub struct KeyChange {
     pub key: Key,
 }
 
+/// How a song that names no end gets one, when a file is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum EndRule {
+    /// The bar line after the last bar holding a note or control, and never before a
+    /// tempo, meter or key change: [`Song::default_end`].
+    #[default]
+    LastBar,
+    /// That end carried on to the next whole multiple of this many bars, so a song of
+    /// 5 bars rounded up to 4 ends after bar 8. A song already a multiple ends where it
+    /// does.
+    RoundUp(u32),
+}
+
 /// One instrument part on one MIDI channel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -286,6 +300,27 @@ impl Song {
     /// one: a change later than the last bar played moves the end to the first bar line
     /// at or after it.
     pub fn default_end(&self) -> Result<Position> {
+        self.default_end_by(EndRule::LastBar)
+    }
+
+    /// The end a song that names none gets under `rule`. [`EndRule::LastBar`] is
+    /// [`Song::default_end`]; [`EndRule::RoundUp`] carries that on to the next whole
+    /// multiple of its bars. The same song and rule always give the same end.
+    pub fn default_end_by(&self, rule: EndRule) -> Result<Position> {
+        let last = self.last_bar_end()?;
+        match rule {
+            EndRule::LastBar => Ok(last),
+            EndRule::RoundUp(0) => Err(Error::invalid(
+                "an end rounded up to a multiple of 0 bars has no end; use 1 or more",
+            )),
+            EndRule::RoundUp(n) => {
+                let bars = last.bar - 1;
+                Ok(Position::bar(bars.div_ceil(n) * n + 1))
+            }
+        }
+    }
+
+    fn last_bar_end(&self) -> Result<Position> {
         let map = self.time_map()?;
         let tpq = self.ticks_per_quarter;
         let mut last_bar = 0;
@@ -336,6 +371,28 @@ mod tests {
     fn default_end(body: &str) -> String {
         let song = Song::from_text(&format!("time 4/4\n{body}")).expect("a song");
         song.default_end().expect("an end").to_string()
+    }
+
+    #[test]
+    fn rounding_up_carries_the_end_to_a_whole_multiple_of_bars() {
+        let song = |body: &str| Song::from_text(&format!("time 3/4\n{body}")).expect("song");
+        let end = |song: &Song, rule| song.default_end_by(rule).expect("end").to_string();
+        let five = song("\n[track \"P\" ch1]\n5.1.0 C4 1 80\n");
+        assert_eq!(end(&five, EndRule::LastBar), "6.1.0");
+        assert_eq!(end(&five, EndRule::RoundUp(4)), "9.1.0");
+        assert_eq!(
+            end(&five, EndRule::RoundUp(5)),
+            "6.1.0",
+            "already a multiple"
+        );
+        assert_eq!(end(&five, EndRule::RoundUp(1)), "6.1.0");
+        assert_eq!(end(&five, EndRule::RoundUp(2)), "7.1.0");
+        assert_eq!(
+            end(&song(""), EndRule::RoundUp(4)),
+            "1.1.0",
+            "nothing to round"
+        );
+        assert!(five.default_end_by(EndRule::RoundUp(0)).is_err());
     }
 
     #[test]

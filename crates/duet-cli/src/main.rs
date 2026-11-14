@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+mod config;
 mod drums;
 mod io;
 mod song;
@@ -15,6 +16,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use crate::config::{Config, Dirs};
 use crate::drums::DrumsCommand;
 use crate::io::{Format, format_of, read, write};
 use crate::song::SongCommand;
@@ -48,6 +50,19 @@ enum Command {
     /// snap its velocities, or list the lanes.
     #[command(subcommand)]
     Drums(DrumsCommand),
+    /// Show duet's configuration: where its duet.toml files are, and what they set.
+    #[command(subcommand)]
+    Config(ConfigCommand),
+}
+
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Print the directories duet reads duet.toml and duet.local.toml from, and each
+    /// file in the order it is read, found or not.
+    Path,
+    /// Print the merged configuration as a duet.toml, each value with the file it came
+    /// from.
+    Show,
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -60,11 +75,20 @@ fn run(cli: Cli) -> Result<()> {
         } => {
             let from = from.unwrap_or_else(|| format_of(&input, Format::Text));
             let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
-            write(&read(&input, from)?, &output, to)
+            write(&read(&input, from)?, &output, to, Config::load()?.end)
         }
-        Command::Song(command) => song::run(command),
-        Command::Drums(command) => drums::run(command),
+        Command::Song(command) => song::run(command, &Config::load()?),
+        Command::Drums(command) => drums::run(command, &Config::load()?),
+        Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(&Dirs::find()?)),
+        Command::Config(ConfigCommand::Show) => stdout(&Config::load()?.show()),
     }
+}
+
+fn stdout(text: &str) -> Result<()> {
+    use std::io::Write as _;
+    std::io::stdout()
+        .write_all(text.as_bytes())
+        .map_err(|e| anyhow::anyhow!("writing standard output: {e}"))
 }
 
 fn main() -> ExitCode {

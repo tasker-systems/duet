@@ -15,16 +15,26 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// Runs duet with no config at all: an empty user config directory, and a working
+/// directory with no `.duet` above it.
 fn duet(args: &[&Path]) {
-    let out = Command::new(env!("CARGO_BIN_EXE_duet"))
-        .args(args)
-        .output()
-        .expect("run duet");
+    let none = scratch("no-config");
+    let out = duet_in(&none, &none.join("user"), args);
     assert!(
         out.status.success(),
         "duet {args:?}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// Runs duet in `cwd`, with `user` as its user config directory.
+fn duet_in(cwd: &Path, user: &Path, args: &[&Path]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_duet"))
+        .args(args)
+        .current_dir(cwd)
+        .env("DUET_CONFIG_DIR", user)
+        .output()
+        .expect("run duet")
 }
 
 /// Every line of `new` but its header's `end` line, and that line's position.
@@ -210,5 +220,229 @@ fn a_song_with_no_end_is_written_stating_its_default() {
         "{}",
         read("take-out.txt")
     );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+fn write(path: &Path, text: &str) {
+    std::fs::create_dir_all(path.parent().expect("a parent")).expect("dirs");
+    std::fs::write(path, text).expect("write");
+}
+
+/// Witness for config precedence: the user's `duet.toml`, then the user's
+/// `duet.local.toml`, then the project's `.duet/duet.toml` (found from a directory below
+/// it), then the project's `.duet/duet.local.toml`, each over the one before, lane by
+/// lane and field by field. `duet config show` names where each value came from, and a
+/// configured end default changes what is written, the same way every time.
+#[test]
+fn config_files_merge_in_order_and_the_end_default_is_stable() {
+    let dir = scratch("precedence");
+    let user = dir.join("user");
+    let project = dir.join("project");
+    let below = project.join("songs/sketches");
+    std::fs::create_dir_all(&below).expect("dirs");
+    write(
+        &user.join("duet.toml"),
+        "[song]\nend = { round-up = 4 }\n\n[lanes.shaker-2]\nkey = 82\naliases = [\"sh2\"]\n",
+    );
+    write(
+        &user.join("duet.local.toml"),
+        "[lanes.shaker-2]\nkey = 83\n",
+    );
+    write(
+        &project.join(".duet/duet.toml"),
+        "[song]\nend = { round-up = 2 }\n\n[lanes.kick]\naliases = [\"boom\"]\n",
+    );
+    write(
+        &project.join(".duet/duet.local.toml"),
+        "[lanes.shaker-2]\ngroup = \"percussion\"\n",
+    );
+    let p = |s: &'static str| Path::new(s);
+    let run = |cwd: &Path, args: &[&Path]| {
+        let out = duet_in(cwd, &user, args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).expect("utf-8")
+    };
+
+    let show = run(&below, &[p("config"), p("show")]);
+    let from = |f: &str| f.to_owned();
+    let user_toml = from(&user.join("duet.toml").display().to_string());
+    let user_local = from(&user.join("duet.local.toml").display().to_string());
+    let proj_toml = from(&project.join(".duet/duet.toml").display().to_string());
+    let proj_local = from(&project.join(".duet/duet.local.toml").display().to_string());
+    for want in [
+        format!("end = {{ round-up = 2 }}  # {proj_toml}\n"),
+        format!("[lanes.shaker-2]\nkey = 83  # {user_local}\n"),
+        format!("group = \"percussion\"  # {proj_local}\naliases = [\"sh2\"]  # {user_toml}\n"),
+        format!(
+            "[lanes.kick]\nkey = 36  # built-in\ngroup = \"kick\"  # built-in\naliases = [\"boom\"]  # {proj_toml}\n"
+        ),
+    ] {
+        assert!(
+            show.contains(&want),
+            "config show should hold\n{want}\n{show}"
+        );
+    }
+    let paths = run(&below, &[p("config"), p("path")]);
+    assert!(
+        paths.contains(&format!("{}  (found)", proj_local)),
+        "{paths}"
+    );
+
+    // The end default: round-up 2 in the project, 4 for the user alone, the built-in
+    // with no config; the same bytes every time.
+    let take = dir.join("take.txt");
+    write(&take, "[track \"P\" ch1]\n1.1.0 C4 1 80\n");
+    let convert = |cwd: &Path, user_dir: &Path| {
+        let out = duet_in(cwd, user_dir, &[p("convert"), &take, p("-")]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).expect("utf-8")
+    };
+    let in_project = convert(&below, &user);
+    assert!(in_project.contains("\nend 3.1.0\n"), "{in_project}");
+    assert_eq!(convert(&below, &user), in_project, "stable");
+    assert!(
+        convert(&dir, &user).contains("\nend 5.1.0\n"),
+        "the user's round-up 4"
+    );
+    assert!(
+        convert(&dir, &dir.join("none")).contains("\nend 2.1.0\n"),
+        "built-in"
+    );
+    let midi = |cwd: &Path| {
+        let out = duet_in(
+            cwd,
+            &user,
+            &[p("convert"), &take, p("--to"), p("midi"), p("-")],
+        );
+        assert!(out.status.success());
+        out.stdout
+    };
+    assert_eq!(midi(&below), midi(&below), "the same MIDI every time");
+
+    // Config lanes read without lane lines, and a .drums file written under the config
+    // reads the same with none.
+    let hand = dir.join("hand.drums");
+    write(
+        &hand,
+        "grid 1/8\n\n[bars 1]\nsh2  | x . x . x . x . |\nboom | X . . . X . . . |\n",
+    );
+    let written = dir.join("written.drums");
+    let out = duet_in(&below, &user, &[p("drums"), p("snap"), &hand, &written]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = std::fs::read_to_string(&written).expect("written");
+    assert!(text.contains("\nmap gm\nlane shaker-2 83\n"), "{text}");
+    assert!(
+        text.contains("\nkick     | X"),
+        "the lane's own name: {text}"
+    );
+    let elsewhere = dir.join("elsewhere.drums");
+    let out = duet_in(
+        &dir,
+        &dir.join("none"),
+        &[p("drums"), p("snap"), &written, &elsewhere],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&elsewhere).expect("read"),
+        text,
+        "self-contained"
+    );
+    let out = duet_in(
+        &dir,
+        &dir.join("none"),
+        &[p("drums"), p("snap"), &hand, &elsewhere],
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && err.contains("'sh2' is not a lane"),
+        "{err}"
+    );
+
+    // Reading a drum track uses the config's lanes, and runs to its end default: a
+    // one-bar take is two bars under round-up 2.
+    let kit = dir.join("kit.txt");
+    write(
+        &kit,
+        "[track \"Kit\" ch10]\n1.1.0 B5 0.25 90\n1.3.0 C2 0.25 90\n",
+    );
+    let grid = dir.join("kit.drums");
+    let args = [p("drums"), p("read"), &kit, &grid, p("--grid"), p("1/8")];
+    let out = duet_in(&below, &user, &args);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = std::fs::read_to_string(&grid).expect("grid");
+    assert!(
+        text.contains("\nend 3.1.0\n") && text.contains("[bars 1-2]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nshaker-2 | x"),
+        "key 83 is the config's shaker-2: {text}"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A config file that breaks a rule is refused, naming its path and the rule.
+#[test]
+fn a_config_file_that_breaks_a_rule_is_refused_naming_it() {
+    let dir = scratch("refusals");
+    let user = dir.join("user");
+    let file = user.join("duet.toml");
+    let cases = [
+        ("[song\nend = 4\n", "TOML parse error"),
+        ("[song]\nlength = 4\n", "unknown field `length`"),
+        (
+            "[song]\nend = { round-up = 0 }\n",
+            "round-up is a whole number of bars, 1 or more, not 0",
+        ),
+        (
+            "[song]\nend = \"bar\"\n",
+            "[song] end is \"last-bar\" or { round-up = <bars> }",
+        ),
+        (
+            "[lanes.kick]\nkey = 38\n",
+            "lanes kick and snare both play key 38",
+        ),
+        (
+            "[lanes.kick]\ncolour = 1\n",
+            "[lanes.kick]: unknown field `colour`",
+        ),
+        (
+            "[lanes.bell-2]\ngroup = \"other\"\n",
+            "lane bell-2 is not in the gm map, so it needs a key",
+        ),
+        ("[drums]\nchannel = 9\n", "unknown field `drums`"),
+    ];
+    let p = |s: &'static str| Path::new(s);
+    for (text, want) in cases {
+        write(&file, text);
+        let out = duet_in(&dir, &user, &[p("config"), p("show")]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{text} should be refused");
+        assert!(
+            err.contains(&file.display().to_string()),
+            "names the file: {err}"
+        );
+        assert!(err.contains(want), "{err}\nshould say: {want}");
+    }
     std::fs::remove_dir_all(&dir).expect("clean up");
 }

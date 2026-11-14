@@ -43,5 +43,5 @@ mod text;
 
 pub use error::{Error, Result};
 pub use grid::{Bar, DrumGrid, Lane, Levels};
-pub use lanes::{LaneDef, LaneMap};
+pub use lanes::{LaneDef, LaneMap, LanePatch};
 pub use song::DRUM_TRACK;

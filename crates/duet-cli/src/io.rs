@@ -6,7 +6,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use clap::ValueEnum;
-use duet_core::Song;
+use duet_core::{EndRule, Song};
 use duet_midi::Midi;
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -64,11 +64,20 @@ fn normalized(mut song: Song) -> duet_core::Result<Song> {
     Ok(song)
 }
 
-pub fn write(song: &Song, path: &Path, format: Format) -> Result<()> {
-    // Every file written says where the song ends, whatever default computed it. Text and
-    // MIDI state it themselves; JSON and TOML carry it as the `end` field.
+/// The song with its end stated: the one it names, or else the configured default's.
+pub fn with_end(song: &Song, end: EndRule) -> Result<Song> {
     let mut song = song.clone();
-    song.end = Some(song.stated_end()?);
+    if song.end.is_none() {
+        song.end = Some(song.default_end_by(end)?);
+    }
+    Ok(song)
+}
+
+/// Writes the song in a format. Every file written says where the song ends, whatever
+/// default computed it: text and MIDI state it themselves, and JSON and TOML carry it as
+/// the `end` field.
+pub fn write(song: &Song, path: &Path, format: Format, end: EndRule) -> Result<()> {
+    let song = with_end(song, end)?;
     let song = &song;
     let bytes = match format {
         Format::Midi => song.to_midi()?,

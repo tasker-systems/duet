@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use duet_core::Grid;
 
+use crate::config::Config;
 use crate::io::{Format, format_of, read, same_file, write};
 
 #[derive(Subcommand)]
@@ -35,11 +36,11 @@ pub enum SongCommand {
     },
 }
 
-pub fn run(command: SongCommand) -> Result<()> {
+pub fn run(command: SongCommand, config: &Config) -> Result<()> {
     match command {
         SongCommand::Show { input, from, to } => {
             let from = from.unwrap_or_else(|| format_of(&input, Format::Midi));
-            write(&read(&input, from)?, Path::new("-"), to)
+            write(&read(&input, from)?, Path::new("-"), to, config.end)
         }
         SongCommand::Quantize {
             input,
@@ -56,7 +57,12 @@ pub fn run(command: SongCommand) -> Result<()> {
             }
             let from = from.unwrap_or_else(|| format_of(&input, Format::Text));
             let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
-            write(&read(&input, from)?.quantized(grid)?, &output, to)
+            write(
+                &read(&input, from)?.quantized(grid)?,
+                &output,
+                to,
+                config.end,
+            )
         }
     }
 }

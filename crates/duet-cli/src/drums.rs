@@ -9,7 +9,8 @@ use clap::Subcommand;
 use duet_core::Grid;
 use duet_drums::{DrumGrid, LaneMap};
 
-use crate::io::{Format, format_of, read, same_file, write};
+use crate::config::Config;
+use crate::io::{Format, format_of, read, same_file, with_end, write};
 
 #[derive(Subcommand)]
 pub enum DrumsCommand {
@@ -62,7 +63,8 @@ pub enum DrumsCommand {
         /// input.
         output: PathBuf,
     },
-    /// List the lanes of the built-in gm map: each name, its key, and its aliases.
+    /// List the lanes of the gm map, as config extends or changes it: each name, its
+    /// key, and its aliases.
     Lanes,
 }
 
@@ -92,7 +94,7 @@ fn form_of(path: &Path) -> GridForm {
     }
 }
 
-fn read_grid(path: &Path) -> Result<DrumGrid> {
+fn read_grid(path: &Path, lanes: &LaneMap) -> Result<DrumGrid> {
     let text = if path == Path::new("-") {
         let mut buf = String::new();
         io::stdin()
@@ -103,7 +105,7 @@ fn read_grid(path: &Path) -> Result<DrumGrid> {
         fs::read_to_string(path).with_context(|| path.display().to_string())?
     };
     let grid = match form_of(path) {
-        GridForm::Text => DrumGrid::from_text(&text)?,
+        GridForm::Text => DrumGrid::from_text_in(&text, lanes)?,
         GridForm::Json => normalized(serde_json::from_str(&text)?)?,
         GridForm::Toml => normalized(toml::from_str(&text)?)?,
     };
@@ -145,12 +147,17 @@ fn refuse_overwrite(input: &Path, output: &Path, what: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn run(command: DrumsCommand) -> Result<()> {
+pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
     match command {
         DrumsCommand::Render { input, output, to } => {
             refuse_overwrite(&input, &output, "render")?;
             let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
-            write(&read_grid(&input)?.to_song()?, &output, to)
+            write(
+                &read_grid(&input, &config.lanes)?.to_song()?,
+                &output,
+                to,
+                config.end,
+            )
         }
         DrumsCommand::Read {
             input,
@@ -163,9 +170,10 @@ pub fn run(command: DrumsCommand) -> Result<()> {
         } => {
             refuse_overwrite(&input, &output, "read")?;
             let from = from.unwrap_or_else(|| format_of(&input, Format::Midi));
-            let song = read(&input, from)?;
-            let map = LaneMap::gm();
-            let mut drums = DrumGrid::from_song(&song, grid, &map, track.as_deref(), bars)?;
+            // A song that names no end runs to the configured default's.
+            let song = with_end(&read(&input, from)?, config.end)?;
+            let mut drums =
+                DrumGrid::from_song(&song, grid, &config.lanes, track.as_deref(), bars)?;
             if snap_levels {
                 drums = drums.snapped_to_levels();
             } else if form_of(&output) == GridForm::Text
@@ -182,14 +190,14 @@ pub fn run(command: DrumsCommand) -> Result<()> {
         }
         DrumsCommand::Snap { input, output } => {
             refuse_overwrite(&input, &output, "snap")?;
-            let grid = read_grid(&input)?;
+            let grid = read_grid(&input, &config.lanes)?;
             let snapped = grid.snapped_to_levels();
             let moved = moved_velocities(&grid, &snapped);
             eprintln!("duet: snapped {moved} velocities to the levels");
             write_grid(&snapped, &output)
         }
         DrumsCommand::Lanes => {
-            let map = LaneMap::gm();
+            let map = &config.lanes;
             let mut out = format!("# lane map {}, channel {}\n", map.name(), map.channel());
             let width = map.lanes().map(|l| l.name.len()).max().unwrap_or(1);
             let groups = map.lanes().map(|l| l.group.len()).max().unwrap_or(1);
