@@ -5,6 +5,13 @@ description = "Convert MIDI to a readable, LLM-editable note format (text, JSON,
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["midi", "music", "notation", "llm"]
+categories = ["multimedia::audio", "command-line-utilities", "parser-implementations"]
+
+[lints]
+workspace = true
 
 [dependencies]
 midly = "0.5.3"
