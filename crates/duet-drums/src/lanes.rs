@@ -285,6 +285,55 @@ impl LaneMap {
         Ok(out)
     }
 
+    /// What `map gm` stands for when reading .drums text under a config's `patches`:
+    /// General MIDI, with only the config's additions. A shared file must mean the same
+    /// on every machine, so a config may add lanes, and aliases to a gm lane, but a gm
+    /// lane keeps its key, group and aliases here. Reading a MIDI drum track is where a
+    /// moved key applies; use [`LaneMap::patched`] for that.
+    ///
+    /// Returns the map and a notice for every part of a patch that does not apply to
+    /// reading text, so nothing is dropped silently: a gm lane's key moved off its gm
+    /// key, or an added lane that would collide with gm (as one on a key only a move
+    /// frees does).
+    pub fn gm_for_text(patches: &[(String, LanePatch)]) -> (LaneMap, Vec<String>) {
+        let gm = LaneMap::gm();
+        let mut out = gm.clone();
+        let mut notices = Vec::new();
+        for (name, patch) in patches {
+            let patch = match gm.lanes.iter().find(|l| &l.name == name) {
+                Some(lane) => {
+                    if let Some(key) = patch.key
+                        && key != lane.key
+                    {
+                        notices.push(format!(
+                            "lane {name}: key {key} does not apply to reading .drums text, \
+                             where map gm keeps {name} on {}; a file's own lane line moves it",
+                            lane.key
+                        ));
+                    }
+                    let Some(added) = &patch.aliases else {
+                        continue;
+                    };
+                    let mut aliases = lane.aliases.clone();
+                    aliases.extend(added.iter().filter(|a| !lane.aliases.contains(a)).cloned());
+                    LanePatch {
+                        aliases: Some(aliases),
+                        ..LanePatch::default()
+                    }
+                }
+                None => patch.clone(),
+            };
+            match out.patched(&[(name.clone(), patch)]) {
+                Ok(map) => out = map,
+                Err(e) => notices.push(format!(
+                    "lane {name} does not apply to reading .drums text, where map gm keeps \
+                     every gm lane: {e}"
+                )),
+            }
+        }
+        (out, notices)
+    }
+
     /// The map's name, such as `gm`.
     pub fn name(&self) -> &str {
         &self.name

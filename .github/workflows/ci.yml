@@ -103,6 +103,15 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: Tests
         run: cargo test --locked
+      # duet reads config from the user's directory and from a .duet above the working
+      # directory. The tests must not: a developer's own duet.toml must never change what
+      # they check. So run them again under a hostile config in both places.
+      - name: duet-cli tests ignore the developer's config
+        run: |
+          mkdir .duet
+          cp crates/duet-cli/tests/hostile/duet.toml .duet/
+          DUET_CONFIG_DIR="$PWD/crates/duet-cli/tests/hostile" cargo test --locked -p duet-cli
+          rm -r .duet
 
   msrv:
     name: Builds on the declared rust-version

@@ -305,10 +305,15 @@ aliases = ["bd", "boom"]
   `group` (one of the map's groups, or `other`) and `aliases`. A file never removes a
   built-in lane, so one that would put two lanes on one key is refused: move the other lane
   too. Each file must leave a valid map.
-- **Config lanes are for reading.** A `.drums` row may use a config lane's name or alias, and
+- **Config lanes are for reading.** A `.drums` row may use a lane or alias config adds, and
   `duet drums read` names notes by the configured keys. Written `.drums` files never depend on
   config: they say `map gm` and carry a `lane` line for every lane the built-in map does not
   name on that key, so they read the same with no config at all.
+- **`map gm` is General MIDI on every machine.** When reading `.drums` text, a config that
+  moves a gm lane's key or group does not apply: `kick` is still 36 there. The move still
+  applies to `duet drums read`, where it describes your kit. `duet` says on standard error
+  when a moved key doesn't apply, and `duet config show` lists it. A file's own `lane` line
+  still moves a lane.
 - A file that breaks a rule (bad TOML, a field `duet` does not know, two lanes on one key)
   is refused, naming the file and the rule.
 

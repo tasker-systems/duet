@@ -69,10 +69,8 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
     use crate::io::{Format, read};
-    use crate::{Cli, run};
+    use crate::tests::run_hermetic;
 
     #[test]
     fn quantize_never_writes_over_its_input() {
@@ -82,8 +80,7 @@ mod tests {
         let played = "[track \"P\" ch1]\n1.1.10 C4 0.48 80\n";
         std::fs::write(&take, played).expect("write");
         let cli = |out: &std::path::Path| {
-            Cli::parse_from([
-                "duet",
+            run_hermetic(&[
                 "song",
                 "quantize",
                 take.to_str().expect("utf-8 path"),
@@ -93,13 +90,13 @@ mod tests {
             ])
         };
 
-        let err = run(cli(&take)).expect_err("writing over the input is refused");
+        let err = cli(&take).expect_err("writing over the input is refused");
         assert!(err.to_string().contains("never changes its input"), "{err}");
         let kept = std::fs::read_to_string(&take).expect("read");
         assert_eq!(kept, played, "the input is untouched");
 
         let out = dir.join("take-q.txt");
-        run(cli(&out)).expect("quantize to a new file");
+        cli(&out).expect("quantize to a new file");
         let q = read(&out, Format::Text).expect("read the output");
         assert_eq!(q.tracks[0].notes[0].at.to_string(), "1.1.0");
         std::fs::remove_dir_all(&dir).expect("clean up");
