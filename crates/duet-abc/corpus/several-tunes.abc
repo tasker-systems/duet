@@ -1,0 +1,15 @@
+X:1
+T:The first of two tunes
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+K:C
+CDEF GABc | c8 |]
+
+X:2
+T:The second of two tunes
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:3/4
+L:1/8
+K:G
+GABc d2 | g6 |]

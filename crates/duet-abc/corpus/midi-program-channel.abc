@@ -1,0 +1,15 @@
+X:1
+T:Programs and channels
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+V:1 name="Flute"
+%%MIDI program 73
+V:2 name="Bass"
+%%MIDI program 32
+%%MIDI channel 4
+K:C
+V:1
+e2d2 c2d2 | e8 |]
+V:2
+C,4 G,,4 | C,8 |]

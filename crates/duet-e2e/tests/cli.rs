@@ -503,3 +503,70 @@ fn a_config_that_moves_a_gm_lane_never_changes_how_drums_text_reads() {
     );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+#[test]
+fn abc_tunes_render_convert_and_are_refused_by_name() {
+    let dir = scratch("abc");
+    let none = scratch("abc-no-config");
+    let user = none.join("user");
+    let run = |args: &[&Path]| duet_in(&none, &user, args);
+    let tunes = root().join("crates/duet-abc/corpus/several-tunes.abc");
+
+    let out = run(&[Path::new("abc"), Path::new("check"), &tunes]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        listed.contains("X:2 The second of two tunes: read"),
+        "{listed}"
+    );
+
+    // A file of two tunes needs --tune; the second is in 3/4.
+    let txt = dir.join("second.txt");
+    let out = run(&[Path::new("abc"), Path::new("render"), &tunes, &txt]);
+    assert!(!out.status.success(), "two tunes and no --tune is refused");
+    let out = run(&[
+        Path::new("abc"),
+        Path::new("render"),
+        &tunes,
+        &txt,
+        Path::new("--tune"),
+        Path::new("2"),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = std::fs::read_to_string(&txt).expect("rendered");
+    assert!(
+        text.contains("time 3/4") && text.contains("key G major"),
+        "{text}"
+    );
+
+    // convert goes both ways through .abc.
+    let abc = dir.join("second.abc");
+    duet(&[Path::new("convert"), &txt, &abc]);
+    let written = std::fs::read_to_string(&abc).expect("written");
+    assert!(
+        written.starts_with("X:1\n") && written.contains("M:3/4"),
+        "{written}"
+    );
+    let back = dir.join("back.txt");
+    duet(&[Path::new("convert"), &abc, &back]);
+    assert_eq!(std::fs::read_to_string(&back).expect("back"), text);
+
+    // A construct outside the subset is refused by name, with its line.
+    let grace = dir.join("grace.abc");
+    std::fs::write(&grace, "X:1\nT:g\nM:4/4\nL:1/8\nK:C\nC2 {g}D2 E4 |]\n").expect("write");
+    let out = run(&[Path::new("abc"), Path::new("check"), &grace]);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        said.contains("line 6, col 4") && said.contains("grace notes"),
+        "{said}"
+    );
+}

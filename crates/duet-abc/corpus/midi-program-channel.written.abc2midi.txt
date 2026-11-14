@@ -1,0 +1,21 @@
+# notefmt v1: positions are bar.beat.tick, lengths are quarter notes
+title "Programs and channels"
+tpq 480
+tempo 120
+time 4/4
+key C major
+end 3.1.26
+
+[track "Programs and channels" ch1]
+1.1.1     prog  73
+1.1.1     E5    0.998  95
+1.2.1     D5    0.998  95
+1.3.1     C5    0.998  95
+1.4.1     D5    0.998  95
+2.1.1     E5    3.998  95
+
+[track "Track 3" ch4]
+1.1.1     prog  32
+1.1.1     C3    1.998  95
+1.3.1     G2    1.998  95
+2.1.1     C3    3.998  95

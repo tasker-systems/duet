@@ -1,0 +1,10 @@
+X:1
+T:Voices inline
+M:4/4
+L:1/8
+Q:1/4=120
+K:G
+V:1 name="1"
+B2 c2 d4 | g8 |]
+V:2 name="2"
+G,4 D4 | G,8 |]

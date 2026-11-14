@@ -1,6 +1,6 @@
 [package]
 name = "duet-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "The Song every duet format converts through, quantizing, and the notefmt text format."
 edition.workspace = true
 license.workspace = true

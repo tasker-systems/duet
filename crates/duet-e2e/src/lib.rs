@@ -94,7 +94,9 @@ pub fn scratch(name: &str) -> PathBuf {
         N.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).expect("scratch dir");
-    dir
+    // The path duet sees: its working directory comes back with symlinks resolved, and
+    // macOS's temp dir is a symlink (/var is /private/var).
+    dir.canonicalize().expect("scratch dir resolves")
 }
 
 /// Runs `duet` in `cwd`, with `user` as its user config directory and `stdin` on standard

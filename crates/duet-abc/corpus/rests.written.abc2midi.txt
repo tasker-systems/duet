@@ -1,0 +1,14 @@
+# notefmt v1: positions are bar.beat.tick, lengths are quarter notes
+title "Rests"
+tpq 480
+tempo 120
+time 4/4
+key C major
+end 4.1.26
+
+[track "Channel 1" ch1]
+1.2.1     C4    0.998  95
+1.4.1     D4    0.998  95
+2.3.1     E4    0.498  95
+3.1.1     C4    0.248  95
+3.1.241   D4    0.248  95

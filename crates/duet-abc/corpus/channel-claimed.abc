@@ -1,0 +1,16 @@
+X:1
+T:A voice claims a channel
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+V:1 name="Upper"
+%%MIDI channel 2
+V:2 name="Middle"
+V:3 name="Lower"
+K:C
+V:1
+c8 |]
+V:2
+E8 |]
+V:3
+C,8 |]

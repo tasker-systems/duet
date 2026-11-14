@@ -1,0 +1,30 @@
+[package]
+name = "duet-abc"
+version = "0.2.0"
+description = "Read and write a subset of ABC 2.1 as duet Songs, refusing the rest by name."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["abc", "music", "notation", "llm"]
+categories = ["multimedia::audio", "parser-implementations"]
+include = ["src/**", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[features]
+# Runs abc2midi, as a separate process, against the corpus's recordings. Local only: no CI job
+# installs abc2midi. See tests/oracle.rs.
+oracle = []
+
+[dependencies]
+duet-core = { path = "../duet-core", version = "0.2.0" }
+thiserror = "2"
+
+[dev-dependencies]
+# The oracle reads abc2midi's MIDI through duet-midi, and the corpus manifest is TOML.
+duet-midi = { path = "../duet-midi", version = "0.2.0" }
+serde = { version = "1", features = ["derive"] }
+toml = "1"

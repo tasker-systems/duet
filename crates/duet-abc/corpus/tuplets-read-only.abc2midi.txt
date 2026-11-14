@@ -1,0 +1,22 @@
+# notefmt v1: positions are bar.beat.tick, lengths are quarter notes
+title "Tuplets the writer does not write"
+tpq 480
+tempo 120
+time 4/4
+key C major
+end 3.1.26
+
+[track "Channel 1" ch1]
+1.1.1     C4    0.198  95
+1.1.97    D4    0.198  95
+1.1.193   E4    0.198  95
+1.1.289   F4    0.198  95
+1.1.385   G4    0.198  95
+2.1.1     C4    0.165  95
+2.1.81    D4    0.165  95
+2.1.161   E4    0.165  95
+2.1.241   F4    0.165  95
+2.1.321   G4    0.165  95
+2.1.401   A4    0.165  95
+2.2.1     C5    1.331  95
+2.3.161   D5    0.665  95

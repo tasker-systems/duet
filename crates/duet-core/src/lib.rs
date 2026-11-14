@@ -33,4 +33,4 @@ pub use error::{Error, Result};
 pub use model::{Control, EndRule, KeyChange, Note, Song, TempoChange, TimeChange, Track};
 pub use pitch::Pitch;
 pub use quantize::Grid;
-pub use time::{Key, Position, TimeMap, TimeSig};
+pub use time::{Key, Mode, Position, TimeMap, TimeSig};

@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+mod abc;
 mod config;
 mod drums;
 mod io;
@@ -17,6 +18,7 @@ use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use duet_core::Grid;
 
+use crate::abc::AbcCommand;
 use crate::config::{Config, Dirs};
 use crate::drums::{DrumsCommand, ReadOptions};
 use crate::io::{AnyFormat, Format, read, write};
@@ -33,7 +35,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Convert between formats. Formats come from the file names (.mid or .midi, .json,
-    /// .toml, .drums, .drums.json, .drums.toml, anything else is notefmt text) unless
+    /// .toml, .abc, .drums, .drums.json, .drums.toml, anything else is notefmt text) unless
     /// --from or --to is given. A drum grid is read as `duet drums render` reads it, and
     /// written from a song as `duet drums read` writes it, which needs --grid. Grid to grid
     /// is a straight copy, or with --grid goes through a song at that step.
@@ -69,6 +71,10 @@ enum Command {
     /// snap its velocities, or list the lanes.
     #[command(subcommand)]
     Drums(DrumsCommand),
+    /// Work on ABC: check a file against the subset this version reads, render a tune,
+    /// or write a song as ABC.
+    #[command(subcommand)]
+    Abc(AbcCommand),
     /// Show duet's configuration: where its duet.toml files are, and what they set.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -112,6 +118,7 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
         ),
         Command::Song(command) => song::run(command, &Config::load(dirs)?),
         Command::Drums(command) => drums::run(command, &Config::load(dirs)?),
+        Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),
     }

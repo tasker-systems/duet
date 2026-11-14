@@ -1,0 +1,8 @@
+X:1
+T:Keys and modes
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+K:D dorian
+DEFG ABcd | [K:Am] ABcd efga | [K:F#Mix] FGAB cdef | [K:Ebmaj] EFGA Bcde |
+[K:Gmin] GABc defg | [K:B loc] Bcde fgab | [K:F lyd] FGAB cdef | [K:E phrygian] EFGA Bcde |]

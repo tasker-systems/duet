@@ -1,0 +1,289 @@
+# The duet-abc corpus: our own tunes, MIT, and the abc2midi run that recorded its readings.
+#
+# Each tune has three committed files beside it: <name>.abc2midi.txt (abc2midi's reading of
+# the tune), <name>.written.abc (our writer's ABC for it, write(read(tune))) and
+# <name>.written.abc2midi.txt (abc2midi's reading of that). A reading is the notefmt text
+# of abc2midi's MIDI, read through duet-midi exactly as read. tests/oracle.rs compares
+# them with our reading, note by note (tick, length, pitch, channel, velocity), then the
+# tempo map and each channel's program; see it for how to re-record.
+#
+# A tune the writer refuses gives `writer_refuses` and its reason. It has no written files,
+# and the tests check that the writer still refuses it.
+#
+# A listed difference is a [[tune.difference]] with `what` (velocity, start, length,
+# channel, extra-note or missing-note), `notes` (all, or a range of our positions such as
+# "3.1.0..5.1.0"), the exact `ours` and `theirs`, and a `reason`. It is subtracted exactly,
+# and a listed difference that no longer occurs fails the test.
+
+# What `abc2midi -ver` prints. The recordings were made with this version, and the local
+# oracle run fails on any other.
+abc2midi_version = "5.10 November 11 2026 abc2midi"
+# Inserted after the tune's X: line, and again at each voice in its body (after a V: line,
+# or as [I:...] fields after an inline [V:]): abc2midi starts each voice's playback
+# settings afresh, so a preamble in the header reaches the first voice only. nobeataccents gives every note the dynamic's level;
+# ratio 3 1 pins broken rhythm to the standard's dotted reading; chordattack 0 starts a
+# chord's notes together instead of 10 ticks apart.
+preamble = ["%%MIDI nobeataccents", "%%MIDI ratio 3 1", "%%MIDI chordattack 0"]
+# After `abc2midi <file> <X> -o <out.mid>`. No -silent, which can hide warnings.
+arguments = ["-Q", "120"]
+
+[[tune]]
+name = "header-fields"
+file = "header-fields.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["X:, T:, M:, L:, Q:, K:", "% comment at the end of a field line", "comment line", "[r:remark]", "information fields A:, B:, C:, D:, F:, G:, H:, N:, O: and Z: (notice)", "I: (notice)"]
+
+[[tune]]
+name = "octaves"
+file = "octaves.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["octaves , and '"]
+
+[[tune]]
+name = "accidentals"
+file = "accidentals.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["accidentals ^ _ =", "an accidental lasts to the bar line in every octave (%%propagate-accidentals pitch)"]
+
+[[tune]]
+name = "lengths"
+file = "lengths.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["lengths n, /n, n/m, /, //"]
+
+[[tune]]
+name = "rests"
+file = "rests.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["rests z", "invisible rests x"]
+
+[[tune]]
+name = "multi-bar-rests"
+file = "multi-bar-rests.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["multi-bar rests Z and Zn"]
+
+[[tune]]
+name = "bar-lines"
+file = "bar-lines.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["bar lines |, ||, [| and |]"]
+
+[[tune]]
+name = "ties"
+file = "ties.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["ties -", "a tie across a bar line, carrying its accidental", "ties on chords"]
+
+[[tune]]
+name = "broken-rhythm"
+file = "broken-rhythm.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["broken rhythm >, <, >> and <<"]
+
+[[tune]]
+name = "tuplets"
+file = "tuplets.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["tuplets (2, (3, (4 and (8", "(p:q:r"]
+
+[[tune]]
+name = "tuplets-seven-nine"
+file = "tuplets-seven-nine.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["tuplets (7 and (9, with the standard's default q"]
+
+[[tune]]
+name = "tuplets-read-only"
+file = "tuplets-read-only.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["tuplets (5 and (6", "(p:q:r with notes of different lengths"]
+writer_refuses = "the writer writes only (3 groups of three equal notes or rests filling whole beats; other tuplets on write are a v2 candidate (design §4.5)"
+
+[[tune]]
+name = "tuplets-compound"
+file = "tuplets-read-only.abc"
+x = 2
+provenance = "our own, written for the corpus"
+constructs = ["tuplets (5 and (2 in compound meter, with the standard's default q"]
+writer_refuses = "the writer writes only (3 groups of three equal notes or rests filling whole beats; other tuplets on write are a v2 candidate (design §4.5)"
+
+[[tune]]
+name = "chords"
+file = "chords.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["chords [...] with one length", "chords with equal per-note lengths"]
+
+[[tune]]
+name = "repeats"
+file = "repeats.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["repeats |: and :|", ":: ", ":|]", "|1 and :|2"]
+
+[[tune]]
+name = "endings"
+file = "endings.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["endings [1 and [2 after a bar line", "an ending closed by ||", "|1,3"]
+
+[[tune]]
+name = "repeat-no-start"
+file = "repeat-no-start.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["a repeat with no start goes back to the start of the tune"]
+
+[[tune]]
+name = "inline-fields"
+file = "inline-fields.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["inline [M:], [L:], [Q:] and [K:] in a single-voice tune", "[Q:] inside a bar"]
+
+[[tune]]
+name = "key-modes"
+file = "key-modes.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["K: with a mode", "K: m, min, maj", "modes matched on their first three letters"]
+
+[[tune]]
+name = "voices"
+file = "voices.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["voices V:<id> with name=", "a voice property other than name= (notice)"]
+
+[[tune]]
+name = "voices-inline"
+file = "voices-inline.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["inline [V:id]"]
+
+[[tune]]
+name = "midi-program-channel"
+file = "midi-program-channel.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["%%MIDI program n", "%%MIDI channel n"]
+
+[[tune]]
+name = "dynamics"
+file = "dynamics.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["dynamics !ppp! to !fff!"]
+
+[[tune]]
+name = "continuation"
+file = "continuation.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["line continuation \\"]
+
+[[tune]]
+name = "several-tunes-1"
+file = "several-tunes.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["several tunes per file"]
+
+[[tune]]
+name = "several-tunes-2"
+file = "several-tunes.abc"
+x = 2
+provenance = "our own, written for the corpus"
+constructs = ["several tunes per file"]
+
+[[tune]]
+name = "notation-only"
+file = "notation-only.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["slurs (notice)", "annotations (notice)", "R: and S: (notice)", "%% directive other than %%MIDI (notice)", "spacer y (notice)"]
+
+[[tune]]
+name = "twinkle"
+file = "twinkle.abc"
+x = 1
+provenance = "traditional (the French air \"Ah! vous dirai-je, maman\"), transcribed by us"
+constructs = ["a whole tune in G major", "L:1/4"]
+
+[[tune]]
+name = "drunken-sailor"
+file = "drunken-sailor.abc"
+x = 1
+provenance = "traditional sea shanty, transcribed by us"
+constructs = ["a whole tune in D dorian", "a repeated section"]
+
+[[tune]]
+name = "god-rest-ye"
+file = "god-rest-ye.abc"
+x = 1
+provenance = "traditional carol, transcribed by us"
+constructs = ["a whole tune in E minor", "a pickup of a quarter in 4/4"]
+
+[[tune]]
+name = "washerwoman"
+file = "washerwoman.abc"
+x = 1
+provenance = "traditional jig, transcribed by us"
+constructs = ["a whole tune in 6/8 with a pickup", "a repeat starting after a pickup", "Q:3/8=n"]
+
+[[tune]]
+name = "amazing-grace"
+file = "amazing-grace.abc"
+x = 1
+provenance = "traditional (the tune \"New Britain\"), transcribed by us"
+constructs = ["a whole tune in 3/4 with a pickup", "ties across bar lines"]
+
+[[tune]]
+name = "frere-jacques"
+file = "frere-jacques.abc"
+x = 1
+provenance = "traditional round, transcribed by us"
+constructs = ["a two-voice tune with programs", "bar rests in one voice while the other plays"]
+
+[[tune]]
+name = "repeats-double-bar-1"
+file = "repeats-double-bar.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["|| inside a repeat is a bar line like any other"]
+
+[[tune]]
+name = "repeats-double-bar-2"
+file = "repeats-double-bar.abc"
+x = 2
+provenance = "our own, written for the corpus"
+constructs = ["a repeat with no start goes back past a || to the start of the tune"]
+
+[[tune]]
+name = "channel-claimed"
+file = "channel-claimed.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["a voice with no %%MIDI channel takes the lowest channel no earlier voice uses"]
+
+[[tune]]
+name = "triplet-groups"
+file = "triplet-groups.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["(3:2:2 triplets of unequal notes", "[K:] inside a triplet"]

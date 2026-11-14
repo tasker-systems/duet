@@ -1,0 +1,19 @@
+X:1
+T:Header fields
+C:duet corpus
+O:Nowhere in particular
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+Z:duet contributors
+B:no book
+D:no recording
+H:Written to exercise the fields that are notation only
+G:corpus
+A:nowhere
+F:crates/duet-abc/corpus/header-fields.abc
+I:linebreak $
+M:4/4
+L:1/8
+Q:1/4=96 % estimated
+K:C
+% a comment line, which is removed entirely
+CDEF GABc | [r:a remark] c2B2 A2G2 | F2E2 D2C2 |]
