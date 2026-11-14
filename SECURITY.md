@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately, through GitHub's private vulnerability reporting:
-[open a draft advisory](https://github.com/tasker-systems/making-music/security/advisories/new)
+[open a draft advisory](https://github.com/tasker-systems/duet/security/advisories/new)
 (the repository's **Security** tab, then **Report a vulnerability**). Do not open a public issue,
 pull request or discussion for a vulnerability.
 
