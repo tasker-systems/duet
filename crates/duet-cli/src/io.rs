@@ -15,10 +15,13 @@ pub enum Format {
     Text,
     Json,
     Toml,
+    /// ABC: the first tune of the file when reading (`duet abc render --tune` picks
+    /// another), one tune `X:1` when writing.
+    Abc,
 }
 
-/// The format a path's extension names: .mid, .midi or .smf is MIDI, .json and .toml are
-/// themselves, and anything else is notefmt text. `-` (standard input or output) has no
+/// The format a path's extension names: .mid, .midi or .smf is MIDI, .json, .toml and .abc
+/// are themselves, and anything else is notefmt text. `-` (standard input or output) has no
 /// extension, so it takes `default`.
 pub fn format_of(path: &Path, default: Format) -> Format {
     if path == Path::new("-") {
@@ -33,6 +36,7 @@ pub fn format_of(path: &Path, default: Format) -> Format {
         Some("mid" | "midi" | "smf") => Format::Midi,
         Some("json") => Format::Json,
         Some("toml") => Format::Toml,
+        Some("abc") => Format::Abc,
         _ => Format::Text,
     }
 }
@@ -55,6 +59,17 @@ pub fn read(path: &Path, format: Format) -> Result<Song> {
         Format::Text => Song::from_text(&text()?)?,
         Format::Json => normalized(serde_json::from_str(&text()?)?)?,
         Format::Toml => normalized(toml::from_str(&text()?)?)?,
+        Format::Abc => {
+            let book = duet_abc::Book::parse(&text()?)?;
+            if book.tunes().len() > 1 {
+                anyhow::bail!(
+                    "{} holds {} tunes; pick one with duet abc render --tune <X>",
+                    path.display(),
+                    book.tunes().len()
+                );
+            }
+            crate::abc::reading(&book.tunes()[0])?
+        }
     };
     Ok(song)
 }
@@ -88,6 +103,7 @@ pub fn write(song: &Song, path: &Path, format: Format, end: EndRule) -> Result<(
             s.into_bytes()
         }
         Format::Toml => toml::to_string(song)?.into_bytes(),
+        Format::Abc => duet_abc::write(song, &duet_abc::WriteOptions::default())?.into_bytes(),
     };
     if path == Path::new("-") {
         io::stdout()

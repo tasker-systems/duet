@@ -21,6 +21,7 @@ path = "src/main.rs"
 duet-core = { path = "../duet-core", version = "0.1.0" }
 duet-midi = { path = "../duet-midi", version = "0.1.0" }
 duet-drums = { path = "../duet-drums", version = "0.1.0" }
+duet-abc = { path = "../duet-abc", version = "0.1.0" }
 serde_json = "1"
 toml = "1"
 clap = { version = "4", features = ["derive"] }

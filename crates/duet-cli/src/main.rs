@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+mod abc;
 mod config;
 mod drums;
 mod io;
@@ -16,6 +17,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use crate::abc::AbcCommand;
 use crate::config::{Config, Dirs};
 use crate::drums::DrumsCommand;
 use crate::io::{Format, format_of, read, write};
@@ -32,7 +34,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Convert between formats. Formats come from the file extensions (.mid or .midi,
-    /// .json, .toml, anything else is notefmt text) unless --from or --to is given.
+    /// .json, .toml, .abc, anything else is notefmt text) unless --from or --to is given.
     Convert {
         /// The file to read, or - for standard input.
         input: PathBuf,
@@ -50,6 +52,10 @@ enum Command {
     /// snap its velocities, or list the lanes.
     #[command(subcommand)]
     Drums(DrumsCommand),
+    /// Work on ABC: check a file against the subset this version reads, render a tune,
+    /// or write a song as ABC.
+    #[command(subcommand)]
+    Abc(AbcCommand),
     /// Show duet's configuration: where its duet.toml files are, and what they set.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -79,6 +85,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Song(command) => song::run(command, &Config::load()?),
         Command::Drums(command) => drums::run(command, &Config::load()?),
+        Command::Abc(command) => abc::run(command, &Config::load()?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(&Dirs::find()?)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load()?.show()),
     }
