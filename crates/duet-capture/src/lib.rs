@@ -27,6 +27,7 @@ mod source;
 mod stage;
 #[cfg(test)]
 mod synth;
+mod timing;
 
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
@@ -37,3 +38,4 @@ pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, Prepare};
 pub use source::FileSource;
 pub use stage::{Chunk, Mono, Source, Stage};
+pub use timing::{BeatTempo, Given, Origin, Timing, WEAK_CONFIDENCE, beat_series, estimate};

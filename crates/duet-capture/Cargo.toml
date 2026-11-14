@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 audioadapter-buffers = "5.2.0"
+duet-core = { path = "../duet-core", version = "0.2.0" }
 rubato = "5.1.0"
 rustfft = "6.4.1"
 serde = { version = "1", features = ["derive"] }
