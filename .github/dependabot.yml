@@ -5,6 +5,11 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
+    # The conventions bump workflow is adopted `exact` from tasker-systems/conventions (CONS-9):
+    # its pins move in the baseline and arrive with a pin bump. A Dependabot edit here would
+    # fail the conventions check (check A) on every update.
+    exclude-paths:
+      - .github/workflows/conventions-bump.yml
     schedule:
       interval: weekly
     cooldown:
