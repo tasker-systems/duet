@@ -121,7 +121,13 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
 - **Notes:** voiced runs are split at onsets and at pitch changes held long enough to count. Each note's pitch is the **median** of its voiced frames, rounded to the nearest semitone.
   - The median is the declared reading for vibrato and slides, which the goal lists as unexamined.
   - The builder sets the thresholds: the shortest note, and how long a pitch must hold to start a new note.
-- **Key:** v1 names no key, and the ABC writer's default applies. Estimating a key is a candidate for later, stated if it is ever applied.
+- **Key (owner, 2026-11-14), handled like tempo:**
+  - **Given** with `--key`, it is used exactly.
+  - **Left out,** it is estimated from the settled notes, applied, and stated with its confidence. The method correlates a pitch-class histogram, weighted by each note's length, against major and minor key profiles (Krumhansl–Schmuckler style). The stated estimate gives the relative major or minor as its alternative, since the two share a signature.
+  - **The key changes spelling and signature only, never a MIDI note.** It is applied at assembly as `Song.key`. Notes are then spelled by the key in force, as the readers already do.
+  - **v1 covers major and minor.** Modes (`Key::with_mode`) come later.
+  - The analysis file carries the pitch-class histogram and every key's score.
+  - Editing `K:` in written ABC changes its pitches, so a wrong key is fixed by re-running with `--key`, not by editing the text.
 
 ### Rhythm
 
