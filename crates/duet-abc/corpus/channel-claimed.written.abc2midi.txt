@@ -1,0 +1,16 @@
+# notefmt v1: positions are bar.beat.tick, lengths are quarter notes
+title "A voice claims a channel"
+tpq 480
+tempo 120
+time 4/4
+key C major
+end 2.1.26
+
+[track "A voice claims a channel" ch2]
+1.1.1     C5    3.998  95
+
+[track "Track 3" ch1]
+1.1.1     E4    3.998  95
+
+[track "Track 4" ch3]
+1.1.1     C3    3.998  95

@@ -80,6 +80,13 @@ pub(crate) const DYNAMICS: [(&str, u8); 8] = [
     ("ff", 110),
     ("fff", 125),
 ];
+/// The channel a voice with no `%%MIDI channel` takes, given the channels the voices
+/// before it are on: the lowest one none of them uses, skipping 10. This is how abc2midi
+/// gives channels out, run with an explicit channel before, between and after.
+pub(crate) fn default_channel(used: &[u8]) -> Option<u8> {
+    (1..=16u8).find(|c| *c != 10 && !used.contains(c))
+}
+
 /// The level with no dynamic: `!f!`.
 pub(crate) const DEFAULT_VELOCITY: u8 = 95;
 
@@ -138,7 +145,7 @@ struct BarItem {
 enum Item {
     Event(Event),
     Bar(BarItem),
-    Ending(Vec<u32>),
+    Ending(Vec<u32>, Span),
     BarRest(u32, Span),
     Key(Key),
     Tempo(f64),
@@ -287,7 +294,9 @@ fn parse_tempo(span: Span, value: &str) -> Result<f64> {
              Q:1/4=<n>",
         ));
     };
-    if beats.trim().eq_ignore_ascii_case("C") {
+    // Q:C=120 and its kin, Q:C3=40: the unit length, so many to the minute (§10.1).
+    let beats_text = beats.trim();
+    if beats_text.starts_with(['C', 'c']) && beats_text[1..].chars().all(|c| c.is_ascii_digit()) {
         return Err(refuse_with(
             span,
             subset::UNIT_TEMPO,
@@ -886,7 +895,9 @@ impl Reader {
                 Tok::SlurEnd => self.notice(span, subset::SLUR, ")"),
                 Tok::Bar(b) => self.bar(v, span, b)?,
                 Tok::Ending(passes) => {
-                    self.voices[v].items.push(Item::Ending(passes.clone()));
+                    self.voices[v]
+                        .items
+                        .push(Item::Ending(passes.clone(), span));
                 }
                 Tok::InlineField { letter, value } => {
                     if *letter == 'V' {
@@ -912,7 +923,7 @@ impl Reader {
                     {
                         return Err(refuse(span, subset::CRESCENDO, format!("!{name}!")));
                     } else {
-                        let found = if name.chars().count() == 1 {
+                        let found = if name.chars().count() == 1 || name.starts_with('+') {
                             name.clone()
                         } else {
                             format!("!{name}!")
@@ -942,6 +953,7 @@ impl Reader {
                     }
                 }
                 Tok::Continuation => {}
+                Tok::Reserved(c) => self.notice(span, subset::RESERVED, c.to_string()),
             }
         }
         Ok(())
@@ -1000,6 +1012,8 @@ fn unfold(items: &[Item], restart: usize, multi_voice: bool) -> Result<Vec<usize
     let mut start = restart;
     let mut pass = 1u32;
     let mut open = false;
+    // Whether the music now playing is an ending (`[1`, `|2`) of the current repeat.
+    let mut in_ending = false;
     let mut steps = 0usize;
     while i < items.len() {
         steps += 1;
@@ -1013,16 +1027,23 @@ fn unfold(items: &[Item], restart: usize, multi_voice: bool) -> Result<Vec<usize
                     return Err(refuse(b.span, subset::TRIPLE_REPEAT, b.text.clone()));
                 }
                 if b.ends == 1 {
+                    if in_ending && pass >= 2 {
+                        // A :| closing the second ending asks for a third pass, which
+                        // abc2midi plays; the standard ties more than two passes to P:.
+                        return Err(refuse(b.span, subset::TRIPLE_REPEAT, b.text.clone()));
+                    }
                     if !open && multi_voice {
                         return Err(refuse(b.span, subset::MULTI_VOICE_REPEAT, b.text.clone()));
                     }
                     if pass == 1 {
                         pass = 2;
+                        in_ending = false;
                         i = start;
                         continue;
                     }
                     pass = 1;
                     open = false;
+                    in_ending = false;
                     start = i + 1;
                 }
                 if b.starts == 1 {
@@ -1030,16 +1051,29 @@ fn unfold(items: &[Item], restart: usize, multi_voice: bool) -> Result<Vec<usize
                         return Err(refuse(b.span, subset::NESTED_REPEAT, b.text.clone()));
                     }
                     open = true;
+                    in_ending = false;
                     start = i + 1;
                     pass = 1;
-                } else if b.closing && b.ends == 0 {
-                    // A double or thick bar ends the last ending.
+                } else if b.closing && b.ends == 0 && in_ending {
+                    // A double or thick bar ends the last ending. Anywhere else it is a bar
+                    // line like any other: a later :| still goes back past it, as abc2midi
+                    // plays it.
                     pass = 1;
+                    in_ending = false;
                 }
                 i += 1;
             }
-            Item::Ending(passes) => {
+            Item::Ending(passes, span) => {
+                if passes.iter().all(|p| *p > 2) {
+                    let list: Vec<String> = passes.iter().map(u32::to_string).collect();
+                    return Err(refuse(
+                        *span,
+                        subset::TRIPLE_REPEAT,
+                        format!("ending {}", list.join(",")),
+                    ));
+                }
                 if passes.contains(&pass) {
+                    in_ending = true;
                     i += 1;
                     continue;
                 }
@@ -1047,7 +1081,7 @@ fn unfold(items: &[Item], restart: usize, multi_voice: bool) -> Result<Vec<usize
                 let mut j = i + 1;
                 i = loop {
                     match items.get(j) {
-                        None | Some(Item::Ending(_)) => break j,
+                        None | Some(Item::Ending(..)) => break j,
                         Some(Item::Bar(b)) if b.ends > 0 => {
                             // The repeat this ending closes is done: the pass stays, so the
                             // next ending plays, and a later :| goes back no further.
@@ -1074,7 +1108,7 @@ fn unfold(items: &[Item], restart: usize, multi_voice: bool) -> Result<Vec<usize
 fn close_bar(
     tick: u64,
     bar_start: &mut u64,
-    bars_closed: &mut u32,
+    bars_closed: &mut u64,
     meter: TimeSig,
     span: Span,
     pickup: &mut Option<(u64, Span)>,
@@ -1114,7 +1148,7 @@ fn lay_out(items: &[Item], order: &[usize], meter: TimeSig, x_line: usize) -> Re
     };
     let mut tick = 0u64;
     let mut bar_start = 0u64;
-    let mut bars_closed = 0u32;
+    let mut bars_closed = 0u64;
     let mut meter = meter;
     let mut vel = DEFAULT_VELOCITY;
     // Tied notes waiting for the next event: (midi, index in laid.notes, span).
@@ -1184,8 +1218,8 @@ fn lay_out(items: &[Item], order: &[usize], meter: TimeSig, x_line: usize) -> Re
                 if !pending.is_empty() {
                     return Err(parse_err(pending[0].2, "this tie is followed by a rest"));
                 }
-                tick += u64::from(*bars) * bar_ticks(meter);
-                bars_closed += bars - 1;
+                tick = tick.saturating_add(u64::from(*bars).saturating_mul(bar_ticks(meter)));
+                bars_closed = bars_closed.saturating_add(u64::from(*bars) - 1);
                 bar_start = tick - bar_ticks(meter);
             }
             Item::Meter(sig, span) => {
@@ -1198,7 +1232,7 @@ fn lay_out(items: &[Item], order: &[usize], meter: TimeSig, x_line: usize) -> Re
             Item::Key(k) => laid.keys.push((tick, *k)),
             Item::Tempo(bpm) => laid.tempos.push((tick, *bpm)),
             Item::Dynamic(v) => vel = *v,
-            Item::Ending(_) => {}
+            Item::Ending(..) => {}
         }
     }
     let end = Span {
@@ -1223,19 +1257,25 @@ fn lay_out(items: &[Item], order: &[usize], meter: TimeSig, x_line: usize) -> Re
 /// The time signature a pickup of `len` ticks becomes: its length over the meter's
 /// denominator, or a finer one when the pickup needs it.
 fn pickup_sig(len: u64, meter: TimeSig, span: Span) -> Result<TimeSig> {
-    let w = whole(len);
-    let den = w.den().max(u64::from(meter.den));
-    let num = w.num() * den / w.den();
-    let fits = den <= 64 && den.is_power_of_two() && (1..=255).contains(&num);
-    if !fits {
-        return Err(refuse_with(
+    pickup_meter(whole(len), meter).ok_or_else(|| {
+        refuse_with(
             span,
             subset::PICKUP,
-            format!("a pickup of {w} of a whole note"),
+            format!("a pickup of {} of a whole note", whole(len)),
             "a pickup is a short first bar, so its length must be a time signature",
-        ));
-    }
-    Ok(TimeSig::new(num as u8, den as u8)?)
+        )
+    })
+}
+
+/// The meter a pickup `len` long (in whole notes) gets under `meter`: its length over the
+/// meter's denominator, or a finer one when it needs it. The writer uses the pickup form
+/// only when this gives back the song's first bar.
+pub(crate) fn pickup_meter(len: Ratio, meter: TimeSig) -> Option<TimeSig> {
+    let den = len.den().max(u64::from(meter.den));
+    let num = len.num() * den / len.den();
+    let fits = den <= 64 && den.is_power_of_two() && (1..=255).contains(&num);
+    fits.then(|| TimeSig::new(num as u8, den as u8).ok())
+        .flatten()
 }
 
 impl Tune {
@@ -1393,20 +1433,21 @@ impl Reader {
                 .collect();
         }
 
-        const CHANNELS: [u8; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16];
-        if voices.len() > CHANNELS.len() {
-            return Err(Error::invalid(format!(
-                "the tune has {} voices; a song holds 15 tracks off the drum channel",
-                voices.len()
-            )));
-        }
-        for (i, (voice, l)) in voices.iter().zip(&laid).enumerate() {
+        let mut used: Vec<u8> = Vec::new();
+        for (voice, l) in voices.iter().zip(&laid) {
             let name = match (&voice.name, voice.id.is_empty()) {
                 (Some(name), _) => name.clone(),
                 (None, false) => voice.id.clone(),
                 (None, true) => self.title.clone().unwrap_or_else(|| "Tune".to_owned()),
             };
-            let mut track = Track::new(name, voice.channel.unwrap_or(CHANNELS[i]));
+            let channel = match voice.channel {
+                Some(c) => c,
+                None => default_channel(&used).ok_or_else(|| {
+                    Error::invalid("the tune has more voices than channels off the drum channel")
+                })?,
+            };
+            used.push(channel);
+            let mut track = Track::new(name, channel);
             track.program = voice.program;
             for n in &l.notes {
                 track.notes.push(Note::new(

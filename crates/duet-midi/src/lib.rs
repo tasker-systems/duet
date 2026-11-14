@@ -278,7 +278,7 @@ impl Midi for Song {
             TimeSig::new(num, 1 << den_power).map_err(|e| Error::Midi(e.to_string()))
         };
         // A key signature takes the mode a `duet:key` event at its tick names, when that
-        // key has the same signature. A signature edited since (by a DAW, say) no longer
+        // key has the same signature: the same sharps, and the same minor flag. A signature edited since (by a DAW, say) no longer
         // matches, and the signature wins.
         let key_texts = last_per_tick(key_texts);
         let to_key = |tick: u64, (sharps, minor): (i8, bool)| {
@@ -287,7 +287,7 @@ impl Midi for Song {
                 .binary_search_by_key(&tick, |(t, _)| *t)
                 .ok()
                 .map(|i| key_texts[i].1)
-                .filter(|k| k.sharps == sharps);
+                .filter(|k| k.sharps == sharps && k.is_minor() == minor);
             Ok::<Key, Error>(named.unwrap_or(signature))
         };
 

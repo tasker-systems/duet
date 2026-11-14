@@ -12,7 +12,9 @@ use duet_core::{Key, Mode, Position, Song, TimeSig, Track};
 
 use crate::error::{Error, Result};
 use crate::ratio::Ratio;
-use crate::read::{DEFAULT_VELOCITY, DYNAMICS, NATURAL, key_alterations};
+use crate::read::{
+    DEFAULT_VELOCITY, DYNAMICS, NATURAL, default_channel, key_alterations, pickup_meter,
+};
 
 /// What to do with a velocity that is not one of the dynamics' levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -123,20 +125,23 @@ fn natural_letter(pc: u8) -> Option<u8> {
     NATURAL.iter().position(|n| *n == pc).map(|l| l as u8)
 }
 
-/// Spells a pitch as a letter and an alteration: as the key signature spells it when it
-/// is in the signature's scale, and otherwise by the pitch's own flat or sharp spelling.
-fn spell(midi: u8, flat: bool, key: Key) -> (u8, i8) {
+/// Spells a pitch as a letter and an alteration.
+///
+/// A black key is spelled as the pitch is (its flat flag), since that is what a song
+/// carries: A# stays `^A` in F major. A white key is its natural letter, except where the
+/// key signature spells it as E#, B#, Cb or Fb (in F# major, MIDI F is E#) and no accidental
+/// is in force on that letter in the bar: then it is written under the key, with no
+/// accidental. An E#, B#, Cb or Fb would otherwise need an accidental the reader refuses.
+fn spell(midi: u8, flat: bool, key: Key, bar_acc: &[Option<i8>; 7]) -> (u8, i8) {
     let pc = midi % 12;
-    let alt = key_alterations(key);
-    for letter in 0..7u8 {
-        let in_key = (i32::from(NATURAL[usize::from(letter)])
-            + i32::from(alt[usize::from(letter)]))
-        .rem_euclid(12);
-        if in_key == i32::from(pc) {
-            return (letter, alt[usize::from(letter)]);
-        }
-    }
     if let Some(letter) = natural_letter(pc) {
+        let alt = key_alterations(key);
+        for l in 0..7usize {
+            let in_key = (i32::from(NATURAL[l]) + i32::from(alt[l])).rem_euclid(12);
+            if alt[l] != 0 && in_key == i32::from(pc) && bar_acc[l].is_none() {
+                return (l as u8, alt[l]);
+            }
+        }
         (letter, 0)
     } else if flat {
         (natural_letter((pc + 1) % 12).unwrap_or(0), -1)
@@ -212,8 +217,8 @@ impl TrackWriter<'_> {
             self.at(piece.start),
             Some(&self.track.name),
             format!(
-                "{what} lies off the 1/64-note grid, and not on a (3 triplet of three equal \
-                 notes or rests that fills whole beats"
+                "{what} lies off the 1/64-note grid, and not in a triplet group (three equal \
+                 slots filling whole beats, each note one or two slots long)"
             ),
             QUANTIZE_HINT,
         )
@@ -238,7 +243,7 @@ impl TrackWriter<'_> {
         }
         for i in notes {
             let pitch = self.track.notes[i].pitch;
-            let (letter, alter) = spell(pitch.midi(), pitch.is_flat(), self.key);
+            let (letter, alter) = spell(pitch.midi(), pitch.is_flat(), self.key, &self.bar_acc);
             let in_force = self.bar_acc[usize::from(letter)]
                 .unwrap_or(key_alterations(self.key)[usize::from(letter)]);
             if alter != in_force {
@@ -265,6 +270,16 @@ impl TrackWriter<'_> {
         format!("z{}", length_text(written, self.unit_ticks))
     }
 
+    /// The inline fields due at `tick`, written, with any key they set taking effect.
+    fn changes_at(&mut self, out: &mut String, changes: &[Change], tick: u64) {
+        for (_, text, key) in changes.iter().filter(|(t, _, _)| *t == tick) {
+            out.push_str(text);
+            if let Some(key) = key {
+                self.key = *key;
+            }
+        }
+    }
+
     /// Writes one bar's pieces. `changes` are the inline fields due at ticks in the bar.
     fn bar(&mut self, bar: &BarSpan, pieces: &mut [Piece], changes: &[Change]) -> Result<String> {
         self.bar_acc = [None; 7];
@@ -278,14 +293,9 @@ impl TrackWriter<'_> {
             let p = pieces[i].clone();
             let off = p.start - bar.start;
             let len = p.end - p.start;
-            for (_, text, key) in changes.iter().filter(|(t, _, _)| *t == p.start) {
-                out.push_str(text);
-                if let Some(key) = key {
-                    self.key = *key;
-                }
-            }
             let end;
             if self.binary(off) && self.binary(len) {
+                self.changes_at(&mut out, changes, p.start);
                 let text = match p.group {
                     Some(g) => self.group_text(g, len, p.tie),
                     None => self.rest_text(len),
@@ -297,29 +307,35 @@ impl TrackWriter<'_> {
                 if !self.binary(off) {
                     return Err(self.off_grid(&p));
                 }
-                let (step, taken) = self
+                let (step, elements, next) = self
                     .triplet(pieces, i, bar_end, beat)
                     .ok_or_else(|| self.off_grid(&p))?;
+                let group_end = p.start + 3 * step;
                 let written = step * 3 / 2;
-                out.push_str("(3");
-                let mut slot_start = p.start;
-                for _ in 0..3 {
-                    let piece = pieces[i].clone();
-                    let text = match piece.group {
-                        Some(g) => self.group_text(g, written, piece.tie),
-                        None => self.rest_text(written),
+                // (3 is three elements; (3:2:n puts n elements, some of two slots, in the
+                // time of two (§4.13).
+                if elements.len() == 3 {
+                    out.push_str("(3");
+                } else {
+                    let _ = write!(out, "(3:2:{}", elements.len());
+                }
+                for e in &elements {
+                    self.changes_at(&mut out, changes, e.start);
+                    let slots = (e.end - e.start) / step;
+                    let text = match e.group {
+                        Some(g) => self.group_text(g, written * slots, e.tie),
+                        None => self.rest_text(written * slots),
                     };
                     out.push_str(&text);
-                    slot_start += step;
-                    if piece.end <= slot_start {
-                        i += 1;
-                    } else {
-                        // A rest over several slots is written one slot at a time.
-                        pieces[i].start = slot_start;
-                    }
                 }
-                debug_assert!(taken > 0);
-                end = slot_start;
+                // A rest running on past the group is written from where the group ends.
+                if let Some(rest) = pieces.get_mut(next)
+                    && rest.start < group_end
+                {
+                    rest.start = group_end;
+                }
+                i = next;
+                end = group_end;
             }
             let into = end - bar.start;
             if end < bar_end && into.is_multiple_of(group_beat) {
@@ -329,14 +345,22 @@ impl TrackWriter<'_> {
         Ok(out)
     }
 
-    /// A (3 group starting at piece `i`: three equal slots, each a note or part of a rest,
-    /// that together fill whole beats. Returns the slot length and the pieces it covers.
-    fn triplet(&self, pieces: &[Piece], i: usize, bar_end: u64, beat: u64) -> Option<(u64, usize)> {
+    /// A triplet group starting at piece `i`: three equal slots that together fill whole
+    /// beats, holding notes of one or two slots each, and rests split at the slots.
+    /// Returns the slot length, the group's elements, and the index of the first piece
+    /// not wholly inside it.
+    fn triplet(
+        &self,
+        pieces: &[Piece],
+        i: usize,
+        bar_end: u64,
+        beat: u64,
+    ) -> Option<(u64, Vec<Piece>, usize)> {
         let start = pieces[i].start;
         // From the longest triplet (half-note triplets) to the shortest (64ths).
-        for k in 1..=6u32 {
+        'sizes: for k in 1..=6u32 {
             let written = self.whole_ticks >> k;
-            if !(written * 2).is_multiple_of(3) || written == 0 {
+            if written == 0 || !(written * 2).is_multiple_of(3) {
                 continue;
             }
             let step = written * 2 / 3;
@@ -344,37 +368,44 @@ impl TrackWriter<'_> {
             if group_end > bar_end || !(3 * step).is_multiple_of(beat) {
                 continue;
             }
+            let mut elements = Vec::new();
             let mut j = i;
-            let mut ok = true;
-            for slot in 0..3 {
-                let slot_start = start + slot * step;
-                let slot_end = slot_start + step;
+            let mut t = start;
+            while t < group_end {
                 let Some(piece) = pieces.get(j) else {
-                    ok = false;
-                    break;
+                    continue 'sizes;
                 };
                 match piece.group {
                     Some(_) => {
-                        if piece.start != slot_start || piece.end != slot_end {
-                            ok = false;
-                            break;
+                        let fits = piece.start == t
+                            && piece.end <= group_end
+                            && (piece.end - t).is_multiple_of(step);
+                        if !fits {
+                            continue 'sizes;
                         }
+                        elements.push(piece.clone());
+                        t = piece.end;
                         j += 1;
                     }
                     None => {
-                        if piece.start > slot_start || piece.end < slot_end {
-                            ok = false;
-                            break;
+                        let slot_end = t + step;
+                        if piece.end < slot_end {
+                            continue 'sizes;
                         }
+                        elements.push(Piece {
+                            start: t,
+                            end: slot_end,
+                            group: None,
+                            tie: false,
+                        });
+                        t = slot_end;
                         if piece.end == slot_end {
                             j += 1;
                         }
                     }
                 }
             }
-            if ok {
-                return Some((step, j - i));
-            }
+            return Some((step, elements, j));
         }
         None
     }
@@ -383,12 +414,15 @@ impl TrackWriter<'_> {
 /// Writes a song as one ABC tune, `X:1`.
 ///
 /// Refused, naming what and where ([`Error::Unwritable`]): a note off the 1/64-note grid
-/// that is not part of a `(3` triplet of three equal notes or rests filling whole beats;
+/// that is not part of a triplet group (three equal slots filling whole beats, each note
+/// one or two slots long);
 /// notes that overlap but neither start and end together; a velocity that is not one of
 /// the dynamics' levels (unless [`Dynamics::Nearest`]); a tempo that is not a whole bpm; a
 /// track on channel 10 (drums are the drum grid's); controls; a bar cut short by a meter
 /// change; a song that ends inside a bar; and tempo, meter or key changes in a song of
 /// several tracks. The song is never changed.
+///
+/// ABC needs a key, so a song that names none is written in C major, and reads back so.
 pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
     let tpq = u64::from(song.ticks_per_quarter);
     let whole_ticks = 4 * tpq;
@@ -440,7 +474,8 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
         && song
             .time_changes
             .first()
-            .is_some_and(|c| map.tick(c.at).ok() == Some(bars[1].start));
+            .is_some_and(|c| map.tick(c.at).ok() == Some(bars[1].start))
+        && pickup_meter(Ratio::new(bars[0].len, whole_ticks), bars[1].sig) == Some(bars[0].sig);
     let header_sig = match (pickup, bars.first()) {
         (true, _) => bars[1].sig,
         (false, Some(b)) => b.sig,
@@ -448,12 +483,17 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
     };
 
     let multi = song.tracks.len() > 1;
-    let meter_changes: Vec<(u64, TimeSig)> = bars
+    let mut meter_changes: Vec<(u64, TimeSig)> = bars
         .windows(2)
         .enumerate()
         .filter(|(i, w)| w[0].sig != w[1].sig && !(pickup && *i == 0))
         .map(|(_, w)| (w[1].start, w[1].sig))
         .collect();
+    // A meter change on the song's end opens no bar, so it is written after the last one.
+    let last_sig = bars.last().map_or(song.time_sig, |b| b.sig);
+    if map.sig_at(end_tick) != last_sig && !bars.is_empty() {
+        meter_changes.push((end_tick, map.sig_at(end_tick)));
+    }
     if multi
         && (!meter_changes.is_empty()
             || !song.key_changes.is_empty()
@@ -524,7 +564,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
 
     let mut body = String::new();
     let mut snapped = false;
-    let channels: [u8; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16];
+    let mut used_channels: Vec<u8> = Vec::new();
     for (index, track) in song.tracks.iter().enumerate() {
         let name = Some(track.name.as_str());
         let at1 = Position::bar(1);
@@ -552,15 +592,22 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
                 "rename the track",
             ));
         }
-        let default_channel = channels.get(index).copied().unwrap_or(0);
+        let default_channel = default_channel(&used_channels);
+        used_channels.push(track.channel);
         let default_name = song.title.clone().unwrap_or_else(|| "Tune".to_owned());
         if multi || track.name != default_name {
-            let _ = writeln!(body, "V:{} name=\"{}\"", index + 1, track.name);
+            // A % would start a comment: \% is a literal percent (§2.2.5).
+            let _ = writeln!(
+                body,
+                "V:{} name=\"{}\"",
+                index + 1,
+                track.name.replace('%', "\\%")
+            );
         }
         if let Some(program) = track.program {
             let _ = writeln!(body, "%%MIDI program {program}");
         }
-        if track.channel != default_channel {
+        if Some(track.channel) != default_channel {
             let _ = writeln!(body, "%%MIDI channel {}", track.channel);
         }
 
@@ -745,14 +792,20 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
                 .collect();
             texts.push(writer.bar(bar, &mut in_bar, &in_changes)?);
         }
+        // Changes on the song's end go after its last bar line, where they still fall.
+        let at_end: String = track_changes
+            .iter()
+            .filter(|(t, _, _)| *t == end_tick)
+            .map(|(_, text, _)| text.as_str())
+            .collect();
         for (i, chunk) in texts.chunks(4).enumerate() {
             let last = (i + 1) * 4 >= texts.len();
-            let _ = writeln!(
-                body,
-                "{} {}",
-                chunk.join(" | "),
-                if last { "|]" } else { "|" }
-            );
+            let close = match (last, at_end.is_empty()) {
+                (false, _) => "|".to_owned(),
+                (true, true) => "|]".to_owned(),
+                (true, false) => format!("|] {at_end}"),
+            };
+            let _ = writeln!(body, "{} {close}", chunk.join(" | "));
         }
     }
 
@@ -781,10 +834,17 @@ mod tests {
     fn pitches_are_spelled_by_the_key_then_by_their_own_spelling() {
         let key = |s: &str| s.parse::<Key>().unwrap();
         // In F# major, MIDI F is E#, written E under the key.
-        assert_eq!(spell(65, false, key("F# major")), (2, 1));
+        let none = [None; 7];
+        assert_eq!(spell(65, false, key("F# major"), &none), (2, 1));
+        // After an E natural in the bar, it is written as F, which needs only =.
+        let mut e_natural = none;
+        e_natural[2] = Some(0);
+        assert_eq!(spell(65, false, key("F# major"), &e_natural), (3, 0));
         // In D minor, C# is outside the signature.
-        assert_eq!(spell(61, false, key("D minor")), (0, 1));
-        assert_eq!(spell(70, true, key("C major")), (6, -1));
+        assert_eq!(spell(61, false, key("D minor"), &none), (0, 1));
+        assert_eq!(spell(70, true, key("C major"), &none), (6, -1));
+        // A# keeps its own spelling in F major, where the key would say Bb.
+        assert_eq!(spell(70, false, key("F major"), &none), (5, 1));
         assert_eq!(note_name(60, 0, 0), "C");
         assert_eq!(note_name(72, 0, 0), "c");
         assert_eq!(note_name(86, 1, 0), "d'");

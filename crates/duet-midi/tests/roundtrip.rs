@@ -1167,6 +1167,20 @@ fn a_duet_key_event_that_disagrees_with_the_signature_is_ignored() {
     );
     let song = Song::from_midi(&bytes).unwrap();
     assert_eq!(song.key.unwrap().to_string(), "D major");
+
+    // The same when only the minor flag moved: D dorian edited to A minor keeps no sharps.
+    let bytes = save(
+        Format::Parallel,
+        480,
+        vec![track(vec![
+            (0, meta(MetaMessage::KeySignature(0, true))),
+            (0, meta(MetaMessage::Text(b"duet:key D dorian"))),
+            (0, on(0, 62, 80)),
+            (480, off(0, 62, false)),
+        ])],
+    );
+    let song = Song::from_midi(&bytes).unwrap();
+    assert_eq!(song.key.unwrap().to_string(), "A minor");
 }
 
 #[test]

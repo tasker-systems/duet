@@ -51,6 +51,16 @@
 //! `Q:120` (unit lengths per minute in the standard, quarters in abc2midi) and a tune with
 //! no `M:` (free meter in the standard, 4/4 in abc2midi). The bar-length check is this
 //! crate's own: abc2midi plays a short bar as written, without a warning.
+//!
+//! **One place this crate parts from both.** A `:|` with no `|:` goes back to the start of
+//! the tune in the standard (§4.8) and in abc2midi, which replays a pickup there and warns
+//! of the short bar that makes. A song cannot hold a short bar in its middle, so this
+//! crate goes back to the first full bar after the pickup. abc2midi's warning means the
+//! corpus cannot record the case; a test pins this crate's reading instead. Write `|:`
+//! after the pickup and all three agree.
+//!
+//! A `||` inside a repeat is a bar line like any other: a later `:|` goes back past it, as
+//! abc2midi plays it. The standard also allows going back only to the `||`.
 
 #![forbid(unsafe_code)]
 

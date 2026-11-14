@@ -212,7 +212,7 @@ fn every_refused_construct_names_itself_and_its_line() {
             1,
         ),
         (
-            "repeat played more than twice (|:: or ::|)",
+            "repeat played more than twice (|::, ::|, or a third ending)",
             tune("", PLAIN, "|:: C8 ::|\n"),
             6,
             1,
@@ -345,4 +345,138 @@ fn a_bar_of_the_wrong_length_is_an_error_naming_the_bar() {
         }
         other => panic!("a short bar was read: {other:?}"),
     }
+}
+
+/// Reads `abc`, writes it, reads that back: the same song, and the written form canonical.
+fn round_trips(abc: &str) -> String {
+    let song = read(abc).unwrap_or_else(|e| panic!("reading: {e}\n{abc}"));
+    let written =
+        write(&song, &WriteOptions::default()).unwrap_or_else(|e| panic!("writing: {e}\n{abc}"));
+    let again = read(&written).unwrap_or_else(|e| panic!("re-reading: {e}\n{written}"));
+    assert_eq!(
+        again, song,
+        "the song changed through ABC:\n{abc}\n--- written\n{written}"
+    );
+    assert_eq!(
+        write(&again, &WriteOptions::default()).expect("rewrite"),
+        written
+    );
+    written
+}
+
+#[test]
+fn the_writer_keeps_spelling_and_changes_that_reviews_found_it_losing() {
+    let t = |key: &str, body: &str| format!("X:1\nT:t\nM:4/4\nL:1/8\nK:{key}\n{body}\n");
+    // A natural on E, then MIDI F, in F# major: F, not the refused ^E.
+    let w = round_trips(&t("F#", "=E2 =F2 F4 |]"));
+    assert!(!w.contains("^E"), "{w}");
+    // The same for B and Cb in Gb major.
+    let w = round_trips(&t("Gb", "=C2 =B2 B4 |]"));
+    assert!(!w.contains("_c"), "{w}");
+    // A# in F major stays A#, not the key's Bb.
+    let w = round_trips(&t("F", "^A2 B2 c4 |]"));
+    assert!(w.contains("^A2"), "{w}");
+    // A key or tempo change inside a triplet is kept.
+    round_trips(&t("C", "(3C[K:G]FG B6 |]"));
+    round_trips(&t("C", "(3C[Q:1/4=90]FG B6 |]"));
+    // Triplets of unequal notes are written as (3:2:n.
+    let w = round_trips(&t("C", "(3:2:2C2D B6 |]"));
+    assert!(w.contains("(3:2:2C2D"), "{w}");
+    round_trips(&t("C", "(3:2:2c4d2 z4 |]"));
+    // Changes on the song's end, after its last bar line.
+    round_trips(&t("C", "C8 |] [M:3/4][K:G][Q:1/4=90]"));
+}
+
+#[test]
+fn the_writer_keeps_what_notefmt_holds_that_reviews_found_it_losing() {
+    let through = |text: &str| {
+        let mut song = Song::from_text(text).expect("song");
+        song.end = Some(song.stated_end().expect("end"));
+        let written = write(&song, &WriteOptions::default()).expect("write");
+        let again = read(&written).unwrap_or_else(|e| panic!("{e}\n{written}"));
+        (song, again, written)
+    };
+    // A first bar of 1/4 before 6/8 is no pickup of 6/8 (that would read back as 2/8).
+    let (song, again, w) = through(
+        "time 1/4\ntime 6/8 at 2.1.0\nkey C major\n\n[track \"t\" ch1]\n1.1.0 C4 0.5 95\n2.1.0 D4 3 95\n",
+    );
+    assert_eq!(again, song, "{w}");
+    // A meter, key and tempo change on the end of a one-bar song.
+    let (song, again, w) = through(
+        "time 3/4\ntime 4/4 at 2.1.0\nkey C major\nkey G major at 2.1.0\ntempo 90 at 2.1.0\n\n\
+         [track \"t\" ch1]\n1.1.0 C4 3 95\n",
+    );
+    assert_eq!(again, song, "{w}");
+    // A % in a track name is a literal percent, not a comment.
+    let (song, again, w) = through(
+        "key C major\n\n[track \"Lead\" ch2]\n1.1.0 C4 4 95\n[track \"50% mix\" ch1]\n1.1.0 E4 4 95\n",
+    );
+    assert_eq!(again, song, "{w}");
+}
+
+#[test]
+fn repeats_unfold_as_abc2midi_plays_them_or_are_refused_by_name() {
+    let notes = |body: &str| -> Vec<String> {
+        let song = read(&format!("X:1\nT:t\nM:4/4\nL:1/4\nK:C\n{body}\n"))
+            .unwrap_or_else(|e| panic!("{e}"));
+        song.tracks[0]
+            .notes
+            .iter()
+            .map(|n| n.pitch.to_string())
+            .collect()
+    };
+    // A double bar is a bar line like any other inside a repeat, with a start or without.
+    let twice = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"].repeat(2);
+    assert_eq!(notes("|: C D E F || G A B c :|"), twice);
+    assert_eq!(notes("C D E F || G A B c :|"), twice);
+    // A third ending, or a :| that ends the second, asks for a third pass: refused.
+    for body in [
+        "|: C D E F |1 G A B c :|2 A B c d :|3 B c d e |]",
+        "|: C D E F |1,3 G A B c :|2 A B c d :|]",
+    ] {
+        let abc = format!("X:1\nT:t\nM:4/4\nL:1/4\nK:C\n{body}\n");
+        assert!(
+            matches!(read(&abc), Err(Error::Unsupported { construct, .. }) if construct.starts_with("repeat played more than twice")),
+            "{body}: {:?}",
+            read(&abc)
+        );
+    }
+    // |1,3 in a repeat played twice is the first ending.
+    assert_eq!(
+        notes("|: C D E F |1,3 G A B c :|2 A B c d |]"),
+        [
+            "C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "C4", "D4", "E4", "F4", "A4", "B4",
+            "C5", "D5"
+        ]
+    );
+}
+
+#[test]
+fn a_repeat_with_no_start_goes_back_past_a_pickup_where_the_standard_does_not() {
+    // Where we part from the standard, by the design's rule (§3.9): the standard (§4.8) and
+    // abc2midi go back to the start of the tune, which replays the pickup; abc2midi warns
+    // of the short bar that makes, so the oracle cannot record it. A song cannot hold a
+    // short bar in its middle, so we go back to the first full bar.
+    let song = read("X:1\nT:t\nM:4/4\nL:1/4\nK:C\nG | C D E F :| G4 |]\n").expect("read");
+    let pitches: Vec<String> = song.tracks[0]
+        .notes
+        .iter()
+        .map(|n| n.pitch.to_string())
+        .collect();
+    assert_eq!(
+        pitches,
+        ["G4", "C4", "D4", "E4", "F4", "C4", "D4", "E4", "F4", "G4"]
+    );
+}
+
+#[test]
+fn reserved_characters_are_listed_not_refused() {
+    let notices = duet_abc::check("X:1\nT:t\nM:4/4\nL:1/8\nK:C\nC2 # D2 * E4 |]\n").expect("read");
+    assert_eq!(
+        notices
+            .iter()
+            .filter(|n| n.construct == "reserved character")
+            .count(),
+        2
+    );
 }

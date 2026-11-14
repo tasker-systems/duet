@@ -1,0 +1,15 @@
+X:1
+T:A double bar inside a repeat
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+K:C
+|: C2D2 E2F2 || G2A2 B2c2 :|
+
+X:2
+T:A double bar before a repeat with no start
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+K:C
+C2D2 E2F2 || G2A2 B2c2 :|

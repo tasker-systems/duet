@@ -71,7 +71,8 @@ impl Add for Ratio {
         let g = gcd(self.den, rhs.den).max(1);
         let den = (self.den / g).saturating_mul(rhs.den);
         Ratio::new(
-            (self.num.saturating_mul(rhs.den / g)).saturating_add(rhs.num * (self.den / g)),
+            (self.num.saturating_mul(rhs.den / g))
+                .saturating_add(rhs.num.saturating_mul(self.den / g)),
             den,
         )
     }

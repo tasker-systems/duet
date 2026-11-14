@@ -359,13 +359,18 @@ unit lengths per minute and abc2midi as quarters (write `Q:1/4=120`), and a tune
 `M:`, which is free meter in the standard and 4/4 in abc2midi. A bar of the wrong length is
 an error naming the bar; abc2midi plays it as written, without a warning.
 
-**Writing.** Nothing is quantized. A note off the 1/64-note grid that is not one of a `(3`
-triplet's three equal notes or rests is refused, naming its track and position (quantize
-it first with `duet song quantize`). So are a velocity that is not a dynamic's level
+**One place duet parts from both.** A `:|` with no `|:` goes back to the start of the tune,
+in the standard and in abc2midi, so a pickup is replayed there (abc2midi warns of the short
+bar). A song cannot hold a short bar in its middle, so duet goes back to the first full bar
+after the pickup instead. Write `|:` after the pickup and all three agree.
+
+**Writing.** Nothing is quantized. A note off the 1/64-note grid that is not in a triplet
+group (three equal slots filling whole beats, each note one or two of them) is refused,
+naming its track and position (quantize it first with `duet song quantize`). So are a velocity that is not a dynamic's level
 (`--dynamics nearest` snaps it, and the ABC says so in a comment), a tempo that is not a
 whole bpm, a track on channel 10 (drums are the drum grid's), and notes that overlap
-without starting and ending together. The ABC written is canonical: reading it and writing
-it again gives the same text.
+without starting and ending together. ABC needs a key, so a song with none is written in C
+major. The ABC written is canonical: reading it and writing it again gives the same text.
 
 **Where it comes from.** `duet-abc` was written from the ABC 2.1 standard and from
 abcMIDI's documentation of how abc2midi plays what the standard leaves open. No abcMIDI

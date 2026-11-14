@@ -118,6 +118,9 @@ pub(crate) enum Tok {
     Space,
     /// `\` at the end of a music line.
     Continuation,
+    /// A character the standard reserves and says to ignore, such as `#` or `*`, or the
+    /// `$` that `I:linebreak $` makes a score line-break.
+    Reserved(char),
 }
 
 /// Removes a `%` comment from the end of a line (§2.2.5). `\%` is a literal percent and
@@ -170,6 +173,8 @@ struct Cursor<'a> {
     pos: usize,
     line: usize,
     _text: &'a str,
+    /// Where a number too long to hold was found, if one was.
+    too_long: Option<Span>,
 }
 
 impl Cursor<'_> {
@@ -206,11 +211,19 @@ impl Cursor<'_> {
         if self.pos == start {
             return None;
         }
-        self.chars[start..self.pos]
+        let parsed = self.chars[start..self.pos]
             .iter()
             .collect::<String>()
             .parse()
-            .ok()
+            .ok();
+        if parsed.is_none() && self.too_long.is_none() {
+            self.too_long = Some(Span {
+                line: self.line,
+                col: start + 1,
+            });
+        }
+        // A number too long to hold is reported once the line is read, never taken as 1.
+        Some(parsed.unwrap_or(u64::MAX))
     }
 
     /// A length multiplier after a note, rest or chord (§4.3): `2`, `3/2`, `/`, `//`,
@@ -276,6 +289,7 @@ pub(crate) fn music(line: usize, code: &str) -> Result<Vec<(Span, Tok)>> {
         pos: 0,
         line,
         _text: code,
+        too_long: None,
     };
     let mut out: Vec<(Span, Tok)> = Vec::new();
     while let Some(c) = cur.peek() {
@@ -452,9 +466,18 @@ pub(crate) fn music(line: usize, code: &str) -> Result<Vec<(Span, Tok)>> {
             '+' => {
                 cur.bump();
                 let text = cur.delimited(span, '+', "a +...+ group")?;
-                // Like a chord, it may carry a length.
-                cur.length()?;
-                out.push((span, Tok::OldChord(format!("+{text}+"))));
+                // Notes make the deprecated chord form, which may carry a length; anything
+                // else is the deprecated abc 2.0 decoration form, +trill+ (§10.2).
+                let notes = !text.is_empty()
+                    && text
+                        .chars()
+                        .all(|c| "ABCDEFGabcdefg^_=,'0123456789/ ".contains(c));
+                if notes {
+                    cur.length()?;
+                    out.push((span, Tok::OldChord(format!("+{text}+"))));
+                } else {
+                    out.push((span, Tok::Decoration(format!("+{text}+"))));
+                }
             }
             '&' => {
                 cur.bump();
@@ -491,6 +514,10 @@ pub(crate) fn music(line: usize, code: &str) -> Result<Vec<(Span, Tok)>> {
                 out.push((span, Tok::ChordEnd { len }));
             }
             '|' | ':' => bar(&mut cur, &mut out, span)?,
+            '#' | '*' | ';' | '?' | '@' | '$' => {
+                cur.bump();
+                out.push((span, Tok::Reserved(c)));
+            }
             c if is_shortcut(c) => {
                 cur.bump();
                 out.push((span, Tok::Decoration(c.to_string())));
@@ -499,6 +526,9 @@ pub(crate) fn music(line: usize, code: &str) -> Result<Vec<(Span, Tok)>> {
                 return Err(cur.err(span, format!("'{other}' is not ABC music code")));
             }
         }
+    }
+    if let Some(span) = cur.too_long {
+        return Err(cur.err(span, "this number is too large to be a length or a count"));
     }
     Ok(out)
 }

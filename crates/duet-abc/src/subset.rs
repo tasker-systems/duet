@@ -92,8 +92,8 @@ refusals! {
         "it carries decorations and chord symbols, which are refused";
     COMPLEX_METER = "complex meter (M:(2+3+2)/8)":
         "a v2 candidate; write the meter's total, such as M:7/8";
-    TRIPLE_REPEAT = "repeat played more than twice (|:: or ::|)":
-        "a v2 candidate";
+    TRIPLE_REPEAT = "repeat played more than twice (|::, ::|, or a third ending)":
+        "abc2midi plays a third pass; the standard ties more than two endings to P: (§4.10), a v2 candidate";
     LATE_PROGRAM = "%%MIDI program or channel after a voice's first note":
         "a Song track has one program and channel from its start";
 }
@@ -107,6 +107,7 @@ pub(crate) const DIRECTIVE: &str = "%% directive";
 pub(crate) const SPACER: &str = "spacer (y)";
 pub(crate) const BEAMING: &str = "beaming (spaces between notes)";
 pub(crate) const STAFF_PROPERTY: &str = "staff property";
+pub(crate) const RESERVED: &str = "reserved character";
 
 /// The refusal for `construct` at `span`, with the reason from [`REFUSED`].
 pub(crate) fn refuse(span: Span, construct: &'static str, found: impl Into<String>) -> Error {

@@ -259,3 +259,31 @@ file = "frere-jacques.abc"
 x = 1
 provenance = "traditional round, transcribed by us"
 constructs = ["a two-voice tune with programs", "bar rests in one voice while the other plays"]
+
+[[tune]]
+name = "repeats-double-bar-1"
+file = "repeats-double-bar.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["|| inside a repeat is a bar line like any other"]
+
+[[tune]]
+name = "repeats-double-bar-2"
+file = "repeats-double-bar.abc"
+x = 2
+provenance = "our own, written for the corpus"
+constructs = ["a repeat with no start goes back past a || to the start of the tune"]
+
+[[tune]]
+name = "channel-claimed"
+file = "channel-claimed.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["a voice with no %%MIDI channel takes the lowest channel no earlier voice uses"]
+
+[[tune]]
+name = "triplet-groups"
+file = "triplet-groups.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["(3:2:2 triplets of unequal notes", "[K:] inside a triplet"]
