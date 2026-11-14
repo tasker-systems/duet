@@ -35,8 +35,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Convert between formats. Formats come from the file names (.mid or .midi, .json,
-    /// .toml, .abc, .drums, .drums.json, .drums.toml, anything else is notefmt text) unless
-    /// --from or --to is given. A drum grid is read as `duet drums render` reads it, and
+    /// .toml, .abc, .drums, .drums.json, .drums.toml, .notes or anything else is notefmt
+    /// text) unless --from or --to is given. A drum grid is read as `duet drums render` reads it, and
     /// written from a song as `duet drums read` writes it, which needs --grid. Grid to grid
     /// is a straight copy, or with --grid goes through a song at that step.
     Convert {

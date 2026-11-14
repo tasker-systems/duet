@@ -31,7 +31,7 @@ drum grid and ABC are readable, grid-shaped views of part of one, for discussing
 ```mermaid
 flowchart LR
     MIDI["MIDI (.mid)"] <-->|lossless| Song(("Song"))
-    Song <-->|lossless| TXT["notefmt (.txt)<br/>a performance, exact"]
+    Song <-->|lossless| TXT["notefmt (.notes)<br/>a performance, exact"]
     Song <-->|lossless| JT["JSON / TOML<br/>the Song through serde"]
     Song <-->|"a drum track on its grid"| DRUMS[".drums<br/>a drum part"]
     Song <-->|"a score-shaped song"| ABC[".abc<br/>a melodic score"]
@@ -54,7 +54,7 @@ flowchart LR
   choose: `duet song quantize`, then `duet abc write`.
 - **The drum grid is the same idea for drums**, which ABC refuses. ABC covers pitched lines.
 
-| | notefmt `.txt` | `.drums` | `.abc` |
+| | notefmt `.notes` | `.drums` | `.abc` |
 |---|---|---|---|
 | What it is | a performance, exact | a drum part on a step grid | a melodic score |
 | Unit | ticks | steps | fractions of a note |
@@ -90,15 +90,15 @@ key D minor
 1.3.0     A1    2      84
 ```
 
-The full example is [samples/sketch.txt](samples/sketch.txt).
+The full example is [samples/sketch.notes](samples/sketch.notes).
 
 ### Install and run
 
 ```sh
 cargo install --path crates/duet-cli
 
-duet convert take.mid take.txt      # MIDI to text
-duet convert take.txt take.mid      # text back to MIDI
+duet convert take.mid take.notes    # MIDI to text
+duet convert take.notes take.mid    # text back to MIDI
 duet convert take.mid take.json     # or JSON, or .toml
 duet song show take.mid             # print as text
 duet song show take.mid --to json
@@ -106,7 +106,9 @@ duet song quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteen
 ```
 
 Formats come from the file name (`.mid`/`.midi`, `.json`, `.toml`, the drum grid forms
-`.drums`, `.drums.json` and `.drums.toml`, anything else is text). Use `-` for standard
+`.drums`, `.drums.json` and `.drums.toml`, and `.notes` for notefmt text). Any other name is
+read and written as notefmt too, so a notefmt file named `.txt`, as they were before
+`.notes`, works unchanged. Use `-` for standard
 input or output, with `--from` and `--to` to name the format: `midi`, `text`, `json`,
 `toml`, or `drums`, `drums-json` and `drums-toml` for a grid. `convert` reads and writes
 [drum grids](#drum-grids) too; writing one needs `--grid`.
@@ -267,7 +269,7 @@ bar, one velocity per lane and step, 0 for no hit. `.drums` files are its text f
 `.drums.json` and `.drums.toml` its exact form, the matrix itself.
 
 ```sh
-duet drums render groove.drums groove.mid        # to MIDI (or .txt, .json, .toml)
+duet drums render groove.drums groove.mid        # to MIDI (or .notes, .json, .toml)
 duet drums read take.mid take.drums --grid 1/16  # a song's drum track to a grid
 duet drums read take.mid take.drums.json --grid 1/16  # keeping every velocity
 duet drums snap take.drums.json take.drums       # velocities snapped to g, x and X
@@ -366,8 +368,8 @@ halfway between two levels goes to the louder one. Nothing snaps unless you ask.
 
 ```sh
 duet abc check tunes.abc                      # what each tune holds that a song does not carry
-duet abc render tunes.abc tune.mid --tune 2   # one tune as MIDI (or .txt, .json, .toml)
-duet abc write take.txt take.abc --unit 1/4   # a song as ABC, X:1
+duet abc render tunes.abc tune.mid --tune 2   # one tune as MIDI (or .notes, .json, .toml)
+duet abc write take.notes take.abc --unit 1/4 # a song as ABC, X:1
 duet convert tune.abc tune.mid                # .abc works both ways, for a file of one tune
 ```
 

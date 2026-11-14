@@ -48,7 +48,7 @@ fn the_drums_and_song_commands_refuse_a_name_of_the_other_kind() {
     );
 
     // drums read writes a grid: a song's name as its output is refused.
-    for out in ["out.json", "out.toml", "out.txt", "out.mid"] {
+    for out in ["out.json", "out.toml", "out.notes", "out.mid"] {
         let want = format!("{not_grid}, and read writes a grid");
         refused(
             &dir,
@@ -99,11 +99,11 @@ fn the_drums_and_song_commands_refuse_a_name_of_the_other_kind() {
             "song",
             "quantize",
             s(&exact),
-            s(&p("q.txt")),
+            s(&p("q.notes")),
             "--grid",
             "1/16",
         ],
-        &p("q.txt"),
+        &p("q.notes"),
         &want,
     );
     let want = format!("{grid_name}, and quantize writes a song");

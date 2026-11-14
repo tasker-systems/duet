@@ -40,7 +40,7 @@ fn convert_reads_every_grid_as_drums_render_does() {
     let mut compared = 0;
     for grid in grids(&dir) {
         let stem = grid.file_name().and_then(|n| n.to_str()).expect("a name");
-        for ext in ["mid", "txt", "json", "toml"] {
+        for ext in ["mid", "notes", "json", "toml"] {
             let a = dir.join(format!("{stem}.convert.{ext}"));
             let b = dir.join(format!("{stem}.render.{ext}"));
             let conv = duet(&dir, &["convert", s(&grid), s(&a)]);
@@ -146,7 +146,7 @@ fn same_as_drums_read(dir: &Path, song: &Path, out_name: &str, flags: &[&str]) -
 #[test]
 fn convert_writes_every_grid_as_drums_read_does() {
     let dir = scratch("write");
-    let band = dir.join("band.txt");
+    let band = dir.join("band.notes");
     std::fs::write(
         &band,
         "[track \"Keys\" ch1]\n1.1.0 C4 1 80\n\n[track \"Kit\" ch10]\n1.1.0 C2 0.25 120\n\
@@ -156,7 +156,7 @@ fn convert_writes_every_grid_as_drums_read_does() {
     .expect("band");
     let songs = [
         golden("groove.mid"),
-        golden("groove.txt"),
+        golden("groove.notes"),
         golden("groove.json"),
         band,
     ];
@@ -216,15 +216,20 @@ fn convert_refuses_what_drums_read_refuses() {
         ),
     ];
     for (name, text, out) in cases {
-        let song = dir.join(format!("{name}.txt"));
+        let song = dir.join(format!("{name}.notes"));
         std::fs::write(&song, text).expect("song");
         let conv = same_as_drums_read(&dir, &song, out, &["--grid", "1/16", "--bars", "1"]);
         assert!(!conv.status.success(), "{name} is refused");
     }
-    let off_level = dir.join("off-level.txt");
+    let off_level = dir.join("off-level.notes");
     let conv = same_as_drums_read(&dir, &off_level, "g.drums", &["--grid", "1/16"]);
     assert!(String::from_utf8_lossy(&conv.stderr).contains("--snap-levels"));
-    let conv = same_as_drums_read(&dir, &golden("sketch.txt"), "g.drums", &["--grid", "1/16"]);
+    let conv = same_as_drums_read(
+        &dir,
+        &golden("sketch.notes"),
+        "g.drums",
+        &["--grid", "1/16"],
+    );
     assert!(!conv.status.success(), "sketch has no drum track");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
@@ -255,7 +260,7 @@ fn grid_flags_are_never_guessed_and_never_ignored() {
         &["--bars", "2"],
         &["--snap-levels"],
     ];
-    for out in ["g.mid", "g.txt", "g.json", "g.toml"] {
+    for out in ["g.mid", "g.notes", "g.json", "g.toml"] {
         for flag in flags {
             let path = dir.join(out);
             let mut args = vec!["convert", s(&groove), s(&path)];
@@ -364,7 +369,7 @@ fn grid_forms_by_name_on_standard_input_and_output() {
         &text,
     );
     ok(&o, "drums to text");
-    let want = std::fs::read(golden("groove.txt")).expect("golden");
+    let want = std::fs::read(golden("groove.notes")).expect("golden");
     let got = String::from_utf8(o.stdout).expect("utf-8");
     assert_eq!(
         got.replace("end 3.1.0\n", ""),
@@ -376,7 +381,10 @@ fn grid_forms_by_name_on_standard_input_and_output() {
     // and refused as one.
     let song_json = dir.join("song.json");
     ok(
-        &duet(&dir, &["convert", s(&golden("groove.txt")), s(&song_json)]),
+        &duet(
+            &dir,
+            &["convert", s(&golden("groove.notes")), s(&song_json)],
+        ),
         "song.json",
     );
     ok(

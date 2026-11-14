@@ -85,7 +85,7 @@ fn a_grid_copied_between_forms_loses_nothing() {
 #[test]
 fn off_level_velocities_copy_exactly_and_snap_only_when_asked() {
     let dir = scratch("copy-levels");
-    let take = dir.join("take.txt");
+    let take = dir.join("take.notes");
     std::fs::write(
         &take,
         "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n",
