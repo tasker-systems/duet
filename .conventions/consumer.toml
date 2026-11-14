@@ -1,7 +1,7 @@
 # This repository's pin on the tasker-systems conventions baseline. Doctrine: CONS-* in
 # .conventions/baseline/doctrine/consuming.md. `revision` is written by `conventions.py bump`.
 name = "making-music"
-revision = "126db91fe37dbca23647ccd78412f4a152a849c6"
+revision = "3203dd5bd3dab7a538b30aeab2279d4ee6523b0a"
 
 # Each adopted canonical file: where it lives here, and how it is compared (exact, extends,
 # table, superset).
@@ -29,7 +29,7 @@ path = ".cargo/audit.toml"
 mode = "exact"
 
 [[adopted]]
-canonical = "ci/conventions-bump.yml"
+canonical = ".github/workflows/conventions-bump.yml"
 path = ".github/workflows/conventions-bump.yml"
 mode = "exact"
 
