@@ -5,7 +5,8 @@ Tooling for writing and editing music together with an LLM.
 LLMs can't read MIDI, and the text formats that do exist either quantize (ABC) or speak
 in ticks and note numbers (midicsv). The tool here is **duet**. Its first format,
 **notefmt**, turns a MIDI file into one readable note per line, in bars, beats and note
-names, and turns it back into MIDI without losing a tick.
+names, and turns it back into MIDI without losing a tick. Its second, the **drum grid**,
+writes a drum part as one row per drum and one column per step.
 
 The workspace is split by domain:
 
@@ -13,6 +14,7 @@ The workspace is split by domain:
 |---|---|
 | `duet-core` | the `Song` every format converts through, quantizing, and the notefmt text |
 | `duet-midi` | reading and writing Standard MIDI Files |
+| `duet-drums` | the drum grid, its lane maps, and grid ⇄ `Song` |
 | `duet-cli` | the `duet` binary |
 
 ## notefmt
@@ -159,6 +161,85 @@ let back = Song::from_text(&text)?.to_midi()?;
 serde format works. Positions, pitches, keys and time signatures serialize as the same
 strings the text format uses.
 
+## Drum grids
+
+```
+# notefmt drums v1: one row per lane, one column per step, | at bar lines
+title "Groove in D"
+tpq 480
+tempo 96
+time 4/4
+grid 1/16
+map gm
+
+[bars 1-2]
+#         1 . . . 2 . . . 3 . . . 4 . . .   1 . . . 2 . . . 3 . . . 4 . . .
+crash   | X . . . . . . . . . . . . . . . | . . . . . . . . . . . . . . . . |
+hh      | x . x . x . x . x . x . x . x . | x . x . x . x . x . x . x . . . |
+hh-open | . . . . . . . . . . . . . . . . | . . . . . . . . . . . . . . x . |
+snare   | . . . . X . . . . . . g X . . . | . . . . X . . . . . . . X . g . |
+kick    | X . . . . . . X . . X . . . . . | X . . . . . . X . . X . . X . . |
+```
+
+That is [samples/groove.drums](samples/groove.drums). A drum grid is a matrix: for each
+bar, one velocity per lane and step, 0 for no hit. `.drums` files are its text form, and
+`.drums.json` and `.drums.toml` its exact form, the matrix itself.
+
+```sh
+duet drums render groove.drums groove.mid        # to MIDI (or .txt, .json, .toml)
+duet drums read take.mid take.drums --grid 1/16  # a song's drum track to a grid
+duet drums read take.mid take.drums.json --grid 1/16  # keeping every velocity
+duet drums snap take.drums.json take.drums       # velocities snapped to g, x and X
+duet drums lanes                                 # the lanes and their keys
+```
+
+**Header.** The notefmt header lines (title, tpq, tempo, time, key and their `at`
+changes) mean what they mean in notefmt, plus:
+
+| Line | Meaning |
+| --- | --- |
+| `grid 1/16` | One step (required): `1/16`, `1/8`, `1/8t` for triplet eighths, and so on |
+| `map gm` | The lane map the rows are named from; `gm` is the default and the only one |
+| `lane shaker-2 82` | Adds a lane, or moves a map lane to another key |
+| `channel 10` | The MIDI channel, when it is not the map's (10) |
+| `vel g 40 x 90 X 120` | The velocities the cells stand for, when they are not these |
+
+**Blocks.** `[bars 1-4]` holds rows for those bars. Blocks cover every bar in order from
+bar 1, so an empty bar is written as rests, and every block lists the same lanes in the
+same order. A row is a lane name, then each bar's cells between `|`s. A cell is `.` (no
+hit), `g` (ghost), `x` (hit) or `X` (accent), separated by single spaces. Each bar's cell
+count is checked against its meter, and a wrong count names the line, lane and bar:
+`line 14: snare, bar 2 has 15 steps; 4/4 at 1/16 needs 16`. The `#` row counting beats is
+a comment, written to help find "the and of 3".
+
+**Every bar must be a whole number of steps**, so 7/8 needs a grid of `1/8` or finer, and
+a grid that does not fit is refused by name.
+
+**Lanes.** The `gm` map has a lane for every General MIDI Level 1 percussion key, 35 to
+81, on channel 10, with names that are never note names: `kick` 36, `sidestick` 37,
+`snare` 38, `clap` 39, `rimshot` 40, `hh` 42, `hh-pedal` 44, `hh-open` 46, `crash` 49,
+`ride` 51, the toms from `tom-high` 50 down to `tom-floor` 41, and so on. `duet drums
+lanes` lists them all with their aliases (`bd` for `kick`, `oh` for `hh-open`); a file may
+use an alias, and the grid then uses the lane's own name. Rows are written cymbals first,
+then hats, toms, snare, kick and percussion. The map is built into `duet` for now; user
+and project lane files come later.
+
+**To and from a song.** Rendering gives one track named `Drums` on the grid's channel:
+each hit is a note on its lane's key, one step long, with its velocity. Reading a song
+takes its drum track (the one on channel 10, or the one `--track` names) and keeps only
+note starts and velocities: lengths, controls and other tracks are left out, and `duet`
+says how many. Nothing is moved to fit. A note off the grid (quantize it first, with
+`duet song quantize`), on a key no lane plays, or on the same lane and step as another is
+refused by name. The grid runs to the last bar with a hit, or to `--bars`.
+
+Grid → song → grid gives back the same grid, through MIDI too, when its lanes are in the
+map's row order and each is played at least once, as the writer leaves them.
+
+**Velocities.** The text holds three levels. Writing a velocity that is not one of them as
+text is refused, naming the lane, bar and step; keep it in `.drums.json`, or snap it to the
+nearest level with `duet drums snap` (or `--snap-levels` when reading). A velocity exactly
+halfway between two levels goes to the louder one. Nothing snaps unless you ask.
+
 ## Development
 
 Builds on the latest stable Rust (1.100 or later, edition 2024).
@@ -177,4 +258,7 @@ CI also runs `cargo deny`, `cargo audit`, rustdoc with `-D warnings`, a build on
 The round-trip tests in `crates/duet-midi/tests` generate MIDI files with humanized timing,
 sustain pedal, pitch bend, tempo and meter changes (including one in the middle of a bar),
 overlapping notes, and a format 0 file with several channels, at 96, 384, 480 and 960 ticks
-per quarter, and check every kept event survives MIDI to text to MIDI unchanged.
+per quarter, and check every kept event survives MIDI to text to MIDI unchanged. Those in
+`crates/duet-drums/tests` generate drum grids in several meters (with a change of meter),
+grids and resolutions, with any velocity, and check grid → song → grid, through MIDI, JSON
+and TOML, and the text form all round-trip unchanged.
