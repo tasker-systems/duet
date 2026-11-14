@@ -505,6 +505,29 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo fmt --all --check
 ```
 
+Beyond cargo, a developer's machine wants a few things CI does not. mise cannot install
+abcmidi or FluidSynth (neither has a registry entry), so they are in the `Brewfile`:
+
+```sh
+scripts/dev-setup.sh                 # brew bundle, then fetch the pinned SoundFont
+scripts/fetch-soundfont.sh           # just the SoundFont, to duet's data directory
+scripts/port-check.sh                # duet play --port to FluidSynth, then check what arrived
+scripts/port-check.sh --interrupt 4  # the same, with Ctrl-C after 4 seconds
+```
+
+- **The SoundFont** is the one duet's installer will fetch, pinned in `scripts/soundfont.env`
+  by commit and sha256: GeneralUser GS 2.0.3. It is never committed. `fetch-soundfont.sh` puts
+  it at `default.sf2` in the data directory, so `duet play` sounds with no flags. It keeps a
+  file already there with that sha256, and refuses to overwrite any other.
+- **`port-check.sh`** (macOS) starts FluidSynth as a CoreMIDI port, sounding what it receives
+  through the speakers and logging every event, then plays a song to it with `--port`.
+  Played to the end, it passes when every note arrived and no key is left on. Interrupted, it
+  passes when duet says it stopped, its last messages reset every channel it used (sustain
+  off, all notes off), and no key is left on. This is the only check of `--port` against a
+  real port; CI can't open one.
+- The Brewfile installs each tool's current version. The abc2midi oracle checks its own
+  version against the corpus manifest.
+
 CI also runs `cargo deny`, `cargo audit`, rustdoc with `-D warnings`, a build on the declared
 `rust-version`, and the checks for the tasker-systems
 [conventions](https://github.com/tasker-systems/conventions) baseline this repository is pinned to
