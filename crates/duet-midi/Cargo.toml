@@ -14,7 +14,7 @@ categories = ["multimedia::audio", "parser-implementations"]
 workspace = true
 
 [dependencies]
-duet-core = { path = "../duet-core" }
+duet-core = { path = "../duet-core", version = "0.1.0" }
 midly = "0.5.3"
 thiserror = "2"
 
