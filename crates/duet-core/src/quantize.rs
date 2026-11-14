@@ -9,10 +9,11 @@ use std::str::FromStr;
 
 use crate::error::{Error, Result};
 use crate::model::Song;
-use crate::time::{Position, TimeMap, beats_from_ticks, ticks_from_beats};
+use crate::time::{Position, TimeMap, beats_from_ticks, string_serde, ticks_from_beats};
 
 /// A quantize grid: one step is `1/den` of a whole note, or, for a triplet grid, two
-/// thirds of that. Written `1/16` for sixteenths and `1/8t` for triplet eighths.
+/// thirds of that. Written `1/16` for sixteenths and `1/8t` for triplet eighths, in text
+/// and in JSON and TOML alike.
 ///
 /// The grid restarts at every bar line, so bar lines are always on it. In a bar whose
 /// length is not a whole number of steps, such as one cut short by a time signature
@@ -72,6 +73,8 @@ impl FromStr for Grid {
         Grid::new(den, triplet)
     }
 }
+
+string_serde!(Grid);
 
 /// Grid points near a tick, read against the bar the tick falls in.
 struct Snapper<'a> {
