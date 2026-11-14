@@ -1,9 +1,9 @@
-# making-music
+# duet
 
 Tooling for writing and editing music together with an LLM.
 
 LLMs can't read MIDI, and the text formats that do exist either quantize (ABC) or speak
-in ticks and note numbers (midicsv). The tool here is **duet**. Its first format,
+in ticks and note numbers (midicsv). **duet** is the tool for that. Its first format,
 **notefmt**, turns a MIDI file into one readable note per line, in bars, beats and note
 names, and turns it back into MIDI without losing a tick. Its second, the **drum grid**,
 writes a drum part as one row per drum and one column per step. It also reads and writes
