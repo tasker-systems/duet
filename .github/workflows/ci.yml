@@ -44,6 +44,44 @@ jobs:
       - name: cargo audit (SC-ADV-1)
         run: cargo audit
 
+  # SC-SEC-1: gitleaks over the full history, on every change. It is a separate job rather than a
+  # step in `gate` for two reasons. It needs a full-depth checkout, which `gate` does not. And
+  # `gate` runs the conventions check, so it must reference no secret (CONS-8). Keeping the scan
+  # apart means a later switch to a token-using scanner cannot land in `gate`. It runs alongside
+  # `gate`, and `ci-success` needs it, so a docs-only change is scanned too.
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Pinned by version and by the module hash that sum.golang.org records for it (SC-IN-1).
+      # v8.30.0 was published 2025-11-26. v8.30.1 is not used: its tag was moved after the
+      # checksum database recorded it, so the tag and the recorded module now disagree.
+      GITLEAKS_VERSION: v8.30.0
+      GITLEAKS_SUM: h1:5heLlxRQkHfXgTJgdQsJhi/evX1oj6i+xBanDu2XUM8=
+      # gitleaks needs go >= 1.25.4. Without a pin, the Go on the runner would fetch the newest
+      # toolchain. go1.26.11 was published 2026-11-02, and sum.golang.org verifies it too.
+      GOTOOLCHAIN: go1.26.11
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          go install "github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}"
+          bin="$(go env GOPATH)/bin/gitleaks"
+          got="$(go version -m "$bin" | awk '$1 == "mod" { print $3, $4 }')"
+          if [ "$got" != "${GITLEAKS_VERSION} ${GITLEAKS_SUM}" ]; then
+            echo "gitleaks module is '$got', expected '${GITLEAKS_VERSION} ${GITLEAKS_SUM}'"
+            exit 1
+          fi
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: gitleaks (SC-SEC-1)
+        run: gitleaks git --config .gitleaks.toml --redact --no-banner --exit-code 1 .
+
   check:
     name: Clippy, docs and tests
     needs: gate
@@ -84,7 +122,7 @@ jobs:
   ci-success:
     name: CI Success
     if: always()
-    needs: [gate, check, msrv]
+    needs: [gate, secrets, check, msrv]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
