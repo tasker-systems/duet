@@ -138,12 +138,12 @@ Statuses for **making-music**:
 | SC-DENY-2 | gated: .github/workflows/ci.yml#gate |
 | SC-DENY-3 | gated: .github/workflows/ci.yml#gate |
 | SC-GHA-1 | practiced: every uses: is a commit SHA with its tag; nothing refuses a new tag or branch ref |
-| SC-GHA-2 | practiced: both workflows set top-level permissions: contents: read; nothing refuses a workflow without it |
+| SC-GHA-2 | practiced: every workflow sets top-level permissions: contents: read, and codeql.yml#analyze adds security-events: write with its reason; nothing refuses a workflow without it |
 | SC-GHA-3 | n/a: no release chain |
-| SC-IN-1 | practiced: install-action and its tool versions are pinned, each at least 7 days old when pinned; nothing checks it |
+| SC-IN-1 | practiced: install-action, its tool versions, gitleaks (module hash asserted) and the Go toolchain that builds it are pinned, each at least 7 days old when pinned; nothing checks it |
 | SC-IN-2 | practiced: Dependabot covers cargo and github-actions with a 7-day cooldown; nothing checks a new ecosystem is added |
 | SC-IN-3 | gated: .github/workflows/ci.yml#gate |
-| SC-SEC-1 | uncovered: no gitleaks and no CodeQL |
+| SC-SEC-1 | partial: gitleaks scans the full history on every pull request, docs-only changes included, with the reviewed allowlist in .gitleaks.toml (.github/workflows/ci.yml#secrets, required through CI Success); CodeQL runs per pull request and weekly (.github/workflows/codeql.yml#analyze) but its alerts block a merge only once the owner sets a code scanning merge protection rule; the pre-commit half is out of scope, as there is no pre-commit hook (CI-4) |
 | SEC-AUTH-1 | n/a: no authentication |
 | SEC-AUTH-2 | n/a: no authentication |
 | SEC-AUTH-3 | n/a: no authentication |
@@ -153,7 +153,7 @@ Statuses for **making-music**:
 | SEC-CRED-4 | n/a: no credentials |
 | SEC-RED-1 | n/a: no secrets or personal data to redact |
 | SEC-RED-2 | n/a: no secrets or personal data to redact |
-| SEC-RPT-1 | uncovered: no SECURITY.md |
+| SEC-RPT-1 | partial: SECURITY.md routes reports to GitHub private vulnerability reporting, with response times and an out-of-scope list; it names no email address, private reporting must be enabled in repo settings by the owner, and nothing checks the file |
 | SEC-SQL-1 | n/a: no database |
 | SEC-SQL-2 | n/a: no database |
 | SEC-TEST-1 | n/a: no test doors; nothing ships a server |
