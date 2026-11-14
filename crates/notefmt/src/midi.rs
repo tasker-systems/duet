@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use midly::num::{u15, u24, u28, u4, u7};
+use midly::num::{u4, u7, u15, u24, u28};
 use midly::{
     Format, Header, MetaMessage, MidiMessage, PitchBend, Smf, Timing, TrackEvent, TrackEventKind,
 };
@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::model::{Control, KeyChange, Note, Song, TempoChange, TimeChange, Track};
 use crate::pitch::Pitch;
 use crate::time::{
-    beats_from_ticks, bpm_from_micros, micros_from_bpm, ticks_from_beats, Key, TimeMap, TimeSig,
+    Key, TimeMap, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm, ticks_from_beats,
 };
 
 const DEFAULT_TEMPO_MICROS: u32 = 500_000;
@@ -63,7 +63,7 @@ impl Song {
             Timing::Timecode(..) => {
                 return Err(Error::Midi(
                     "files timed in SMPTE frames are not supported, only ticks per quarter".into(),
-                ))
+                ));
             }
         };
 
@@ -232,10 +232,10 @@ impl Song {
                     ch + 1,
                 );
                 let mut controls = part.controls.into_iter().peekable();
-                if let Some((0, RawControl::Program(_))) = controls.peek() {
-                    if let Some((_, RawControl::Program(p))) = controls.next() {
-                        track.program = Some(p);
-                    }
+                if let Some((0, RawControl::Program(_))) = controls.peek()
+                    && let Some((_, RawControl::Program(p))) = controls.next()
+                {
+                    track.program = Some(p);
                 }
                 track.controls = controls
                     .map(|(tick, control)| {
@@ -521,20 +521,20 @@ fn check_no_nested_notes(track: &str, notes: &[(u64, u64, &Note)]) -> Result<()>
                 .position(|(s, _, _)| *s != start)
                 .map_or(same.len(), |n| group_start + n);
             for &(_, end, inner) in &same[group_start..group_end] {
-                if let Some((outer_end, outer_note)) = outer {
-                    if end < outer_end {
-                        return Err(Error::invalid(format!(
-                            "track '{track}': the {} at {} lies inside the {} at {}; MIDI \
+                if let Some((outer_end, outer_note)) = outer
+                    && end < outer_end
+                {
+                    return Err(Error::invalid(format!(
+                        "track '{track}': the {} at {} lies inside the {} at {}; MIDI \
                              cannot keep a note of the same pitch inside another, so shorten \
                              the note at {} to end by {}",
-                            inner.pitch,
-                            inner.at,
-                            outer_note.pitch,
-                            outer_note.at,
-                            outer_note.at,
-                            inner.at
-                        )));
-                    }
+                        inner.pitch,
+                        inner.at,
+                        outer_note.pitch,
+                        outer_note.at,
+                        outer_note.at,
+                        inner.at
+                    )));
                 }
             }
             for &(_, end, note) in &same[group_start..group_end] {

@@ -1,0 +1,24 @@
+# Dependency updates for every ecosystem in the repository (SC-IN-2): the Actions pins and the
+# cargo lockfile, grouped weekly. A new ecosystem (a Python or JS tool, a Dockerfile) gets an
+# entry here in the same change that adds it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        patterns: ["*"]

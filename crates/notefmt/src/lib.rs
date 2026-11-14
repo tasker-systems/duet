@@ -19,6 +19,8 @@
 //! Round-trips are exact to the tick: lengths and tempos are written as the shortest
 //! decimal that converts back to the same ticks and microseconds.
 
+#![forbid(unsafe_code)]
+
 mod error;
 mod midi;
 mod model;

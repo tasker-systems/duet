@@ -124,11 +124,18 @@ strings the text format uses.
 
 ## Development
 
+Builds on the latest stable Rust (1.100 or later, edition 2024).
+
 ```sh
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
 cargo fmt --all --check
 ```
+
+CI also runs `cargo deny`, `cargo audit`, rustdoc with `-D warnings`, a build on the declared
+`rust-version`, and the checks for the tasker-systems
+[conventions](https://github.com/tasker-systems/conventions) baseline this repository is pinned to
+(see [CLAUDE.md](CLAUDE.md) and `.conventions/`).
 
 The round-trip tests in `crates/notefmt/tests` generate MIDI files with humanized timing,
 sustain pedal, pitch bend, tempo and meter changes (including one in the middle of a bar),

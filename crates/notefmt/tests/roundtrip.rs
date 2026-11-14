@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use midly::num::{u15, u24, u28, u4, u7};
+use midly::num::{u4, u7, u15, u24, u28};
 use midly::{
     Format, Header, MetaMessage, MidiMessage, PitchBend, Smf, Timing, TrackEvent, TrackEventKind,
 };

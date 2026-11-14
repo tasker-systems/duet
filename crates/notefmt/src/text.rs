@@ -27,7 +27,7 @@ use std::fmt::Write as _;
 use crate::error::{Error, Result};
 use crate::model::{Control, KeyChange, Note, Song, TempoChange, TimeChange, Track};
 use crate::pitch::Pitch;
-use crate::time::{parse_beats, Key, Position, TimeSig};
+use crate::time::{Key, Position, TimeSig, parse_beats};
 
 const HEADER_COMMENT: &str = "# notefmt v1: positions are bar.beat.tick, lengths are quarter notes";
 
@@ -223,7 +223,7 @@ impl Song {
                         (kw, _) => {
                             return Err(err(format!(
                                 "'{kw}' is not a header line; expected title, tpq, tempo, time, key or a [track]"
-                            )))
+                            )));
                         }
                     }
                 }
@@ -279,7 +279,7 @@ impl Song {
                         return Err(err(
                             "expected a note like '1.1.0 D4 1 80', or a cc, bend or prog line"
                                 .into(),
-                        ))
+                        ));
                     }
                 },
             }

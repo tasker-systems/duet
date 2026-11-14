@@ -1,0 +1,39 @@
+# This repository's pin on the tasker-systems conventions baseline. Doctrine: CONS-* in
+# .conventions/baseline/doctrine/consuming.md. `revision` is written by `conventions.py bump`.
+name = "making-music"
+revision = "e3c948de44a7e401b358fe03109e7684a833bf84"
+
+# Each adopted canonical file: where it lives here, and how it is compared (exact, extends,
+# table, superset).
+
+[[adopted]]
+canonical = "rust/workspace-lints.toml"
+path = "Cargo.toml"
+mode = "table"
+table = "workspace.lints"
+canonical_table = "workspace.lints"
+
+[[adopted]]
+canonical = "rust/clippy.toml"
+path = "clippy.toml"
+mode = "exact"
+
+[[adopted]]
+canonical = "rust/deny.toml"
+path = "deny.toml"
+mode = "exact"
+
+[[adopted]]
+canonical = "rust/audit.toml"
+path = ".cargo/audit.toml"
+mode = "exact"
+
+[[adopted]]
+canonical = "ci/conventions-bump.yml"
+path = ".github/workflows/conventions-bump.yml"
+mode = "exact"
+
+[guidance]
+# Agent entry files that must link the projected skill, and where the skill is projected.
+entry = ["CLAUDE.md"]
+skill = ".claude/skills/tasker-systems-conventions"
