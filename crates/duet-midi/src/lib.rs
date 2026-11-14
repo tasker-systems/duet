@@ -28,7 +28,7 @@ use midly::{
 };
 
 use duet_core::time::{
-    Key, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm, ticks_from_beats,
+    Key, Mode, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm, ticks_from_beats,
 };
 use duet_core::{Control, KeyChange, Note, Pitch, Song, TempoChange, TimeChange, TimeMap, Track};
 
@@ -65,6 +65,9 @@ pub trait Midi: Sized {
 }
 
 const DEFAULT_TEMPO_MICROS: u32 = 500_000;
+
+/// The start of the text event that names a key's mode, as in `duet:key D dorian`.
+const KEY_TEXT_PREFIX: &str = "duet:key ";
 
 /// A note with absolute ticks, before positions are worked out.
 struct RawNote {
@@ -103,8 +106,10 @@ impl Midi for Song {
     /// Reads a Standard MIDI File.
     ///
     /// Notes, tempo, time signature and key changes, track names, program changes,
-    /// controllers and pitch bend are kept exactly. Aftertouch, SysEx, markers, lyrics and
-    /// other text events, and note-off velocities are dropped. A MIDI track that uses
+    /// controllers and pitch bend are kept exactly. A key signature takes its mode from a
+    /// `duet:key` text event at its tick, when that event names a key with the same
+    /// signature. Aftertouch, SysEx, markers, lyrics and other text events, and note-off
+    /// velocities are dropped. A MIDI track that uses
     /// several channels becomes one [`Track`] per channel.
     ///
     /// The file's end (its latest end of track) becomes the song's [end](Song::end) when
@@ -128,6 +133,8 @@ impl Midi for Song {
         let mut tempos: Vec<(u64, u32)> = Vec::new();
         let mut sigs: Vec<(u64, (u8, u8))> = Vec::new();
         let mut keys: Vec<(u64, (i8, bool))> = Vec::new();
+        // `duet:key D dorian` text events, which name the mode a key signature cannot.
+        let mut key_texts: Vec<(u64, Key)> = Vec::new();
         let mut title = None;
         let single_track = smf.header.format == Format::SingleTrack;
         // (midi track index, channel, name, events), in file order.
@@ -161,6 +168,15 @@ impl Midi for Song {
                         }
                         MetaMessage::TrackName(bytes) if name.is_none() => {
                             name = Some(String::from_utf8_lossy(bytes).into_owned())
+                        }
+                        MetaMessage::Text(bytes) => {
+                            if let Some(key) = std::str::from_utf8(bytes)
+                                .ok()
+                                .and_then(|t| t.strip_prefix(KEY_TEXT_PREFIX))
+                                .and_then(|k| k.parse::<Key>().ok())
+                            {
+                                key_texts.push((tick, key));
+                            }
                         }
                         _ => {}
                     },
@@ -261,8 +277,18 @@ impl Midi for Song {
             }
             TimeSig::new(num, 1 << den_power).map_err(|e| Error::Midi(e.to_string()))
         };
-        let to_key = |(sharps, minor): (i8, bool)| {
-            Key::new(sharps, minor).map_err(|e| Error::Midi(e.to_string()))
+        // A key signature takes the mode a `duet:key` event at its tick names, when that
+        // key has the same signature. A signature edited since (by a DAW, say) no longer
+        // matches, and the signature wins.
+        let key_texts = last_per_tick(key_texts);
+        let to_key = |tick: u64, (sharps, minor): (i8, bool)| {
+            let signature = Key::new(sharps, minor).map_err(|e| Error::Midi(e.to_string()))?;
+            let named = key_texts
+                .binary_search_by_key(&tick, |(t, _)| *t)
+                .ok()
+                .map(|i| key_texts[i].1)
+                .filter(|k| k.sharps == sharps);
+            Ok::<Key, Error>(named.unwrap_or(signature))
         };
 
         let (initial_sig, sig_rest) = match sigs.split_first() {
@@ -292,7 +318,7 @@ impl Midi for Song {
             .collect();
 
         let (key, key_rest) = match keys.split_first() {
-            Some((&(0, key), rest)) => (Some(to_key(key)?), rest),
+            Some((&(0, key), rest)) => (Some(to_key(0, key)?), rest),
             _ => (None, &keys[..]),
         };
         let key_changes = key_rest
@@ -300,7 +326,7 @@ impl Midi for Song {
             .map(|&(tick, key)| {
                 Ok(KeyChange {
                     at: map.position(tick),
-                    key: to_key(key)?,
+                    key: to_key(tick, key)?,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -308,7 +334,7 @@ impl Midi for Song {
         // Spell each black key the way the key in force where the note starts spells it.
         let key_ticks: Vec<(u64, Key)> = keys
             .iter()
-            .map(|&(tick, k)| to_key(k).map(|k| (tick, k)))
+            .map(|&(tick, k)| to_key(tick, k).map(|k| (tick, k)))
             .collect::<Result<_>>()?;
         let flat = |start: u64, midi: u8| {
             let in_force = key_ticks.partition_point(|(tick, _)| *tick <= start);
@@ -384,7 +410,9 @@ impl Midi for Song {
     }
 
     /// Writes the song as a format 1 Standard MIDI File: a first track with the title,
-    /// tempo, time signature and key, then one track per [`Track`].
+    /// tempo, time signature and key, then one track per [`Track`]. A key in a mode other
+    /// than major or minor is written as its signature plus a `duet:key D dorian` text
+    /// event at the same tick.
     ///
     /// Every track ends at the song's [stated end](Song::stated_end): the end it names,
     /// or else its default. Anything past a named end is refused by name
@@ -417,7 +445,24 @@ impl Midi for Song {
             TrackEventKind::Meta(MetaMessage::TimeSignature(sig.num, sig.den_power(), 24, 8))
         };
         let key_event =
-            |key: Key| TrackEventKind::Meta(MetaMessage::KeySignature(key.sharps, key.minor));
+            |key: Key| TrackEventKind::Meta(MetaMessage::KeySignature(key.sharps, key.is_minor()));
+        // The text of a key's `duet:key` event, for a mode MIDI's signature cannot hold.
+        let key_texts: Vec<(u64, Vec<u8>)> = self
+            .key
+            .map(|key| Ok((0, key)))
+            .into_iter()
+            .chain(
+                self.key_changes
+                    .iter()
+                    .map(|c| map.tick(c.at).map(|tick| (tick, c.key))),
+            )
+            .filter(|r| {
+                r.as_ref().map_or(true, |(_, key)| {
+                    !matches!(key.mode, Mode::Major | Mode::Minor)
+                })
+            })
+            .map(|r| r.map(|(tick, key)| (tick, format!("{KEY_TEXT_PREFIX}{key}").into_bytes())))
+            .collect::<duet_core::Result<_>>()?;
         let tempo_event = |bpm: f64| -> Result<TrackEventKind<'static>> {
             Ok(TrackEventKind::Meta(MetaMessage::Tempo(u24::new(
                 micros_from_bpm(bpm)?,
@@ -437,6 +482,15 @@ impl Midi for Song {
         }
         for (i, change) in self.key_changes.iter().enumerate() {
             conductor.push((map.tick(change.at)?, 2, i + 1, key_event(change.key)));
+        }
+        let key_count = self.key_changes.len() + 1;
+        for (i, (tick, text)) in key_texts.iter().enumerate() {
+            conductor.push((
+                *tick,
+                2,
+                key_count + i,
+                TrackEventKind::Meta(MetaMessage::Text(text)),
+            ));
         }
         conductor.push((0, 3, 0, tempo_event(self.tempo_bpm)?));
         for (i, change) in self.tempo_changes.iter().enumerate() {

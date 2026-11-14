@@ -136,45 +136,142 @@ impl FromStr for TimeSig {
 
 string_serde!(TimeSig);
 
-const MAJOR_KEYS: [&str; 15] = [
-    "Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#",
+/// Tonic names around the circle of fifths, from Fb (8 flats from C) to B# (12 sharps).
+/// A key's tonic is the name `sharps + mode offset` steps from C.
+const FIFTHS: [&str; 21] = [
+    "Fb", "Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#",
+    "G#", "D#", "A#", "E#", "B#",
 ];
-const MINOR_KEYS: [&str; 15] = [
-    "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#", "G#", "D#", "A#",
-];
+/// The index of C in [`FIFTHS`].
+const FIFTHS_C: i8 = 8;
 
-/// A key signature, stored the way MIDI does: sharps (positive) or flats (negative),
-/// and major or minor. Written as `D minor` or `Bb major`.
+/// A key's mode: major, minor, or one of the five other diatonic modes.
+///
+/// Ionian is major and aeolian is minor, so they have no variants of their own: `C ionian`
+/// reads as `C major`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mode {
+    Major,
+    Minor,
+    Dorian,
+    Phrygian,
+    Lydian,
+    Mixolydian,
+    Locrian,
+}
+
+impl Mode {
+    /// The mode's name as notefmt writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Major => "major",
+            Mode::Minor => "minor",
+            Mode::Dorian => "dorian",
+            Mode::Phrygian => "phrygian",
+            Mode::Lydian => "lydian",
+            Mode::Mixolydian => "mixolydian",
+            Mode::Locrian => "locrian",
+        }
+    }
+
+    /// The mode a word names, matched as the ABC 2.1 standard matches modes (§3.1.14): on
+    /// its first three letters, ignoring case, with `m` alone for minor. So `Dor`, `dorian`
+    /// and `DORIAN` are all dorian, and `ionian` and `aeolian` are major and minor.
+    pub fn from_word(word: &str) -> Option<Mode> {
+        let lower = word.to_ascii_lowercase();
+        if lower == "m" {
+            return Some(Mode::Minor);
+        }
+        if lower.len() < 3 || !lower.is_char_boundary(3) {
+            return None;
+        }
+        Some(match &lower[..3] {
+            "maj" | "ion" => Mode::Major,
+            "min" | "aeo" => Mode::Minor,
+            "dor" => Mode::Dorian,
+            "phr" => Mode::Phrygian,
+            "lyd" => Mode::Lydian,
+            "mix" => Mode::Mixolydian,
+            "loc" => Mode::Locrian,
+            _ => return None,
+        })
+    }
+
+    /// How many steps round the circle of fifths the tonic lies from the major key with
+    /// the same signature: D dorian is two steps from C.
+    fn fifths_from_major(self) -> i8 {
+        match self {
+            Mode::Lydian => -1,
+            Mode::Major => 0,
+            Mode::Mixolydian => 1,
+            Mode::Dorian => 2,
+            Mode::Minor => 3,
+            Mode::Phrygian => 4,
+            Mode::Locrian => 5,
+        }
+    }
+
+    /// The scale's steps above the tonic, in semitones. Minor is spelled as harmonic
+    /// minor, so its leading tone is raised; the other modes are their natural scales.
+    fn spelling_steps(self) -> [u8; 7] {
+        match self {
+            Mode::Major => [0, 2, 4, 5, 7, 9, 11],
+            Mode::Minor => [0, 2, 3, 5, 7, 8, 11],
+            Mode::Dorian => [0, 2, 3, 5, 7, 9, 10],
+            Mode::Phrygian => [0, 1, 3, 5, 7, 8, 10],
+            Mode::Lydian => [0, 2, 4, 6, 7, 9, 11],
+            Mode::Mixolydian => [0, 2, 4, 5, 7, 9, 10],
+            Mode::Locrian => [0, 1, 3, 5, 6, 8, 10],
+        }
+    }
+}
+
+/// A key signature, stored the way MIDI does (sharps, positive, or flats, negative), and
+/// the key's mode. Written as `D minor`, `Bb major` or `D dorian`.
+///
+/// MIDI's key signature holds only major or minor. A key in another mode is written to
+/// MIDI as its signature plus a `duet:key D dorian` text event, which `duet-midi` reads
+/// back; other programs see the signature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Key {
     pub sharps: i8,
-    pub minor: bool,
+    pub mode: Mode,
 }
 
 impl Key {
+    /// A major (`minor` false) or minor key with this many sharps (or flats, negative).
     pub fn new(sharps: i8, minor: bool) -> Result<Self> {
+        Key::with_mode(sharps, if minor { Mode::Minor } else { Mode::Major })
+    }
+
+    /// A key in any mode, with this many sharps (or flats, negative) in its signature.
+    pub fn with_mode(sharps: i8, mode: Mode) -> Result<Self> {
         if !(-7..=7).contains(&sharps) {
             return Err(Error::invalid(format!(
                 "a key has between 7 flats and 7 sharps, not {sharps}"
             )));
         }
-        Ok(Key { sharps, minor })
+        Ok(Key { sharps, mode })
+    }
+
+    /// Whether MIDI's key signature marks this key as minor. Only the minor mode is; the
+    /// other modes are written as their signature with the major flag.
+    pub fn is_minor(self) -> bool {
+        self.mode == Mode::Minor
     }
 
     /// The key's tonic, such as `D` or `Bb`.
     pub fn tonic(self) -> &'static str {
-        let names = if self.minor { &MINOR_KEYS } else { &MAJOR_KEYS };
-        names[(self.sharps + 7) as usize]
+        FIFTHS[(self.sharps + self.mode.fifths_from_major() + FIFTHS_C) as usize]
     }
 
     /// Whether a black key (pitch class 0 to 11, C = 0) should be spelled as a flat in this
-    /// key. Notes of the scale (the major scale, or harmonic minor so the leading tone is
-    /// raised) are spelled as the scale spells them, so D minor has Bb and C#. Other black
-    /// keys follow the key signature: flats in flat keys, sharps otherwise.
+    /// key. Notes of the scale (harmonic minor for minor, so the leading tone is raised,
+    /// and the natural scale for every other mode) are spelled as the scale spells them, so
+    /// D minor has Bb and C#. Other black keys follow the key signature: flats in flat
+    /// keys, sharps otherwise.
     pub fn spells_flat(self, pitch_class: u8) -> bool {
         const NATURAL: [u8; 7] = [0, 2, 4, 5, 7, 9, 11]; // C D E F G A B
-        const MAJOR: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
-        const HARMONIC_MINOR: [u8; 7] = [0, 2, 3, 5, 7, 8, 11];
         let tonic = self.tonic();
         let letter = match tonic.as_bytes()[0] {
             b'C' => 0,
@@ -190,8 +287,7 @@ impl Key {
             .map(|c| if c == '#' { 1 } else { -1 })
             .sum();
         let tonic_pc = (i32::from(NATURAL[letter]) + shift).rem_euclid(12);
-        let steps = if self.minor { &HARMONIC_MINOR } else { &MAJOR };
-        for (degree, step) in steps.iter().enumerate() {
+        for (degree, step) in self.mode.spelling_steps().iter().enumerate() {
             let pc = (tonic_pc + i32::from(*step)).rem_euclid(12);
             if pc == i32::from(pitch_class % 12) {
                 let natural = i32::from(NATURAL[(letter + degree) % 7]);
@@ -205,47 +301,48 @@ impl Key {
 
 impl fmt::Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mode = if self.minor { "minor" } else { "major" };
-        write!(f, "{} {}", self.tonic(), mode)
+        write!(f, "{} {}", self.tonic(), self.mode.name())
     }
 }
 
 impl FromStr for Key {
     type Err = Error;
 
-    /// Parses `D minor`, `Dm`, `D min`, `Bb major`, `Bb maj` or plain `Bb` (major).
+    /// Parses a tonic and a mode: `D minor`, `Dm`, `Bb major`, plain `Bb` (major),
+    /// `D dorian`, `F#Mix`. Modes are matched on their first three letters, ignoring case,
+    /// as [`Mode::from_word`] says.
     fn from_str(s: &str) -> Result<Self> {
-        let bad = || Error::invalid(format!("'{s}' is not a key like D minor or Bb major"));
+        let bad = || {
+            Error::invalid(format!(
+                "'{s}' is not a key like D minor, Bb major or D dorian"
+            ))
+        };
         let s = s.trim();
         let mut chars = s.chars();
         let letter = chars.next().ok_or_else(bad)?.to_ascii_uppercase();
         let rest = chars.as_str();
+        // A "b" straight after the letter is a flat: no mode word starts with "b".
         let accidental_len = rest
             .chars()
             .take_while(|c| *c == '#' || *c == 'b')
             .map(char::len_utf8)
             .sum::<usize>();
-        // A lone "b" after the letter could be a flat ("Bb") or nothing else, since no
-        // mode word starts with "b"; so accidentals are unambiguous.
         let (accidental, mode) = rest.split_at(accidental_len);
         let tonic = format!("{letter}{accidental}");
-        let minor = match mode.trim().to_ascii_lowercase().as_str() {
-            "" | "major" | "maj" => false,
-            "m" | "min" | "minor" => true,
-            _ => return Err(bad()),
+        let mode = match mode.trim() {
+            "" => Mode::Major,
+            word => Mode::from_word(word).ok_or_else(bad)?,
         };
-        let names = if minor { &MINOR_KEYS } else { &MAJOR_KEYS };
-        let index = names.iter().position(|n| *n == tonic).ok_or_else(|| {
-            Error::invalid(format!(
-                "'{s}' has no standard key signature; use a key like {} instead",
-                if minor {
-                    "D# minor or Eb minor"
-                } else {
-                    "Db major"
-                }
-            ))
-        })?;
-        Key::new(index as i8 - 7, minor)
+        let index = FIFTHS.iter().position(|n| *n == tonic).ok_or_else(bad)? as i8;
+        let sharps = index - FIFTHS_C - mode.fifths_from_major();
+        if !(-7..=7).contains(&sharps) {
+            return Err(Error::invalid(format!(
+                "'{s}' has no standard key signature: it needs {} {}",
+                sharps.abs(),
+                if sharps < 0 { "flats" } else { "sharps" }
+            )));
+        }
+        Key::with_mode(sharps, mode)
     }
 }
 

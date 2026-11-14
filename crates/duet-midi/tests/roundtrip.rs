@@ -1072,3 +1072,125 @@ fn a_song_with_no_end_states_its_default_end() {
     let midi = late.to_midi().unwrap();
     assert_eq!(ends_of_track(&midi), vec![8 * 1920, 8 * 1920]);
 }
+
+/// Every `duet:key` text event in a file: (tick, text).
+fn key_texts(bytes: &[u8]) -> Vec<(u64, String)> {
+    let smf = Smf::parse(bytes).unwrap();
+    let mut out = Vec::new();
+    for track in &smf.tracks {
+        let mut tick = 0u64;
+        for e in track {
+            tick += u64::from(e.delta.as_int());
+            if let TrackEventKind::Meta(MetaMessage::Text(text)) = e.kind {
+                let text = String::from_utf8_lossy(text).into_owned();
+                if text.starts_with("duet:key ") {
+                    out.push((tick, text));
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_key_with_a_mode_round_trips_through_text_json_toml_and_midi() {
+    // D dorian has no sharps or flats, and E phrygian at bar 3 has none either: only the
+    // mode tells them from C major, so only the duet:key event carries it through MIDI.
+    let text = "key D dorian\nkey E phrygian at 3.1.0\nkey G mixolydian at 4.1.0\n\
+                key F lydian at 5.1.0\nkey B locrian at 6.1.0\nkey Bb major at 7.1.0\n\n\
+                [track \"P\" ch1]\n1.1.0 D4 1 80\n7.1.0 Bb4 1 80\n";
+    let song = Song::from_text(text).unwrap();
+    assert_eq!(song.key.unwrap().to_string(), "D dorian");
+    let keys: Vec<String> = song.key_changes.iter().map(|c| c.key.to_string()).collect();
+    assert_eq!(
+        keys,
+        [
+            "E phrygian",
+            "G mixolydian",
+            "F lydian",
+            "B locrian",
+            "Bb major"
+        ]
+    );
+    let song = stated(&song);
+
+    let text = song.to_text();
+    assert!(text.contains("key D dorian\n"), "{text}");
+    assert_eq!(Song::from_text(&text).unwrap(), song, "text round-trip");
+    let json = serde_json::to_string(&song).unwrap();
+    assert!(json.contains("\"D dorian\""), "{json}");
+    assert_eq!(serde_json::from_str::<Song>(&json).unwrap(), song, "JSON");
+    let toml_text = toml::to_string(&song).unwrap();
+    assert_eq!(toml::from_str::<Song>(&toml_text).unwrap(), song, "TOML");
+
+    // MIDI holds each key's own signature, and a duet:key event beside each mode.
+    let midi = song.to_midi().unwrap();
+    let ev = events(&midi);
+    assert_eq!(
+        ev.keys,
+        [
+            (0, 0, false),
+            (3840, 0, false),
+            (5760, 0, false),
+            (7680, 0, false),
+            (9600, 0, false),
+            (11520, -2, false)
+        ]
+    );
+    assert_eq!(
+        key_texts(&midi),
+        [
+            (0, "duet:key D dorian".to_owned()),
+            (3840, "duet:key E phrygian".to_owned()),
+            (5760, "duet:key G mixolydian".to_owned()),
+            (7680, "duet:key F lydian".to_owned()),
+            (9600, "duet:key B locrian".to_owned()),
+        ],
+        "major and minor need no text event"
+    );
+    assert_eq!(Song::from_midi(&midi).unwrap(), song, "MIDI round-trip");
+}
+
+#[test]
+fn a_duet_key_event_that_disagrees_with_the_signature_is_ignored() {
+    // A DAW that edits the key signature leaves our text event behind. The signature is
+    // what the DAW shows, so it wins: the key reads as the signature's major key.
+    let bytes = save(
+        Format::Parallel,
+        480,
+        vec![track(vec![
+            (0, meta(MetaMessage::KeySignature(2, false))),
+            (0, meta(MetaMessage::Text(b"duet:key D dorian"))),
+            (0, on(0, 62, 80)),
+            (480, off(0, 62, false)),
+        ])],
+    );
+    let song = Song::from_midi(&bytes).unwrap();
+    assert_eq!(song.key.unwrap().to_string(), "D major");
+}
+
+#[test]
+fn modes_are_named_on_their_first_three_letters() {
+    use duet_core::Key;
+    for (written, read) in [
+        ("D dorian", "D dorian"),
+        ("D Dor", "D dorian"),
+        ("F#Mix", "F# mixolydian"),
+        ("F# MIXOLYDIAN", "F# mixolydian"),
+        ("A aeolian", "A minor"),
+        ("C ionian", "C major"),
+        ("Am", "A minor"),
+        ("Eb", "Eb major"),
+        ("B#Loc", "B# locrian"),
+        ("FbLyd", "Fb lydian"),
+    ] {
+        assert_eq!(
+            written.parse::<Key>().unwrap().to_string(),
+            read,
+            "{written}"
+        );
+    }
+    // A tonic whose mode needs more than seven sharps or flats has no signature.
+    assert!("D# lydian".parse::<Key>().is_err());
+    assert!("D blues".parse::<Key>().is_err());
+}
