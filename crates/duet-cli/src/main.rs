@@ -71,7 +71,9 @@ enum ConfigCommand {
     Show,
 }
 
-fn run(cli: Cli) -> Result<()> {
+/// Runs a command with config read from `dirs`. Tests pass their own, so a developer's
+/// duet.toml never changes what they check.
+fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
     match cli.command {
         Command::Convert {
             input,
@@ -81,13 +83,13 @@ fn run(cli: Cli) -> Result<()> {
         } => {
             let from = from.unwrap_or_else(|| format_of(&input, Format::Text));
             let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
-            write(&read(&input, from)?, &output, to, Config::load()?.end)
+            write(&read(&input, from)?, &output, to, Config::load(dirs)?.end)
         }
-        Command::Song(command) => song::run(command, &Config::load()?),
-        Command::Drums(command) => drums::run(command, &Config::load()?),
-        Command::Abc(command) => abc::run(command, &Config::load()?),
-        Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(&Dirs::find()?)),
-        Command::Config(ConfigCommand::Show) => stdout(&Config::load()?.show()),
+        Command::Song(command) => song::run(command, &Config::load(dirs)?),
+        Command::Drums(command) => drums::run(command, &Config::load(dirs)?),
+        Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
+        Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
+        Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),
     }
 }
 
@@ -99,12 +101,42 @@ fn stdout(text: &str) -> Result<()> {
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    match Dirs::find().and_then(|dirs| run(Cli::parse(), &dirs)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // `{:#}` prints the context chain on one line, like "take.mid: No such file".
             eprintln!("duet: {e:#}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use clap::Parser;
+
+    use crate::config::Dirs;
+    use crate::{Cli, run};
+
+    /// Runs `duet <args>` with no config at all: a fresh, empty user config directory and
+    /// no project `.duet`, passed in rather than set in the process's environment, so a
+    /// developer's own duet.toml, or a `.duet` above the checkout, cannot change a test.
+    pub(crate) fn run_hermetic(args: &[&str]) -> anyhow::Result<()> {
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let user = std::env::temp_dir().join(format!(
+            "duet-no-config-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let dirs = Dirs {
+            user: Some((user, "the test's empty config directory")),
+            project: None,
+        };
+        run(
+            Cli::parse_from(std::iter::once("duet").chain(args.iter().copied())),
+            &dirs,
+        )
     }
 }

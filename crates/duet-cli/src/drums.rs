@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use duet_core::Grid;
-use duet_drums::{DrumGrid, LaneMap};
+use duet_drums::DrumGrid;
 
 use crate::config::Config;
 use crate::io::{Format, format_of, read, same_file, with_end, write};
@@ -94,7 +94,9 @@ fn form_of(path: &Path) -> GridForm {
     }
 }
 
-fn read_grid(path: &Path, lanes: &LaneMap) -> Result<DrumGrid> {
+/// Reads a grid. As .drums text, `map gm` means General MIDI with only the lanes and
+/// aliases config adds, and anything config sets that does not apply is said.
+fn read_grid(path: &Path, config: &Config) -> Result<DrumGrid> {
     let text = if path == Path::new("-") {
         let mut buf = String::new();
         io::stdin()
@@ -105,7 +107,12 @@ fn read_grid(path: &Path, lanes: &LaneMap) -> Result<DrumGrid> {
         fs::read_to_string(path).with_context(|| path.display().to_string())?
     };
     let grid = match form_of(path) {
-        GridForm::Text => DrumGrid::from_text_in(&text, lanes)?,
+        GridForm::Text => {
+            for notice in &config.text_notices {
+                eprintln!("duet: {notice}");
+            }
+            DrumGrid::from_text_in(&text, &config.text_lanes)?
+        }
         GridForm::Json => normalized(serde_json::from_str(&text)?)?,
         GridForm::Toml => normalized(toml::from_str(&text)?)?,
     };
@@ -153,7 +160,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
             refuse_overwrite(&input, &output, "render")?;
             let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
             write(
-                &read_grid(&input, &config.lanes)?.to_song()?,
+                &read_grid(&input, config)?.to_song()?,
                 &output,
                 to,
                 config.end,
@@ -190,7 +197,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
         }
         DrumsCommand::Snap { input, output } => {
             refuse_overwrite(&input, &output, "snap")?;
-            let grid = read_grid(&input, &config.lanes)?;
+            let grid = read_grid(&input, config)?;
             let snapped = grid.snapped_to_levels();
             let moved = moved_velocities(&grid, &snapped);
             eprintln!("duet: snapped {moved} velocities to the levels");
@@ -248,9 +255,7 @@ fn report_left_out(song: &duet_core::Song, track: Option<&str>, grid: &DrumGrid)
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
-    use crate::{Cli, run};
+    use crate::tests::run_hermetic;
 
     fn temp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("duet-drums-{name}-{}", std::process::id()));
@@ -259,9 +264,7 @@ mod tests {
     }
 
     fn duet(args: &[&str]) -> anyhow::Result<()> {
-        run(Cli::parse_from(
-            std::iter::once("duet").chain(args.iter().copied()),
-        ))
+        run_hermetic(args)
     }
 
     #[test]

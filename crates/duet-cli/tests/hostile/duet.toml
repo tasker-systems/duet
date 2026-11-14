@@ -1,0 +1,15 @@
+# A hostile config for checking that duet-cli's tests are hermetic: CI runs the tests with
+# DUET_CONFIG_DIR pointing here and a copy in a .duet above the checkout. A test that
+# reads the developer's real config would see every one of these.
+[song]
+end = { round-up = 4 }
+
+[lanes.kick]   # a gm lane moved
+key = 100
+aliases = ["boom"]
+
+[lanes.snare]  # another, so a test that uses either sees a move
+key = 101
+
+[lanes.cowbell-2]  # a lane added
+key = 102
