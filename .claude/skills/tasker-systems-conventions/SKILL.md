@@ -84,7 +84,7 @@ Statuses for **making-music**:
 | CONS-6 | gated: .github/workflows/ci.yml#gate |
 | CONS-7 | gated: .github/workflows/ci.yml#gate |
 | CONS-8 | gated: .github/workflows/ci.yml#gate |
-| CONS-9 | partial: conventions-bump.yml is adopted exact; it cannot run until the CONVENTIONS_BOT_CLIENT_ID and CONVENTIONS_BOT_KEY secrets and auto-merge are set |
+| CONS-9 | gated: .github/workflows/conventions-bump.yml#bump |
 | DOC-1 | uncovered: no Markdown linter |
 | DOC-2 | uncovered: no Markdown linter |
 | DOC-3 | uncovered: no Markdown linter; README.md fits 100 columns today |
