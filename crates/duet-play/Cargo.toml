@@ -9,6 +9,8 @@ rust-version.workspace = true
 readme = "../../README.md"
 keywords = ["midi", "music", "soundfont", "synthesizer"]
 categories = ["multimedia::audio"]
+# The tests read the workspace's samples, so they stay out of the package.
+include = ["src/**", "Cargo.toml"]
 
 [lints]
 workspace = true

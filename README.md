@@ -18,6 +18,7 @@ The workspace is split by domain:
 | `duet-midi` | reading and writing Standard MIDI Files |
 | `duet-drums` | the drum grid, its lane maps, and grid ⇄ `Song` |
 | `duet-abc` | a subset of ABC 2.1 ⇄ `Song`, and the corpus that checks it against abc2midi |
+| `duet-play` | a `Song` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-cli` | the `duet` binary |
 
 ## How the formats fit together

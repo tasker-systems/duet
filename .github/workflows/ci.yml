@@ -96,9 +96,16 @@ jobs:
           toolchain: stable
           components: clippy
       # duet play's cpal and midir build against ALSA on Linux, by the owner's decision.
-      # The packages come from the runner image's own Ubuntu 24.04 archive.
+      # Exact versions from Ubuntu 24.04's archive (SC-IN-1). libasound2-dev is the
+      # noble-updates/-security build of 2026-07-14, and pkg-config noble's release build.
+      # Ubuntu lists only the newest build in noble-updates, so this step fails, loudly, once
+      # a newer one replaces 1.2.11-1ubuntu0.3 there. Then pin the new build, once it is at
+      # least 7 days old: `apt-cache policy libasound2-dev` on the runner names it.
       - name: ALSA headers for duet play
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1
       # --all-features compiles and lints duet-abc's oracle tier, which needs abc2midi and so
       # never runs here (TEST-3): its drift gate runs in the plain tests below.
       - name: Clippy (RUST-LINT-1, RUST-LINT-2)
@@ -135,9 +142,16 @@ jobs:
         with:
           toolchain: "1.100"
       # duet play's cpal and midir build against ALSA on Linux, by the owner's decision.
-      # The packages come from the runner image's own Ubuntu 24.04 archive.
+      # Exact versions from Ubuntu 24.04's archive (SC-IN-1). libasound2-dev is the
+      # noble-updates/-security build of 2026-07-14, and pkg-config noble's release build.
+      # Ubuntu lists only the newest build in noble-updates, so this step fails, loudly, once
+      # a newer one replaces 1.2.11-1ubuntu0.3 there. Then pin the new build, once it is at
+      # least 7 days old: `apt-cache policy libasound2-dev` on the runner names it.
       - name: ALSA headers for duet play
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1
       - run: cargo check --locked --all-targets
 
   ci-success:
