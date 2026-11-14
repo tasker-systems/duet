@@ -7,7 +7,7 @@ use midly::num::{u4, u7, u15, u24, u28};
 use midly::{
     Format, Header, MetaMessage, MidiMessage, PitchBend, Smf, Timing, TrackEvent, TrackEventKind,
 };
-use notefmt::Song;
+use notefmt::{Grid, Position, Song};
 
 /// A note as absolute ticks: (channel, key, start, end, velocity).
 type RawNote = (u8, u8, u64, u64, u8);
@@ -698,4 +698,144 @@ fn header_lines_after_a_track_say_where_they_belong() {
             other => panic!("{line}: expected a parse error on line 3, got {other:?}"),
         }
     }
+}
+
+/// Whether an absolute tick is on `step`'s grid, which restarts at every bar line.
+fn on_grid(map: &notefmt::TimeMap, tick: u64, step: u64) -> bool {
+    let bar_start = map.tick(Position::bar(map.position(tick).bar)).unwrap();
+    (tick - bar_start).is_multiple_of(step)
+}
+
+#[test]
+fn a_quantized_take_lies_on_its_grid() {
+    for tpq in [96, 384, 480, 960] {
+        let (bytes, _) = played_take(tpq, Format::Parallel);
+        let song = Song::from_midi(&bytes).unwrap();
+        let map = song.time_map().unwrap();
+        for grid in ["1/4", "1/8", "1/16", "1/8t", "1/16t"] {
+            let grid: Grid = grid.parse().unwrap();
+            let step = grid.step_ticks(tpq).unwrap();
+            let q = song.quantized(grid).unwrap();
+            let case = format!("{grid} at {tpq} tpq");
+
+            // Only notes move: everything else is as it was.
+            assert_eq!(q.tracks.len(), song.tracks.len(), "{case}");
+            assert_eq!(q.tempo_changes, song.tempo_changes, "{case}");
+            assert_eq!(q.time_changes, song.time_changes, "{case}");
+            assert_eq!(q.key_changes, song.key_changes, "{case}");
+            for (qt, t) in q.tracks.iter().zip(&song.tracks) {
+                assert_eq!(
+                    (&qt.name, qt.channel, qt.program),
+                    (&t.name, t.channel, t.program)
+                );
+                assert_eq!(qt.controls, t.controls, "{case}");
+                assert_eq!(qt.notes.len(), t.notes.len(), "{case}: no note is lost");
+                for (qn, n) in qt.notes.iter().zip(&t.notes) {
+                    // Same note, in the same place in the list.
+                    assert_eq!((qn.pitch, qn.vel), (n.pitch, n.vel), "{case}");
+                    let start = map.tick(n.at).unwrap();
+                    let end = start + (n.beats * f64::from(tpq)).round() as u64;
+                    let q_start = map.tick(qn.at).unwrap();
+                    let q_len = (qn.beats * f64::from(tpq)).round() as u64;
+                    let q_end = q_start + q_len;
+                    let at = format!("{case}: {} {} {}", n.at, n.pitch, n.beats);
+                    assert!(
+                        on_grid(&map, q_start, step),
+                        "{at}: start {q_start} off grid"
+                    );
+                    assert!(on_grid(&map, q_end, step), "{at}: end {q_end} off grid");
+                    assert!(
+                        start.abs_diff(q_start) * 2 <= step,
+                        "{at}: start not nearest"
+                    );
+                    // Zero length stays zero; a played note never collapses to nothing.
+                    assert_eq!(q_len == 0, end == start, "{at}: length {q_len}");
+                    if q_len > step {
+                        assert!(end.abs_diff(q_end) * 2 <= step, "{at}: end not nearest");
+                    }
+                }
+            }
+            assert_eq!(
+                q.quantized(grid).unwrap(),
+                q,
+                "{case}: quantizing twice changes nothing"
+            );
+        }
+    }
+}
+
+#[test]
+fn quantizing_rounds_to_the_nearest_step_and_keeps_collapsed_notes() {
+    let eighths: Grid = "1/8".parse().unwrap();
+    let song = Song::from_text(
+        "tpq 480\ntime 4/4\n\n[track \"P\" ch1]\n\
+         1.1.10 C4 0.48 80\n\
+         1.2.120 D4 0.5 81\n\
+         1.3.10 E4 0.05 82\n\
+         1.4.0 F4 0 83\n",
+    )
+    .unwrap();
+    assert_eq!(
+        notes_of(&song.quantized(eighths).unwrap()),
+        [
+            // Start and end each go to the nearest eighth.
+            "1.1.0 C4 0.5 80",
+            // Exactly halfway between two eighths, start and end both go to the later one.
+            "1.2.240 D4 0.5 81",
+            // It would collapse to nothing, so it gets one step.
+            "1.3.0 E4 0.5 82",
+            // It was zero length already, and stays zero length.
+            "1.4.0 F4 0 83",
+        ]
+    );
+    // The song quantizing was called on is unchanged.
+    assert_eq!(notes_of(&song)[0], "1.1.10 C4 0.48 80");
+
+    // A 6/8 bar cut short after three eighths: on a quarter grid its last step is one
+    // eighth long, because the bar line is always on the grid.
+    let cut = Song::from_text(
+        "tpq 480\ntime 6/8\ntime 4/4 at 1.4.0\n\n[track \"P\" ch1]\n\
+         1.3.200 G4 1 84\n\
+         1.2.10 A4 0.05 85\n",
+    )
+    .unwrap();
+    assert_eq!(
+        notes_of(&cut.quantized("1/4".parse().unwrap()).unwrap()),
+        [
+            // Tick 680 lies between the quarter at 480 and the bar line at 720.
+            "2.1.0 G4 1 84",
+            // It collapses at 480, and the next grid point is the bar line, an eighth on.
+            "1.3.0 A4 0.5 85",
+        ]
+    );
+}
+
+#[test]
+fn a_grid_finer_than_the_resolution_is_refused_by_name() {
+    let (bytes, _) = played_take(96, Format::Parallel);
+    let song = Song::from_midi(&bytes).unwrap();
+    let err = song
+        .quantized("1/5".parse().unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("1/5 grid") && err.contains("96 ticks per quarter"),
+        "{err}"
+    );
+}
+
+#[test]
+fn no_read_write_or_conversion_quantizes_unasked() {
+    // A played take is off every grid. Going through every format and back to MIDI keeps
+    // it off the grid exactly, and quantizing a copy leaves the original as it was.
+    let (bytes, expected) = played_take(480, Format::Parallel);
+    let song = Song::from_midi(&bytes).unwrap();
+    let before = song.clone();
+    let _ = song.quantized("1/16".parse().unwrap()).unwrap();
+    assert_eq!(song, before, "quantizing changed the song it was called on");
+    let through_all = Song::from_text(&song.to_text()).unwrap();
+    let through_all: Song =
+        serde_json::from_str(&serde_json::to_string(&through_all).unwrap()).unwrap();
+    let through_all: Song = toml::from_str(&toml::to_string(&through_all).unwrap()).unwrap();
+    assert_eq!(events(&through_all.to_midi().unwrap()).notes, expected);
 }

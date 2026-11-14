@@ -16,6 +16,9 @@
 //! # Ok::<(), notefmt::Error>(())
 //! ```
 //!
+//! Quantizing is a separate, explicit step: [`Song::quantized`] returns a new song on a
+//! [`Grid`] and leaves the original as it was.
+//!
 //! Round-trips are exact to the tick: lengths and tempos are written as the shortest
 //! decimal that converts back to the same ticks and microseconds.
 
@@ -25,10 +28,12 @@ mod error;
 mod midi;
 mod model;
 mod pitch;
+mod quantize;
 mod text;
 pub mod time;
 
 pub use error::{Error, Result};
 pub use model::{Control, KeyChange, Note, Song, TempoChange, TimeChange, Track};
 pub use pitch::Pitch;
+pub use quantize::Grid;
 pub use time::{Key, Position, TimeMap, TimeSig};
