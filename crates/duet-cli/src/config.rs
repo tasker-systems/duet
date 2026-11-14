@@ -88,8 +88,16 @@ pub struct Config {
     /// How a song that names no end gets one when a file is written.
     pub end: EndRule,
     end_from: String,
-    /// The lanes `map gm` stands for: the built-in map with every file's lanes laid over.
+    /// The drum kit's lanes, for reading a MIDI drum track: the built-in map with every
+    /// file's lanes laid over.
     pub lanes: LaneMap,
+    /// The lanes `map gm` stands for when reading .drums text: the built-in map with
+    /// only the lanes and aliases files add. A gm lane's key never moves here.
+    pub text_lanes: LaneMap,
+    /// What files set that does not apply to reading .drums text, said when it is read.
+    pub text_notices: Vec<String>,
+    /// Every file's lane patches, in the order they were read.
+    patches: Vec<(String, LanePatch)>,
     /// (lane, field, source) for every lane field a file set.
     lane_from: Vec<(String, &'static str, String)>,
 }
@@ -132,13 +140,16 @@ impl Config {
             end: EndRule::LastBar,
             end_from: BUILT_IN.to_owned(),
             lanes: LaneMap::gm(),
+            text_lanes: LaneMap::gm(),
+            text_notices: Vec::new(),
+            patches: Vec::new(),
             lane_from: Vec::new(),
         }
     }
 
-    /// Reads every file there is, in order, over the built-in defaults.
-    pub fn load() -> Result<Config> {
-        Config::load_from(&Dirs::find()?.files())
+    /// Reads every file in `dirs` there is, in order, over the built-in defaults.
+    pub fn load(dirs: &Dirs) -> Result<Config> {
+        Config::load_from(&dirs.files())
     }
 
     /// Reads these files, those that exist, in order, over the built-in defaults.
@@ -151,6 +162,7 @@ impl Config {
                     .with_context(|| path.display().to_string())?;
             }
         }
+        (config.text_lanes, config.text_notices) = LaneMap::gm_for_text(&config.patches);
         Ok(config)
     }
 
@@ -181,6 +193,7 @@ impl Config {
             patches.push((name, patch));
         }
         self.lanes = self.lanes.patched(&patches)?;
+        self.patches.extend(patches);
         Ok(())
     }
 
@@ -215,6 +228,12 @@ impl Config {
                 aliases.join(", "),
                 src("aliases"),
             );
+        }
+        if !self.text_notices.is_empty() {
+            out.push_str("\n# reading .drums text, map gm stays General MIDI:\n");
+            for notice in &self.text_notices {
+                let _ = writeln!(out, "# {notice}");
+            }
         }
         out
     }

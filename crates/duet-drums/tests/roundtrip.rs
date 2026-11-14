@@ -667,8 +667,9 @@ fn random_patches(rng: &mut Lcg, gm: &LaneMap) -> Vec<(String, LanePatch)> {
 /// Witness that a written .drums file is self-contained: a grid read or made under a
 /// user's config (lanes added, gm lanes moved, aliases added) and written as text reads
 /// back as the same grid with no config, and with the config too. Rows a person writes
-/// by hand under the config may use its names and aliases with no `lane` line, and the
-/// grid's song reads back under the config. The generator varies the lanes, keys,
+/// by hand under the config may use the lanes and aliases it adds with no `lane` line
+/// (a gm lane the config moves still needs its own, as `map gm` never moves one), and
+/// the grid's song reads back under the config. The generator varies the lanes, keys,
 /// aliases and groups the config sets, and the test checks config lanes were in play.
 #[test]
 fn a_grid_written_under_a_config_reads_the_same_with_none() {
@@ -678,6 +679,7 @@ fn a_grid_written_under_a_config_reads_the_same_with_none() {
     for _ in 0..16 {
         let patches = random_patches(&mut rng, &gm);
         let config = gm.patched(&patches).expect("a valid config");
+        let (text_map, _) = LaneMap::gm_for_text(&patches);
         for shape in shapes() {
             let grid = random_grid(&mut rng, &config, shape).snapped_to_levels();
             let touched: Vec<&Lane> = grid
@@ -694,7 +696,7 @@ fn a_grid_written_under_a_config_reads_the_same_with_none() {
                 "{text}"
             );
             assert_eq!(
-                DrumGrid::from_text_in(&text, &config).expect("config"),
+                DrumGrid::from_text_in(&text, &text_map).expect("config"),
                 grid
             );
             for lane in &touched {
@@ -703,10 +705,14 @@ fn a_grid_written_under_a_config_reads_the_same_with_none() {
                 assert!(text.contains(&format!("\nlane {} {}\n", lane.name, lane.key)));
             }
 
-            // By hand, under the config: no lane lines, and rows by their config alias.
+            // By hand, under the config: no lane lines for the lanes it adds, and rows by
+            // their config alias.
             let mut hand: String = text
                 .lines()
-                .filter(|l| !l.starts_with("lane "))
+                .filter(|l| {
+                    let name = l.strip_prefix("lane ").and_then(|r| r.split(' ').next());
+                    name.is_none_or(|n| gm.lookup(n).is_some_and(|g| g.name == n))
+                })
                 .map(|l| format!("{l}\n"))
                 .collect();
             for (name, patch) in &patches {
@@ -718,7 +724,7 @@ fn a_grid_written_under_a_config_reads_the_same_with_none() {
                 }
             }
             let read =
-                DrumGrid::from_text_in(&hand, &config).unwrap_or_else(|e| panic!("{e}\n{hand}"));
+                DrumGrid::from_text_in(&hand, &text_map).unwrap_or_else(|e| panic!("{e}\n{hand}"));
             assert_eq!(read, grid, "hand-written under the config\n{hand}");
 
             let song = grid.to_song().expect("song");
@@ -732,6 +738,127 @@ fn a_grid_written_under_a_config_reads_the_same_with_none() {
         config_lanes >= 30 && aliased >= 10,
         "{config_lanes} config lanes, {aliased} aliased"
     );
+}
+
+/// Witness that `map gm` means General MIDI on every machine: a .drums file written with
+/// no config, read under a config that moves gm lanes (and adds lanes and aliases),
+/// gives the same grid as with no config, and every move is said, not dropped. The
+/// generator varies which gm lanes move and to which keys. Read under the patched map
+/// itself, as text was read before, the same files come back changed: the check bites.
+#[test]
+fn a_config_never_moves_a_gm_lane_when_reading_text() {
+    let gm = LaneMap::gm();
+    let mut rng = Lcg(0x6a11);
+    let (mut moved_in_play, mut changed_before, mut aliased) = (0, 0, 0);
+    for _ in 0..16 {
+        let patches = random_patches(&mut rng, &gm);
+        let moved: Vec<&String> = patches
+            .iter()
+            .filter(|(n, p)| {
+                gm.lookup(n)
+                    .is_some_and(|l| p.key.is_some_and(|k| k != l.key))
+            })
+            .map(|(n, _)| n)
+            .collect();
+        assert!(!moved.is_empty(), "the generator moves a gm lane");
+        let (text_map, notices) = LaneMap::gm_for_text(&patches);
+        for name in &moved {
+            assert!(
+                notices
+                    .iter()
+                    .any(|n| n.starts_with(&format!("lane {name}: key "))),
+                "the move of {name} is said: {notices:?}"
+            );
+            let at = |m: &LaneMap| m.lookup(name).map(|l| (l.key, l.group.clone()));
+            assert_eq!(at(&text_map), at(&gm), "{name} stays gm's");
+        }
+        let full = gm.patched(&patches).expect("a valid config");
+        for shape in shapes() {
+            let grid = random_grid(&mut rng, &gm, shape).snapped_to_levels();
+            let text = grid.to_text().expect("text");
+            assert_eq!(
+                DrumGrid::from_text_in(&text, &text_map).expect("under the config"),
+                DrumGrid::from_text(&text).expect("no config"),
+                "{text}"
+            );
+            let in_play = grid
+                .lanes
+                .iter()
+                .filter(|l| moved.contains(&&l.name))
+                .count();
+            moved_in_play += in_play;
+            if in_play > 0 && DrumGrid::from_text_in(&text, &full).ok().as_ref() != Some(&grid) {
+                changed_before += 1;
+            }
+
+            // A row may use an alias the config adds to a gm lane; it reads as gm's lane.
+            let mut hand = text.clone();
+            for (name, patch) in &patches {
+                if let Some([alias]) = patch.aliases.as_deref()
+                    && gm.lookup(name).is_some()
+                    && grid.lanes.iter().any(|l| &l.name == name)
+                {
+                    hand = hand.replace(&format!("\n{name} "), &format!("\n{alias} "));
+                    aliased += 1;
+                }
+            }
+            assert_eq!(
+                DrumGrid::from_text_in(&hand, &text_map).unwrap_or_else(|e| panic!("{e}\n{hand}")),
+                grid,
+                "{hand}"
+            );
+        }
+    }
+    assert!(
+        moved_in_play >= 15 && aliased >= 5,
+        "{moved_in_play} moved lanes in play, {aliased} aliased"
+    );
+    assert!(
+        changed_before >= 10,
+        "only {changed_before} grids read differently under the patched map"
+    );
+}
+
+/// A gm lane keeps its key when reading text, so an added lane that takes a key only a
+/// move frees cannot apply there; it is said, and the rest of the config still applies.
+#[test]
+fn an_added_lane_on_a_freed_gm_key_is_said_and_left_out_of_text_reading() {
+    let mut cowbell = LanePatch::key(100);
+    cowbell.aliases = Some(vec!["moo".to_owned()]);
+    let mut boom = LanePatch::default();
+    boom.aliases = Some(vec!["boom".to_owned()]);
+    let patches = [
+        ("cowbell".to_owned(), cowbell),
+        ("agogo".to_owned(), LanePatch::key(56)),
+        ("tabla".to_owned(), LanePatch::key(110)),
+        ("kick".to_owned(), boom),
+    ];
+    LaneMap::gm().patched(&patches).expect("valid as a kit");
+    let (map, notices) = LaneMap::gm_for_text(&patches);
+    assert_eq!(notices.len(), 2, "{notices:?}");
+    assert!(notices[0].contains("lane cowbell: key 100"), "{notices:?}");
+    assert!(
+        notices[1].starts_with("lane agogo does not apply"),
+        "{notices:?}"
+    );
+    assert_eq!(
+        map.lookup("moo").map(|l| l.key),
+        Some(56),
+        "the alias applies"
+    );
+    for alias in ["bd", "bass-drum", "boom"] {
+        assert_eq!(
+            map.lookup(alias).map(|l| l.key),
+            Some(36),
+            "{alias}: added to gm's"
+        );
+    }
+    assert_eq!(
+        map.lookup("tabla").map(|l| l.key),
+        Some(110),
+        "an added lane applies"
+    );
+    assert!(map.lookup("agogo").is_none());
 }
 
 /// Patches change only what they set, add lanes, never remove one, and refuse by name

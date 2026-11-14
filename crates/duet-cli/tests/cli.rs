@@ -446,3 +446,74 @@ fn a_config_file_that_breaks_a_rule_is_refused_naming_it() {
     }
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+/// `map gm` reads the same on every machine: under a config that moves gm lanes, a
+/// .drums file written with no config reads, and is written back, the same as with no
+/// config, and the move is said on standard error and in `config show`. Reading a MIDI
+/// drum track still uses the moved keys: there the config describes the user's kit.
+#[test]
+fn a_config_that_moves_a_gm_lane_never_changes_how_drums_text_reads() {
+    let dir = scratch("gm-stays");
+    let user = dir.join("user");
+    write(
+        &user.join("duet.toml"),
+        "[lanes.kick]\nkey = 100\naliases = [\"boom\"]\n\n[lanes.snare]\nkey = 101\n",
+    );
+    let p = |s: &'static str| Path::new(s);
+    let beat = dir.join("beat.drums");
+    write(
+        &beat,
+        "grid 1/8\n\n[bars 1]\nsnare | . . X . . . X . |\nkick  | X . . . X . . . |\n",
+    );
+    let snap = |user_dir: &Path, input: &Path, out: &Path| {
+        let o = duet_in(&dir, user_dir, &[p("drums"), p("snap"), input, out]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        (
+            std::fs::read_to_string(out).expect("written"),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+        )
+    };
+    let (plain, _) = snap(&dir.join("none"), &beat, &dir.join("plain.drums"));
+    let (moved, err) = snap(&user, &beat, &dir.join("moved.drums"));
+    assert_eq!(
+        moved, plain,
+        "the config does not move kick or snare in text"
+    );
+    assert!(!moved.contains("\nlane "), "{moved}");
+    for want in ["lane kick: key 100 does not apply", "lane snare: key 101"] {
+        assert!(err.contains(want), "said on stderr: {err}");
+    }
+
+    // The alias the config adds still reads, as gm's kick.
+    let hand = dir.join("hand.drums");
+    write(
+        &hand,
+        "grid 1/8\n\n[bars 1]\nsnare | . . X . . . X . |\nboom  | X . . . X . . . |\n",
+    );
+    assert_eq!(snap(&user, &hand, &dir.join("hand-out.drums")).0, plain);
+
+    let show = duet_in(&dir, &user, &[p("config"), p("show")]);
+    let show = String::from_utf8_lossy(&show.stdout);
+    assert!(
+        show.contains("# reading .drums text, map gm stays General MIDI:\n# lane kick: key 100"),
+        "{show}"
+    );
+
+    // A MIDI drum track on key 100 reads as the config's kick.
+    let kit = dir.join("kit.txt");
+    write(&kit, "[track \"Kit\" ch10]\n1.1.0 E7 0.25 90\n");
+    let grid = dir.join("kit.drums");
+    let args = [p("drums"), p("read"), &kit, &grid, p("--grid"), p("1/8")];
+    let out = duet_in(&dir, &user, &args);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = std::fs::read_to_string(&grid).expect("grid");
+    assert!(
+        text.contains("\nlane kick 100\n") && text.contains("\nkick | x"),
+        "{text}"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
