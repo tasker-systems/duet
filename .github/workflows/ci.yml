@@ -95,6 +95,10 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # duet play's cpal and midir build against ALSA on Linux, by the owner's decision.
+      # The packages come from the runner image's own Ubuntu 24.04 archive.
+      - name: ALSA headers for duet play
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
       # --all-features compiles and lints duet-abc's oracle tier, which needs abc2midi and so
       # never runs here (TEST-3): its drift gate runs in the plain tests below.
       - name: Clippy (RUST-LINT-1, RUST-LINT-2)
@@ -130,6 +134,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: "1.100"
+      # duet play's cpal and midir build against ALSA on Linux, by the owner's decision.
+      # The packages come from the runner image's own Ubuntu 24.04 archive.
+      - name: ALSA headers for duet play
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
       - run: cargo check --locked --all-targets
 
   ci-success:

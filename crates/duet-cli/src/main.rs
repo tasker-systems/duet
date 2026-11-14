@@ -9,6 +9,7 @@ mod abc;
 mod config;
 mod drums;
 mod io;
+mod play;
 mod song;
 
 use std::path::{Path, PathBuf};
@@ -75,6 +76,9 @@ enum Command {
     /// or write a song as ABC.
     #[command(subcommand)]
     Abc(AbcCommand),
+    /// Play a song: through the built-in synth with a General MIDI SoundFont, or to a
+    /// MIDI port with --port.
+    Play(play::PlayArgs),
     /// Show duet's configuration: where its duet.toml files are, and what they set.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -119,6 +123,7 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
         Command::Song(command) => song::run(command, &Config::load(dirs)?),
         Command::Drums(command) => drums::run(command, &Config::load(dirs)?),
         Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
+        Command::Play(args) => play::run(args, &Config::load(dirs)?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),
     }

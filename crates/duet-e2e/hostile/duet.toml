@@ -4,6 +4,9 @@
 [song]
 end = { round-up = 4 }
 
+[play]         # a SoundFont no test names, so a test that reads it fails on it
+soundfont = "hostile-not-a-file.sf2"
+
 [lanes.kick]   # a gm lane moved
 key = 100
 aliases = ["boom"]

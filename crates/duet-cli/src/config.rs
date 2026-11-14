@@ -17,6 +17,9 @@
 //! [song]
 //! end = "last-bar"            # or { round-up = 4 }
 //!
+//! [play]
+//! soundfont = "GeneralUser.sf2"  # for `duet play`; relative to this file's directory
+//!
 //! [lanes.shaker-2]            # a lane of the gm map, added or changed
 //! key = 82
 //! aliases = ["sh2"]
@@ -96,6 +99,8 @@ pub struct Config {
     pub text_lanes: LaneMap,
     /// What files set that does not apply to reading .drums text, said when it is read.
     pub text_notices: Vec<String>,
+    /// The SoundFont `duet play` sounds a song with, when a file names one, and that file.
+    pub soundfont: Option<(PathBuf, String)>,
     /// Every file's lane patches, in the order they were read.
     patches: Vec<(String, LanePatch)>,
     /// (lane, field, source) for every lane field a file set.
@@ -106,7 +111,14 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 struct RawFile {
     song: Option<RawSong>,
+    play: Option<RawPlay>,
     lanes: Option<toml::Table>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPlay {
+    soundfont: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -142,6 +154,7 @@ impl Config {
             lanes: LaneMap::gm(),
             text_lanes: LaneMap::gm(),
             text_notices: Vec::new(),
+            soundfont: None,
             patches: Vec::new(),
             lane_from: Vec::new(),
         }
@@ -173,6 +186,11 @@ impl Config {
         if let Some(end) = raw.song.and_then(|s| s.end) {
             self.end = end_rule(&end)?;
             self.end_from.clone_from(&from);
+        }
+        if let Some(font) = raw.play.and_then(|p| p.soundfont) {
+            // A relative path is the file's own directory's, not the working directory's.
+            let dir = path.parent().unwrap_or(Path::new(""));
+            self.soundfont = Some((dir.join(font), from.clone()));
         }
         let mut patches = Vec::new();
         for (name, value) in raw.lanes.unwrap_or_default() {
@@ -214,6 +232,18 @@ impl Config {
         };
         // Writing to a String cannot fail.
         let _ = writeln!(out, "[song]\nend = {end}  # {}", self.end_from);
+        match &self.soundfont {
+            Some((path, from)) => {
+                let _ = writeln!(
+                    out,
+                    "\n[play]\nsoundfont = {:?}  # {from}",
+                    path.display().to_string()
+                );
+            }
+            None => out.push_str(
+                "\n[play]\n# soundfont: not set; duet play looks where duet installs one\n",
+            ),
+        }
         for lane in self.lanes.lanes() {
             let src = |field| self.lane_source(&lane.name, field);
             let aliases: Vec<String> = lane.aliases.iter().map(|a| format!("\"{a}\"")).collect();

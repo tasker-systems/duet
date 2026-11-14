@@ -99,8 +99,8 @@ pub fn scratch(name: &str) -> PathBuf {
     dir.canonicalize().expect("scratch dir resolves")
 }
 
-/// Runs `duet` in `cwd`, with `user` as its user config directory and `stdin` on standard
-/// input. With `cwd` a scratch directory, no project `.duet` is found above it.
+/// Runs `duet` in `cwd`, with `user` as its user config directory (and `user/data` as its
+/// data directory) and `stdin` on standard input. With `cwd` a scratch directory, no project `.duet` is found above it.
 ///
 /// # Panics
 ///
@@ -115,6 +115,8 @@ pub fn duet_with<S: AsRef<std::ffi::OsStr>>(
         .args(args)
         .current_dir(cwd)
         .env("DUET_CONFIG_DIR", user)
+        // Nor does a SoundFont the developer has installed: duet play looks here.
+        .env("DUET_DATA_DIR", user.join("data"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

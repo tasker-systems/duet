@@ -412,6 +412,28 @@ abcMIDI's documentation of how abc2midi plays what the standard leaves open. No 
 source file was opened, and none is copied. abc2midi is only ever run as a separate
 program, on a developer's machine, to check this crate's reading (see Development).
 
+## Playing a song
+
+```sh
+duet play take.notes                       # through the built-in synth, to the speakers
+duet play take.mid --soundfont GM.sf2      # with a SoundFont of your choosing
+duet play take.notes --port "IAC Driver"   # to a MIDI port: Logic, a synth, a DAW
+```
+
+- **The built-in synth** sounds the song with a General MIDI SoundFont (`.sf2`): every note
+  at its position, length, pitch, channel, program and velocity, with its controls and tempo
+  changes. Channel 10 is drums. It needs nothing else running.
+- **The SoundFont** is `--soundfont`, else `[play] soundfont` in duet.toml, else the one duet
+  installs: `default.sf2` in the data directory (`~/.local/share/duet`, or `DUET_DATA_DIR`),
+  or in `share/duet` beside the binary's directory. With none, `duet play` fails saying where
+  it looked; it never plays silence.
+- **`--port`** sends the same events, at the same times, to a MIDI port instead, with no
+  SoundFont. Give the port's name, or a part only one port's name holds. On macOS a port
+  exists only while the app that owns it runs, such as Logic, or the IAC Driver once it is
+  enabled in Audio MIDI Setup. An unknown name lists the ports there are.
+- **What plays is the song's MIDI file**, exactly as `duet convert take.notes take.mid` writes
+  it. The synth renders in blocks of 64 samples, so an event sounds within 1.5 ms of its time.
+
 ## Configuration
 
 `duet` reads `duet.toml` and `duet.local.toml` from two places, each file over the ones
@@ -425,6 +447,9 @@ before it:
 [song]
 end = { round-up = 4 }   # or "last-bar", the built-in
 
+[play]
+soundfont = "GeneralUser.sf2"   # for duet play; a relative path is this file's directory's
+
 [lanes.shaker-2]         # a new lane: it needs a key; it goes in the "other" group
 key = 82
 aliases = ["sh2"]
@@ -437,6 +462,8 @@ aliases = ["bd", "boom"]
   `"last-bar"` is the bar line after the last bar holding a note or control. `{ round-up = 4 }`
   carries that on to the next multiple of 4 bars. The end is always written into the file, so
   someone with other defaults reads the same song.
+- **`[play] soundfont`** is the SoundFont `duet play` sounds songs with, over the installed
+  one. `--soundfont` is over both.
 - **`[lanes.<name>]`** adds a lane to the `gm` map, or changes one. The fields are `key`,
   `group` (one of the map's groups, or `other`) and `aliases`. A file never removes a
   built-in lane, so one that would put two lanes on one key is refused: move the other lane
@@ -460,7 +487,9 @@ duet config show   # the merged config as a duet.toml, each value with where it 
 
 ## Development
 
-Builds on the latest stable Rust (1.100 or later, edition 2024).
+Builds on the latest stable Rust (1.100 or later, edition 2024). On Linux, `duet play`'s
+audio and MIDI crates need the ALSA headers: `apt install libasound2-dev pkg-config` (or your
+distribution's package).
 
 ```sh
 cargo test --locked
