@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// `Asked` is the lane the user asked for, when the take is not told apart by sound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum HitLane {
     Kick,
@@ -71,6 +71,20 @@ mod tests {
         let back: Vec<Event> = serde_json::from_str(&json).unwrap();
         assert_eq!(back, events);
         assert!(json.contains(r#""type":"onset""#), "{json}");
-        assert!(json.contains(r#""lane":{"type":"snare"}"#), "{json}");
+        assert!(json.contains(r#""lane":"snare""#), "{json}");
+    }
+
+    #[test]
+    fn every_hit_lane_round_trips_as_its_lowercase_name() {
+        for (lane, name) in [
+            (HitLane::Kick, "kick"),
+            (HitLane::Snare, "snare"),
+            (HitLane::Hat, "hat"),
+            (HitLane::Asked, "asked"),
+        ] {
+            let json = serde_json::to_string(&lane).unwrap();
+            assert_eq!(json, format!("\"{name}\""));
+            assert_eq!(serde_json::from_str::<HitLane>(&json).unwrap(), lane);
+        }
     }
 }

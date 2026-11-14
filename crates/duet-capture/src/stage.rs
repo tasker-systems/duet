@@ -1,6 +1,8 @@
 use crate::error::Result;
 
 /// A block of interleaved samples from a [`Source`].
+///
+/// Deliberately exhaustive, so other crates can build one in their own [`Source`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
     /// Sample rate in Hz.
@@ -13,6 +15,8 @@ pub struct Chunk {
 }
 
 /// One channel at the analysis rate: what every analysis stage receives.
+///
+/// Deliberately exhaustive, so other crates can build one for their own stages.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mono {
     pub rate: u32,
