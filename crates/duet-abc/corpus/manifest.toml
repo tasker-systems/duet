@@ -4,7 +4,8 @@
 # the tune), <name>.written.abc (our writer's ABC for it, write(read(tune))) and
 # <name>.written.abc2midi.txt (abc2midi's reading of that). A reading is the notefmt text
 # of abc2midi's MIDI, read through duet-midi exactly as read. tests/oracle.rs compares
-# them with our reading; see it for how to re-record.
+# them with our reading, note by note (tick, length, pitch, channel, velocity), then the
+# tempo map and each channel's program; see it for how to re-record.
 #
 # A tune the writer refuses gives `writer_refuses` and its reason. It has no written files,
 # and the tests check that the writer still refuses it.
@@ -31,7 +32,7 @@ name = "header-fields"
 file = "header-fields.abc"
 x = 1
 provenance = "our own, written for the corpus"
-constructs = ["X:, T:, M:, L:, Q:, K:", "% comment at the end of a field line", "comment line", "[r:remark]", "information fields C:, O:, N:, Z: (notice)"]
+constructs = ["X:, T:, M:, L:, Q:, K:", "% comment at the end of a field line", "comment line", "[r:remark]", "information fields A:, B:, C:, D:, F:, G:, H:, N:, O: and Z: (notice)", "I: (notice)"]
 
 [[tune]]
 name = "octaves"
@@ -95,6 +96,13 @@ file = "tuplets.abc"
 x = 1
 provenance = "our own, written for the corpus"
 constructs = ["tuplets (2, (3, (4 and (8", "(p:q:r"]
+
+[[tune]]
+name = "tuplets-seven-nine"
+file = "tuplets-seven-nine.abc"
+x = 1
+provenance = "our own, written for the corpus"
+constructs = ["tuplets (7 and (9, with the standard's default q"]
 
 [[tune]]
 name = "tuplets-read-only"

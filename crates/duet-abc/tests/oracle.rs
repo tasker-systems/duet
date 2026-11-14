@@ -47,6 +47,18 @@ fn every_tune_is_recorded() {
             );
         }
     }
+    // Every recording belongs to a tune the manifest lists, so a stale one cannot linger.
+    let recorded: BTreeSet<String> = m
+        .tune
+        .iter()
+        .flat_map(|e| {
+            [
+                format!("{}.abc2midi.txt", e.name),
+                format!("{}.written.abc", e.name),
+                format!("{}.written.abc2midi.txt", e.name),
+            ]
+        })
+        .collect();
     for dir_entry in std::fs::read_dir(support::corpus()).expect("corpus dir") {
         let path = dir_entry.expect("entry").path();
         let name = path
@@ -54,7 +66,14 @@ fn every_tune_is_recorded() {
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_owned();
-        if !name.ends_with(".abc") || name.ends_with(".written.abc") {
+        if name.ends_with(".abc2midi.txt") || name.ends_with(".written.abc") {
+            assert!(
+                recorded.contains(&name),
+                "{name} is a recording of no tune in the manifest; remove it"
+            );
+            continue;
+        }
+        if !name.ends_with(".abc") {
             continue;
         }
         let book = duet_abc::Book::parse(&read_file(&name)).expect("corpus file parses");
@@ -89,18 +108,39 @@ fn the_comparison_fails_where_it_must() {
         mapped_back(&on_time).is_err(),
         "a recording whose notes start on time has lost the one-tick onset"
     );
-}
 
-/// The one-tick onset is present in a recording that agrees with us: every recorded note
-/// starts one tick after one of ours, and none starts with one. If abc2midi stopped adding
-/// the offset, the comparison fails first, naming it (see `mapped_back`).
-fn onset_holds(name: &str, ours: &[N], theirs_raw: &[N]) {
-    let starts: BTreeSet<u64> = ours.iter().map(|n| n.0).collect();
-    for n in theirs_raw {
-        assert!(
-            n.0 >= 1 && starts.contains(&(n.0 - 1)) && !starts.contains(&n.0),
-            "{name}: abc2midi's note {n:?} does not start one tick after one of ours"
-        );
+    // The tempo map and programs are compared too, not just the notes.
+    let ours = duet_core::Song::from_text(
+        "tempo 168\ntempo 80 at 2.1.0\n\n[track \"P\" ch1 prog73]\n1.1.0 C4 1 95\n",
+    )
+    .expect("song");
+    let theirs = |header: &str, prog: u8| {
+        duet_core::Song::from_text(&format!(
+            "{header}\n\n[track \"P\" ch1]\n1.1.1 prog {prog}\n1.1.1 C4 0.998 95\n"
+        ))
+        .expect("recording")
+    };
+    let agrees = theirs("tempo 168.0004\ntempo 80 at 2.1.1", 73);
+    assert!(
+        compare(&ours, &agrees, &[]).is_ok(),
+        "{:?}",
+        compare(&ours, &agrees, &[])
+    );
+    for (wrong, what) in [
+        (
+            theirs("tempo 56\ntempo 80 at 2.1.1", 73),
+            "a different tempo",
+        ),
+        (
+            theirs("tempo 168\ntempo 80 at 2.2.1", 73),
+            "a tempo change elsewhere",
+        ),
+        (
+            theirs("tempo 168\ntempo 80 at 2.1.1", 74),
+            "a different program",
+        ),
+    ] {
+        assert!(compare(&ours, &wrong, &[]).is_err(), "{what} must fail");
     }
 }
 
@@ -121,10 +161,7 @@ fn our_abc_reading_agrees_with_recorded_abc2midi() {
             }
         };
         match compare(&ours, &rec, &entry.difference) {
-            Ok(n) => {
-                onset_holds(&entry.name, &notes_of(&ours), &notes_of(&rec));
-                compared += n;
-            }
+            Ok(n) => compared += n,
             Err(e) => failures.push(format!("{}: {e}", entry.name)),
         }
     }
@@ -143,7 +180,7 @@ fn our_written_abc_agrees_with_recorded_abc2midi() {
             // not, it needs its written files recorded.
             let written = duet_abc::write(&our_song(entry), &duet_abc::WriteOptions::default());
             assert!(
-                matches!(written, Err(duet_abc::Error::Unwritable { .. })),
+                matches!(&written, Err(duet_abc::Error::Unwritable { why, .. }) if why.contains("triplet")),
                 "{}: the manifest says the writer refuses it ({reason}), but it wrote it; \
                  record its written files and drop writer_refuses",
                 entry.name
@@ -172,7 +209,7 @@ fn our_written_abc_agrees_with_recorded_abc2midi() {
             }
         };
         match compare(&ours, &rec, &entry.difference) {
-            Ok(_) => onset_holds(&entry.name, &notes_of(&ours), &notes_of(&rec)),
+            Ok(_) => {}
             Err(e) => failures.push(format!("{} (written): {e}", entry.name)),
         }
     }
@@ -270,8 +307,9 @@ mod live {
             .args(&m.arguments)
             .output()
             .map_err(|e| format!("running abc2midi: {e}"))?;
-        // Exit status is not trusted: older versions exit 0 after an error. Every problem
-        // is printed on a line of its own.
+        // Every problem is printed on a line of its own, which is the first check. The
+        // exit status is the second: the pinned version exits 1 after an error (older
+        // ones exited 0, which is why the lines come first).
         let printed = format!(
             "{}{}",
             String::from_utf8_lossy(&out.stdout),
@@ -285,6 +323,12 @@ mod live {
             .collect();
         if !problems.is_empty() {
             return Err(format!("{label}: abc2midi says:\n{}", problems.join("\n")));
+        }
+        if !out.status.success() {
+            return Err(format!(
+                "{label}: abc2midi exited with {}:\n{printed}",
+                out.status
+            ));
         }
         let bytes = std::fs::read(&mid).map_err(|e| format!("{label}: no MIDI file: {e}"))?;
         let song = Song::from_midi(&bytes).map_err(|e| format!("{label}: {e}"))?;
@@ -323,7 +367,8 @@ mod live {
         assert_eq!(
             have, m.abc2midi_version,
             "the recordings were made with abc2midi '{}', and this is '{have}'; install that \
-             version (see the README), or re-record and review the diff",
+             version (see the README), or set abc2midi_version in the manifest to this one, \
+             re-record, and review the diff",
             m.abc2midi_version
         );
         let mut failures = Vec::new();

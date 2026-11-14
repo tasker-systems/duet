@@ -139,7 +139,9 @@ pub fn notes_of(song: &Song) -> Vec<N> {
 }
 
 /// abc2midi starts every note one tick late and ends it on time; this maps its notes
-/// back. It is the harness's one fixed rule, applied to every tune.
+/// back. It is the harness's one fixed rule, applied to every tune, and this is also the
+/// assertion that the offset still occurs: a recorded note at tick 0 cannot have started
+/// late, so it fails here naming the rule.
 pub fn mapped_back(theirs: &[N]) -> Result<Vec<N>, String> {
     let mut out = Vec::with_capacity(theirs.len());
     for &(start, len, midi, ch, vel) in theirs {
@@ -252,13 +254,75 @@ pub fn apply_differences(song: &Song, ours: &[N], diffs: &[Difference]) -> Resul
     Ok(out)
 }
 
+/// The tempo map as (tick, microseconds per quarter): the start, then each change. With
+/// `recorded`, a change after the start is mapped back one tick, as abc2midi writes
+/// tempo changes one tick late, like its notes.
+pub fn tempi_of(song: &Song, recorded: bool) -> Result<Vec<(u64, u32)>, String> {
+    let map = song.time_map().map_err(|e| e.to_string())?;
+    let micros = |bpm: f64| duet_core::time::micros_from_bpm(bpm).map_err(|e| e.to_string());
+    let mut out = vec![(0, micros(song.tempo_bpm)?)];
+    for c in &song.tempo_changes {
+        let tick = map.tick(c.at).map_err(|e| e.to_string())?;
+        let tick = if recorded && tick > 0 { tick - 1 } else { tick };
+        out.push((tick, micros(c.bpm)?));
+    }
+    Ok(out)
+}
+
+/// Each channel's program, where one is set: the track's own, or (as abc2midi writes it)
+/// a program change in the track's first tick.
+pub fn programs_of(song: &Song) -> Result<BTreeMap<u8, u8>, String> {
+    let map = song.time_map().map_err(|e| e.to_string())?;
+    let mut out = BTreeMap::new();
+    for t in &song.tracks {
+        let mut program = t.program;
+        for c in &t.controls {
+            if let duet_core::Control::Program { at, program: p } = c
+                && map.tick(*at).map_err(|e| e.to_string())? <= 1
+                && program.is_none()
+            {
+                program = Some(*p);
+            }
+        }
+        if let Some(p) = program {
+            out.insert(t.channel, p);
+        }
+    }
+    Ok(out)
+}
+
+/// Our tempo map and programs against a recording's. Tempos agree to within one
+/// microsecond per quarter: abc2midi's MIDI stores 168 bpm as 357142 µs where duet rounds
+/// to 357143, and that rounding is the only slack.
+fn compare_conductor(ours: &Song, recording: &Song) -> Result<(), String> {
+    let (a, b) = (tempi_of(ours, false)?, tempi_of(recording, true)?);
+    let agree = a.len() == b.len()
+        && a.iter()
+            .zip(&b)
+            .all(|((ta, ma), (tb, mb))| ta == tb && ma.abs_diff(*mb) <= 1);
+    if !agree {
+        return Err(format!(
+            "tempo maps differ (tick, µs per quarter):\n  ours:   {a:?}\n  theirs: {b:?}"
+        ));
+    }
+    let (a, b) = (programs_of(ours)?, programs_of(recording)?);
+    if a != b {
+        return Err(format!(
+            "programs differ (channel: program):\n  ours:   {a:?}\n  theirs: {b:?}"
+        ));
+    }
+    Ok(())
+}
+
 /// Compares our song with a recording of abc2midi's reading, under the fixed rule and
-/// the listed differences. `Ok` holds the number of notes compared.
+/// the listed differences: every note, then the tempo map and each channel's program.
+/// `Ok` holds the number of notes compared.
 pub fn compare(ours_song: &Song, recording: &Song, diffs: &[Difference]) -> Result<usize, String> {
     let ours = apply_differences(ours_song, &notes_of(ours_song), diffs)?;
     let raw = notes_of(recording);
     let theirs = mapped_back(&raw)?;
     if ours == theirs {
+        compare_conductor(ours_song, recording)?;
         return Ok(ours.len());
     }
     let count = |v: &[N]| {
