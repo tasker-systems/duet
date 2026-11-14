@@ -18,6 +18,7 @@
 
 mod error;
 mod event;
+mod hits;
 mod notes;
 mod onset;
 mod pitch;
@@ -29,6 +30,7 @@ mod synth;
 
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
+pub use hits::{Hits, LaneMode};
 pub use notes::Melody;
 pub use onset::Onsets;
 pub use pitch::{PitchFrame, PitchTrack};
