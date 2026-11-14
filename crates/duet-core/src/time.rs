@@ -4,14 +4,12 @@
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use crate::error::{Error, Result};
 
 macro_rules! string_serde {
     ($ty:ty) => {
-        impl Serialize for $ty {
-            fn serialize<S: Serializer>(
+        impl serde::Serialize for $ty {
+            fn serialize<S: serde::Serializer>(
                 &self,
                 serializer: S,
             ) -> std::result::Result<S::Ok, S::Error> {
@@ -19,16 +17,17 @@ macro_rules! string_serde {
             }
         }
 
-        impl<'de> Deserialize<'de> for $ty {
-            fn deserialize<D: Deserializer<'de>>(
+        impl<'de> serde::Deserialize<'de> for $ty {
+            fn deserialize<D: serde::Deserializer<'de>>(
                 deserializer: D,
             ) -> std::result::Result<Self, D::Error> {
-                let s = String::deserialize(deserializer)?;
+                let s = <String as serde::Deserialize>::deserialize(deserializer)?;
                 s.parse().map_err(serde::de::Error::custom)
             }
         }
     };
 }
+pub(crate) use string_serde;
 
 /// A position as bar, beat and tick, all counted the way a DAW shows them.
 ///
@@ -318,6 +317,16 @@ impl TimeMap {
             beat: (in_bar / beat_ticks) as u32 + 1,
             tick: (in_bar % beat_ticks) as u32,
         }
+    }
+
+    /// The time signature in force at an absolute tick.
+    pub fn sig_at(&self, tick: u64) -> TimeSig {
+        self.segments
+            .iter()
+            .rev()
+            .find(|s| s.start_tick <= tick)
+            .expect("the first segment starts at tick 0")
+            .sig
     }
 
     /// The absolute tick of a position. Tick offsets past the end of a beat, and beats

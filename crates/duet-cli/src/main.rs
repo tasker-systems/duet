@@ -1,10 +1,11 @@
 //! `duet`: compose with an LLM in text both can read, and convert it to and from MIDI.
 //!
-//! Commands are grouped by domain (`duet song …`), plus `duet convert`, which goes
+//! Commands are grouped by domain (`duet song …`, `duet drums …`), plus `duet convert`, which goes
 //! between any two formats because every format passes through the same `Song`.
 
 #![forbid(unsafe_code)]
 
+mod drums;
 mod io;
 mod song;
 
@@ -14,6 +15,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use crate::drums::DrumsCommand;
 use crate::io::{Format, format_of, read, write};
 use crate::song::SongCommand;
 
@@ -42,6 +44,10 @@ enum Command {
     /// Work on a song: show it, or quantize it.
     #[command(subcommand)]
     Song(SongCommand),
+    /// Work on drum grids: render one as a song, read one from a song's drum track,
+    /// snap its velocities, or list the lanes.
+    #[command(subcommand)]
+    Drums(DrumsCommand),
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -57,6 +63,7 @@ fn run(cli: Cli) -> Result<()> {
             write(&read(&input, from)?, &output, to)
         }
         Command::Song(command) => song::run(command),
+        Command::Drums(command) => drums::run(command),
     }
 }
 

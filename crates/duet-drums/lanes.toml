@@ -1,0 +1,221 @@
+# The built-in `gm` lane map: every General MIDI Level 1 percussion key (35 to 81), on
+# channel 10. duet builds this file into the binary.
+#
+# A lane is a row of a drum grid. `key` is the MIDI note it plays and reads; `aliases` are
+# other names a hand-written grid may use for it (matched ignoring case; the grid then uses
+# the lane's own name); `group` places its row: rows are written in `order`, then in the
+# order lanes appear here. Names are lowercase letters, digits and hyphens, and are never
+# note names, because tools disagree on them (Logic calls key 36 C1, REAPER calls it C2).
+#
+# Each comment gives the GM1 name. GM2 names (keys 27 to 34 and 82 to 87) are left out
+# until they are checked against the MMA specification.
+
+channel = 10
+order = ["cymbals", "hats", "toms", "snare", "kick", "percussion"]
+
+[lanes.crash] # Crash Cymbal 1
+key = 49
+group = "cymbals"
+aliases = ["cr"]
+
+[lanes.crash-2] # Crash Cymbal 2
+key = 57
+group = "cymbals"
+
+[lanes.ride] # Ride Cymbal 1
+key = 51
+group = "cymbals"
+aliases = ["rd"]
+
+[lanes.ride-2] # Ride Cymbal 2
+key = 59
+group = "cymbals"
+
+[lanes.ride-bell] # Ride Bell
+key = 53
+group = "cymbals"
+aliases = ["bell"]
+
+[lanes.china] # Chinese Cymbal
+key = 52
+group = "cymbals"
+
+[lanes.splash] # Splash Cymbal
+key = 55
+group = "cymbals"
+
+[lanes.hh] # Closed Hi-Hat
+key = 42
+group = "hats"
+aliases = ["ch", "hhc", "hh-closed", "hat"]
+
+[lanes.hh-open] # Open Hi-Hat
+key = 46
+group = "hats"
+aliases = ["oh", "hho"]
+
+[lanes.hh-pedal] # Pedal Hi-Hat
+key = 44
+group = "hats"
+aliases = ["hhp", "hh-foot"]
+
+[lanes.tom-high] # High Tom
+key = 50
+group = "toms"
+aliases = ["t1"]
+
+[lanes.tom-mid-high] # Hi-Mid Tom
+key = 48
+group = "toms"
+
+[lanes.tom-mid] # Low-Mid Tom
+key = 47
+group = "toms"
+aliases = ["t2"]
+
+[lanes.tom-low] # Low Tom
+key = 45
+group = "toms"
+aliases = ["t3"]
+
+[lanes.tom-floor-high] # High Floor Tom
+key = 43
+group = "toms"
+
+[lanes.tom-floor] # Low Floor Tom
+key = 41
+group = "toms"
+aliases = ["ft"]
+
+[lanes.snare] # Acoustic Snare
+key = 38
+group = "snare"
+aliases = ["sd", "sn"]
+
+[lanes.rimshot] # Electric Snare (a rimshot in Logic, SD3, SSD and Hydrogen)
+key = 40
+group = "snare"
+
+[lanes.sidestick] # Side Stick
+key = 37
+group = "snare"
+aliases = ["xstick", "cross-stick"]
+
+[lanes.clap] # Hand Clap
+key = 39
+group = "snare"
+aliases = ["cp"]
+
+[lanes.kick] # Bass Drum 1
+key = 36
+group = "kick"
+aliases = ["bd", "bass-drum"]
+
+[lanes.kick-2] # Acoustic Bass Drum
+key = 35
+group = "kick"
+
+[lanes.tamb] # Tambourine
+key = 54
+group = "percussion"
+aliases = ["tambourine"]
+
+[lanes.cowbell] # Cowbell
+key = 56
+group = "percussion"
+aliases = ["cb"]
+
+[lanes.shaker] # Maracas (Logic Drummer's shaker)
+key = 70
+group = "percussion"
+aliases = ["maracas"]
+
+[lanes.clave] # Claves
+key = 75
+group = "percussion"
+aliases = ["claves"]
+
+[lanes.vibraslap] # Vibraslap
+key = 58
+group = "percussion"
+
+[lanes.bongo-high] # Hi Bongo
+key = 60
+group = "percussion"
+
+[lanes.bongo-low] # Low Bongo
+key = 61
+group = "percussion"
+
+[lanes.conga-high-mute] # Mute Hi Conga
+key = 62
+group = "percussion"
+
+[lanes.conga-high] # Open Hi Conga
+key = 63
+group = "percussion"
+
+[lanes.conga-low] # Low Conga
+key = 64
+group = "percussion"
+
+[lanes.timbale-high] # High Timbale
+key = 65
+group = "percussion"
+
+[lanes.timbale-low] # Low Timbale
+key = 66
+group = "percussion"
+
+[lanes.agogo-high] # High Agogo
+key = 67
+group = "percussion"
+
+[lanes.agogo-low] # Low Agogo
+key = 68
+group = "percussion"
+
+[lanes.cabasa] # Cabasa
+key = 69
+group = "percussion"
+
+[lanes.whistle-short] # Short Whistle
+key = 71
+group = "percussion"
+
+[lanes.whistle-long] # Long Whistle
+key = 72
+group = "percussion"
+
+[lanes.guiro-short] # Short Guiro
+key = 73
+group = "percussion"
+
+[lanes.guiro-long] # Long Guiro
+key = 74
+group = "percussion"
+
+[lanes.woodblock-high] # Hi Wood Block
+key = 76
+group = "percussion"
+
+[lanes.woodblock-low] # Low Wood Block
+key = 77
+group = "percussion"
+
+[lanes.cuica-mute] # Mute Cuica
+key = 78
+group = "percussion"
+
+[lanes.cuica-open] # Open Cuica
+key = 79
+group = "percussion"
+
+[lanes.triangle-mute] # Mute Triangle
+key = 80
+group = "percussion"
+
+[lanes.triangle] # Open Triangle
+key = 81
+group = "percussion"
+aliases = ["tri"]

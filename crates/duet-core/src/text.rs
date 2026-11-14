@@ -64,8 +64,100 @@ impl Song {
         out
     }
 
+    /// The song's header as notefmt header lines: title, tpq, tempo, time and key, then
+    /// their changes. Other formats that share the notefmt header (the drum grid) write it
+    /// with this, so both agree on what each line means.
+    pub fn header_text(&self) -> String {
+        let mut out = String::new();
+        // Writing to a String cannot fail.
+        let _ = self.write_header(&mut out);
+        out
+    }
+
+    /// Applies one notefmt header line, such as `tempo 96 at 9.1.0`, to this song.
+    ///
+    /// Returns `Ok(false)` and changes nothing when the line's first word is not a header
+    /// keyword (title, tpq, tempo, time or key), so a format that extends the header can
+    /// read its own lines. Fails when the line is a header line but malformed.
+    pub fn apply_header_line(&mut self, line: &str) -> Result<bool> {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("title") {
+            let (title, _) = parse_quoted(rest.trim())?;
+            self.title = Some(title);
+            return Ok(true);
+        }
+        let words: Vec<&str> = line
+            .split_whitespace()
+            .take_while(|w| !w.starts_with('#'))
+            .collect();
+        let [kw, rest @ ..] = words.as_slice() else {
+            return Ok(false);
+        };
+        if !HEADER_KEYWORDS.contains(kw) {
+            return Ok(false);
+        }
+        let (value, at) = match rest.iter().position(|w| *w == "at") {
+            Some(i) => {
+                if i + 2 != rest.len() {
+                    return Err(Error::invalid(format!(
+                        "'{kw} ... at' needs one position after 'at'"
+                    )));
+                }
+                (rest[..i].join(" "), Some(rest[i + 1].parse::<Position>()?))
+            }
+            None => (rest.join(" "), None),
+        };
+        match (*kw, at) {
+            ("tpq", None) => {
+                self.ticks_per_quarter = value
+                    .parse()
+                    .ok()
+                    .filter(|t| (1..=0x7FFF).contains(t))
+                    .ok_or_else(|| {
+                        Error::invalid(format!("'{value}' is not ticks per quarter (1 to 32767)"))
+                    })?;
+            }
+            ("tempo", at) => {
+                let bpm: f64 = value
+                    .parse()
+                    .ok()
+                    .filter(|b: &f64| b.is_finite() && *b > 0.0)
+                    .ok_or_else(|| Error::invalid(format!("'{value}' is not a tempo in bpm")))?;
+                match at {
+                    None => self.tempo_bpm = bpm,
+                    Some(at) => self.tempo_changes.push(TempoChange { at, bpm }),
+                }
+            }
+            ("time", at) => {
+                let time_sig: TimeSig = value.parse()?;
+                match at {
+                    None => self.time_sig = time_sig,
+                    Some(at) => self.time_changes.push(TimeChange { at, time_sig }),
+                }
+            }
+            ("key", at) => {
+                let key: Key = value.parse()?;
+                match at {
+                    None => self.key = Some(key),
+                    Some(at) => self.key_changes.push(KeyChange { at, key }),
+                }
+            }
+            (kw, _) => {
+                return Err(Error::invalid(format!(
+                    "'{kw} ... at' is not a header line"
+                )));
+            }
+        }
+        Ok(true)
+    }
+
     fn write_text(&self, out: &mut String) -> std::fmt::Result {
         writeln!(out, "{HEADER_COMMENT}")?;
+        self.write_header(out)?;
+        self.write_tracks(out)
+    }
+
+    fn write_header(&self, out: &mut String) -> std::fmt::Result {
         if let Some(title) = &self.title {
             writeln!(out, "title {}", quote(title))?;
         }
@@ -84,7 +176,10 @@ impl Song {
         for c in &self.tempo_changes {
             writeln!(out, "tempo {} at {}", c.bpm, c.at)?;
         }
+        Ok(())
+    }
 
+    fn write_tracks(&self, out: &mut String) -> std::fmt::Result {
         for track in &self.tracks {
             writeln!(out)?;
             write!(out, "[track {} ch{}", quote(&track.name), track.channel)?;
@@ -155,13 +250,6 @@ impl Song {
                 continue;
             }
 
-            if line.starts_with("title") && track.is_none() {
-                let rest = line["title".len()..].trim();
-                let (title, _) = parse_quoted(rest).map_err(ctx)?;
-                song.title = Some(title);
-                continue;
-            }
-
             let words: Vec<&str> = line
                 .split_whitespace()
                 .take_while(|w| !w.starts_with('#'))
@@ -169,66 +257,11 @@ impl Song {
 
             match track.as_mut() {
                 None => {
-                    let (value, at) = match words.as_slice() {
-                        [kw, rest @ ..] => {
-                            let at_index = rest.iter().position(|w| *w == "at");
-                            match at_index {
-                                Some(i) => {
-                                    if i + 2 != rest.len() {
-                                        return Err(err(format!(
-                                            "'{kw} ... at' needs one position after 'at'"
-                                        )));
-                                    }
-                                    (
-                                        rest[..i].join(" "),
-                                        Some(rest[i + 1].parse::<Position>().map_err(ctx)?),
-                                    )
-                                }
-                                None => (rest.join(" "), None),
-                            }
-                        }
-                        [] => continue,
-                    };
-                    match (words[0], at) {
-                        ("tpq", None) => {
-                            song.ticks_per_quarter = value
-                                .parse()
-                                .ok()
-                                .filter(|t| (1..=0x7FFF).contains(t))
-                                .ok_or_else(|| {
-                                    err(format!("'{value}' is not ticks per quarter (1 to 32767)"))
-                                })?;
-                        }
-                        ("tempo", at) => {
-                            let bpm: f64 = value
-                                .parse()
-                                .ok()
-                                .filter(|b: &f64| b.is_finite() && *b > 0.0)
-                                .ok_or_else(|| err(format!("'{value}' is not a tempo in bpm")))?;
-                            match at {
-                                None => song.tempo_bpm = bpm,
-                                Some(at) => song.tempo_changes.push(TempoChange { at, bpm }),
-                            }
-                        }
-                        ("time", at) => {
-                            let time_sig: TimeSig = value.parse().map_err(ctx)?;
-                            match at {
-                                None => song.time_sig = time_sig,
-                                Some(at) => song.time_changes.push(TimeChange { at, time_sig }),
-                            }
-                        }
-                        ("key", at) => {
-                            let key: Key = value.parse().map_err(ctx)?;
-                            match at {
-                                None => song.key = Some(key),
-                                Some(at) => song.key_changes.push(KeyChange { at, key }),
-                            }
-                        }
-                        (kw, _) => {
-                            return Err(err(format!(
-                                "'{kw}' is not a header line; expected title, tpq, tempo, time, key or a [track]"
-                            )));
-                        }
+                    if !song.apply_header_line(line).map_err(ctx)? {
+                        return Err(err(format!(
+                            "'{}' is not a header line; expected title, tpq, tempo, time, key or a [track]",
+                            words[0]
+                        )));
                     }
                 }
                 Some(_) if words.first().is_some_and(|w| HEADER_KEYWORDS.contains(w)) => {

@@ -1,0 +1,15 @@
+# notefmt drums v1: one row per lane, one column per step, | at bar lines
+title "Groove in D"
+tpq 480
+tempo 96
+time 4/4
+grid 1/16
+map gm
+
+[bars 1-2]
+#         1 . . . 2 . . . 3 . . . 4 . . .   1 . . . 2 . . . 3 . . . 4 . . .
+crash   | X . . . . . . . . . . . . . . . | . . . . . . . . . . . . . . . . |
+hh      | x . x . x . x . x . x . x . x . | x . x . x . x . x . x . x . . . |
+hh-open | . . . . . . . . . . . . . . . . | . . . . . . . . . . . . . . x . |
+snare   | . . . . X . . . . . . g X . . . | . . . . X . . . . . . . X . g . |
+kick    | X . . . . . . X . . X . . . . . | X . . . . . . X . . X . . X . . |
