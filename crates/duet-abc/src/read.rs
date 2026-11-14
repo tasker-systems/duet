@@ -1329,8 +1329,24 @@ pub(crate) struct FileHeader {
 
 /// Applies a file header's lines once, for every tune in the file to start from (§2.2.2).
 pub(crate) fn read_file_header(lines: &[Line]) -> Result<FileHeader> {
+    // The fields the standard allows in a file header (§3, its table's first column), plus
+    // `+:` continuing one of them. A tune's own fields (T:, V:, K:, Q:, P:, the lyrics) are
+    // refused there: each tune starts from this state, so it holds only small defaults.
+    const ALLOWED: &str = "ABCDFGHILMmNORrSUZ+";
     let mut state = Reader::new();
     for line in lines {
+        if let LineKind::Field { letter, .. } = &line.kind
+            && !ALLOWED.contains(*letter)
+        {
+            return Err(Error::parse(
+                line.number,
+                1,
+                format!(
+                    "'{letter}:' is not allowed in a file header; it belongs in a tune's \
+                     header (§3)"
+                ),
+            ));
+        }
         state.line(line)?;
     }
     let notices = std::mem::take(&mut state.notices);

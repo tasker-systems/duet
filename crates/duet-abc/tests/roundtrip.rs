@@ -534,3 +534,31 @@ fn the_file_header_is_read_once_and_its_notices_listed_once() {
         Err(Error::Unsupported { line: 1, .. })
     ));
 }
+
+#[test]
+fn a_file_header_holds_only_the_fields_the_standard_allows_there() {
+    // A tune's own fields are refused in a file header, naming the line, so no tune copies
+    // a header title or voice into its song.
+    for field in [
+        "T:a title",
+        "V:1 name=\"x\"",
+        "K:G",
+        "Q:1/4=90",
+        "P:AB",
+        "w:la",
+    ] {
+        let abc = format!("{field}\nM:4/4\n\nX:1\nT:t\nK:C\nC8 |]\n");
+        let book = Book::parse(&abc).expect("parse");
+        assert!(
+            matches!(
+                book.tunes()[0].to_song(&ReadOptions::default()),
+                Err(Error::Parse { line: 1, .. })
+            ),
+            "{field}"
+        );
+    }
+    // The fields it allows still set every tune's defaults.
+    let abc = "C:someone\nM:6/8\nL:1/8\n\nX:1\nT:t\nK:C\nC6 |]\n";
+    let song = read(abc).expect("read");
+    assert_eq!(song.time_sig.to_string(), "6/8");
+}
