@@ -12,17 +12,21 @@
 //!    The pulse is its shortest lag peak within [`PULSE_PEAK_SHARE`] of the highest, so a
 //!    pattern whose bars recur most strongly is still counted in its quickest regular step.
 //! 2. **The grid.** The pulse is refined by a least-squares line through the onsets that fall
-//!    within [`GRID_TOLERANCE`] of it, which is what makes a whole-bpm rounding trustworthy.
+//!    within [`GRID_TOLERANCE`] of it, which is what makes a whole-bpm rounding trustworthy and
+//!    gives the measured beat period notes are placed by. Its phase is the one, among grids
+//!    anchored on each of the [`ANCHOR_CANDIDATES`] strongest onsets, that puts the most onset
+//!    strength on the grid, so a loud stray or syncopated onset cannot pull it off the beat.
 //! 3. **The meter.** Each meter is an accent template on that grid: the downbeat 1, a middle
 //!    beat 0.5, other beats 0.25, subdivisions 0. A hypothesis is a meter, a number of grid
 //!    steps to its felt beat (1, 2 or 4 in a simple meter; 3 or 6 in a compound one, whose
-//!    beat divides in three, or also 1 when the meter is given), and a rotation. Its fit is the correlation of the onsets'
-//!    relative strengths with the template, scaled down when those strengths barely differ
-//!    ([`ACCENT_SPREAD`]). Among hypotheses that fit at least [`WEAK_CONFIDENCE`], the one with
+//!    beat divides in three, or also 1 when the meter is given), and a rotation. Its fit is
+//!    the correlation of the on-grid onsets' strengths, relative to the strongest of them,
+//!    with the template, scaled down when those strengths barely differ ([`ACCENT_SPREAD`]). Among hypotheses that fit at least [`WEAK_CONFIDENCE`], the one with
 //!    the best fit times a tempo prior wins; with none, 4/4 applies at the beat level the prior
 //!    favours, stated with its own, weak, fit.
 //! 4. **The downbeat** is the first grid step the winning rotation puts on beat 1, or, when the
-//!    meter evidence is weak, the first onset at least [`STRONG_ONSET`] of the loudest.
+//!    meter evidence is weak, the first on-grid onset at least [`STRONG_ONSET`] of the loudest
+//!    on-grid onset.
 //!
 //! Confidence is in 0..=1, and below [`WEAK_CONFIDENCE`] an estimate is weak. A tempo's is the
 //! strength-weighted share of onsets on its grid. A meter's is its accent fit, and a downbeat's
@@ -50,6 +54,10 @@ const LAG_STEP_SECS: f64 = 0.001;
 const LAG_SPREAD_SECS: f64 = 0.01;
 /// A lag peak at least this share of the highest can be the pulse. Task 9 tunes it.
 const PULSE_PEAK_SHARE: f64 = 0.5;
+/// How many of the strongest onsets are each tried as the grid's anchor. A loud onset off the
+/// beat makes a poor anchor, so the anchor kept is the one whose grid holds the most onset
+/// strength; this many loud off-beat onsets would be needed to crowd out every on-beat one.
+const ANCHOR_CANDIDATES: usize = 16;
 /// How far from a grid step, as a share of the step, an onset may sit and be on it.
 /// Task 9 tunes it.
 const GRID_TOLERANCE: f64 = 0.2;
@@ -74,8 +82,8 @@ const COMPOUND_STEPS: [u32; 2] = [3, 6];
 const GIVEN_COMPOUND_STEPS: [u32; 3] = [1, 3, 6];
 /// The meters an estimate chooses between.
 const CANDIDATES: [(u8, u8); 3] = [(4, 4), (3, 4), (6, 8)];
-/// An onset at least this share of the take's loudest is strong enough to be a downbeat when
-/// the meter does not say where one is. Task 9 tunes it.
+/// An on-grid onset at least this share of the loudest on-grid onset is strong enough to be a
+/// downbeat when the meter does not say where one is. Task 9 tunes it.
 const STRONG_ONSET: f64 = 0.5;
 
 /// How far from a predicted beat, as a share of the beat, an onset may be and be that beat.
@@ -124,8 +132,14 @@ impl<T> Origin<T> {
 pub struct Timing {
     /// Quarter notes per minute. An estimate is a whole number.
     pub tempo_bpm: Origin<f64>,
-    /// Half and double the tempo, the likeliest other readings of it.
+    /// Half and double the tempo, the likeliest other readings of it. They are stated as
+    /// alternatives only when the tempo is estimated: a given tempo is not reported as an
+    /// estimate, so neither are its half and double.
     pub tempo_alternatives: (f64, f64),
+    /// Frames per quarter note, the period notes are placed by. For an estimated tempo it is the
+    /// period measured on the grid, not the rounded `tempo_bpm` (92.4 a minute is stated as 92
+    /// but placed at 92.4); for a given tempo it is exactly `60 * rate / tempo_bpm`.
+    pub beat_period_frames: f64,
     pub meter: Origin<TimeSig>,
     /// Where bar 1 starts, as a frame on the input timeline.
     pub downbeat_frame: Origin<u64>,
@@ -225,6 +239,7 @@ pub fn estimate(onsets: &[Event], rate: u32, given: &Given) -> Result<Timing> {
 
     let (chosen, downbeat) = read_meter(&onsets, &grid, rate, given);
     let confidence = chosen.fit as f32;
+    let beat_period_frames = 60.0 * rate / given.tempo_bpm.unwrap_or(chosen.quarter_bpm);
     let tempo_bpm = match given.tempo_bpm {
         Some(bpm) => Origin::Given(bpm),
         None => Origin::Estimated {
@@ -235,6 +250,7 @@ pub fn estimate(onsets: &[Event], rate: u32, given: &Given) -> Result<Timing> {
     Ok(Timing {
         tempo_alternatives: alternatives(*tempo_bpm.value()),
         tempo_bpm,
+        beat_period_frames,
         meter: match given.meter {
             Some(meter) => Origin::Given(meter),
             None => Origin::Estimated {
@@ -286,7 +302,7 @@ fn read_meter(onsets: &[Onset], grid: &Grid, rate: f64, given: &Given) -> (Hypot
         .filter(|h| h.meter == fallback)
         .max_by(|a, b| a.prior.total_cmp(&b.prior).then(a.fit.total_cmp(&b.fit)))
         .expect("every meter has a hypothesis per step count");
-    (*h, first_strong(onsets))
+    (*h, first_strong(onsets, Some(grid)))
 }
 
 /// The timing when a tempo is given but the onsets are too few, or too scattered, to show a
@@ -296,11 +312,12 @@ fn without_pulse(onsets: &[Onset], rate: f64, bpm: f64, given: &Given) -> Timing
     let downbeat = if onsets.is_empty() {
         0.0
     } else {
-        first_strong(onsets)
+        first_strong(onsets, None)
     };
     Timing {
         tempo_bpm: Origin::Given(bpm),
         tempo_alternatives: alternatives(bpm),
+        beat_period_frames: 60.0 * rate / bpm,
         meter: match given.meter {
             Some(meter) => Origin::Given(meter),
             None => Origin::Estimated {
@@ -386,18 +403,26 @@ fn pulse(onsets: &[Onset], rate: f64) -> Option<f64> {
     Some((MIN_PULSE_SECS + peak as f64 * LAG_STEP_SECS) * rate)
 }
 
-/// The grid through the onsets at about `period` frames a step.
-///
-/// Steps are first counted from the strongest onset, out to each side, from each on-grid onset
-/// to the next, which a small error in `period` cannot throw off; a least-squares line through
-/// them sets the grid. Then every onset is put on the nearest step of that grid, and the line
-/// is fitted again.
+/// The grid through the onsets at about `period` frames a step: of the grids anchored on each
+/// of the [`ANCHOR_CANDIDATES`] strongest onsets, the one with the most onset strength on it.
 fn fit_grid(onsets: &[Onset], period: f64) -> Grid {
-    let anchor = onsets
+    let mut by_strength: Vec<usize> = (0..onsets.len()).collect();
+    by_strength.sort_by(|&a, &b| onsets[b].strength.total_cmp(&onsets[a].strength));
+    by_strength
         .iter()
-        .enumerate()
-        .max_by(|a, b| a.1.strength.total_cmp(&b.1.strength))
-        .map_or(0, |(i, _)| i);
+        .take(ANCHOR_CANDIDATES)
+        .map(|&anchor| grid_from(onsets, period, anchor))
+        .max_by(|a, b| on_grid_share(onsets, a).total_cmp(&on_grid_share(onsets, b)))
+        .expect("a grid is fitted from at least one onset")
+}
+
+/// The grid through the onsets at about `period` frames a step, in phase with `anchor`.
+///
+/// Steps are first counted from the anchor, out to each side, from each on-grid onset to the
+/// next, which a small error in `period` cannot throw off; a least-squares line through them
+/// sets the grid. Then every onset is put on the nearest step of that grid, and the line is
+/// fitted again.
+fn grid_from(onsets: &[Onset], period: f64, anchor: usize) -> Grid {
     let mut counted = vec![(onsets[anchor].frame, 0)];
     count_steps(onsets[anchor + 1..].iter(), period, 1, &mut counted);
     count_steps(onsets[..anchor].iter().rev(), period, -1, &mut counted);
@@ -465,8 +490,9 @@ fn on_grid_share(onsets: &[Onset], grid: &Grid) -> f64 {
     on / total
 }
 
-/// The accent on each grid step from the take's first onset on: the relative strength of the
-/// strongest onset on it, or 0. Returns the first step too.
+/// The accent on each grid step from the take's first on-grid onset on: the strength of the
+/// strongest onset on it, relative to the strongest on-grid onset, or 0. Returns the first step
+/// too.
 fn accents(onsets: &[Onset], grid: &Grid) -> (i64, Vec<f64>) {
     let on: Vec<(i64, f64)> = onsets
         .iter()
@@ -477,10 +503,11 @@ fn accents(onsets: &[Onset], grid: &Grid) -> (i64, Vec<f64>) {
         .collect();
     let first = on.iter().map(|o| o.0).min().unwrap_or(0);
     let last = on.iter().map(|o| o.0).max().unwrap_or(0);
+    let loudest = on.iter().map(|o| o.1).fold(f64::MIN_POSITIVE, f64::max);
     let mut accents = vec![0.0; (last - first + 1) as usize];
     for (step, strength) in on {
         let slot = &mut accents[(step - first) as usize];
-        *slot = f64::max(*slot, strength);
+        *slot = f64::max(*slot, strength / loudest);
     }
     (first, accents)
 }
@@ -497,11 +524,17 @@ fn onset_at(onsets: &[Onset], grid: &Grid, step: i64) -> Option<f64> {
         .map(|o| o.frame)
 }
 
-/// The frame of the first onset at least [`STRONG_ONSET`] of the loudest.
-fn first_strong(onsets: &[Onset]) -> f64 {
-    onsets
+/// The frame of the first onset at least [`STRONG_ONSET`] of the loudest, counting only onsets
+/// on `grid` when there is one.
+fn first_strong(onsets: &[Onset], grid: Option<&Grid>) -> f64 {
+    let candidates: Vec<&Onset> = onsets
         .iter()
-        .find(|o| o.strength >= STRONG_ONSET)
+        .filter(|o| grid.is_none_or(|g| g.step(o.frame).1 <= GRID_TOLERANCE))
+        .collect();
+    let loudest = candidates.iter().map(|o| o.strength).fold(0.0, f64::max);
+    candidates
+        .iter()
+        .find(|o| o.strength >= STRONG_ONSET * loudest)
         .map_or(0.0, |o| o.frame)
 }
 
@@ -552,7 +585,8 @@ fn steps_per_beat(meter: TimeSig, given: bool) -> &'static [u32] {
     }
 }
 
-/// Whether the meter's felt beat is a dotted note: 6/8, 9/8, 12/8 and the like.
+/// Whether the meter's felt beat is a dotted note: 6/8, 9/8, 12/8 and the like. Only eighths
+/// and shorter group in threes here: 6/4 is treated as simple, six quarter beats.
 fn is_compound(meter: TimeSig) -> bool {
     meter.den >= 8 && meter.num > 3 && meter.num.is_multiple_of(3)
 }
@@ -608,42 +642,57 @@ fn std_dev(values: &[f64]) -> f64 {
 
 /// The local tempo from each beat to the next, from the downbeat on.
 ///
+/// The beats are the meter's felt beats (dotted quarters in 6/8), and their tempo is stated in
+/// quarter notes per minute.
+///
 /// Beats are tracked from `timing`'s downbeat: each is expected one beat period after the last,
 /// and is the onset nearest that, if one is within `SNAP_TOLERANCE` of a beat; otherwise it
-/// is where it was expected. The period starts at `timing`'s tempo and moves
+/// is where it was expected. The period starts at `timing`'s measured beat period and moves
 /// `PERIOD_ADAPT` of the way to each snapped interval, so it follows a slowly changing tempo
 /// rather than holding the global one. Tracking stops when the next beat would fall past the
 /// last onset.
 ///
 /// The onset stage places onsets on a grid of about 6 ms, which is a percent of a beat at 120,
 /// so an interval's tempo is not read from its two ends alone: it is the slope, at the
-/// interval's middle, of a least-squares quadratic through the `FIT_BEATS` beats around it
-/// (a Savitzky-Golay derivative), which keeps a slow drift and averages out that grain.
+/// interval's middle, of a least-squares quadratic through the `FIT_BEATS` snapped beats nearest
+/// it (a Savitzky-Golay derivative), which keeps a slow drift and averages out that grain.
+/// Beats in a rest are placed where they were expected but are not fitted.
 pub fn beat_series(onsets: &[Event], rate: u32, timing: &Timing) -> Vec<BeatTempo> {
     let rate = f64::from(rate);
+    let quarters = felt_quarters(*timing.meter.value());
     let frames: Vec<f64> = relative(onsets).iter().map(|o| o.frame).collect();
     let beats = track(
         &frames,
         *timing.downbeat_frame.value() as f64,
-        60.0 * rate / timing.tempo_bpm.value(),
+        timing.beat_period_frames * quarters,
     );
     (0..beats.len().saturating_sub(1))
         .map(|i| BeatTempo {
             beat: i as u32,
-            secs: beats[i] / rate,
-            bpm: 60.0 * rate / local_period(&beats, i),
+            secs: beats[i].frame / rate,
+            bpm: 60.0 * rate * quarters / local_period(&beats, i),
         })
         .collect()
 }
 
+/// A tracked beat: its frame, and whether an onset is on it, or it was only expected there.
+#[derive(Debug, Clone, Copy)]
+struct Beat {
+    frame: f64,
+    snapped: bool,
+}
+
 /// The beats from `start`, at about `period` frames apart, snapped to `frames`.
-fn track(frames: &[f64], start: f64, mut period: f64) -> Vec<f64> {
+fn track(frames: &[f64], start: f64, mut period: f64) -> Vec<Beat> {
     let Some(&end) = frames.last() else {
         return Vec::new();
     };
-    let mut beats = vec![start];
+    let mut beats = vec![Beat {
+        frame: start,
+        snapped: frames.iter().any(|f| (f - start).abs() < 1.0),
+    }];
     loop {
-        let last = beats[beats.len() - 1];
+        let last = beats[beats.len() - 1].frame;
         let expected = last + period;
         let reach = SNAP_TOLERANCE * period;
         if expected > end + reach {
@@ -655,28 +704,40 @@ fn track(frames: &[f64], start: f64, mut period: f64) -> Vec<f64> {
             .filter(|f| (f - expected).abs() <= reach)
             .min_by(|a, b| (a - expected).abs().total_cmp(&(b - expected).abs()));
         match snapped {
-            Some(beat) => {
-                period += PERIOD_ADAPT * (beat - last - period);
-                beats.push(beat);
+            Some(frame) => {
+                period += PERIOD_ADAPT * (frame - last - period);
+                beats.push(Beat {
+                    frame,
+                    snapped: true,
+                });
             }
-            None => beats.push(expected),
+            None => beats.push(Beat {
+                frame: expected,
+                snapped: false,
+            }),
         }
     }
     beats
 }
 
-/// The frames per beat at the middle of the interval from beat `i` to beat `i + 1`.
-fn local_period(beats: &[f64], i: usize) -> f64 {
-    let width = FIT_BEATS.min(beats.len());
-    if width < 3 {
-        return beats[i + 1] - beats[i];
-    }
-    let from = (i + 1).saturating_sub(width / 2).min(beats.len() - width);
+/// The frames per beat at the middle of the interval from beat `i` to beat `i + 1`, fitted
+/// over the [`FIT_BEATS`] snapped beats nearest it. Beats only expected, in a rest, are left
+/// out: they are guesses at the tempo, not measurements of it.
+fn local_period(beats: &[Beat], i: usize) -> f64 {
     let middle = i as f64 + 0.5;
-    let points: Vec<(f64, f64)> = (from..from + width)
-        .map(|k| (k as f64 - middle, beats[k]))
+    let mut measured: Vec<(f64, f64)> = beats
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.snapped)
+        .map(|(k, b)| (k as f64 - middle, b.frame))
         .collect();
-    quadratic_slope_at_zero(&points)
+    measured.sort_by(|a, b| a.0.abs().total_cmp(&b.0.abs()));
+    measured.truncate(FIT_BEATS);
+    match measured.len() {
+        0 | 1 => beats[i + 1].frame - beats[i].frame,
+        2 => (measured[1].1 - measured[0].1) / (measured[1].0 - measured[0].0),
+        _ => quadratic_slope_at_zero(&measured),
+    }
 }
 
 /// The slope at x = 0 of the least-squares quadratic through `points`.
@@ -752,9 +813,19 @@ mod tests {
     /// Clicks whose tempo slides in a straight line, in time, from `start_bpm` at the first
     /// click, [`LEAD`] in, to `end_bpm` `secs` later.
     fn sliding(start_bpm: f64, end_bpm: f64, secs: f64) -> Vec<f32> {
+        synth::clicks(
+            RATE,
+            secs + LEAD + 0.5,
+            &sliding_times(start_bpm, end_bpm, secs),
+            0.5,
+        )
+    }
+
+    /// The click times of [`sliding`].
+    fn sliding_times(start_bpm: f64, end_bpm: f64, secs: f64) -> Vec<f64> {
         // Beats elapsed by t: (start t + slope t² / 2) / 60, with slope in bpm per second.
         let half_slope = (end_bpm - start_bpm) / secs / 2.0;
-        let times: Vec<f64> = (0..)
+        (0..)
             .map(|k| {
                 let beats = f64::from(k);
                 (-start_bpm + (start_bpm * start_bpm + 4.0 * half_slope * 60.0 * beats).sqrt())
@@ -762,8 +833,7 @@ mod tests {
                     + LEAD
             })
             .take_while(|&t| t < secs + LEAD)
-            .collect();
-        synth::clicks(RATE, secs + LEAD + 0.5, &times, 0.5)
+            .collect()
     }
 
     fn steady_120() -> Vec<f32> {
@@ -885,6 +955,7 @@ mod tests {
             "got {err:?}"
         );
         assert!(err.to_string().contains("--tempo"), "{err}");
+        assert!(err.to_string().starts_with("found 1 onset,"), "{err}");
     }
 
     #[test]
@@ -993,6 +1064,164 @@ mod tests {
         );
     }
 
+    /// The frames of `onsets`.
+    fn frames(onsets: &[Event]) -> Vec<u64> {
+        onsets
+            .iter()
+            .filter_map(|e| match e {
+                Event::Onset { frame, .. } => Some(*frame),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether `beat` lies on one of `onsets`, as a snapped beat does.
+    fn is_snapped(beat: &BeatTempo, onsets: &[u64]) -> bool {
+        onsets
+            .iter()
+            .any(|&f| (f as f64 / f64::from(RATE) - beat.secs).abs() < 1e-9)
+    }
+
+    #[test]
+    fn a_stray_onset_louder_than_the_accents_moves_neither_grid_nor_downbeat() {
+        // A burst of noise a tenth of a second in, off the beat and the loudest onset in the take,
+        // before the bars of `accents_place_the_downbeat`.
+        let mut signal = synth::noise_bursts(RATE, 20.5, &[(0.1, 0.04)], 200.0, 8_000.0, 0.5);
+        synth::add(
+            &mut signal,
+            &pattern(120.0, LEAD, 20.0, &[0.3, 0.15, 0.5, 0.15]),
+        );
+        let onsets = onsets_of(&signal);
+        let strengths: Vec<(u64, f32)> = onsets
+            .iter()
+            .filter_map(|e| match e {
+                Event::Onset { frame, strength } => Some((*frame, *strength)),
+                _ => None,
+            })
+            .collect();
+        let loudest = strengths.iter().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+        assert!(
+            (loudest.0 as f64 / f64::from(RATE) - 0.1).abs() < 0.03,
+            "the stray is not the loudest onset: {strengths:?}"
+        );
+        let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
+        assert_eq!(estimated(&timing.tempo_bpm).0, 120.0);
+        let half_second = 0.5 * f64::from(RATE);
+        assert!(
+            (timing.beat_period_frames / half_second - 1.0).abs() < 0.001,
+            "{timing:?}"
+        );
+        let (sig, confidence) = estimated(&timing.meter);
+        assert_eq!(sig, meter("4/4"));
+        assert!(confidence >= WEAK_CONFIDENCE, "confidence {confidence}");
+        assert_eq!(
+            estimated(&timing.downbeat_frame).0,
+            the_onset_nearest(&onsets, 1.25)
+        );
+    }
+
+    #[test]
+    fn loud_syncopations_leave_the_downbeat_on_the_beat() {
+        // A quiet, steady beat at 120 from 0.25 s, with four loud onsets halfway between beats.
+        let off_beats = [2.0, 5.0, 9.0, 13.0];
+        let mut signal = pattern(120.0, LEAD, 20.0, &[0.15]);
+        synth::add(&mut signal, &synth::clicks(RATE, 20.5, &off_beats, 0.5));
+        let onsets = onsets_of(&signal);
+        let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
+        assert_eq!(estimated(&timing.tempo_bpm).0, 120.0);
+        assert_eq!(
+            estimated(&timing.downbeat_frame).0,
+            the_onset_nearest(&onsets, LEAD)
+        );
+        let series = beat_series(&onsets, RATE, &timing);
+        assert!(series.len() >= 38, "{} beats", series.len());
+        for beat in &series {
+            let from_beat = (beat.secs - LEAD) / 0.5;
+            assert!((from_beat - from_beat.round()).abs() < 0.1, "{beat:?}");
+        }
+    }
+
+    #[test]
+    fn notes_are_placed_by_the_measured_period_not_the_rounded_tempo() {
+        let onsets = onsets_of(&pattern(92.4, LEAD, 20.0, &[0.5]));
+        let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
+        assert_eq!(estimated(&timing.tempo_bpm).0, 92.0);
+        let measured = 60.0 * f64::from(RATE) / 92.4;
+        assert!(
+            (timing.beat_period_frames / measured - 1.0).abs() < 0.001,
+            "{} frames, wanted {measured}",
+            timing.beat_period_frames
+        );
+    }
+
+    #[test]
+    fn a_given_tempo_sets_the_period_exactly() {
+        let given = Given {
+            tempo_bpm: Some(97.25),
+            ..Given::default()
+        };
+        let timing = estimate(&onsets_of(&steady_120()), RATE, &given).unwrap();
+        assert_eq!(timing.beat_period_frames, 60.0 * f64::from(RATE) / 97.25);
+    }
+
+    #[test]
+    fn unaccented_eighths_at_120_read_as_120() {
+        let onsets = onsets_of(&pattern(240.0, LEAD, 20.0, &[0.5]));
+        let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
+        assert_eq!(estimated(&timing.tempo_bpm).0, 120.0);
+    }
+
+    #[test]
+    fn a_six_eight_series_tracks_the_dotted_quarter_in_quarter_bpm() {
+        let accents = [0.5, 0.15, 0.15, 0.3, 0.15, 0.15];
+        let onsets = onsets_of(&pattern(270.0, LEAD, 20.0, &accents));
+        let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
+        let series = beat_series(&onsets, RATE, &timing);
+        // 20 s of dotted quarters at 90 a minute.
+        assert!(series.len() >= 28, "{} beats", series.len());
+        for beat in &series {
+            assert!((beat.bpm - 135.0).abs() <= 1.0, "{beat:?}");
+        }
+        for pair in series.windows(2) {
+            assert!(
+                (pair[1].secs - pair[0].secs - 60.0 / 90.0).abs() < 0.01,
+                "{pair:?}"
+            );
+        }
+        let frames = frames(&onsets);
+        let snapped = series.iter().filter(|b| is_snapped(b, &frames)).count();
+        assert!(
+            snapped * 10 >= series.len() * 9,
+            "{snapped} of {} snapped",
+            series.len()
+        );
+    }
+
+    #[test]
+    fn the_tracked_period_follows_a_drift_through_a_rest() {
+        // 100 to 112 bpm over 20 s, with the clicks between 15.5 and 18 s left out, about four
+        // beats: the beat carries on through the rest at the tempo it had reached (about 110),
+        // where the take's average (about 106) would lose it.
+        let times: Vec<f64> = sliding_times(100.0, 112.0, 20.0)
+            .into_iter()
+            .filter(|&t| !(15.5..18.0).contains(&t))
+            .collect();
+        let onsets = onsets_of(&synth::clicks(RATE, 20.0 + LEAD + 0.5, &times, 0.5));
+        let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
+        let series = beat_series(&onsets, RATE, &timing);
+        let frames = frames(&onsets);
+        let after_rest: Vec<&BeatTempo> = series.iter().filter(|b| b.secs > 18.0).collect();
+        assert!(after_rest.len() >= 3, "{series:?}");
+        for beat in &after_rest {
+            assert!(
+                is_snapped(beat, &frames),
+                "{beat:?} is not on an onset: {series:?}"
+            );
+        }
+        let last = series.last().unwrap().bpm;
+        assert!((last - 112.0).abs() <= 1.0, "{series:?}");
+    }
+
     #[test]
     fn a_given_downbeat_is_kept() {
         let given = Given {
@@ -1052,6 +1281,7 @@ mod tests {
                 confidence: 0.75,
             },
             tempo_alternatives: (67.5, 270.0),
+            beat_period_frames: 9_800.25,
             meter: Origin::Given(meter("6/8")),
             downbeat_frame: Origin::Estimated {
                 value: 22_050,

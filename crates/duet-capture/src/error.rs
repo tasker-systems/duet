@@ -18,7 +18,10 @@ pub enum Error {
     },
 
     /// The take has too few onsets to estimate a tempo from.
-    #[error("found {found} onsets, too few to estimate a tempo; give one with --tempo")]
+    #[error(
+        "found {found} onset{}, too few to estimate a tempo; give one with --tempo",
+        if *found == 1 { "" } else { "s" }
+    )]
     TooFewOnsets {
         /// How many onsets the take has.
         found: usize,
