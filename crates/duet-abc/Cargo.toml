@@ -1,6 +1,6 @@
 [package]
 name = "duet-abc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Read and write a subset of ABC 2.1 as duet Songs, refusing the rest by name."
 edition.workspace = true
 license.workspace = true
@@ -20,11 +20,11 @@ workspace = true
 oracle = []
 
 [dependencies]
-duet-core = { path = "../duet-core", version = "0.1.0" }
+duet-core = { path = "../duet-core", version = "0.2.0" }
 thiserror = "2"
 
 [dev-dependencies]
 # The oracle reads abc2midi's MIDI through duet-midi, and the corpus manifest is TOML.
-duet-midi = { path = "../duet-midi", version = "0.1.0" }
+duet-midi = { path = "../duet-midi", version = "0.2.0" }
 serde = { version = "1", features = ["derive"] }
 toml = "1"

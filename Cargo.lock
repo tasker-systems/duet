@@ -137,7 +137,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "duet-abc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "duet-core",
  "duet-midi",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "duet-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "duet-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "duet-drums"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "duet-core",
  "duet-midi",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "duet-midi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "duet-core",
  "midly",
