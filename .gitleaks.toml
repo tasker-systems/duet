@@ -1,0 +1,12 @@
+# gitleaks configuration (SC-SEC-1): the default rule set plus this repository's allowlist.
+#
+# The allowlist is reviewed: each entry says what it allows and why it is not a secret, and lands
+# in the change that needs it. It is empty because the full history scans clean. Prefer a narrow
+# entry (one path, one regex, one commit) to a broad one, and never allowlist a real credential:
+# rotate it instead.
+[extend]
+useDefault = true
+
+# [[allowlists]]
+# description = "what this allows, and why it is not a secret"
+# paths = ['''^samples/example\.txt$''']
