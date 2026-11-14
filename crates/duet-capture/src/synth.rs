@@ -1,5 +1,5 @@
-//! Test signals: clicks, tones, vibrato, note sequences, silence and band-limited noise bursts,
-//! at a given rate.
+//! Test signals: clicks, tones, vibrato, scoops, note sequences (attacked or legato), fades,
+//! silence and band-limited noise bursts, at a given rate.
 //!
 //! Every generator returns mono `f32` samples and is deterministic, so a test failure
 //! reproduces. Times are in seconds.
@@ -48,6 +48,77 @@ pub fn vibrato(
     harmonics: u32,
     amplitude: f32,
 ) -> Vec<f32> {
+    swept(rate, secs, harmonics, amplitude, |t| {
+        freq * (cents / 1200.0 * (TAU * speed * t).sin()).exp2()
+    })
+}
+
+/// Notes one after another, each `(freq, secs)`, played legato: one tone whose pitch slides
+/// from note to note over `glide` seconds, ending at each boundary, with its phase unbroken, so
+/// nothing is attacked afresh. It rises over its first 5 ms and falls over its last 20 ms, as
+/// [`note_sequence`]'s notes do.
+pub fn legato(
+    rate: u32,
+    notes: &[(f64, f64)],
+    glide: f64,
+    harmonics: u32,
+    amplitude: f32,
+) -> Vec<f32> {
+    let secs: f64 = notes.iter().map(|n| n.1).sum();
+    let at = |t: f64| {
+        let mut end = 0.0;
+        for (i, &(freq, length)) in notes.iter().enumerate() {
+            end += length;
+            if t < end {
+                let Some(&(next, _)) = notes.get(i + 1) else {
+                    return freq;
+                };
+                let into = ((t - (end - glide)) / glide).clamp(0.0, 1.0);
+                return freq * (next / freq).powf(into);
+            }
+        }
+        notes.last().map_or(0.0, |n| n.0)
+    };
+    let mut out = swept(rate, secs, harmonics, amplitude, at);
+    envelope(rate, &mut out);
+    out
+}
+
+/// A tone at `freq` Hz that scoops up to it: it starts `cents` flat and rises in a straight line
+/// over the first `fraction` of the note, then holds.
+pub fn scoop(
+    rate: u32,
+    freq: f64,
+    secs: f64,
+    cents: f64,
+    fraction: f64,
+    harmonics: u32,
+    amplitude: f32,
+) -> Vec<f32> {
+    swept(rate, secs, harmonics, amplitude, |t| {
+        let below = cents * (1.0 - t / (fraction * secs)).max(0.0);
+        freq * (-below / 1200.0).exp2()
+    })
+}
+
+/// Raises `signal` from silence in a straight line over its first `secs`: a soft entry, with no
+/// attack for an onset to find.
+pub fn fade_in(rate: u32, signal: &mut [f32], secs: f64) {
+    let ramp = frames(rate, secs).max(1);
+    for (i, s) in signal.iter_mut().take(ramp).enumerate() {
+        *s *= i as f32 / ramp as f32;
+    }
+}
+
+/// A tone whose frequency at `t` seconds is `freq(t)`, with its phase integrated so a change of
+/// pitch is not a break, and `harmonics` partials and peak at most `amplitude` as in [`tone`].
+fn swept(
+    rate: u32,
+    secs: f64,
+    harmonics: u32,
+    amplitude: f32,
+    freq: impl Fn(f64) -> f64,
+) -> Vec<f32> {
     let norm: f64 = (1..=harmonics).map(|n| 1.0 / f64::from(n)).sum();
     let mut phase = 0.0;
     (0..frames(rate, secs))
@@ -56,27 +127,31 @@ pub fn vibrato(
             let sum: f64 = (1..=harmonics)
                 .map(|n| (phase * f64::from(n)).sin() / f64::from(n))
                 .sum();
-            let now = freq * (cents / 1200.0 * (TAU * speed * t).sin()).exp2();
-            phase += TAU * now / f64::from(rate);
+            phase += TAU * freq(t) / f64::from(rate);
             (sum / norm) as f32 * amplitude
         })
         .collect()
+}
+
+/// Shapes a note: a 5 ms rise and a 20 ms fall to silence.
+fn envelope(rate: u32, note: &mut [f32]) {
+    let attack = frames(rate, 0.005) as f32;
+    let release = frames(rate, 0.02) as f32;
+    let len = note.len();
+    for (i, s) in note.iter_mut().enumerate() {
+        *s *= (i as f32 / attack).min((len - i) as f32 / release).min(1.0);
+    }
 }
 
 /// Notes one after another, each `(freq, secs)` a [`tone`] that rises over its first 5 ms and
 /// falls to silence over its last 20 ms, so each note is attacked afresh, as a plucked or sung
 /// note is, even when it repeats the pitch before it.
 pub fn note_sequence(rate: u32, notes: &[(f64, f64)], harmonics: u32, amplitude: f32) -> Vec<f32> {
-    let attack = frames(rate, 0.005) as f32;
-    let release = frames(rate, 0.02) as f32;
     let mut out = Vec::new();
     for &(freq, secs) in notes {
-        let note = tone(rate, freq, secs, harmonics, amplitude);
-        let len = note.len();
-        out.extend(note.into_iter().enumerate().map(|(i, s)| {
-            let envelope = (i as f32 / attack).min((len - i) as f32 / release).min(1.0);
-            s * envelope
-        }));
+        let mut note = tone(rate, freq, secs, harmonics, amplitude);
+        envelope(rate, &mut note);
+        out.extend(note);
     }
     out
 }

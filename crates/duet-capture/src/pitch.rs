@@ -49,6 +49,8 @@ pub struct PitchFrame {
     pub hz: Option<f32>,
     /// The frame's own voicing probability, before smoothing: the candidates' total.
     pub voiced: f32,
+    /// The root mean square of the frame's integration window: how loud the frame is.
+    pub level: f32,
 }
 
 /// Tracks the fundamental, frame by frame, pYIN-style.
@@ -79,8 +81,8 @@ pub struct PitchTrack {
     buffer_start: usize,
     /// The next window to analyse.
     next_window: usize,
-    /// Frames analysed but not yet settled: where each sits, and its voicing probability.
-    unsettled: VecDeque<(u64, f32)>,
+    /// Frames analysed but not yet settled: where each sits, its voicing probability and level.
+    unsettled: VecDeque<(u64, f32, f32)>,
 }
 
 impl std::fmt::Debug for PitchTrack {
@@ -135,11 +137,11 @@ impl PitchTrack {
             let Some(samples) = self.buffer.get(start..start + self.frame_len) else {
                 break;
             };
-            let candidates = self.yin.candidates(samples);
+            let (candidates, level) = self.yin.candidates(samples);
             let voiced = candidates.iter().fold(0.0, |total, c| total + c.1).min(1.0);
             let observation = self.observation(&candidates, voiced);
             self.unsettled
-                .push_back((self.frame_of(self.next_window), voiced));
+                .push_back((self.frame_of(self.next_window), voiced, level));
             self.next_window += 1;
             if let Some(state) = self.hmm.step(&observation) {
                 self.settle(state, out);
@@ -174,13 +176,18 @@ impl PitchTrack {
 
     /// Emits the oldest unsettled frame, now settled in `state`.
     fn settle(&mut self, state: usize, out: &mut Vec<PitchFrame>) {
-        let (frame, voiced) = self
+        let (frame, voiced, level) = self
             .unsettled
             .pop_front()
             .expect("the smoothing settles only frames it was given");
         let hz = (state < self.hmm.bins)
             .then(|| (FMIN_HZ * (state as f64 / (12 * BINS_PER_SEMITONE) as f64).exp2()) as f32);
-        out.push(PitchFrame { frame, hz, voiced });
+        out.push(PitchFrame {
+            frame,
+            hz,
+            voiced,
+            level,
+        });
     }
 }
 
@@ -267,8 +274,9 @@ impl Yin {
         }
     }
 
-    /// YIN's cumulative mean normalised difference for periods `min_period..=max_period`.
-    fn normalised_difference(&self, frame: &[f32]) -> Vec<f32> {
+    /// YIN's cumulative mean normalised difference for periods `min_period..=max_period`, and
+    /// the integration window's energy.
+    fn normalised_difference(&self, frame: &[f32]) -> (Vec<f32>, f32) {
         let negligible = |x: f32| if x.abs() < NEGLIGIBLE { 0.0 } else { x };
         // The window's correlation with the frame at each lag, by FFT.
         let mut whole: Vec<Complex<f32>> = frame.iter().map(|&s| Complex::new(s, 0.0)).collect();
@@ -307,12 +315,14 @@ impl Yin {
                 out.push(difference / (running / lag as f32 + f32::MIN_POSITIVE));
             }
         }
-        out
+        (out, first)
     }
 
-    /// The frame's pitch candidates as `(period in samples, probability)`, pYIN-style.
-    fn candidates(&self, frame: &[f32]) -> Vec<(f32, f32)> {
-        let curve = self.normalised_difference(frame);
+    /// The frame's pitch candidates as `(period in samples, probability)`, pYIN-style, and the
+    /// root mean square of its integration window.
+    fn candidates(&self, frame: &[f32]) -> (Vec<(f32, f32)>, f32) {
+        let (curve, energy) = self.normalised_difference(frame);
+        let level = (energy / self.window as f32).sqrt();
         let last = curve.len() - 1;
         let troughs: Vec<usize> = (0..=last)
             .filter(|&i| match i {
@@ -325,7 +335,7 @@ impl Yin {
             .iter()
             .min_by(|&&a, &&b| curve[a].total_cmp(&curve[b]))
         else {
-            return Vec::new();
+            return (Vec::new(), level);
         };
         let mut probability = vec![0.0f32; troughs.len()];
         for (j, &prior) in self.threshold_prior.iter().enumerate() {
@@ -346,12 +356,13 @@ impl Yin {
                 }
             }
         }
-        troughs
+        let candidates = troughs
             .iter()
             .zip(probability)
             .filter(|&(_, p)| p > 0.0)
             .map(|(&i, p)| ((i + self.min_period) as f32 + parabolic_shift(&curve, i), p))
-            .collect()
+            .collect();
+        (candidates, level)
     }
 }
 
@@ -575,6 +586,7 @@ mod tests {
     fn the_track_is_the_same_whatever_the_chunking() {
         let signal = scale();
         let reference = track(&signal, 1000);
+        assert!(reference.iter().any(|p| p.hz.is_some()));
         for chunk in [1, 777, 4096] {
             assert_eq!(track(&signal, chunk), reference, "chunk of {chunk}");
         }
