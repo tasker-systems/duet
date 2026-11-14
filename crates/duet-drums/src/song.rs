@@ -39,6 +39,14 @@ impl DrumGrid {
         }
         let mut song = self.conductor();
         song.tracks.push(track);
+        // The song ends where the grid does. When that is where a song with no end ends
+        // anyway (the bar line after the last bar with a hit), it names none, so a grid
+        // whose last bar has a hit renders as it always has.
+        let end = match self.end {
+            Some(end) => end,
+            None => self.bars_end(),
+        };
+        song.end = (song.default_end()? != end).then_some(end);
         song.normalize()?;
         Ok(song)
     }
@@ -47,8 +55,13 @@ impl DrumGrid {
     ///
     /// The drum track is the one named `track`, or else the only track on the map's
     /// channel. The grid takes the song's conductor and that track's channel. Its lanes
-    /// are the map's lanes the track plays, in the map's row order. It runs to `bars`
-    /// bars, or to the last bar with a hit.
+    /// are the map's lanes the track plays, in the map's row order.
+    ///
+    /// It runs to the song's [end](Song::end) when the song names one: through the bar
+    /// before a bar-line end, or through the bar an end inside a bar falls in, which then
+    /// becomes the grid's own end and must lie on a step. Otherwise it runs to `bars`
+    /// bars, or to the last bar with a hit. `bars` given with an end that disagrees is
+    /// refused, naming both.
     ///
     /// Only note starts and velocities are kept: note lengths, the track's controls and
     /// the song's other tracks are not part of a drum grid.
@@ -65,10 +78,33 @@ impl DrumGrid {
         bars: Option<u32>,
     ) -> Result<DrumGrid> {
         let drums = drum_track(song, lanes, track)?;
+        song.check_end()?;
         let mut out = DrumGrid::with_conductor(song, grid);
         out.channel = drums.channel;
         let map = out.time_map()?;
         let step = out.step_ticks()?;
+
+        // The bars the song's end reaches, and the grid's own end when it falls mid-bar.
+        let end_bars = match song.end {
+            None => None,
+            Some(end) => {
+                let tick = map.tick(end)?;
+                let end = map.position(tick);
+                if end.beat == 1 && end.tick == 0 {
+                    Some(end.bar - 1)
+                } else {
+                    let shape = out.bar_shape(&map, step, end.bar)?;
+                    if !(tick - shape.start).is_multiple_of(step) {
+                        return Err(Error::invalid(format!(
+                            "the song ends at {end}, which is not on the {grid} grid; a grid \
+                             ends on a bar line or a step"
+                        )));
+                    }
+                    out.end = Some(end);
+                    Some(end.bar)
+                }
+            }
+        };
 
         // (lane, bar, step, vel) for every note, checked against the grid and the map.
         let mut hits = Vec::with_capacity(drums.notes.len());
@@ -95,14 +131,28 @@ impl DrumGrid {
         }
 
         let last = hits.iter().map(|h| h.1).max().unwrap_or(0);
-        let count = match bars {
-            Some(n) if n < last => {
+        let count = match (bars, end_bars) {
+            (Some(n), Some(e)) if n != e => {
+                let end = song.end.map(|e| e.to_string()).unwrap_or_default();
+                return Err(Error::invalid(format!(
+                    "{n} bars were asked for, but the song ends at {end}, which makes {e}; \
+                     leave out the bar count, or change the song's end"
+                )));
+            }
+            (_, Some(e)) if last > e => {
+                let end = song.end.map(|e| e.to_string()).unwrap_or_default();
+                return Err(Error::invalid(format!(
+                    "there is a hit in bar {last}, at or past the song's end at {end}"
+                )));
+            }
+            (_, Some(e)) => e,
+            (Some(n), None) if n < last => {
                 return Err(Error::invalid(format!(
                     "there is a hit in bar {last}, past the {n} bars asked for"
                 )));
             }
-            Some(n) => n,
-            None => last,
+            (Some(n), None) => n,
+            (None, None) => last,
         };
 
         let mut used: Vec<&crate::lanes::LaneDef> = Vec::new();

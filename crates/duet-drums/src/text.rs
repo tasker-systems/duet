@@ -17,7 +17,8 @@
 //! ```
 //!
 //! The header is the notefmt header (title, tpq, tempo, time, key and their `at`
-//! changes) plus five lines of its own:
+//! changes, and `end`, which in a grid is only for one that stops inside its last bar)
+//! plus five lines of its own:
 //!
 //! - `grid 1/16`: the step. Required.
 //! - `map gm`: the lane map that names the rows. `gm` is the default and the only one.
@@ -158,7 +159,7 @@ impl Header {
             }
             [kw, ..] => {
                 return Err(Error::invalid(format!(
-                    "'{kw}' is not a header line; expected title, tpq, tempo, time, key, grid, \
+                    "'{kw}' is not a header line; expected title, tpq, tempo, time, key, end, grid, \
                      map, lane, channel, vel or a [bars a-b] block"
                 )));
             }
@@ -175,6 +176,7 @@ impl Header {
         conductor.normalize()?;
         let map = LaneMap::builtin(&self.map)?.overlaid(&self.lanes)?;
         let mut out = DrumGrid::with_conductor(&conductor, grid);
+        out.end = conductor.end;
         out.channel = self.channel.unwrap_or(map.channel());
         out.levels = self.levels;
         let time = out.time_map()?;

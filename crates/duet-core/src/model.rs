@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::pitch::Pitch;
 use crate::time::{
     Key, Position, TimeMap, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm,
@@ -34,6 +34,15 @@ pub struct Song {
     pub time_changes: Vec<TimeChange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_changes: Vec<KeyChange>,
+    /// Where the song ends, if it says: a bar.beat.tick position such as `9.1.0` (the bar
+    /// line before bar 9), or one inside a bar, for a song that stops mid-bar. Nothing in
+    /// the song may lie past it: a note may end on it, and no note may end after it.
+    ///
+    /// `None` means the song names no end. A song that names none is written exactly as
+    /// it always was, and where a length is needed its [default end](Song::default_end)
+    /// applies: the end of the last bar holding an event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
     pub tracks: Vec<Track>,
 }
 
@@ -48,6 +57,7 @@ impl Default for Song {
             tempo_changes: Vec::new(),
             time_changes: Vec::new(),
             key_changes: Vec::new(),
+            end: None,
             tracks: Vec::new(),
         }
     }
@@ -157,6 +167,9 @@ impl Song {
         for change in &mut self.key_changes {
             change.at = canonical(change.at)?;
         }
+        if let Some(end) = &mut self.end {
+            *end = canonical(*end)?;
+        }
         for track in &mut self.tracks {
             for note in &mut track.notes {
                 note.at = canonical(note.at)?;
@@ -171,7 +184,97 @@ impl Song {
                 }
             }
         }
+        self.check_end()
+    }
+
+    /// Checks that nothing lies past the song's [end](Song::end), when it names one.
+    ///
+    /// A note may end exactly on the end, and a control or a tempo, meter or key change
+    /// may sit on it; anything later is refused, naming it and the end. Nothing is ever
+    /// cut to fit: move the end, or shorten or move what lies past it.
+    pub fn check_end(&self) -> Result<()> {
+        let Some(end) = self.end else {
+            return Ok(());
+        };
+        let map = self.time_map()?;
+        let end_tick = map.tick(end)?;
+        let end = map.position(end_tick);
+        let past = |what: String| {
+            Err(Error::invalid(format!(
+                "{what} lies past the song's end at {end}; move the end, or shorten or move \
+                 what lies past it"
+            )))
+        };
+        for c in &self.time_changes {
+            if map.tick(c.at)? > end_tick {
+                return past(format!("the time {} change at {}", c.time_sig, c.at));
+            }
+        }
+        for c in &self.tempo_changes {
+            if map.tick(c.at)? > end_tick {
+                return past(format!("the tempo {} change at {}", c.bpm, c.at));
+            }
+        }
+        for c in &self.key_changes {
+            if map.tick(c.at)? > end_tick {
+                return past(format!("the key {} change at {}", c.key, c.at));
+            }
+        }
+        for track in &self.tracks {
+            for note in &track.notes {
+                let note_end =
+                    map.tick(note.at)? + ticks_from_beats(note.beats, self.ticks_per_quarter)?;
+                if note_end > end_tick {
+                    return past(format!(
+                        "track '{}': the {} at {}, which ends at {},",
+                        track.name,
+                        note.pitch,
+                        note.at,
+                        map.position(note_end)
+                    ));
+                }
+            }
+            for control in &track.controls {
+                if map.tick(control.at())? > end_tick {
+                    let what = match control {
+                        Control::Cc { controller, .. } => format!("cc{controller}"),
+                        Control::Bend { .. } => "bend".to_owned(),
+                        Control::Program { .. } => "prog".to_owned(),
+                    };
+                    return past(format!(
+                        "track '{}': the {what} at {}",
+                        track.name,
+                        control.at()
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// The end the song has when it names none: the bar line after the last bar that
+    /// holds a note or a control. A note holds every bar it sounds in, so one that ends
+    /// exactly on a bar line does not hold the bar after it; a control, or a note of no
+    /// length, holds the bar it sits in. A song with no notes or controls ends at `1.1.0`.
+    ///
+    /// Tempo, meter and key changes do not hold a bar: they describe the song's time,
+    /// not what is played in it.
+    pub fn default_end(&self) -> Result<Position> {
+        let map = self.time_map()?;
+        let tpq = self.ticks_per_quarter;
+        let mut last_bar = 0;
+        for track in &self.tracks {
+            for note in &track.notes {
+                let start = map.tick(note.at)?;
+                let len = ticks_from_beats(note.beats, tpq)?;
+                let held = if len == 0 { start } else { start + len - 1 };
+                last_bar = last_bar.max(map.position(held).bar);
+            }
+            for control in &track.controls {
+                last_bar = last_bar.max(map.position(map.tick(control.at())?).bar);
+            }
+        }
+        Ok(Position::bar(last_bar + 1))
     }
 
     /// The map from positions to ticks for this song's time signatures.
@@ -181,5 +284,39 @@ impl Song {
             map.change_at(change.at, change.time_sig)?;
         }
         Ok(map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_end(body: &str) -> String {
+        let song = Song::from_text(&format!("time 4/4\n{body}")).expect("a song");
+        song.default_end().expect("an end").to_string()
+    }
+
+    #[test]
+    fn the_default_end_is_the_bar_line_after_the_last_bar_holding_an_event() {
+        let track = "\n[track \"P\" ch1]\n";
+        assert_eq!(default_end(""), "1.1.0", "nothing played");
+        assert_eq!(default_end(&format!("{track}1.1.0 C4 1 80\n")), "2.1.0");
+        assert_eq!(
+            default_end(&format!("{track}1.3.0 C4 7 80\n")),
+            "4.1.0",
+            "a note holds every bar it sounds in"
+        );
+        assert_eq!(
+            default_end(&format!("{track}1.3.0 C4 2 80\n")),
+            "2.1.0",
+            "a note ending on a bar line does not hold the bar after it"
+        );
+        assert_eq!(default_end(&format!("{track}2.1.0 C4 0 80\n")), "3.1.0");
+        assert_eq!(default_end(&format!("{track}5.4.0 cc64 0\n")), "6.1.0");
+        assert_eq!(
+            default_end(&format!("tempo 90 at 9.1.0\n{track}1.1.0 C4 1 80\n")),
+            "2.1.0",
+            "a tempo change holds no bar"
+        );
     }
 }

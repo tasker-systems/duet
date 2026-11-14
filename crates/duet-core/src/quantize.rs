@@ -119,7 +119,9 @@ impl Song {
     /// - Notes of the same pitch that quantizing puts one inside another are kept as they
     ///   come out; writing them to MIDI refuses them by name, as it does any nested note.
     ///
-    /// Fails, naming the grid, when one step is not a whole number of this song's ticks.
+    /// Fails, naming the grid, when one step is not a whole number of this song's ticks,
+    /// and, naming the note, when the song names an [end](Song::end) and a note quantizing
+    /// would end past it. The end is never moved and the note is never cut to fit.
     pub fn quantized(&self, grid: Grid) -> Result<Song> {
         let tpq = self.ticks_per_quarter;
         let map = self.time_map()?;
@@ -141,6 +143,7 @@ impl Song {
                 note.beats = beats_from_ticks(q_end - q_start, tpq);
             }
         }
+        out.check_end()?;
         Ok(out)
     }
 }

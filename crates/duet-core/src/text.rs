@@ -8,6 +8,7 @@
 //! time 4/4
 //! key D minor
 //! tempo 96 at 9.1.0
+//! end 13.1.0
 //!
 //! [track "Piano" ch1 prog0]
 //! 1.1.0     D4    1      80
@@ -31,7 +32,7 @@ use crate::time::{Key, Position, TimeSig, parse_beats};
 
 /// The words that start a header line. A header line inside a track is an error rather
 /// than a song-wide change, so where a tempo, meter or key change sits is never in doubt.
-const HEADER_KEYWORDS: [&str; 5] = ["title", "tpq", "tempo", "time", "key"];
+const HEADER_KEYWORDS: [&str; 6] = ["title", "tpq", "tempo", "time", "key", "end"];
 
 const HEADER_COMMENT: &str = "# notefmt v1: positions are bar.beat.tick, lengths are quarter notes";
 
@@ -65,7 +66,7 @@ impl Song {
     }
 
     /// The song's header as notefmt header lines: title, tpq, tempo, time and key, then
-    /// their changes. Other formats that share the notefmt header (the drum grid) write it
+    /// their changes, then the end when the song names one. Other formats that share the notefmt header (the drum grid) write it
     /// with this, so both agree on what each line means.
     pub fn header_text(&self) -> String {
         let mut out = String::new();
@@ -77,7 +78,7 @@ impl Song {
     /// Applies one notefmt header line, such as `tempo 96 at 9.1.0`, to this song.
     ///
     /// Returns `Ok(false)` and changes nothing when the line's first word is not a header
-    /// keyword (title, tpq, tempo, time or key), so a format that extends the header can
+    /// keyword (title, tpq, tempo, time, key or end), so a format that extends the header can
     /// read its own lines. Fails when the line is a header line but malformed.
     pub fn apply_header_line(&mut self, line: &str) -> Result<bool> {
         let line = line.trim();
@@ -135,6 +136,7 @@ impl Song {
                     Some(at) => self.time_changes.push(TimeChange { at, time_sig }),
                 }
             }
+            ("end", None) => self.end = Some(value.parse()?),
             ("key", at) => {
                 let key: Key = value.parse()?;
                 match at {
@@ -175,6 +177,9 @@ impl Song {
         }
         for c in &self.tempo_changes {
             writeln!(out, "tempo {} at {}", c.bpm, c.at)?;
+        }
+        if let Some(end) = self.end {
+            writeln!(out, "end {end}")?;
         }
         Ok(())
     }
@@ -259,7 +264,7 @@ impl Song {
                 None => {
                     if !song.apply_header_line(line).map_err(ctx)? {
                         return Err(err(format!(
-                            "'{}' is not a header line; expected title, tpq, tempo, time, key or a [track]",
+                            "'{}' is not a header line; expected title, tpq, tempo, time, key, end or a [track]",
                             words[0]
                         )));
                     }

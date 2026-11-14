@@ -16,7 +16,8 @@
 //!
 //! A grid converts to a song ([`DrumGrid::to_song`]) and back ([`DrumGrid::from_song`])
 //! exactly: grid → song → grid gives the same grid, as long as its lanes are in the map's
-//! row order and each is played at least once, and the same number of bars is asked for.
+//! row order and each is played at least once. No bar count is needed: when a grid ends
+//! in empty bars, or inside its last bar ([`DrumGrid::end`]), the song names that end.
 //! Reading a song never moves or alters a note to make it fit; what does not fit is
 //! refused by name.
 //!
@@ -26,7 +27,7 @@
 //! let text = "grid 1/8\n\n[bars 1]\nsnare | . . x . . . x . |\nkick  | x . . . x . . . |\n";
 //! let grid = DrumGrid::from_text(text)?;
 //! let song = grid.to_song()?;
-//! let back = DrumGrid::from_song(&song, grid.grid, &LaneMap::gm(), None, Some(1))?;
+//! let back = DrumGrid::from_song(&song, grid.grid, &LaneMap::gm(), None, None)?;
 //! assert_eq!(back, grid);
 //! assert_eq!(DrumGrid::from_text(&grid.to_text()?)?, grid);
 //! # Ok::<(), duet_drums::Error>(())
