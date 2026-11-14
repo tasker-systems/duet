@@ -40,9 +40,9 @@ pub enum DrumsCommand {
         /// channel 10.
         #[arg(long)]
         track: Option<String>,
-        /// How many bars the grid runs to. Without it, the grid runs to the song's end
-        /// when it names one, or else to the last bar that holds a hit. A count that
-        /// disagrees with the song's end is refused.
+        /// How many bars the grid runs to. Without it, the grid runs to the song's end:
+        /// the one it names, or else the bar line after its last bar with a note or
+        /// control. A hit or a tempo, meter or key change past the bars is refused.
         #[arg(long)]
         bars: Option<u32>,
         /// Snap each velocity to the nearest of the text form's levels (g, x, X) as the

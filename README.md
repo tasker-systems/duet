@@ -101,22 +101,26 @@ optionally the General MIDI program (0 to 127) at the start. Then one event per 
 
 ### Where a song ends
 
-A song can name its end with `end`, a position like any other: `end 9.1.0` is the bar line
-before bar 9, and `end 8.3.0` stops halfway through bar 8, for a pickup ending. It is kept by
-every format: the header line in text and drum grids, `end` in JSON and TOML, and MIDI's end of
-track, where every track then ends.
+A song names its end with `end`, a position like any other: `end 9.1.0` is the bar line
+before bar 9, and `end 8.3.0` stops halfway through bar 8, for a pickup ending. Every format
+keeps it: the header line in text and drum grids, `end` in JSON and TOML, and MIDI's end of
+track, where every track ends.
+
+**Every file `duet` writes states its end**, so a file shared between people means the same
+on every machine, whatever defaults each has set.
 
 - A note may end exactly on the end. Anything past it is refused, naming it and the end:
   `track 'Piano': the D4 at 8.4.0, which ends at 9.1.240, lies past the song's end at 9.1.0`.
   That goes for notes, controls and tempo, meter or key changes, when reading, writing MIDI
   and quantizing. Nothing is cut to fit.
-- A song with no `end` is written exactly as before: in MIDI, each track ends at its last
-  event. Where a length is needed (a drum grid's bar count), it ends at the bar line after
-  the last bar holding a note or control.
-- Reading MIDI, the file's end (its latest end of track) becomes the song's when some track's
-  end of track comes after the event before it, or when it lies past every event kept. A file
-  whose tracks each end at their last event names no end, so every file `duet` wrote from a
-  song with no end reads back with none.
+- A song that names no end gets the default: the bar line after the last bar holding a
+  note or control, and never before a tempo, meter or key change. A file written from it
+  states that end.
+- Reading MIDI, the file's end (its latest end of track) becomes the song's when some
+  track's end of track comes after the event before it, or when it lies past every event
+  kept. A file whose tracks each end exactly at their last event cannot say whether it means
+  an end there or none, so it reads as naming none and the default applies; the music is
+  the same either way.
 
 ### Exact round-trips
 
@@ -223,11 +227,11 @@ changes) mean what they mean in notefmt, plus:
 | `lane shaker-2 82` | Adds a lane, or moves a map lane to another key |
 | `channel 10` | The MIDI channel, when it is not the map's (10) |
 | `vel g 40 x 90 X 120` | The velocities the cells stand for, when they are not these |
-| `end 8.3.0` | Where the grid stops, when it stops on a step inside its last bar |
+| `end 3.1.0` | Where the grid stops: the bar line after its last bar, or a step inside that bar |
 
-A grid's bars say where it ends, so `end` is only for a grid that stops inside its last bar:
-the cells from that step on must be rests. An `end` on a bar line is refused, since the bars
-already say it.
+The writer always states the end. An `end` inside the last bar must be on a step, and the
+cells from that step on must be rests. An `end` that contradicts the bars, before the last
+bar or past it, is refused by name, and so is a tempo, meter or key change past the end.
 
 **Blocks.** `[bars 1-4]` holds rows for those bars. Blocks cover every bar in order from
 bar 1, so an empty bar is written as rests, and every block lists the same lanes in the
@@ -255,13 +259,12 @@ takes its drum track (the one on channel 10, or the one `--track` names) and kee
 note starts and velocities: lengths, controls and other tracks are left out, and `duet`
 says how many. Nothing is moved to fit. A note off the grid (quantize it first, with
 `duet song quantize`), on a key no lane plays, or on the same lane and step as another is
-refused by name. The grid runs to the song's end when it names one (a mid-bar end, which
-must be on a step, becomes the grid's `end`), or else to the last bar with a hit, or to
-`--bars`. A `--bars` that disagrees with the song's end is refused, naming both.
+refused by name. The grid runs to `--bars` when it is given, or else to the song's end, the
+one it names or its default (a mid-bar end, which must be on a step, becomes the grid's
+`end`). `--bars` never cuts anything: a hit or a tempo, meter or key change past it is
+refused by name.
 
-Rendering names the grid's end in the song only when it is not where a song with no end
-ends anyway, so a grid whose last bar holds a hit renders as it always has, and one that
-ends in empty bars carries them.
+Rendering gives the song the grid's end, so trailing empty bars and a mid-bar end survive.
 
 Grid → song → grid gives back the same grid, through MIDI too, with no bar count asked for,
 trailing empty bars and a mid-bar end included, when its lanes are in the map's row order
@@ -295,4 +298,5 @@ per quarter, and check every kept event survives MIDI to text to MIDI unchanged.
 grids and resolutions, with any velocity, ending in empty bars or inside a bar, and check
 grid → song → grid, through MIDI, JSON and TOML, and the text form all round-trip unchanged.
 `crates/duet-cli/tests/golden` holds what `duet` wrote from the samples before a song could
-name an end, and a test checks every byte is still the same.
+name an end, and a test checks that every file written now holds the same music, event for
+event, and differs only by stating its end.

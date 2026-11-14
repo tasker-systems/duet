@@ -361,6 +361,13 @@ fn played_take(tpq: u16, format: Format) -> (Vec<u8>, Vec<RawNote>) {
     (bytes, expected)
 }
 
+/// The song as every writer gives it back: with its end stated.
+fn stated(song: &Song) -> Song {
+    let mut song = song.clone();
+    song.end = Some(song.stated_end().unwrap());
+    song
+}
+
 fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
     let original = events(bytes);
     assert_eq!(
@@ -368,10 +375,14 @@ fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
         "test file is built as intended"
     );
 
-    let song = Song::from_midi(bytes).unwrap();
+    // The generated file's tracks each end at their last event, so it names no end; every
+    // form written from it states the default.
+    let read = Song::from_midi(bytes).unwrap();
+    assert_eq!(read.end, None);
+    let song = stated(&read);
 
     // Text, JSON and TOML all give back the same song.
-    let text = song.to_text();
+    let text = read.to_text();
     let from_text = Song::from_text(&text).unwrap();
     assert_eq!(from_text, song, "text round-trip; text was:\n{text}");
     assert_eq!(from_text.to_text(), text, "text is stable");
@@ -527,6 +538,7 @@ fn sample_sketch_round_trips() {
     let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
     assert_eq!(back, song);
     assert_eq!(back.to_text(), text, "the sample is in canonical form");
+    assert!(text.contains("\nend 5.1.0\n"), "the sample states its end");
 }
 
 #[test]
@@ -639,7 +651,7 @@ fn black_keys_are_spelled_by_the_key_in_force() {
             "3.2.0 Eb4 1 80"
         ]
     );
-    assert_eq!(back, song);
+    assert_eq!(back, stated(&song));
 }
 
 #[test]
@@ -658,7 +670,10 @@ fn format_0_sequence_name_is_the_title() {
         [("Channel 1", 1), ("Channel 2", 2), ("Channel 10", 10)]
     );
     // Written as format 1, the title and names come back unchanged.
-    assert_eq!(Song::from_midi(&song.to_midi().unwrap()).unwrap(), song);
+    assert_eq!(
+        Song::from_midi(&song.to_midi().unwrap()).unwrap(),
+        stated(&song)
+    );
 }
 
 #[test]
@@ -1017,21 +1032,43 @@ fn what_lies_past_the_end_is_refused_by_name_never_truncated() {
     assert_eq!(song, before, "never changed");
 }
 
-/// With no end named, a song's MIDI is written exactly as before: each track ends at
-/// its last event, and the file reads back with no end.
+/// With no end named, every writer states the default end: the text says `end`, and
+/// every MIDI track ends there. A MIDI file whose tracks each end at their last event
+/// names no end, so the default applies when it is read.
 #[test]
-fn a_song_with_no_end_is_written_as_before() {
+fn a_song_with_no_end_states_its_default_end() {
     let song = Song::from_text(
         "tpq 480\ntempo 90 at 1.3.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n2.1.0 cc64 0\n",
     )
     .unwrap();
     assert_eq!(song.end, None);
+    assert!(
+        song.to_text().contains("\nend 3.1.0\n"),
+        "{}",
+        song.to_text()
+    );
     let midi = song.to_midi().unwrap();
     assert_eq!(
         ends_of_track(&midi),
-        vec![960, 1920],
-        "conductor, then the track"
+        vec![3840, 3840],
+        "every track ends at 3.1.0"
     );
-    assert_eq!(Song::from_midi(&midi).unwrap().end, None);
-    assert!(!song.to_text().contains("end"), "{}", song.to_text());
+    assert_eq!(Song::from_midi(&midi).unwrap(), stated(&song));
+
+    // A file from another tool, each track ending at its last event: no end, so the
+    // default applies, and the music is the same.
+    let bytes = save(
+        Format::Parallel,
+        480,
+        vec![track(vec![(0, on(0, 60, 80)), (480, off(0, 60, true))])],
+    );
+    let read = Song::from_midi(&bytes).unwrap();
+    assert_eq!(read.end, None);
+    assert_eq!(read.stated_end().unwrap().to_string(), "2.1.0");
+
+    // The default never comes before a tempo, meter or key change, so a song that names
+    // no end is never refused for one.
+    let late = Song::from_text("tempo 90 at 9.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n").unwrap();
+    let midi = late.to_midi().unwrap();
+    assert_eq!(ends_of_track(&midi), vec![8 * 1920, 8 * 1920]);
 }

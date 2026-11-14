@@ -8,7 +8,7 @@
 //! ```
 //! use duet_core::Song;
 //!
-//! let text = "tempo 92\ntime 4/4\nkey D minor\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n";
+//! let text = "tempo 92\ntime 4/4\nkey D minor\nend 2.1.0\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n";
 //! let song = Song::from_text(text)?;
 //! assert_eq!(Song::from_text(&song.to_text())?, song);
 //! # Ok::<(), duet_core::Error>(())

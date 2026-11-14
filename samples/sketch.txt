@@ -4,6 +4,7 @@ tpq 480
 tempo 92
 time 4/4
 key D minor
+end 5.1.0
 
 [track "Piano" ch1 prog0]
 1.1.0     cc64  127

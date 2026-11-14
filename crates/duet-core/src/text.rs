@@ -66,7 +66,8 @@ impl Song {
     }
 
     /// The song's header as notefmt header lines: title, tpq, tempo, time and key, then
-    /// their changes, then the end when the song names one. Other formats that share the notefmt header (the drum grid) write it
+    /// their changes, then the end: the one the song names, or its default
+    /// ([`Song::stated_end`]). Other formats that share the notefmt header (the drum grid) write it
     /// with this, so both agree on what each line means.
     pub fn header_text(&self) -> String {
         let mut out = String::new();
@@ -178,7 +179,8 @@ impl Song {
         for c in &self.tempo_changes {
             writeln!(out, "tempo {} at {}", c.bpm, c.at)?;
         }
-        if let Some(end) = self.end {
+        // Every written file says where it ends, whatever default computed it.
+        if let Ok(end) = self.stated_end() {
             writeln!(out, "end {end}")?;
         }
         Ok(())

@@ -38,9 +38,10 @@ pub struct Song {
     /// line before bar 9), or one inside a bar, for a song that stops mid-bar. Nothing in
     /// the song may lie past it: a note may end on it, and no note may end after it.
     ///
-    /// `None` means the song names no end. A song that names none is written exactly as
-    /// it always was, and where a length is needed its [default end](Song::default_end)
-    /// applies: the end of the last bar holding an event.
+    /// `None` means the song names no end, and its [default end](Song::default_end)
+    /// applies: the end of the last bar holding an event. Every writer states the end it
+    /// uses ([`Song::stated_end`]), so a written file always says where it ends, whatever
+    /// default computed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Position>,
     pub tracks: Vec<Track>,
@@ -252,17 +253,43 @@ impl Song {
         Ok(())
     }
 
+    /// The end the song names, or else its [default end](Song::default_end): the end
+    /// every writer states.
+    pub fn stated_end(&self) -> Result<Position> {
+        match self.end {
+            Some(end) => Ok(end),
+            None => self.default_end(),
+        }
+    }
+
     /// The end the song has when it names none: the bar line after the last bar that
     /// holds a note or a control. A note holds every bar it sounds in, so one that ends
     /// exactly on a bar line does not hold the bar after it; a control, or a note of no
     /// length, holds the bar it sits in. A song with no notes or controls ends at `1.1.0`.
     ///
-    /// Tempo, meter and key changes do not hold a bar: they describe the song's time,
-    /// not what is played in it.
+    /// Tempo, meter and key changes do not hold a bar, but the default never comes before
+    /// one: a change later than the last bar played moves the end to the first bar line
+    /// at or after it.
     pub fn default_end(&self) -> Result<Position> {
         let map = self.time_map()?;
         let tpq = self.ticks_per_quarter;
         let mut last_bar = 0;
+        let changes = self
+            .time_changes
+            .iter()
+            .map(|c| c.at)
+            .chain(self.tempo_changes.iter().map(|c| c.at))
+            .chain(self.key_changes.iter().map(|c| c.at));
+        for at in changes {
+            // The bar line at or after the change: the bar before it, when it is on one.
+            let at = map.position(map.tick(at)?);
+            let before = if at.beat == 1 && at.tick == 0 {
+                at.bar - 1
+            } else {
+                at.bar
+            };
+            last_bar = last_bar.max(before);
+        }
         for track in &self.tracks {
             for note in &track.notes {
                 let start = map.tick(note.at)?;
@@ -315,8 +342,16 @@ mod tests {
         assert_eq!(default_end(&format!("{track}5.4.0 cc64 0\n")), "6.1.0");
         assert_eq!(
             default_end(&format!("tempo 90 at 9.1.0\n{track}1.1.0 C4 1 80\n")),
-            "2.1.0",
-            "a tempo change holds no bar"
+            "9.1.0",
+            "a tempo change holds no bar, but the end never comes before it"
+        );
+        assert_eq!(
+            default_end(&format!("key D minor at 4.2.0\n{track}1.1.0 C4 1 80\n")),
+            "5.1.0"
+        );
+        assert_eq!(
+            default_end(&format!("tempo 90 at 1.3.0\n{track}5.1.0 C4 1 80\n")),
+            "6.1.0"
         );
     }
 }

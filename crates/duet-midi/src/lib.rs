@@ -8,7 +8,7 @@
 //! use duet_midi::Midi;
 //!
 //! let song = Song::from_text(
-//!     "tempo 92\ntime 4/4\nkey D minor\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n",
+//!     "tempo 92\ntime 4/4\nkey D minor\nend 2.1.0\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n",
 //! )?;
 //! let midi = song.to_midi()?;
 //! assert_eq!(Song::from_midi(&midi)?, song);
@@ -385,9 +385,9 @@ impl Midi for Song {
     /// Writes the song as a format 1 Standard MIDI File: a first track with the title,
     /// tempo, time signature and key, then one track per [`Track`].
     ///
-    /// When the song names an [end](Song::end), every track ends there, and anything past
-    /// it is refused by name ([`Song::check_end`]). When it names none, each track ends at
-    /// its own last event, as it always has.
+    /// Every track ends at the song's [stated end](Song::stated_end): the end it names,
+    /// or else its default. Anything past a named end is refused by name
+    /// ([`Song::check_end`]).
     fn to_midi(&self) -> Result<Vec<u8>> {
         let tpq = self.ticks_per_quarter;
         if tpq == 0 || tpq > 0x7FFF {
@@ -397,7 +397,7 @@ impl Midi for Song {
         }
         let map = self.time_map()?;
         self.check_end()?;
-        let end = self.end.map(|end| map.tick(end)).transpose()?;
+        let end = Some(map.tick(self.stated_end()?)?);
 
         // Each event is (tick, order class, sequence, event); sorting by the first three
         // keeps a note's end before a new note at the same tick and keeps file order.
@@ -608,9 +608,8 @@ fn check_no_nested_notes(track: &str, notes: &[(u64, u64, &Note)]) -> Result<()>
     Ok(())
 }
 
-/// Sorts timed events, turns them into delta times and ends the track: at `end` when the
-/// song names one (every event is at or before it, as [`Song::check_end`] made sure), or
-/// else at its last event.
+/// Sorts timed events, turns them into delta times and ends the track at `end` (every
+/// event is at or before it), or at its last event when there is none.
 fn finish_track(
     mut events: Vec<(u64, u8, usize, TrackEventKind<'_>)>,
     end: Option<u64>,
