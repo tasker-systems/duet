@@ -2,12 +2,19 @@ use std::fmt;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
+use symphonia::core::codecs::audio::well_known::{
+    CODEC_ID_AAC, CODEC_ID_AC3, CODEC_ID_ADPCM_IMA_QT, CODEC_ID_ADPCM_IMA_WAV, CODEC_ID_ADPCM_MS,
+    CODEC_ID_ALAC, CODEC_ID_DCA, CODEC_ID_EAC3, CODEC_ID_MONKEYS_AUDIO, CODEC_ID_MP1, CODEC_ID_MP2,
+    CODEC_ID_OPUS, CODEC_ID_SPEEX, CODEC_ID_TTA, CODEC_ID_WAVPACK, CODEC_ID_WMA,
+};
+use symphonia::core::codecs::audio::{
+    AudioCodecId, AudioCodecParameters, AudioDecoder, AudioDecoderOptions,
+};
 use symphonia::core::errors::Error as DecodeFailure;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
 use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::{MetadataOptions, RawValue};
+use symphonia::core::meta::{MetadataOptions, MetadataRevision, RawValue};
 
 use crate::error::{Error, Result};
 use crate::stage::{Chunk, Source};
@@ -30,6 +37,9 @@ pub struct FileSource {
     track_id: u32,
     /// Frames already yielded.
     next_frame: u64,
+    /// Where the last packet ended, in the track's time base (frames), to notice packets the
+    /// container reader skipped.
+    packet_end: Option<i64>,
     gapless: Option<Gapless>,
 }
 
@@ -87,37 +97,36 @@ impl FileSource {
                 _ => undecodable("not a recognised audio format"),
             })?;
 
-        let gapless = format.metadata().current().and_then(|revision| {
-            revision.media.tags.iter().find_map(|tag| match &tag.raw {
-                raw if raw.key.ends_with("iTunSMPB") => match &raw.value {
-                    RawValue::String(value) => parse_itunsmpb(value),
-                    _ => None,
-                },
-                _ => None,
-            })
-        });
-
         let track = format
             .default_track(TrackType::Audio)
             .ok_or_else(|| undecodable("no audio track"))?;
+        let track_id = track.id;
         let params = track
             .codec_params
             .as_ref()
             .and_then(|p| p.audio())
-            .ok_or_else(|| undecodable("no audio track"))?;
-        if declares_he_aac(params) {
+            .ok_or_else(|| undecodable("no audio track"))?
+            .clone();
+        if declares_he_aac(&params) {
             return Err(undecodable("HE-AAC"));
         }
         let decoder = symphonia::default::get_codecs()
-            .make_audio_decoder(params, &AudioDecoderOptions::default())
-            .map_err(|_| undecodable(&format!("codec {:?}", params.codec)))?;
-        let track_id = track.id;
+            .make_audio_decoder(&params, &AudioDecoderOptions::default())
+            .map_err(|_| undecodable(&codec_name(params.codec)))?;
+        // Only AAC needs the tag: Symphonia's MP3 decoder trims by itself, and a second trim
+        // from an ID3 copy of the tag would cut twice.
+        let gapless = if params.codec == CODEC_ID_AAC {
+            format.metadata().current().and_then(itunsmpb)
+        } else {
+            None
+        };
         Ok(FileSource {
             path: path.to_path_buf(),
             format,
             decoder,
             track_id,
             next_frame: 0,
+            packet_end: None,
             gapless,
         })
     }
@@ -134,10 +143,19 @@ impl Source for FileSource {
             if packet.track_id != self.track_id {
                 continue;
             }
+            // A reader that skips a damaged packet leaves a gap in the timestamps; count it.
+            if let Some(end) = self.packet_end {
+                self.next_frame += u64::try_from(packet.pts.get() - end).unwrap_or(0);
+            }
+            self.packet_end = Some(packet.pts.get().saturating_add_unsigned(packet.dur.get()));
             let buffer = match self.decoder.decode(&packet) {
                 Ok(buffer) => buffer,
-                // A damaged packet is dropped; the stream goes on.
-                Err(DecodeFailure::DecodeError(_)) => continue,
+                // A damaged packet is dropped and its frames still counted, so the start
+                // frames of what follows stay true; the stream goes on.
+                Err(DecodeFailure::DecodeError(_)) => {
+                    self.next_frame += packet.dur.get();
+                    continue;
+                }
                 Err(e) => return Err(self.failed(&e)),
             };
             if buffer.frames() == 0 {
@@ -181,6 +199,45 @@ impl Gapless {
         let kept = self.keep.min(frames - dropped);
         self.keep -= kept;
         samples.truncate(kept as usize * channels);
+    }
+}
+
+/// The `iTunSMPB` tag of a metadata revision, if it has one.
+fn itunsmpb(revision: &MetadataRevision) -> Option<Gapless> {
+    revision.media.tags.iter().find_map(|tag| {
+        let RawValue::String(value) = &tag.raw.value else {
+            return None;
+        };
+        if tag.raw.key.ends_with("iTunSMPB") {
+            parse_itunsmpb(value)
+        } else {
+            None
+        }
+    })
+}
+
+/// A readable name for a codec Symphonia cannot decode, or its id when it has none.
+fn codec_name(id: AudioCodecId) -> String {
+    let named = [
+        (CODEC_ID_OPUS, "Opus"),
+        (CODEC_ID_SPEEX, "Speex"),
+        (CODEC_ID_MP1, "MP1"),
+        (CODEC_ID_MP2, "MP2"),
+        (CODEC_ID_AC3, "AC-3"),
+        (CODEC_ID_EAC3, "E-AC-3"),
+        (CODEC_ID_DCA, "DTS"),
+        (CODEC_ID_WMA, "WMA"),
+        (CODEC_ID_ALAC, "ALAC"),
+        (CODEC_ID_WAVPACK, "WavPack"),
+        (CODEC_ID_MONKEYS_AUDIO, "Monkey's Audio"),
+        (CODEC_ID_TTA, "TTA"),
+        (CODEC_ID_ADPCM_MS, "ADPCM"),
+        (CODEC_ID_ADPCM_IMA_WAV, "ADPCM"),
+        (CODEC_ID_ADPCM_IMA_QT, "ADPCM"),
+    ];
+    match named.iter().find(|(known, _)| *known == id) {
+        Some((_, name)) => (*name).to_owned(),
+        None => format!("audio codec {id}"),
     }
 }
 
@@ -240,7 +297,11 @@ fn declares_he_aac(params: &AudioCodecParameters) -> bool {
         if bits.read(11)? != SYNC_EXTENSION {
             return None;
         }
-        Some(audio_object_type(&mut bits)? == 5)
+        if audio_object_type(&mut bits)? != 5 {
+            return None;
+        }
+        // sbrPresentFlag: 0 declares the extension without SBR, which is plain AAC-LC.
+        Some(bits.read(1)? == 1)
     };
     declared_extension().unwrap_or(false)
 }
@@ -277,6 +338,7 @@ impl Bits<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use symphonia::core::common::FourCc;
 
     #[test]
     fn itunsmpb_gives_the_delay_and_the_valid_length() {
@@ -337,6 +399,19 @@ mod tests {
     fn sbr_declared_after_an_lc_header_is_he_aac() {
         // object type 2, 24 kHz, stereo, then the 0x2b7 extension naming object type 5.
         assert!(declares_he_aac(&params(&[0x13, 0x10, 0x56, 0xe5, 0x98])));
+    }
+
+    #[test]
+    fn a_sync_extension_with_sbr_absent_is_plain_aac_lc() {
+        // The same bytes with sbrPresentFlag cleared: the extension is there, SBR is not.
+        assert!(!declares_he_aac(&params(&[0x13, 0x10, 0x56, 0xe5, 0x18])));
+    }
+
+    #[test]
+    fn unsupported_codecs_are_named() {
+        assert_eq!(codec_name(CODEC_ID_OPUS), "Opus");
+        assert_eq!(codec_name(CODEC_ID_ALAC), "ALAC");
+        assert!(codec_name(AudioCodecId::new(FourCc::new(*b"zzzz"))).starts_with("audio codec"));
     }
 
     #[test]

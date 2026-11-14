@@ -166,3 +166,23 @@ fn chunks_are_bounded() {
     assert!(chunks > 1, "the file came as one chunk");
     assert_eq!(frames, 60 * 44_100);
 }
+
+#[test]
+fn a_damaged_packet_leaves_a_gap_in_start_frames_not_a_drift() {
+    let mut bytes = fs::read(fixture("tone-mono44.flac")).unwrap();
+    for byte in &mut bytes[10_000..10_200] {
+        *byte ^= 0xff;
+    }
+    let path = scratch("damaged.flac");
+    fs::write(&path, bytes).unwrap();
+
+    let mut source = FileSource::open(&path).unwrap();
+    let (mut decoded, mut end) = (0u64, 0u64);
+    while let Some(chunk) = source.next_chunk().unwrap() {
+        let frames = chunk.samples.len() as u64 / u64::from(chunk.channels);
+        decoded += frames;
+        end = chunk.start_frame + frames;
+    }
+    assert!(decoded < 44_100, "nothing was damaged: {decoded} frames");
+    assert_eq!(end, 44_100, "the stream's end drifted");
+}

@@ -11,6 +11,7 @@ pub enum Error {
     /// A file whose audio duet cannot decode: HE-AAC, a codec Symphonia lacks, or not audio.
     #[error("cannot decode {}: {codec}", path.display())]
     Undecodable {
+        /// The file that was refused.
         path: PathBuf,
         /// What the file is, as far as it could be told.
         codec: String,

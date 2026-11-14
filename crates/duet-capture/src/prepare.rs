@@ -46,7 +46,8 @@ impl Stage for Prepare {
             None => {
                 self.input_rate = Some(input.rate);
                 if input.rate != self.rate {
-                    self.resampling = Some(Resampling::new(input.rate, self.rate)?);
+                    self.resampling =
+                        Some(Resampling::new(input.rate, self.rate, input.start_frame)?);
                 }
             }
             Some(rate) if rate != input.rate => {
@@ -114,7 +115,9 @@ struct Resampling {
     input_frames: u64,
     /// Output frames still to drop: the filter's delay, which would start the stream late.
     to_skip: usize,
-    /// Output frames returned so far.
+    /// Where the first output frame sits: the first input's start, at the output rate.
+    base: u64,
+    /// Output frames numbered so far, counting from zero like the source, so from `base`.
     emitted: u64,
 }
 
@@ -128,7 +131,8 @@ impl std::fmt::Debug for Resampling {
 }
 
 impl Resampling {
-    fn new(from: u32, to: u32) -> Result<Resampling> {
+    /// `start_frame` is the first input frame's position, counted at `from`.
+    fn new(from: u32, to: u32, start_frame: u64) -> Result<Resampling> {
         let fft = Fft::new(
             from as usize,
             to as usize,
@@ -138,6 +142,7 @@ impl Resampling {
         )
         .map_err(|e| Error::Invalid(format!("cannot resample {from} Hz to {to} Hz: {e}")))?;
         let to_skip = fft.output_delay();
+        let base = (start_frame * u64::from(to) + u64::from(from) / 2) / u64::from(from);
         Ok(Resampling {
             fft,
             from,
@@ -145,7 +150,8 @@ impl Resampling {
             pending: Vec::new(),
             input_frames: 0,
             to_skip,
-            emitted: 0,
+            base,
+            emitted: base,
         })
     }
 
@@ -162,8 +168,9 @@ impl Resampling {
 
     /// Flushes the filter with silence, and returns exactly the frames the input is worth.
     fn finish(&mut self) -> Result<Vec<f32>> {
-        let wanted = (self.input_frames * u64::from(self.to) + u64::from(self.from) / 2)
-            / u64::from(self.from);
+        let wanted = self.base
+            + (self.input_frames * u64::from(self.to) + u64::from(self.from) / 2)
+                / u64::from(self.from);
         let mut produced = Vec::new();
         while self.emitted + (produced.len() as u64) < wanted {
             let held = self.pending.len();
@@ -255,7 +262,10 @@ mod tests {
         let Error::Invalid(message) = err else {
             panic!("expected Invalid, got {err:?}");
         };
-        assert!(message.contains('7') && message.contains('2'), "{message}");
+        assert!(
+            message.contains("7 samples") && message.contains("2-channel"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -313,6 +323,25 @@ mod tests {
             expected += m.samples.len() as u64;
         }
         assert_eq!(expected, 5513); // 12000 frames at 48 kHz, to 22.05 kHz, rounded
+    }
+
+    #[test]
+    fn both_paths_number_output_from_the_first_start_frame_at_the_output_rate() {
+        // A first chunk at frame 5000: that is frame 5000 at the output rate when nothing is
+        // resampled, and frame 2500 when 44.1 kHz becomes 22.05 kHz.
+        for (rate, first) in [(22_050, 5000), (44_100, 2500)] {
+            let mut prepare = Prepare::new(22_050);
+            let chunks = (0..4)
+                .map(|i| chunk(rate, 1, 5000 + i * 3000, vec![0.1; 3000]))
+                .collect();
+            let out = run(&mut prepare, chunks);
+            assert_eq!(out[0].start_frame, first, "{rate} Hz");
+            let mut next = first;
+            for m in &out {
+                assert_eq!(m.start_frame, next, "{rate} Hz");
+                next += m.samples.len() as u64;
+            }
+        }
     }
 
     #[test]
