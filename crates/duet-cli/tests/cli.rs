@@ -12,7 +12,9 @@ fn root() -> PathBuf {
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("duet-cli-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+    // The path duet sees: its working directory comes back with symlinks resolved, and
+    // macOS's temp dir is a symlink (/var is /private/var).
+    dir.canonicalize().expect("temp dir resolves")
 }
 
 /// Runs duet with no config at all: an empty user config directory, and a working
