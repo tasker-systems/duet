@@ -42,6 +42,7 @@ notefmt convert take.txt take.mid      # text back to MIDI
 notefmt convert take.mid take.json     # or JSON, or .toml
 notefmt show take.mid                  # print as text
 notefmt show take.mid --to json
+notefmt quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
 ```
 
 Formats come from the file extension (`.mid`/`.midi`, `.json`, `.toml`, anything else is
@@ -115,8 +116,24 @@ channel and ends before it. MIDI has no note ids, so its note-off would end the 
 instead. Converting such a song to MIDI is an error that names both notes. Notes that only
 overlap, or that start together, are kept exactly.
 
-There is no quantizing: played timing comes through as it was played. A quantize option is
-a likely next step.
+Nothing is quantized unless you ask: played timing comes through as it was played.
+
+### Quantizing
+
+`notefmt quantize` (or `Song::quantized` in the library) writes a copy with every note's
+start and end moved to the nearest point of a grid. The input is never changed.
+
+- The grid is written `1/16` for sixteenths or `1/8t` for triplet eighths. A grid whose step
+  is not a whole number of the file's ticks is refused, naming the grid and the resolution.
+- The grid restarts at every bar line, so bar lines are always on it. In a bar cut short by
+  a time signature change, the last step before the bar line is short.
+- A tick exactly halfway between two grid points goes to the later one.
+- A note that would collapse to zero length gets one step instead, so no played note
+  disappears. A note that was already zero length stays that way.
+- Pitch, velocity, track and note order are kept. Controls, tempo, key and time signature
+  changes are not moved.
+- Two notes of the same pitch can end up one inside the other. Writing those to MIDI is
+  refused by name, as above; quantize to text to see and fix them.
 
 ### As a library
 
