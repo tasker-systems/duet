@@ -3,63 +3,10 @@
 //! flags are never guessed and never silently ignored; and a grid survives a round trip
 //! through MIDI by `convert` alone.
 
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::Output;
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-fn golden(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/golden")
-        .join(name)
-}
-
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("duet-convert-{name}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
-
-/// Runs duet in `cwd` with `user` as its user config directory and `stdin` on standard
-/// input. `cwd` is a scratch directory, so no `.duet` above the checkout is found.
-fn duet_with(cwd: &Path, user: &Path, args: &[&str], stdin: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_duet"))
-        .args(args)
-        .current_dir(cwd)
-        .env("DUET_CONFIG_DIR", user)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("run duet");
-    child
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(stdin)
-        .expect("write stdin");
-    child.wait_with_output().expect("duet output")
-}
-
-/// Runs duet with no config at all.
-fn duet(dir: &Path, args: &[&str]) -> Output {
-    duet_with(dir, &dir.join("no-config"), args, b"")
-}
-
-fn ok(out: &Output, what: &str) {
-    assert!(
-        out.status.success(),
-        "{what}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-fn s(path: &Path) -> &str {
-    path.to_str().expect("utf-8 path")
-}
+use duet_e2e::{duet, duet_with, golden, ok, root, s, scratch};
 
 /// The grids to read: the sample, the goldens, and the same grid in its TOML form.
 fn grids(dir: &Path) -> Vec<PathBuf> {
