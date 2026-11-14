@@ -15,6 +15,7 @@ use crate::lanes::valid_lane_name;
 /// the same fields of a [`Song`] mean. Every bar must be a whole number of steps of
 /// [`DrumGrid::grid`], so each column is one step wide.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct DrumGrid {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -179,18 +180,17 @@ impl DrumGrid {
 
     /// The conductor, and the grid's end, as a song with no tracks.
     pub fn conductor(&self) -> Song {
-        Song {
-            title: self.title.clone(),
-            ticks_per_quarter: self.ticks_per_quarter,
-            tempo_bpm: self.tempo_bpm,
-            time_sig: self.time_sig,
-            key: self.key,
-            tempo_changes: self.tempo_changes.clone(),
-            time_changes: self.time_changes.clone(),
-            key_changes: self.key_changes.clone(),
-            end: self.end,
-            tracks: Vec::new(),
-        }
+        let mut song = Song::default();
+        song.title = self.title.clone();
+        song.ticks_per_quarter = self.ticks_per_quarter;
+        song.tempo_bpm = self.tempo_bpm;
+        song.time_sig = self.time_sig;
+        song.key = self.key;
+        song.tempo_changes = self.tempo_changes.clone();
+        song.time_changes = self.time_changes.clone();
+        song.key_changes = self.key_changes.clone();
+        song.end = self.end;
+        song
     }
 
     pub(crate) fn time_map(&self) -> Result<TimeMap> {

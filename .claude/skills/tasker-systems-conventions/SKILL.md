@@ -100,8 +100,8 @@ Statuses for **making-music**:
 | PY-TYPE-1 | n/a: no Python in this repository (the projected tool is the baseline's) |
 | PY-TYPE-2 | n/a: no Python in this repository (the projected tool is the baseline's) |
 | PY-VER-1 | n/a: no Python in this repository (the projected tool is the baseline's) |
-| RUST-API-1 | convention: duet-core and duet-midi are library crates and duet-cli is the application; review applies the API rules to the libraries' public API |
-| RUST-API-2 | n/a: no duet crate is published to crates.io |
+| RUST-API-1 | convention: duet-core, duet-midi and duet-drums are library crates and duet-cli is the application; review applies the API rules to the libraries' public API |
+| RUST-API-2 | convention: the libraries are published to crates.io; the open sets are #[non_exhaustive] (the three Error enums, Control, Song, Track, Note, DrumGrid, LaneDef) and the closed ones are exhaustive (Position, TimeSig, Key, the three *Change events, Lane, Bar, Levels); a new public type is judged in review |
 | RUST-API-3 | partial: should_implement_trait and derivable_impls gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
 | RUST-API-4 | partial: ptr_arg and borrowed_box gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
 | RUST-API-5 | partial: new_without_default and wrong_self_convention gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
@@ -129,7 +129,7 @@ Statuses for **making-music**:
 | RUST-TC-3 | gated: .github/workflows/ci.yml#check |
 | RUST-TYPE-1 | gated: .github/workflows/ci.yml#check |
 | RUST-TYPE-2 | convention: judged in review |
-| RUST-UNSAFE-1 | partial: every crate root (duet-core, duet-midi, duet-cli) declares #![forbid(unsafe_code)] and the table denies unsafe_code; nothing checks that a new crate root declares the forbid |
+| RUST-UNSAFE-1 | partial: every crate root (duet-core, duet-midi, duet-drums, duet-cli) declares #![forbid(unsafe_code)] and the table denies unsafe_code; nothing checks that a new crate root declares the forbid |
 | RUST-UNSAFE-2 | n/a: no unsafe code and no registered exceptions |
 | RUST-UNSAFE-3 | n/a: no FFI |
 | SC-ADV-1 | gated: .github/workflows/ci.yml#gate |

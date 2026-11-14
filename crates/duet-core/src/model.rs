@@ -12,6 +12,7 @@ use crate::time::{
 
 /// A whole song: its tempo, meter and key, and its tracks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Song {
     /// The song's name: the MIDI sequence name, from the first track of a format 1 file
     /// when that track holds no notes, or from the only track of a format 0 file.
@@ -84,6 +85,7 @@ pub struct KeyChange {
 
 /// One instrument part on one MIDI channel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Track {
     pub name: String,
     /// The MIDI channel, 1 to 16 as DAWs number them.
@@ -111,6 +113,7 @@ impl Track {
 
 /// One note.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Note {
     /// Where the note starts, as bar.beat.tick.
     pub at: Position,
@@ -121,9 +124,21 @@ pub struct Note {
     pub vel: u8,
 }
 
+impl Note {
+    pub fn new(at: Position, pitch: Pitch, beats: f64, vel: u8) -> Self {
+        Note {
+            at,
+            pitch,
+            beats,
+            vel,
+        }
+    }
+}
+
 /// A channel event other than a note.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Control {
     /// A control change, such as 64 for the sustain pedal or 1 for the mod wheel.
     Cc {

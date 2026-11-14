@@ -43,12 +43,10 @@ fn random_grid(
     shape: (u16, &str, Option<&str>, &str, u32),
 ) -> DrumGrid {
     let (tpq, sig, change, step, bars) = shape;
-    let mut conductor = Song {
-        ticks_per_quarter: tpq,
-        tempo_bpm: 96.0,
-        time_sig: sig.parse().expect("meter"),
-        ..Song::default()
-    };
+    let mut conductor = Song::default();
+    conductor.ticks_per_quarter = tpq;
+    conductor.tempo_bpm = 96.0;
+    conductor.time_sig = sig.parse().expect("meter");
     if let Some(c) = change {
         conductor.time_changes.push(TimeChange {
             at: Position::bar(3),
@@ -74,17 +72,10 @@ fn random_grid(
     }
     // Build the bars with the library's own shapes: an empty grid of `bars` bars, read
     // back from a song with no notes, gives each bar's step count.
-    let empty = DrumGrid::from_song(
-        &Song {
-            tracks: vec![Track::new("Drums", 10)],
-            ..conductor.clone()
-        },
-        grid.grid,
-        map,
-        None,
-        Some(bars),
-    )
-    .expect("an empty drum track fits any whole-step grid");
+    let mut empty_song = conductor.clone();
+    empty_song.tracks = vec![Track::new("Drums", 10)];
+    let empty = DrumGrid::from_song(&empty_song, grid.grid, map, None, Some(bars))
+        .expect("an empty drum track fits any whole-step grid");
     grid.bars = empty
         .bars
         .iter()
@@ -308,17 +299,16 @@ fn the_sample_groove_round_trips_through_midi() {
 fn drum_song(notes: &[(&str, u8, u8)]) -> Song {
     let mut track = Track::new("Kit", 10);
     for (at, key, vel) in notes {
-        track.notes.push(Note {
-            at: at.parse().expect("position"),
-            pitch: duet_core::Pitch::new(*key).expect("key"),
-            beats: 0.1,
-            vel: *vel,
-        });
+        track.notes.push(Note::new(
+            at.parse().expect("position"),
+            duet_core::Pitch::new(*key).expect("key"),
+            0.1,
+            *vel,
+        ));
     }
-    Song {
-        tracks: vec![track],
-        ..Song::default()
-    }
+    let mut song = Song::default();
+    song.tracks = vec![track];
+    song
 }
 
 /// Reading a song's drum track never moves or alters a note to fit: each misfit is
@@ -355,9 +345,10 @@ fn reading_a_drum_track_refuses_what_does_not_fit_and_alters_nothing() {
             "two hits on snare at 1.2.0 (bar 1, step 5)",
         ),
         (
-            Song {
-                time_sig: TimeSig::new(7, 8).expect("7/8"),
-                ..drum_song(&[("1.1.0", 36, 90)])
+            {
+                let mut song = drum_song(&[("1.1.0", 36, 90)]);
+                song.time_sig = TimeSig::new(7, 8).expect("7/8");
+                song
             },
             "bar 1 (7/8) is 3.5 steps of 1/4",
         ),
@@ -390,10 +381,8 @@ fn reading_a_drum_track_refuses_what_does_not_fit_and_alters_nothing() {
     );
     let named = DrumGrid::from_song(&two, g16, &gm, Some("Kit"), None).expect("named");
     assert_eq!(named.lanes.len(), 1);
-    let none = Song {
-        tracks: vec![Track::new("Piano", 1)],
-        ..Song::default()
-    };
+    let mut none = Song::default();
+    none.tracks = vec![Track::new("Piano", 1)];
     assert!(
         read(&none)
             .expect_err("no drums")
@@ -560,9 +549,10 @@ fn ends_that_do_not_fit_a_grid_are_refused_by_name() {
 
     let gm = LaneMap::gm();
     let g8: Grid = "1/8".parse().expect("grid");
-    let ending = |end: &str| Song {
-        end: Some(end.parse().expect("position")),
-        ..drum_song(&[("1.1.0", 36, 90)])
+    let ending = |end: &str| {
+        let mut song = drum_song(&[("1.1.0", 36, 90)]);
+        song.end = Some(end.parse().expect("position"));
+        song
     };
     let err = DrumGrid::from_song(&ending("2.1.120"), g8, &gm, None, None)
         .expect_err("off the grid")
@@ -579,10 +569,8 @@ fn ends_that_do_not_fit_a_grid_are_refused_by_name() {
     // A bar count asked for stands in for the song's end, but never cuts a hit.
     let grid = DrumGrid::from_song(&ending("4.1.0"), g8, &gm, None, Some(2)).expect("2 bars");
     assert_eq!((grid.bars.len(), grid.end), (2, None));
-    let late = Song {
-        end: Some("4.1.0".parse().expect("position")),
-        ..drum_song(&[("3.1.0", 36, 90)])
-    };
+    let mut late = drum_song(&[("3.1.0", 36, 90)]);
+    late.end = Some("4.1.0".parse().expect("position"));
     let err = DrumGrid::from_song(&late, g8, &gm, None, Some(2))
         .expect_err("a hit past the bars asked for")
         .to_string();

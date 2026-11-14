@@ -34,6 +34,7 @@ use duet_core::{Control, KeyChange, Note, Pitch, Song, TempoChange, TimeChange, 
 
 /// Everything that can go wrong reading or writing MIDI.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// The MIDI file could not be parsed, or uses a feature this crate does not support.
     #[error("MIDI error: {0}")]
@@ -351,12 +352,12 @@ impl Midi for Song {
                     .notes
                     .into_iter()
                     .map(|n| {
-                        Ok(Note {
-                            at: map.position(n.start),
-                            pitch: Pitch::new(n.key)?.spelled_flat(flat(n.start, n.key)),
-                            beats: beats_from_ticks(n.len, tpq),
-                            vel: n.vel,
-                        })
+                        Ok(Note::new(
+                            map.position(n.start),
+                            Pitch::new(n.key)?.spelled_flat(flat(n.start, n.key)),
+                            beats_from_ticks(n.len, tpq),
+                            n.vel,
+                        ))
                     })
                     .collect::<Result<Vec<_>>>()?;
                 Ok(track)
@@ -365,21 +366,21 @@ impl Midi for Song {
 
         // The file names an end when a track's end of track comes after the event before
         // it, or when its end lies past every event kept. A file whose tracks each end at
-        // their last event, as one written from a song with no end does, names none.
+        // their last event names none.
         let end = (trailing_time || file_end > last_kept).then(|| map.position(file_end));
 
-        Ok(Song {
-            title,
-            ticks_per_quarter: tpq,
-            tempo_bpm: bpm_from_micros(initial_tempo),
-            time_sig: initial_sig,
-            key,
-            tempo_changes,
-            time_changes,
-            key_changes,
-            end,
-            tracks,
-        })
+        let mut song = Song::default();
+        song.title = title;
+        song.ticks_per_quarter = tpq;
+        song.tempo_bpm = bpm_from_micros(initial_tempo);
+        song.time_sig = initial_sig;
+        song.key = key;
+        song.tempo_changes = tempo_changes;
+        song.time_changes = time_changes;
+        song.key_changes = key_changes;
+        song.end = end;
+        song.tracks = tracks;
+        Ok(song)
     }
 
     /// Writes the song as a format 1 Standard MIDI File: a first track with the title,
@@ -497,6 +498,15 @@ impl Midi for Song {
                     Control::Program { program, .. } => MidiMessage::ProgramChange {
                         program: seven("program", program)?,
                     },
+                    // Control is non_exhaustive: a variant added to duet-core lands here until
+                    // this crate learns to write it.
+                    _ => {
+                        return Err(Error::invalid(format!(
+                            "track '{}': a control at {} that this version cannot write as MIDI",
+                            track.name,
+                            control.at()
+                        )));
+                    }
                 };
                 events.push((tick, 2, i, midi(message)));
             }
