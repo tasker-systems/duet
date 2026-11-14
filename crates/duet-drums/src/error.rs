@@ -1,5 +1,6 @@
 /// Everything that can go wrong reading, writing or converting a drum grid.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A line of the text form could not be read. `line` is 1-based.
     #[error("line {line}: {msg}")]
@@ -27,6 +28,8 @@ impl From<duet_core::Error> for Error {
         match e {
             duet_core::Error::Parse { line, msg } => Error::Parse { line, msg },
             duet_core::Error::Invalid(msg) => Error::Invalid(msg),
+            // duet_core::Error is non_exhaustive: a variant added there keeps its message.
+            other => Error::Invalid(other.to_string()),
         }
     }
 }

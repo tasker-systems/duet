@@ -104,12 +104,12 @@ mod tests {
         // A loose position and a length that is not whole ticks, as a hand edit might leave.
         let mut song = Song::default();
         let mut track = Track::new("P", 1);
-        track.notes.push(Note {
-            at: Position::new(1, 1, 960),
-            pitch: "C4".parse().expect("C4 is a pitch"),
-            beats: 0.3334,
-            vel: 80,
-        });
+        track.notes.push(Note::new(
+            Position::new(1, 1, 960),
+            "C4".parse().expect("C4 is a pitch"),
+            0.3334,
+            80,
+        ));
         song.tracks.push(track);
 
         let dir = std::env::temp_dir().join(format!("duet-read-{}", std::process::id()));

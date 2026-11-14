@@ -1,5 +1,6 @@
 /// Everything that can go wrong reading or writing a song.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A line of the text format could not be parsed. `line` is 1-based.
     #[error("line {line}: {msg}")]

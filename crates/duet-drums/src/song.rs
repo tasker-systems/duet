@@ -27,12 +27,12 @@ impl DrumGrid {
             for s in 0..bar.steps as usize {
                 for (lane, row) in self.lanes.iter().zip(&bar.vel) {
                     if row[s] > 0 {
-                        track.notes.push(Note {
-                            at: map.position(shape.start + s as u64 * step),
-                            pitch: Pitch::new(lane.key)?,
+                        track.notes.push(Note::new(
+                            map.position(shape.start + s as u64 * step),
+                            Pitch::new(lane.key)?,
                             beats,
-                            vel: row[s],
-                        });
+                            row[s],
+                        ));
                     }
                 }
             }
