@@ -1,6 +1,6 @@
 [package]
 name = "duet-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "duet: compose with an LLM in text both can read, and convert it to and from MIDI."
 edition.workspace = true
 license.workspace = true
