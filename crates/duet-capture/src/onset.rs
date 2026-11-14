@@ -31,8 +31,9 @@ const ONSET_POSITION: f64 = 0.75;
 ///
 /// Each window's flux is the rise in log-compressed magnitude since the window one hop
 /// earlier, summed over bins and averaged. A frame is an onset when its flux is the peak of
-/// the frames around it and exceeds their local mean by [`THRESHOLD_OFFSET`]. The first window
-/// has nothing before it to rise from, so the stream's own start is not an onset.
+/// the frames around it and exceeds their local mean by [`THRESHOLD_OFFSET`]. Everything before
+/// the stream is taken to be silence, so a take that opens already sounding has an onset at its
+/// start, placed exactly at the first input frame rather than at the usual position in the window.
 ///
 /// `strength` is the peak's mean rise per bin, scaled to 0..=1.
 ///
@@ -55,7 +56,7 @@ pub struct Onsets {
     /// Samples not yet dropped, starting at stream offset `buffer_start`.
     buffer: Vec<f32>,
     buffer_start: usize,
-    previous: Option<Vec<f32>>,
+    previous: Vec<f32>,
     /// Flux of windows `flux_start..flux_start + flux.len()`.
     flux: Vec<f32>,
     flux_start: usize,
@@ -96,7 +97,7 @@ impl Onsets {
             received: 0,
             buffer: Vec::new(),
             buffer_start: 0,
-            previous: None,
+            previous: vec![0.0; frame_len / 2 + 1],
             flux: Vec::new(),
             flux_start: 0,
             next_decision: 0,
@@ -123,16 +124,13 @@ impl Onsets {
                 .iter()
                 .map(|c| (1.0 + COMPRESSION * c.norm() * scale).ln())
                 .collect();
-            let flux = self.previous.as_ref().map_or(0.0, |previous| {
-                let rise: f32 = magnitudes
-                    .iter()
-                    .zip(previous)
-                    .map(|(now, before)| (now - before).max(0.0))
-                    .sum();
-                rise / magnitudes.len() as f32
-            });
-            self.flux.push(flux);
-            self.previous = Some(magnitudes);
+            let rise: f32 = magnitudes
+                .iter()
+                .zip(&self.previous)
+                .map(|(now, before)| (now - before).max(0.0))
+                .sum();
+            self.flux.push(rise / magnitudes.len() as f32);
+            self.previous = magnitudes;
         }
         // Windows are only ever read from the next hop on.
         let keep_from = (self.flux_start + self.flux.len()) * self.hop;
@@ -178,6 +176,9 @@ impl Onsets {
 
     /// The input frame an onset found at window `k` is placed at.
     fn frame_of(&self, k: usize) -> u64 {
+        if k == 0 {
+            return self.origin.unwrap_or(0);
+        }
         let offset = k * self.hop + (self.frame_len as f64 * ONSET_POSITION) as usize;
         self.origin.unwrap_or(0) + offset as u64
     }
@@ -210,6 +211,24 @@ impl Stage for Onsets {
     }
 
     fn finish(&mut self, out: &mut Vec<Event>) -> Result<()> {
+        if self.received > 0 {
+            // Fade the take out over its last two hops and pad it with zeros, so its last partial
+            // window can be analysed. A hard cut would end a sounding take with a corner whose
+            // broadband splatter reads as an onset; a smooth fade does not.
+            let last_start = ((self.received - 1) as usize / self.hop) * self.hop;
+            let end = last_start + self.frame_len;
+            let held = self.buffer_start + self.buffer.len();
+            self.buffer
+                .resize(self.buffer.len() + end.saturating_sub(held), 0.0);
+            let fade = 2 * self.hop;
+            let real_end = self.received as usize - self.buffer_start;
+            for d in 0..fade.min(real_end) {
+                let gain =
+                    0.5 - 0.5 * (std::f32::consts::PI * (d + 1) as f32 / (fade + 1) as f32).cos();
+                self.buffer[real_end - 1 - d] *= gain;
+            }
+            self.analyse();
+        }
         self.decide(true, out);
         Ok(())
     }
@@ -227,12 +246,16 @@ mod tests {
     const RATE: u32 = 22_050;
 
     fn run(signal: &[f32], chunk: usize) -> Vec<Event> {
+        run_from(signal, chunk, 0)
+    }
+
+    fn run_from(signal: &[f32], chunk: usize, origin: u64) -> Vec<Event> {
         let mut stage = Onsets::new(RATE);
         let mut out = Vec::new();
         for (i, piece) in signal.chunks(chunk).enumerate() {
             let mono = Mono {
                 rate: RATE,
-                start_frame: (i * chunk) as u64,
+                start_frame: origin + (i * chunk) as u64,
                 samples: piece.to_vec(),
             };
             stage.push(mono, &mut out).unwrap();
@@ -271,10 +294,26 @@ mod tests {
     }
 
     #[test]
-    fn silence_and_a_steady_tone_have_no_onsets() {
+    fn silence_has_no_onsets_and_a_steady_tone_has_one_at_its_start() {
         assert!(run(&synth::silence(RATE, 3.0), 1024).is_empty());
-        let tone = synth::tone(RATE, 440.0, 3.0, 3, 0.5);
-        assert_eq!(run(&tone, 1024), Vec::new());
+        let mut signal = synth::silence(RATE, 0.5);
+        signal.extend(synth::tone(RATE, 440.0, 3.0, 3, 0.5));
+        assert_near(&frames_of(&run(&signal, 1024)), &[0.5], 0.010);
+    }
+
+    #[test]
+    fn a_take_that_opens_sounding_has_an_onset_at_its_start() {
+        let tone = synth::tone(RATE, 440.0, 1.0, 3, 0.5);
+        for origin in [0, 50_000] {
+            let events = run_from(&tone, 1024, origin);
+            assert_eq!(frames_of(&events), vec![origin], "{events:?}");
+        }
+    }
+
+    #[test]
+    fn a_click_in_the_last_few_milliseconds_is_found() {
+        let signal = synth::clicks(RATE, 2.0, &[1.999], 0.8);
+        assert_near(&frames_of(&run(&signal, 1024)), &[1.999], 0.010);
     }
 
     #[test]
@@ -282,10 +321,12 @@ mod tests {
         let times = [0.4, 0.9, 1.5, 2.2];
         let mut signal = synth::clicks(RATE, 3.0, &times, 0.8);
         synth::add(&mut signal, &synth::tone(RATE, 330.0, 3.0, 2, 0.1));
-        let small = run(&signal, 512);
-        let large = run(&signal, 4096);
-        assert_eq!(small.len(), times.len(), "{small:?}");
-        assert_eq!(small, large);
+        let reference = run(&signal, 512);
+        // The tone sounds from the first frame, so the take opens with an onset.
+        assert_eq!(reference.len(), times.len() + 1, "{reference:?}");
+        for chunk in [1, 777, 4096] {
+            assert_eq!(run(&signal, chunk), reference, "chunk of {chunk}");
+        }
     }
 
     #[test]
@@ -300,7 +341,10 @@ mod tests {
     fn a_quiet_click_over_a_tone_is_found() {
         let mut signal = synth::tone(RATE, 220.0, 2.0, 4, 0.3);
         synth::add(&mut signal, &synth::clicks(RATE, 2.0, &[1.0], 0.4));
-        assert_near(&frames_of(&run(&signal, 1024)), &[1.0], 0.010);
+        let frames = frames_of(&run(&signal, 1024));
+        // The tone sounds from the first frame, so the take opens with an onset.
+        assert_eq!(frames[0], 0);
+        assert_near(&frames[1..], &[1.0], 0.010);
     }
 
     #[test]
