@@ -532,7 +532,7 @@ fn errors_name_the_line() {
 
 #[test]
 fn sample_sketch_round_trips() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/sketch.txt");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/sketch.notes");
     let text = std::fs::read_to_string(path).unwrap();
     let song = Song::from_text(&text).unwrap();
     let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();

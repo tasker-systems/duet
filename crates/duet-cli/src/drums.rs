@@ -15,8 +15,8 @@ use crate::io::{Format, grid_form, read, same_file, song_format, with_end, write
 #[derive(Subcommand)]
 pub enum DrumsCommand {
     /// Render a drum grid as a song: MIDI, notefmt text, JSON or TOML, by the output's
-    /// name (.mid or .midi, .json, .toml, anything else is notefmt text) unless --to is
-    /// given. A grid's name (.drums, .drums.json, .drums.toml) as the output is refused.
+    /// name (.mid or .midi, .json, .toml, .notes or anything else is notefmt text) unless
+    /// --to is given. A grid's name (.drums, .drums.json, .drums.toml) as the output is refused.
     Render {
         /// The grid to read (.drums, .drums.json or .drums.toml), or - for .drums text
         /// on standard input.
@@ -333,10 +333,10 @@ mod tests {
     fn off_level_velocities_are_refused_as_text_until_snapped() {
         let dir = temp("snap");
         let song = "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n";
-        std::fs::write(dir.join("take.txt"), song).expect("write");
+        std::fs::write(dir.join("take.notes"), song).expect("write");
         let p = |name: &str| dir.join(name).to_str().expect("utf-8").to_owned();
         let read = |out: &str, snap: bool| {
-            let (take, out) = (p("take.txt"), p(out));
+            let (take, out) = (p("take.notes"), p(out));
             let mut args = vec![
                 "drums",
                 "read",

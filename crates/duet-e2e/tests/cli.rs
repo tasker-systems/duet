@@ -62,7 +62,8 @@ fn midi_tracks(bytes: &[u8]) -> (Vec<Vec<String>>, Vec<u64>) {
 }
 
 /// The golden files in `golden/` were written by duet at 145077f, before a song
-/// could name an end, from `samples/sketch.txt` and `samples/groove.drums` (which now
+/// could name an end, from `samples/sketch.notes` (then `sketch.txt`, and the text golden
+/// files `.txt` too; only the names changed) and `samples/groove.drums` (which now
 /// state their ends, `end 5.1.0` and `end 3.1.0`, the defaults). Every file written now
 /// holds exactly the same music, every note, control and conductor event at the same
 /// tick, and differs only by stating its end: an `end` line in text, an `end` field in
@@ -71,20 +72,20 @@ fn midi_tracks(bytes: &[u8]) -> (Vec<Vec<String>>, Vec<u64>) {
 fn every_output_holds_the_same_music_and_states_its_end() {
     let dir = scratch("golden");
     let golden = duet_e2e::golden_dir();
-    let sketch = root().join("samples/sketch.txt");
+    let sketch = root().join("samples/sketch.notes");
     let groove = root().join("samples/groove.drums");
     let out = |name: &str| dir.join(name);
     let p = |s: &'static str| Path::new(s);
 
-    for name in ["sketch.mid", "sketch.txt", "sketch.json", "sketch.toml"] {
+    for name in ["sketch.mid", "sketch.notes", "sketch.json", "sketch.toml"] {
         duet(&[p("convert"), &sketch, &out(name)]);
     }
     duet(&[
         p("convert"),
         &out("sketch.mid"),
-        &out("sketch-from-midi.txt"),
+        &out("sketch-from-midi.notes"),
     ]);
-    for name in ["groove.mid", "groove.txt", "groove.json"] {
+    for name in ["groove.mid", "groove.notes", "groove.json"] {
         duet(&[p("drums"), p("render"), &groove, &out(name)]);
     }
     for name in ["groove.drums", "groove.drums.json"] {
@@ -184,10 +185,10 @@ fn a_grid_ending_in_empty_bars_survives_midi_with_no_bar_count() {
 #[test]
 fn a_song_with_no_end_is_written_stating_its_default() {
     let dir = scratch("default");
-    let take = dir.join("take.txt");
+    let take = dir.join("take.notes");
     std::fs::write(&take, "[track \"P\" ch1]\n2.3.0 C4 1 80\n").expect("write");
     let p = |s: &'static str| Path::new(s);
-    for name in ["take.json", "take.toml", "take-out.txt"] {
+    for name in ["take.json", "take.toml", "take-out.notes"] {
         duet(&[p("convert"), &take, &dir.join(name)]);
     }
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect("read");
@@ -202,10 +203,42 @@ fn a_song_with_no_end_is_written_stating_its_default() {
         read("take.toml")
     );
     assert!(
-        read("take-out.txt").contains("\nend 3.1.0\n"),
+        read("take-out.notes").contains("\nend 3.1.0\n"),
         "{}",
-        read("take-out.txt")
+        read("take-out.notes")
     );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// notefmt's extension is .notes, and a file named .txt from before it still reads and
+/// writes as notefmt: the sample is written byte for byte under both names, and each
+/// name read back gives the same MIDI.
+#[test]
+fn a_txt_file_is_still_notefmt() {
+    let dir = scratch("txt");
+    let sample = root().join("samples/sketch.notes");
+    let want = std::fs::read(&sample).expect("the sample");
+    let p = |s: &'static str| Path::new(s);
+    for name in ["sketch.notes", "sketch.txt"] {
+        duet(&[p("convert"), &sample, &dir.join(name)]);
+        assert_eq!(
+            std::fs::read(dir.join(name)).expect("written"),
+            want,
+            "{name}"
+        );
+    }
+    duet(&[
+        p("convert"),
+        &dir.join("sketch.notes"),
+        &dir.join("from-notes.mid"),
+    ]);
+    duet(&[
+        p("convert"),
+        &dir.join("sketch.txt"),
+        &dir.join("from-txt.mid"),
+    ]);
+    let mid = |name: &str| std::fs::read(dir.join(name)).expect("MIDI");
+    assert_eq!(mid("from-txt.mid"), mid("from-notes.mid"));
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -280,7 +313,7 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
 
     // The end default: round-up 2 in the project, 4 for the user alone, the built-in
     // with no config; the same bytes every time.
-    let take = dir.join("take.txt");
+    let take = dir.join("take.notes");
     write(&take, "[track \"P\" ch1]\n1.1.0 C4 1 80\n");
     let convert = |cwd: &Path, user_dir: &Path| {
         let out = duet_in(cwd, user_dir, &[p("convert"), &take, p("-")]);
@@ -362,7 +395,7 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
 
     // Reading a drum track uses the config's lanes, and runs to its end default: a
     // one-bar take is two bars under round-up 2.
-    let kit = dir.join("kit.txt");
+    let kit = dir.join("kit.notes");
     write(
         &kit,
         "[track \"Kit\" ch10]\n1.1.0 B5 0.25 90\n1.3.0 C2 0.25 90\n",
@@ -486,7 +519,7 @@ fn a_config_that_moves_a_gm_lane_never_changes_how_drums_text_reads() {
     );
 
     // A MIDI drum track on key 100 reads as the config's kick.
-    let kit = dir.join("kit.txt");
+    let kit = dir.join("kit.notes");
     write(&kit, "[track \"Kit\" ch10]\n1.1.0 E7 0.25 90\n");
     let grid = dir.join("kit.drums");
     let args = [p("drums"), p("read"), &kit, &grid, p("--grid"), p("1/8")];
@@ -525,14 +558,14 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
     );
 
     // A file of two tunes needs --tune; the second is in 3/4.
-    let txt = dir.join("second.txt");
-    let out = run(&[Path::new("abc"), Path::new("render"), &tunes, &txt]);
+    let notes = dir.join("second.notes");
+    let out = run(&[Path::new("abc"), Path::new("render"), &tunes, &notes]);
     assert!(!out.status.success(), "two tunes and no --tune is refused");
     let out = run(&[
         Path::new("abc"),
         Path::new("render"),
         &tunes,
-        &txt,
+        &notes,
         Path::new("--tune"),
         Path::new("2"),
     ]);
@@ -541,7 +574,7 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let text = std::fs::read_to_string(&txt).expect("rendered");
+    let text = std::fs::read_to_string(&notes).expect("rendered");
     assert!(
         text.contains("time 3/4") && text.contains("key G major"),
         "{text}"
@@ -549,13 +582,13 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
 
     // convert goes both ways through .abc.
     let abc = dir.join("second.abc");
-    duet(&[Path::new("convert"), &txt, &abc]);
+    duet(&[Path::new("convert"), &notes, &abc]);
     let written = std::fs::read_to_string(&abc).expect("written");
     assert!(
         written.starts_with("X:1\n") && written.contains("M:3/4"),
         "{written}"
     );
-    let back = dir.join("back.txt");
+    let back = dir.join("back.notes");
     duet(&[Path::new("convert"), &abc, &back]);
     assert_eq!(std::fs::read_to_string(&back).expect("back"), text);
 

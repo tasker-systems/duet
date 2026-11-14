@@ -21,7 +21,7 @@ pub enum AbcCommand {
         input: PathBuf,
     },
     /// Render one tune as a song: MIDI, notefmt text, JSON or TOML, by the output's
-    /// extension (.mid or .midi, .json, .toml, anything else is notefmt text).
+    /// extension (.mid or .midi, .json, .toml, .notes or anything else is notefmt text).
     Render {
         /// The ABC file to read, or - for standard input.
         input: PathBuf,

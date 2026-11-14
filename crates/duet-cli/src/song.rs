@@ -76,7 +76,7 @@ mod tests {
     fn quantize_never_writes_over_its_input() {
         let dir = std::env::temp_dir().join(format!("duet-quantize-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let take = dir.join("take.txt");
+        let take = dir.join("take.notes");
         let played = "[track \"P\" ch1]\n1.1.10 C4 0.48 80\n";
         std::fs::write(&take, played).expect("write");
         let cli = |out: &std::path::Path| {
@@ -95,7 +95,7 @@ mod tests {
         let kept = std::fs::read_to_string(&take).expect("read");
         assert_eq!(kept, played, "the input is untouched");
 
-        let out = dir.join("take-q.txt");
+        let out = dir.join("take-q.notes");
         cli(&out).expect("quantize to a new file");
         let q = read(&out, Format::Text).expect("read the output");
         assert_eq!(q.tracks[0].notes[0].at.to_string(), "1.1.0");

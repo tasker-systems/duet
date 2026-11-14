@@ -24,8 +24,9 @@ pub enum Format {
 }
 
 /// The format a path's extension names: .mid, .midi or .smf is MIDI, .json, .toml and .abc
-/// are themselves, and anything else is notefmt text. `-` (standard input or output) has no
-/// extension, so it takes `default`.
+/// are themselves, and .notes is notefmt text. So is anything else, such as the .txt notefmt
+/// files had before .notes, so no older file changes meaning. `-` (standard input or output)
+/// has no extension, so it takes `default`.
 pub fn format_of(path: &Path, default: Format) -> Format {
     if path == Path::new("-") {
         return default;
@@ -40,6 +41,7 @@ pub fn format_of(path: &Path, default: Format) -> Format {
         Some("json") => Format::Json,
         Some("toml") => Format::Toml,
         Some("abc") => Format::Abc,
+        Some("notes") => Format::Text,
         _ => Format::Text,
     }
 }
@@ -244,7 +246,9 @@ mod tests {
         assert_eq!(of("song.toml"), AnyFormat::Song(Format::Toml));
         assert_eq!(of("drums.json"), AnyFormat::Song(Format::Json));
         assert_eq!(of("take.mid"), AnyFormat::Song(Format::Midi));
-        assert_eq!(of("take.txt"), text);
+        assert_eq!(of("take.notes"), text);
+        assert_eq!(of("Take.NOTES"), text);
+        assert_eq!(of("take.txt"), text, "a notefmt file named before .notes");
         assert_eq!(of("-"), text);
     }
 
