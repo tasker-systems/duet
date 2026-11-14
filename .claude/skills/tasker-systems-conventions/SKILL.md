@@ -166,7 +166,7 @@ Statuses for **making-music**:
 | SH-7 | n/a: no shell scripts; workflow run: blocks are a few lines each |
 | TEST-1 | uncovered: no #[ignore] tests today, and nothing would catch an unregistered one |
 | TEST-2 | convention: judged in review |
-| TEST-3 | gated: .github/workflows/ci.yml#check |
+| TEST-3 | partial: CI runs every tier but one (.github/workflows/ci.yml#check). duet-abc's oracle feature runs abc2midi, which by the owner's decision runs only on a developer's machine: CI compiles and lints it (clippy --all-features) but never runs it, and gates drift against its committed recordings instead |
 | TEST-4 | n/a: no test retries |
 | TEST-5 | uncovered: no coverage floor |
 | TS-CFG-1 | n/a: no TypeScript |

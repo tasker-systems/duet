@@ -139,8 +139,8 @@ string_serde!(TimeSig);
 /// Tonic names around the circle of fifths, from Fb (8 flats from C) to B# (12 sharps).
 /// A key's tonic is the name `sharps + mode offset` steps from C.
 const FIFTHS: [&str; 21] = [
-    "Fb", "Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#",
-    "G#", "D#", "A#", "E#", "B#",
+    "Fb", "Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#", "G#",
+    "D#", "A#", "E#", "B#",
 ];
 /// The index of C in [`FIFTHS`].
 const FIFTHS_C: i8 = 8;

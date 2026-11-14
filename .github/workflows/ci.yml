@@ -95,8 +95,10 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # --all-features compiles and lints duet-abc's oracle tier, which needs abc2midi and so
+      # never runs here (TEST-3): its drift gate runs in the plain tests below.
       - name: Clippy (RUST-LINT-1, RUST-LINT-2)
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: rustdoc (RUST-LINT-2)
         run: cargo doc --locked --no-deps
         env:
