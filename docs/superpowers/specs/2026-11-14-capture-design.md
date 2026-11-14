@@ -32,7 +32,7 @@ Everything downstream of a `Song` exists and is witnessed: quantize, the ABC wri
 | Polyphony and chords (guitar chords, mixes) | The Later goal, as an ONNX stage such as basic-pitch |
 | Stems, chord suggestion, bassline suggestion | Later; the last two work on a `Song`, not audio |
 | Telling tap timbres apart (knuckle "tok", clap, stomp "thump", "tap") | After v1, as a better classifier stage |
-| Tempo that changes within a take (rubato, accelerando) | After v1; v1 estimates one tempo per take |
+| Tempo that changes within a take (rubato, accelerando) | After v1. v1 estimates one tempo per take, and reports the drift as a beat-by-beat series in `<stem>.capture.json` |
 | A take that mixes melody and rhythm | Stays unexamined in the goal's closure |
 | Audio-graph crates (`dasp`, `fundsp`, `knyst`) | Not excluded for other uses; not the core of this one |
 
@@ -150,6 +150,18 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
   - and as comment lines in the written `.notes` and score file, so the files themselves say so (`an-inferred-tempo-or-meter-is-stated`).
   - `.notes` and `.drums` comments start with `#`; ABC comments start with `%`.
   - A given value is not reported as an estimate.
+
+### The analysis is kept, not thrown away (owner, 2026-11-14)
+
+Every stage's settled output can be stored and read, so the owner and Claude can reason about a capture with numbers.
+- **The event vocabulary and `Timing` serialize** with serde. It's the same payload the MCP stream will send later.
+- **Capture writes `<stem>.capture.json`** beside the `.notes` and the score. It holds:
+  - every onset, note and hit, in seconds as well as frames;
+  - the timing: each value marked given or estimated, with its confidence, the tempo alternatives, and the downbeat;
+  - **a beat-by-beat tempo series:** the local tempo between consecutive beats, so drift is a curve, not a feeling;
+  - **each note's quantize offset:** how far quantizing moved it, in ms and in grid steps.
+- **v1 surfaces drift; it doesn't correct it.** `Song` already carries `tempo_changes`, so fitting a tempo map to the series is the follow-up. The analysis file is what that work, and its witnesses, are built against.
+- **The reference takes are mostly recorded with a click,** so a bad result points at detection, not drift. A few are recorded without one on purpose, as the drift set: v1 only has to report their tempo series truthfully.
 
 ### Where a model fits later
 
