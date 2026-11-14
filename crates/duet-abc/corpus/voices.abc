@@ -1,0 +1,12 @@
+X:1
+T:Voices
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+V:1 name="Upper"
+V:2 name="Lower" subname="L."
+K:C
+V:1
+c2d2 e2f2 | g8 |]
+V:2
+C,4 G,4 | C,8 |]

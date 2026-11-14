@@ -1,0 +1,16 @@
+# notefmt v1: positions are bar.beat.tick, lengths are quarter notes
+title "Ties"
+tpq 480
+tempo 120
+time 4/4
+key C major
+end 7.1.26
+
+[track "Channel 1" ch1]
+1.1.1     C4    3.998  95
+2.1.1     E4    1.998  95
+2.3.1     G4    2.998  95
+3.2.1     C#5   2.998  95
+4.3.1     F#5   3.998  95
+5.3.1     C4    2.998  95
+5.3.1     E4    2.998  95

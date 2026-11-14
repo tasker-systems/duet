@@ -1,0 +1,12 @@
+# notefmt v1: positions are bar.beat.tick, lengths are quarter notes
+title "Multi-bar rests"
+tpq 480
+tempo 120
+time 3/4
+key C major
+end 7.1.26
+
+[track "Channel 1" ch1]
+1.1.1     C4    2.998  95
+3.1.1     D4    2.998  95
+6.1.1     E4    2.998  95

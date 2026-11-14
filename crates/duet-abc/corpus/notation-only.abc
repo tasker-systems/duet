@@ -1,0 +1,10 @@
+X:1
+T:Notation only
+R:reel
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+S:duet corpus
+M:4/4
+L:1/8
+K:G
+%%staffsep 60
+(GA B2) "^slowly"c2 d2 | y e2 "_soft"d2 B2 G2 |]

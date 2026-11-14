@@ -1,0 +1,15 @@
+X:1
+T:Tuplets the writer does not write
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:4/4
+L:1/8
+K:C
+(5CDEFG z6 | (6CDEFGA (3:2:2 c4 d2 z2 |]
+
+X:2
+T:Tuplets in compound time
+N:Written for the duet-abc corpus by its contributors; MIT, like the rest of the repository.
+M:6/8
+L:1/8
+K:C
+(5CDEFG z3 | (2C2D2 | c6 |]
