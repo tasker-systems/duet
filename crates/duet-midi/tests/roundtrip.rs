@@ -361,6 +361,13 @@ fn played_take(tpq: u16, format: Format) -> (Vec<u8>, Vec<RawNote>) {
     (bytes, expected)
 }
 
+/// The song as every writer gives it back: with its end stated.
+fn stated(song: &Song) -> Song {
+    let mut song = song.clone();
+    song.end = Some(song.stated_end().unwrap());
+    song
+}
+
 fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
     let original = events(bytes);
     assert_eq!(
@@ -368,10 +375,14 @@ fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
         "test file is built as intended"
     );
 
-    let song = Song::from_midi(bytes).unwrap();
+    // The generated file's tracks each end at their last event, so it names no end; every
+    // form written from it states the default.
+    let read = Song::from_midi(bytes).unwrap();
+    assert_eq!(read.end, None);
+    let song = stated(&read);
 
     // Text, JSON and TOML all give back the same song.
-    let text = song.to_text();
+    let text = read.to_text();
     let from_text = Song::from_text(&text).unwrap();
     assert_eq!(from_text, song, "text round-trip; text was:\n{text}");
     assert_eq!(from_text.to_text(), text, "text is stable");
@@ -527,6 +538,7 @@ fn sample_sketch_round_trips() {
     let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
     assert_eq!(back, song);
     assert_eq!(back.to_text(), text, "the sample is in canonical form");
+    assert!(text.contains("\nend 5.1.0\n"), "the sample states its end");
 }
 
 #[test]
@@ -639,7 +651,7 @@ fn black_keys_are_spelled_by_the_key_in_force() {
             "3.2.0 Eb4 1 80"
         ]
     );
-    assert_eq!(back, song);
+    assert_eq!(back, stated(&song));
 }
 
 #[test]
@@ -658,7 +670,10 @@ fn format_0_sequence_name_is_the_title() {
         [("Channel 1", 1), ("Channel 2", 2), ("Channel 10", 10)]
     );
     // Written as format 1, the title and names come back unchanged.
-    assert_eq!(Song::from_midi(&song.to_midi().unwrap()).unwrap(), song);
+    assert_eq!(
+        Song::from_midi(&song.to_midi().unwrap()).unwrap(),
+        stated(&song)
+    );
 }
 
 #[test]
@@ -839,4 +854,221 @@ fn no_read_write_or_conversion_quantizes_unasked() {
         serde_json::from_str(&serde_json::to_string(&through_all).unwrap()).unwrap();
     let through_all: Song = toml::from_str(&toml::to_string(&through_all).unwrap()).unwrap();
     assert_eq!(events(&through_all.to_midi().unwrap()).notes, expected);
+}
+
+/// The end of track of every track, in file order, as absolute ticks.
+fn ends_of_track(bytes: &[u8]) -> Vec<u64> {
+    let smf = Smf::parse(bytes).unwrap();
+    smf.tracks
+        .iter()
+        .map(|t| {
+            let mut tick = 0u64;
+            for e in t {
+                tick += u64::from(e.delta.as_int());
+                if let TrackEventKind::Meta(MetaMessage::EndOfTrack) = e.kind {
+                    return tick;
+                }
+            }
+            panic!("a track with no end of track");
+        })
+        .collect()
+}
+
+/// `track`, ending at `end` instead of at its last event.
+fn track_ending_at(
+    timed: Vec<(u64, TrackEventKind<'static>)>,
+    end: u64,
+) -> Vec<TrackEvent<'static>> {
+    let mut out = track(timed);
+    let last: u64 = out.iter().map(|e| u64::from(e.delta.as_int())).sum();
+    out.last_mut().expect("an end of track").delta = u28::new((end - last) as u32);
+    out
+}
+
+/// Witness for a song's end: a MIDI file's end of track survives MIDI → song → MIDI,
+/// through text, JSON and TOML too, whether it falls on a bar line or inside a bar, at
+/// several resolutions and meters, and with the tracks ending at different ticks (the
+/// file's end is the latest). Every track of the written file ends there.
+#[test]
+fn a_midi_files_end_of_track_survives() {
+    // (tpq, numerator, denominator power, the end in ticks from the last note's end)
+    let cases: [(u16, u8, u8, u64); 6] = [
+        (480, 4, 2, 4 * 480),       // a whole empty 4/4 bar after the music
+        (480, 4, 2, 3 * 480 + 240), // and a dotted half more, so it ends mid-bar
+        (96, 3, 2, 7),              // a few ticks: mid-beat
+        (960, 6, 3, 6 * 480 * 2),   // two 6/8 bars
+        (384, 7, 3, 1),             // one tick
+        (192, 5, 2, 5 * 192 * 3),   // three 5/4 bars
+    ];
+    for (tpq, num, den_power, extra) in cases {
+        let note_end = u64::from(tpq) * 2 + 30;
+        let file_end = note_end + extra;
+        let conductor = track_ending_at(
+            vec![
+                (0, meta(MetaMessage::TimeSignature(num, den_power, 24, 8))),
+                (0, meta(MetaMessage::Tempo(u24::new(600_000)))),
+            ],
+            file_end,
+        );
+        let notes = track_ending_at(
+            vec![(30, on(0, 60, 90)), (note_end, off(0, 60, true))],
+            // A track may end before the file does; the file's end is the latest.
+            note_end + extra / 2,
+        );
+        let bytes = save(Format::Parallel, tpq, vec![conductor, notes]);
+
+        let song = Song::from_midi(&bytes).unwrap();
+        let map = song.time_map().unwrap();
+        let want = map.position(file_end);
+        assert_eq!(song.end, Some(want), "tpq {tpq}, {num}/2^{den_power}");
+        assert!(song.to_text().contains(&format!("\nend {want}\n")));
+
+        let from_text = Song::from_text(&song.to_text()).unwrap();
+        assert_eq!(from_text, song, "text");
+        let json: Song = serde_json::from_str(&serde_json::to_string(&song).unwrap()).unwrap();
+        assert_eq!(json, song, "JSON");
+        let toml_song: Song = toml::from_str(&toml::to_string(&song).unwrap()).unwrap();
+        assert_eq!(toml_song, song, "TOML");
+
+        let written = from_text.to_midi().unwrap();
+        assert_eq!(
+            ends_of_track(&written),
+            vec![file_end, file_end],
+            "every track ends there"
+        );
+        assert_eq!(events(&written).notes, events(&bytes).notes);
+        assert_eq!(
+            Song::from_midi(&written).unwrap(),
+            song,
+            "MIDI → song → MIDI → song"
+        );
+    }
+}
+
+/// A song that names an end keeps it through MIDI and back, when the end falls on a bar
+/// line, inside a bar, and exactly where the last note ends: the first track holds only
+/// the conductor, ends after its last event, and so says where the song ends.
+#[test]
+fn a_songs_end_survives_midi() {
+    for end in ["3.1.0", "2.3.240", "2.2.0", "9.1.0"] {
+        let text = format!(
+            "tpq 480\ntempo 100\ntime 4/4\nend {end}\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n1.3.0 D4 1.5 80\n"
+        );
+        let song = Song::from_text(&text).unwrap();
+        assert_eq!(
+            song.end.map(|e| e.to_string()),
+            Some(end.to_owned()),
+            "{end}"
+        );
+        let midi = song.to_midi().unwrap();
+        assert_eq!(Song::from_midi(&midi).unwrap(), song, "end {end}");
+    }
+    // An end is read like any position: offsets past a beat or a bar carry on.
+    let song = Song::from_text("time 4/4\nend 2.4.960\n").unwrap();
+    assert_eq!(song.end.map(|e| e.to_string()).as_deref(), Some("3.2.0"));
+}
+
+/// Anything past a song's end is refused by name, in every place a song is made or
+/// written, and never cut to fit: a note that ends past it, a control, a tempo, meter or
+/// key change, and a note that quantizing would push past it.
+#[test]
+fn what_lies_past_the_end_is_refused_by_name_never_truncated() {
+    let head = "tpq 480\ntime 4/4\n";
+    let cases = [
+        (
+            "end 2.1.0\n\n[track \"P\" ch1]\n1.4.0 C4 1.5 80\n",
+            "track 'P': the C4 at 1.4.0, which ends at 2.1.240, lies past the song's end at 2.1.0",
+        ),
+        (
+            "end 2.1.0\n\n[track \"P\" ch1]\n2.1.1 cc64 0\n",
+            "track 'P': the cc64 at 2.1.1 lies past the song's end at 2.1.0",
+        ),
+        (
+            "end 2.1.0\n\n[track \"P\" ch1]\n3.1.0 bend 10\n",
+            "track 'P': the bend at 3.1.0 lies past the song's end",
+        ),
+        (
+            "end 2.1.0\ntempo 90 at 2.2.0\n",
+            "the tempo 90 change at 2.2.0 lies past the song's end at 2.1.0",
+        ),
+        (
+            "end 2.1.0\ntime 3/4 at 3.1.0\n",
+            "the time 3/4 change at 3.1.0 lies past the song's end at 2.1.0",
+        ),
+        (
+            "end 2.1.0\nkey D minor at 2.1.1\n",
+            "the key D minor change at 2.1.1 lies past the song's end at 2.1.0",
+        ),
+    ];
+    for (body, want) in cases {
+        let text = format!("{head}{body}");
+        let err = Song::from_text(&text).expect_err(want).to_string();
+        assert!(err.contains(want), "{err}\nshould say: {want}");
+
+        // The same song built in code is refused by MIDI, JSON's reader path and quantize.
+        let mut song =
+            Song::from_text(&format!("{head}{}", body.replacen("end 2.1.0\n", "", 1))).unwrap();
+        song.end = Some("2.1.0".parse().unwrap());
+        let err = song.to_midi().expect_err(want).to_string();
+        assert!(err.contains(want), "MIDI: {err}");
+        let err = song.clone().normalize().expect_err(want).to_string();
+        assert!(err.contains(want), "normalize: {err}");
+    }
+
+    // A note ending on the end is fine; quantizing it past the end is refused.
+    let song = Song::from_text(&format!(
+        "{head}end 2.1.0\n\n[track \"P\" ch1]\n1.4.250 C4 0.479 80\n"
+    ))
+    .unwrap();
+    let before = song.clone();
+    let err = song
+        .quantized(Grid::new(4, false).unwrap())
+        .expect_err("quantizing moves the note to 2.1.0 and gives it one step")
+        .to_string();
+    assert!(
+        err.contains("the C4 at 2.1.0, which ends at 2.2.0, lies past the song's end at 2.1.0"),
+        "{err}"
+    );
+    assert_eq!(song, before, "never changed");
+}
+
+/// With no end named, every writer states the default end: the text says `end`, and
+/// every MIDI track ends there. A MIDI file whose tracks each end at their last event
+/// names no end, so the default applies when it is read.
+#[test]
+fn a_song_with_no_end_states_its_default_end() {
+    let song = Song::from_text(
+        "tpq 480\ntempo 90 at 1.3.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n2.1.0 cc64 0\n",
+    )
+    .unwrap();
+    assert_eq!(song.end, None);
+    assert!(
+        song.to_text().contains("\nend 3.1.0\n"),
+        "{}",
+        song.to_text()
+    );
+    let midi = song.to_midi().unwrap();
+    assert_eq!(
+        ends_of_track(&midi),
+        vec![3840, 3840],
+        "every track ends at 3.1.0"
+    );
+    assert_eq!(Song::from_midi(&midi).unwrap(), stated(&song));
+
+    // A file from another tool, each track ending at its last event: no end, so the
+    // default applies, and the music is the same.
+    let bytes = save(
+        Format::Parallel,
+        480,
+        vec![track(vec![(0, on(0, 60, 80)), (480, off(0, 60, true))])],
+    );
+    let read = Song::from_midi(&bytes).unwrap();
+    assert_eq!(read.end, None);
+    assert_eq!(read.stated_end().unwrap().to_string(), "2.1.0");
+
+    // The default never comes before a tempo, meter or key change, so a song that names
+    // no end is never refused for one.
+    let late = Song::from_text("tempo 90 at 9.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n").unwrap();
+    let midi = late.to_midi().unwrap();
+    assert_eq!(ends_of_track(&midi), vec![8 * 1920, 8 * 1920]);
 }

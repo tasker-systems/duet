@@ -30,6 +30,12 @@ pub struct DrumGrid {
     pub time_changes: Vec<TimeChange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_changes: Vec<KeyChange>,
+    /// Where the grid stops: a position on a step of its last bar, with no hit at or
+    /// after it, or the bar line that ends that bar. `None` means that bar line, and is
+    /// the form an end on it takes once [normalized](DrumGrid::normalize) or read; the
+    /// text form always states the end either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
     /// One step, such as `1/16`.
     pub grid: Grid,
     /// The MIDI channel the lanes play on, 1 to 16; 10 is General MIDI's drum channel.
@@ -152,7 +158,7 @@ pub(crate) struct BarShape {
 }
 
 impl DrumGrid {
-    /// An empty grid with this song's conductor: no lanes and no bars.
+    /// An empty grid with this song's conductor: no lanes, no bars and no end.
     pub fn with_conductor(song: &Song, grid: Grid) -> DrumGrid {
         DrumGrid {
             title: song.title.clone(),
@@ -163,6 +169,7 @@ impl DrumGrid {
             tempo_changes: song.tempo_changes.clone(),
             time_changes: song.time_changes.clone(),
             key_changes: song.key_changes.clone(),
+            end: None,
             grid,
             channel: drum_channel(),
             levels: Levels::default(),
@@ -171,7 +178,7 @@ impl DrumGrid {
         }
     }
 
-    /// The conductor as a song with no tracks.
+    /// The conductor, and the grid's end, as a song with no tracks.
     pub fn conductor(&self) -> Song {
         let mut song = Song::default();
         song.title = self.title.clone();
@@ -182,6 +189,7 @@ impl DrumGrid {
         song.tempo_changes = self.tempo_changes.clone();
         song.time_changes = self.time_changes.clone();
         song.key_changes = self.key_changes.clone();
+        song.end = self.end;
         song
     }
 
@@ -292,6 +300,79 @@ impl DrumGrid {
                 }
             }
         }
+        self.check_end(&map, step)?;
+        // Nothing in the conductor may lie past where the grid ends.
+        let mut conductor = self.conductor();
+        conductor.end = Some(self.stated_end());
+        conductor.check_end()?;
+        Ok(())
+    }
+
+    /// Checks the grid's end, when it has one: on a step inside the last bar, with no hit
+    /// at or after it.
+    fn check_end(&self, map: &TimeMap, step: u64) -> Result<()> {
+        let Some(end) = self.end else {
+            return Ok(());
+        };
+        let tick = map.tick(end)?;
+        let end = map.position(tick);
+        let Some(last) = self.bars.last() else {
+            return Err(Error::invalid(format!(
+                "the grid ends at {end} but has no bars; a grid's end lies inside its last bar"
+            )));
+        };
+        let shape = self.bar_shape(map, step, last.bar)?;
+        let bars_end = shape.start + u64::from(shape.steps) * step;
+        if tick <= shape.start || tick > bars_end {
+            return Err(Error::invalid(format!(
+                "the grid ends at {end}, but its last bar, bar {}, runs to {}; an end lies \
+                 inside the last bar or on the bar line that ends it",
+                last.bar,
+                map.position(bars_end)
+            )));
+        }
+        let offset = tick - shape.start;
+        if !offset.is_multiple_of(step) {
+            return Err(Error::invalid(format!(
+                "the grid ends at {end}, which is not on the {} grid",
+                self.grid
+            )));
+        }
+        let first_past = (offset / step) as usize;
+        for (lane, row) in self.lanes.iter().zip(&last.vel) {
+            if let Some(s) = row[first_past..].iter().position(|v| *v > 0) {
+                let s = first_past + s;
+                return Err(Error::invalid(format!(
+                    "{}, bar {}, step {}: the hit at {} lies at or past the grid's end at {end}; \
+                     move the end, or the hit",
+                    lane.name,
+                    last.bar,
+                    s + 1,
+                    map.position(shape.start + s as u64 * step)
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Where the grid's bars end: the bar line after its last bar.
+    pub(crate) fn bars_end(&self) -> Position {
+        Position::bar(self.bars.len() as u32 + 1)
+    }
+
+    /// Where the grid ends: its own end, or else the bar line after its last bar.
+    pub fn stated_end(&self) -> Position {
+        self.end.unwrap_or_else(|| self.bars_end())
+    }
+
+    /// Writes an end on the last bar line as no end, the one form both have.
+    pub(crate) fn canonical_end(&mut self) -> Result<()> {
+        if let Some(end) = self.end {
+            let map = self.time_map()?;
+            if map.tick(end)? == map.tick(self.bars_end())? {
+                self.end = None;
+            }
+        }
         Ok(())
     }
 
@@ -306,7 +387,9 @@ impl DrumGrid {
         self.tempo_changes = grid.tempo_changes;
         self.time_changes = grid.time_changes;
         self.key_changes = grid.key_changes;
-        self.check()
+        self.end = conductor.end;
+        self.check()?;
+        self.canonical_end()
     }
 
     /// A copy with every hit's velocity moved to the nearest of [`DrumGrid::levels`]

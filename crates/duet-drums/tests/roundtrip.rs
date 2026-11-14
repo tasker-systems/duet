@@ -105,14 +105,50 @@ fn random_grid(
             row[0] = 100;
         }
     }
+    // How the grid ends: at the end of its last bar as it came out, after trailing bars
+    // left empty, or on a step inside its last bar, with nothing at or after that step.
+    match rng.below(3) {
+        1 if bars > 1 => {
+            let empty = 1 + rng.below(u64::from(bars) - 1) as usize;
+            let n = grid.bars.len();
+            for bar in &mut grid.bars[n - empty..] {
+                for row in &mut bar.vel {
+                    row.fill(0);
+                }
+            }
+        }
+        2 => {
+            let last = grid.bars.last_mut().expect("at least one bar");
+            let s = 1 + rng.below(u64::from(last.steps) - 1);
+            for row in &mut last.vel {
+                row[s as usize..].fill(0);
+            }
+            let map = conductor.time_map().expect("time map");
+            let start = map.tick(Position::bar(last.bar)).expect("bar start");
+            let step = grid.grid.step_ticks(tpq).expect("whole-tick step");
+            grid.end = Some(map.position(start + s * step));
+        }
+        _ => {}
+    }
     grid.check().expect("a generated grid is valid");
     grid
+}
+
+/// Whether a grid's last bar holds no hit.
+fn ends_in_rests(grid: &DrumGrid) -> bool {
+    grid.bars
+        .last()
+        .is_some_and(|b| b.vel.iter().flatten().all(|v| *v == 0))
 }
 
 /// Witness for `the-drum-grid-round-trips-under-its-map`: for grids of many shapes under
 /// the gm map, and under gm with a grid's own lanes laid over it, grid → song → grid is
 /// the identity, directly and through a MIDI file, JSON and TOML; and every note plays
 /// its lane's key in the map, on channel 10.
+///
+/// No bar count is passed: the song carries the grid's end, so grids that end in empty
+/// bars, or inside their last bar, come back whole. Passing the grid's own bar count
+/// agrees with that end.
 #[test]
 fn the_drum_grid_round_trips_under_its_map() {
     let gm = LaneMap::gm();
@@ -129,16 +165,26 @@ fn the_drum_grid_round_trips_under_its_map() {
     let overlaid = gm.overlaid(&own).expect("a valid overlay");
     let mut rng = Lcg(0x5eed);
     let mut grids = 0;
+    let (mut in_rests, mut mid_bar) = (0, 0);
     for map in [&gm, &overlaid] {
         for shape in shapes() {
             for _ in 0..8 {
                 let grid = random_grid(&mut rng, map, shape);
-                let bars = Some(grid.bars.len() as u32);
+                in_rests += usize::from(grid.end.is_none() && ends_in_rests(&grid));
+                mid_bar += usize::from(grid.end.is_some());
+                let bars = None;
                 let song = grid.to_song().expect("to song");
 
                 let back =
                     DrumGrid::from_song(&song, grid.grid, map, None, bars).expect("from song");
                 assert_eq!(back, grid, "grid → song → grid, {shape:?}");
+                let own = Some(grid.bars.len() as u32);
+                let back =
+                    DrumGrid::from_song(&song, grid.grid, map, None, own).expect("from song");
+                assert_eq!(
+                    back, grid,
+                    "grid → song → grid, its own bar count, {shape:?}"
+                );
 
                 let midi = song.to_midi().expect("to MIDI");
                 let read = Song::from_midi(&midi).expect("from MIDI");
@@ -192,6 +238,11 @@ fn the_drum_grid_round_trips_under_its_map() {
         }
     }
     assert_eq!(grids, 96);
+    // The generator varies how grids end, so the witness covers each way.
+    assert!(
+        in_rests >= 10 && mid_bar >= 10,
+        "{in_rests} end in rests, {mid_bar} mid-bar"
+    );
 }
 
 /// Text → grid → text is the identity for text the writer wrote, and grid → text → grid
@@ -444,4 +495,125 @@ fn hand_written_text_is_read_leniently_but_exactly() {
     assert!(written.contains("lane cajon 80\n"), "{written}");
     assert!(written.contains("vel g 40 x 100 X 120\n"), "{written}");
     assert_eq!(DrumGrid::from_text(&written).expect("again"), grid);
+}
+
+/// A grid's end, and a song's end read into a grid, are checked, and each misfit is
+/// refused by name: nothing is cut, and no bar is added or dropped to fit. An end on the
+/// last bar line agrees with the bars, so it is accepted.
+#[test]
+fn ends_that_do_not_fit_a_grid_are_refused_by_name() {
+    let head = "tpq 480\ntime 4/4\ngrid 1/8\n";
+    let bar = "| x . . . x . . . |";
+    let cases = [
+        (
+            format!("{head}end 2.3.0\n\n[bars 1-2]\nkick {bar} . . . . x . . . |\n"),
+            "kick, bar 2, step 5: the hit at 2.3.0 lies at or past the grid's end at 2.3.0",
+        ),
+        (
+            format!("{head}end 3.2.0\n\n[bars 1-2]\nkick {bar} . . . . . . . . |\n"),
+            "the grid ends at 3.2.0, but its last bar, bar 2, runs to 3.1.0",
+        ),
+        (
+            format!("{head}end 1.3.0\n\n[bars 1-2]\nkick {bar} . . . . . . . . |\n"),
+            "the grid ends at 1.3.0, but its last bar, bar 2, runs to 3.1.0",
+        ),
+        (
+            format!("{head}end 2.1.120\n\n[bars 1-2]\nkick {bar} . . . . . . . . |\n"),
+            "the grid ends at 2.1.120, which is not on the 1/8 grid",
+        ),
+        (
+            format!("{head}end 1.3.0\n"),
+            "the grid ends at 1.3.0 but has no bars",
+        ),
+        (
+            format!("{head}tempo 90 at 3.2.0\n\n[bars 1-2]\nkick {bar} . . . . . . . . |\n"),
+            "the tempo 90 change at 3.2.0 lies past the song's end at 3.1.0",
+        ),
+    ];
+    for (text, want) in cases {
+        let err = text_error(&text);
+        assert!(err.contains(want), "{err}\nshould say: {want}\n{text}");
+    }
+
+    // An end on the last bar line is the bars' own end: accepted, and the same grid as
+    // one that leaves it out. The writer states it either way.
+    let stated = format!("{head}end 3.1.0\n\n[bars 1-2]\nkick {bar} . . . . . . . . |\n");
+    let unstated = format!("{head}\n[bars 1-2]\nkick {bar} . . . . . . . . |\n");
+    let grid = DrumGrid::from_text(&stated).expect("an end on the last bar line");
+    assert_eq!(grid, DrumGrid::from_text(&unstated).expect("no end"));
+    assert!(
+        grid.to_text()
+            .expect("text")
+            .contains("\nend 3.1.0\ngrid 1/8\n")
+    );
+
+    let gm = LaneMap::gm();
+    let g8: Grid = "1/8".parse().expect("grid");
+    let ending = |end: &str| {
+        let mut song = drum_song(&[("1.1.0", 36, 90)]);
+        song.end = Some(end.parse().expect("position"));
+        song
+    };
+    let err = DrumGrid::from_song(&ending("2.1.120"), g8, &gm, None, None)
+        .expect_err("off the grid")
+        .to_string();
+    assert!(
+        err.contains("the song ends at 2.1.120, which is not on the 1/8 grid"),
+        "{err}"
+    );
+    let err = DrumGrid::from_song(&ending("1.1.0"), g8, &gm, None, None)
+        .expect_err("a hit past the end")
+        .to_string();
+    assert!(err.contains("lies past the song's end at 1.1.0"), "{err}");
+
+    // A bar count asked for stands in for the song's end, but never cuts a hit.
+    let grid = DrumGrid::from_song(&ending("4.1.0"), g8, &gm, None, Some(2)).expect("2 bars");
+    assert_eq!((grid.bars.len(), grid.end), (2, None));
+    let mut late = drum_song(&[("3.1.0", 36, 90)]);
+    late.end = Some("4.1.0".parse().expect("position"));
+    let err = DrumGrid::from_song(&late, g8, &gm, None, Some(2))
+        .expect_err("a hit past the bars asked for")
+        .to_string();
+    assert!(
+        err.contains("a hit in bar 3, past the 2 bars asked for"),
+        "{err}"
+    );
+
+    // An end that fits: three bars from a hit in bar 1, then an end inside bar 2, which
+    // a bar count of 2 keeps.
+    let grid = DrumGrid::from_song(&ending("4.1.0"), g8, &gm, None, None).expect("fits");
+    assert_eq!((grid.bars.len(), grid.end), (3, None));
+    let grid = DrumGrid::from_song(&ending("2.2.0"), g8, &gm, None, None).expect("fits");
+    assert_eq!(grid.bars.len(), 2);
+    assert_eq!(grid.end.map(|e| e.to_string()).as_deref(), Some("2.2.0"));
+    assert_eq!(
+        DrumGrid::from_song(&ending("2.2.0"), g8, &gm, None, Some(2)).expect("fits"),
+        grid
+    );
+    let text = grid.to_text().expect("text");
+    assert!(text.contains("\nend 2.2.0\ngrid 1/8\n"), "{text}");
+}
+
+/// A rendered grid always states where it ends: the bar line after its last bar, or its
+/// own end inside that bar, whether or not the last bar holds a hit.
+#[test]
+fn a_rendered_grid_states_its_end() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../samples/groove.drums"
+    ))
+    .expect("the sample");
+    let mut grid = DrumGrid::from_text(&text).expect("parse");
+    let end = |g: &DrumGrid| g.to_song().expect("song").end.map(|e| e.to_string());
+    assert_eq!(end(&grid).as_deref(), Some("3.1.0"));
+    for row in &mut grid.bars[1].vel {
+        row.fill(0);
+    }
+    assert_eq!(
+        end(&grid).as_deref(),
+        Some("3.1.0"),
+        "an empty last bar is kept"
+    );
+    grid.end = Some("2.3.0".parse().expect("position"));
+    assert_eq!(end(&grid).as_deref(), Some("2.3.0"));
 }

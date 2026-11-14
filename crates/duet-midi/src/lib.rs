@@ -8,7 +8,7 @@
 //! use duet_midi::Midi;
 //!
 //! let song = Song::from_text(
-//!     "tempo 92\ntime 4/4\nkey D minor\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n",
+//!     "tempo 92\ntime 4/4\nkey D minor\nend 2.1.0\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n",
 //! )?;
 //! let midi = song.to_midi()?;
 //! assert_eq!(Song::from_midi(&midi)?, song);
@@ -107,6 +107,10 @@ impl Midi for Song {
     /// other text events, and note-off velocities are dropped. A MIDI track that uses
     /// several channels becomes one [`Track`] per channel.
     ///
+    /// The file's end (its latest end of track) becomes the song's [end](Song::end) when
+    /// some track's end of track comes after the event before it, or when it lies past
+    /// every event kept. A file whose tracks each end at their last event names no end.
+    ///
     /// Black keys are spelled by the key in force where each note starts. A format 0
     /// file's track name is its sequence name, so it becomes the title. Names that are
     /// not UTF-8 are read with U+FFFD in place of each invalid byte.
@@ -128,6 +132,11 @@ impl Midi for Song {
         let single_track = smf.header.format == Format::SingleTrack;
         // (midi track index, channel, name, events), in file order.
         let mut parts: Vec<(usize, u8, Option<String>, ChannelEvents)> = Vec::new();
+        // The latest end of track, the latest tick of anything kept, and whether a track's
+        // end of track comes after the event before it.
+        let mut file_end = 0u64;
+        let mut last_kept = 0u64;
+        let mut trailing_time = false;
 
         for (index, events) in smf.tracks.iter().enumerate() {
             let mut tick = 0u64;
@@ -140,6 +149,10 @@ impl Midi for Song {
                 match event.kind {
                     TrackEventKind::Meta(meta) => match meta {
                         MetaMessage::Tempo(micros) => tempos.push((tick, micros.as_int())),
+                        MetaMessage::EndOfTrack => {
+                            file_end = file_end.max(tick);
+                            trailing_time |= event.delta.as_int() > 0;
+                        }
                         MetaMessage::TimeSignature(num, den_power, _, _) => {
                             sigs.push((tick, (num, den_power)))
                         }
@@ -190,6 +203,8 @@ impl Midi for Song {
                 }
             }
 
+            // A track with no end-of-track event ends at its last event.
+            file_end = file_end.max(tick);
             // Notes still sounding when the track ends last until its end.
             for ((ch, key), starts) in open {
                 let part = channels.entry(ch).or_default();
@@ -209,6 +224,11 @@ impl Midi for Song {
                 title = name.take();
             }
             channels.retain(|_, part| !part.notes.is_empty() || !part.controls.is_empty());
+            for part in channels.values() {
+                let notes = part.notes.iter().map(|n| n.start + n.len);
+                let controls = part.controls.iter().map(|(tick, _)| *tick);
+                last_kept = notes.chain(controls).fold(last_kept, u64::max);
+            }
             if channels.is_empty() {
                 if title.is_none() {
                     title = name;
@@ -223,6 +243,12 @@ impl Midi for Song {
         }
 
         // Tempo, meter and key.
+        last_kept = tempos
+            .iter()
+            .map(|(tick, _)| *tick)
+            .chain(sigs.iter().map(|(tick, _)| *tick))
+            .chain(keys.iter().map(|(tick, _)| *tick))
+            .fold(last_kept, u64::max);
         let tempos = last_per_tick(tempos);
         let sigs = last_per_tick(sigs);
         let keys = last_per_tick(keys);
@@ -338,6 +364,11 @@ impl Midi for Song {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        // The file names an end when a track's end of track comes after the event before
+        // it, or when its end lies past every event kept. A file whose tracks each end at
+        // their last event names none.
+        let end = (trailing_time || file_end > last_kept).then(|| map.position(file_end));
+
         let mut song = Song::default();
         song.title = title;
         song.ticks_per_quarter = tpq;
@@ -347,12 +378,17 @@ impl Midi for Song {
         song.tempo_changes = tempo_changes;
         song.time_changes = time_changes;
         song.key_changes = key_changes;
+        song.end = end;
         song.tracks = tracks;
         Ok(song)
     }
 
     /// Writes the song as a format 1 Standard MIDI File: a first track with the title,
     /// tempo, time signature and key, then one track per [`Track`].
+    ///
+    /// Every track ends at the song's [stated end](Song::stated_end): the end it names,
+    /// or else its default. Anything past a named end is refused by name
+    /// ([`Song::check_end`]).
     fn to_midi(&self) -> Result<Vec<u8>> {
         let tpq = self.ticks_per_quarter;
         if tpq == 0 || tpq > 0x7FFF {
@@ -361,6 +397,8 @@ impl Midi for Song {
             )));
         }
         let map = self.time_map()?;
+        self.check_end()?;
+        let end = Some(map.tick(self.stated_end()?)?);
 
         // Each event is (tick, order class, sequence, event); sorting by the first three
         // keeps a note's end before a new note at the same tick and keeps file order.
@@ -405,7 +443,7 @@ impl Midi for Song {
             conductor.push((map.tick(change.at)?, 3, i + 1, tempo_event(change.bpm)?));
         }
 
-        let mut tracks = vec![finish_track(conductor)?];
+        let mut tracks = vec![finish_track(conductor, end)?];
 
         for track in &self.tracks {
             if !(1..=16).contains(&track.channel) {
@@ -512,7 +550,7 @@ impl Midi for Song {
                     }),
                 ));
             }
-            tracks.push(finish_track(events)?);
+            tracks.push(finish_track(events, end)?);
         }
 
         let mut smf = Smf::new(Header::new(
@@ -580,9 +618,11 @@ fn check_no_nested_notes(track: &str, notes: &[(u64, u64, &Note)]) -> Result<()>
     Ok(())
 }
 
-/// Sorts timed events, turns them into delta times and ends the track.
+/// Sorts timed events, turns them into delta times and ends the track at `end` (every
+/// event is at or before it), or at its last event when there is none.
 fn finish_track(
     mut events: Vec<(u64, u8, usize, TrackEventKind<'_>)>,
+    end: Option<u64>,
 ) -> Result<Vec<TrackEvent<'_>>> {
     events.sort_by_key(|(tick, class, seq, _)| (*tick, *class, *seq));
     let mut out = Vec::with_capacity(events.len() + 1);
@@ -598,8 +638,14 @@ fn finish_track(
         });
         last = tick;
     }
+    let delta = end.map_or(0, |end| end.saturating_sub(last));
+    if delta > 0x0FFF_FFFF {
+        return Err(Error::invalid(
+            "the gap before the song's end is too long for MIDI",
+        ));
+    }
     out.push(TrackEvent {
-        delta: u28::new(0),
+        delta: u28::new(delta as u32),
         kind: TrackEventKind::Meta(MetaMessage::EndOfTrack),
     });
     Ok(out)

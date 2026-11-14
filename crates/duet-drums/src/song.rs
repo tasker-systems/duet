@@ -39,6 +39,8 @@ impl DrumGrid {
         }
         let mut song = self.conductor();
         song.tracks.push(track);
+        // The song ends where the grid does, and says so.
+        song.end = Some(self.stated_end());
         song.normalize()?;
         Ok(song)
     }
@@ -47,8 +49,15 @@ impl DrumGrid {
     ///
     /// The drum track is the one named `track`, or else the only track on the map's
     /// channel. The grid takes the song's conductor and that track's channel. Its lanes
-    /// are the map's lanes the track plays, in the map's row order. It runs to `bars`
-    /// bars, or to the last bar with a hit.
+    /// are the map's lanes the track plays, in the map's row order.
+    ///
+    /// It runs to `bars` bars when they are asked for, or else to the song's
+    /// [stated end](Song::stated_end) (the end it names, or its default): through the
+    /// bar before a bar-line end, or through the bar an end inside a bar falls in, which
+    /// then becomes the grid's own end and must lie on a step. A bar count asked for
+    /// stands in for the song's end (keeping it when it falls inside the last of those
+    /// bars), and is refused, naming what lies past it, when a hit or a tempo, meter or
+    /// key change would fall outside the grid.
     ///
     /// Only note starts and velocities are kept: note lengths, the track's controls and
     /// the song's other tracks are not part of a drum grid.
@@ -65,10 +74,30 @@ impl DrumGrid {
         bars: Option<u32>,
     ) -> Result<DrumGrid> {
         let drums = drum_track(song, lanes, track)?;
+        song.check_end()?;
         let mut out = DrumGrid::with_conductor(song, grid);
         out.channel = drums.channel;
         let map = out.time_map()?;
         let step = out.step_ticks()?;
+
+        // The grid's length: the bars asked for, or else the bars the song's stated end
+        // reaches, with the grid's own end when that falls inside a bar.
+        let end = song.stated_end()?;
+        let end_tick = map.tick(end)?;
+        let end = map.position(end_tick);
+        let mid_bar = !(end.beat == 1 && end.tick == 0);
+        let end_bars = if mid_bar { end.bar } else { end.bar - 1 };
+        let count = bars.unwrap_or(end_bars);
+        if mid_bar && count == end_bars {
+            let shape = out.bar_shape(&map, step, end.bar)?;
+            if !(end_tick - shape.start).is_multiple_of(step) {
+                return Err(Error::invalid(format!(
+                    "the song ends at {end}, which is not on the {grid} grid; a grid ends on a \
+                     bar line or a step"
+                )));
+            }
+            out.end = Some(end);
+        }
 
         // (lane, bar, step, vel) for every note, checked against the grid and the map.
         let mut hits = Vec::with_capacity(drums.notes.len());
@@ -95,15 +124,12 @@ impl DrumGrid {
         }
 
         let last = hits.iter().map(|h| h.1).max().unwrap_or(0);
-        let count = match bars {
-            Some(n) if n < last => {
-                return Err(Error::invalid(format!(
-                    "there is a hit in bar {last}, past the {n} bars asked for"
-                )));
-            }
-            Some(n) => n,
-            None => last,
-        };
+        if last > count {
+            return Err(Error::invalid(match bars {
+                Some(n) => format!("there is a hit in bar {last}, past the {n} bars asked for"),
+                None => format!("there is a hit in bar {last}, at or past the song's end at {end}"),
+            }));
+        }
 
         let mut used: Vec<&crate::lanes::LaneDef> = Vec::new();
         for (lane, ..) in &hits {

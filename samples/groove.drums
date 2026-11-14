@@ -3,6 +3,7 @@ title "Groove in D"
 tpq 480
 tempo 96
 time 4/4
+end 3.1.0
 grid 1/16
 map gm
 

@@ -65,6 +65,11 @@ fn normalized(mut song: Song) -> duet_core::Result<Song> {
 }
 
 pub fn write(song: &Song, path: &Path, format: Format) -> Result<()> {
+    // Every file written says where the song ends, whatever default computed it. Text and
+    // MIDI state it themselves; JSON and TOML carry it as the `end` field.
+    let mut song = song.clone();
+    song.end = Some(song.stated_end()?);
+    let song = &song;
     let bytes = match format {
         Format::Midi => song.to_midi()?,
         Format::Text => song.to_text().into_bytes(),

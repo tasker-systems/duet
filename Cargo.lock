@@ -138,6 +138,7 @@ dependencies = [
  "duet-core",
  "duet-drums",
  "duet-midi",
+ "midly",
  "serde_json",
  "toml",
 ]

@@ -17,7 +17,9 @@
 //! ```
 //!
 //! The header is the notefmt header (title, tpq, tempo, time, key and their `at`
-//! changes) plus five lines of its own:
+//! changes, and `end`, which the writer always states: inside the last bar, or on the bar
+//! line that ends it)
+//! plus five lines of its own:
 //!
 //! - `grid 1/16`: the step. Required.
 //! - `map gm`: the lane map that names the rows. `gm` is the default and the only one.
@@ -158,7 +160,7 @@ impl Header {
             }
             [kw, ..] => {
                 return Err(Error::invalid(format!(
-                    "'{kw}' is not a header line; expected title, tpq, tempo, time, key, grid, \
+                    "'{kw}' is not a header line; expected title, tpq, tempo, time, key, end, grid, \
                      map, lane, channel, vel or a [bars a-b] block"
                 )));
             }
@@ -175,6 +177,7 @@ impl Header {
         conductor.normalize()?;
         let map = LaneMap::builtin(&self.map)?.overlaid(&self.lanes)?;
         let mut out = DrumGrid::with_conductor(&conductor, grid);
+        out.end = conductor.end;
         out.channel = self.channel.unwrap_or(map.channel());
         out.levels = self.levels;
         let time = out.time_map()?;
@@ -394,8 +397,10 @@ impl DrumGrid {
                 f
             }
         };
-        frame.grid.check()?;
-        Ok(frame.grid)
+        let mut grid = frame.grid;
+        grid.check()?;
+        grid.canonical_end()?;
+        Ok(grid)
     }
 
     /// Writes the text form, naming rows from the built-in `gm` map; a lane that map does
@@ -425,7 +430,10 @@ impl DrumGrid {
     fn write_text(&self, out: &mut String) -> std::fmt::Result {
         let gm = LaneMap::gm();
         writeln!(out, "{HEADER_COMMENT}")?;
-        out.push_str(&self.conductor().header_text());
+        // The end is always stated, so the file says where it stops.
+        let mut conductor = self.conductor();
+        conductor.end = Some(self.stated_end());
+        out.push_str(&conductor.header_text());
         writeln!(out, "grid {}", self.grid)?;
         writeln!(out, "map {}", gm.name())?;
         if self.channel != gm.channel() {
