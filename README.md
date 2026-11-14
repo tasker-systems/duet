@@ -20,6 +20,53 @@ The workspace is split by domain:
 | `duet-abc` | a subset of ABC 2.1 ⇄ `Song`, and the corpus that checks it against abc2midi |
 | `duet-cli` | the `duet` binary |
 
+## How the formats fit together
+
+**ABC is a score, and notefmt is a performance.** They are different kinds of text, and the
+`Song` sits between them. Every format converts through one in-memory `Song`: notes at
+bar.beat.tick positions with exact tick lengths, velocities, channels, programs, controls,
+and tempo, meter and key changes. notefmt is the text form that shows a `Song` exactly. The
+drum grid and ABC are readable, grid-shaped views of part of one, for discussing it.
+
+```mermaid
+flowchart LR
+    MIDI["MIDI (.mid)"] <-->|lossless| Song(("Song"))
+    Song <-->|lossless| TXT["notefmt (.txt)<br/>a performance, exact"]
+    Song <-->|lossless| JT["JSON / TOML<br/>the Song through serde"]
+    Song <-->|"a drum track on its grid"| DRUMS[".drums<br/>a drum part"]
+    Song <-->|"a score-shaped song"| ABC[".abc<br/>a melodic score"]
+    Q["duet song quantize<br/>(an explicit step)"] -.->|"makes a played take score-shaped"| Song
+```
+
+- **notefmt holds whatever MIDI holds that duet keeps.** A note can start 10 ticks late, last
+  0.98 of a beat, have velocity 103, or overlap another note; a track can sit on channel 10,
+  with sustain pedal and pitch bend. Nothing has to fit a grid. That is what a sung or tapped
+  idea looks like after capture, and what a take from a DAW looks like. MIDI ⇄ notefmt never
+  loses anything duet keeps.
+- **ABC holds a score.** Lengths are fractions of a unit note, bars are full, pitches are
+  spelled against a key, and velocity is one of eight dynamics. ABC also carries notation a
+  performance has no use for: repeats, slurs, beaming, annotations. It is the format people
+  and LLMs already read and talk about as music. ABC → `Song` → ABC keeps every note of the
+  subset duet reads; notation-only marks are listed and dropped, and repeats come back written
+  out.
+- **Writing ABC works only for a song that is already score-shaped.** A played take is
+  refused by name, naming the note, and never snapped quietly. Quantizing is a step you
+  choose: `duet song quantize`, then `duet abc write`.
+- **The drum grid is the same idea for drums**, which ABC refuses. ABC covers pitched lines.
+
+| | notefmt `.txt` | `.drums` | `.abc` |
+|---|---|---|---|
+| What it is | a performance, exact | a drum part on a step grid | a melodic score |
+| Unit | ticks | steps | fractions of a note |
+| Velocity | any, 1 to 127 | three levels as text (exact in `.drums.json`) | eight dynamics |
+| Lossless with `Song` | yes | for what fits the grid | for the subset |
+| For | capture, DAWs, exact edits, diffs | discussing a groove | discussing and sharing a tune |
+
+notefmt is also where anything is checked exactly. The ABC tests compare in it: abc2midi's
+reading of each corpus tune is committed as notefmt text. That is how abc2midi's
+undocumented habit shows: every note one tick late and one tick short (`1.1.1  C4  0.998`),
+which ABC itself could not express.
+
 ## notefmt
 
 ```
