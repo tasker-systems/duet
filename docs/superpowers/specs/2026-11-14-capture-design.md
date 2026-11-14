@@ -15,7 +15,7 @@ Everything downstream of a `Song` exists and is witnessed: quantize, the ABC wri
 - `duet capture melody <source>`: a monophonic take becomes a `.notes` performance, plus ABC.
 - `duet capture rhythm <source>`: a tapped or beatboxed take becomes a `.notes` performance, plus a `.drums` grid.
   - **Beatboxed** hits are sorted into three lanes: kick, snare and hat (GM lanes `kick`, `snare`, `hh`).
-  - **Tapped** hits go to one lane, chosen with `--lane` (default `snare`).
+  - **Tapped** hits go to one lane, named with `--lane`. Without `--lane`, a rhythm take is read as beatboxed. *(Builder's call: a default lane would make the two modes ambiguous.)*
   - Takes captured on different lanes are meant to compose into one groove. v1 doesn't merge them: a later `drums merge` does. v1 makes sure every take can be given `--tempo`, `--meter` and `--downbeat`, so takes line up when merged. *(Builder's call; the owner may revisit.)*
 - WAV, MP3, Ogg Vorbis, AAC/M4A and FLAC are decoded through Symphonia, with its `mp3`, `aac` and `isomp4` features on.
 - `--tempo` and `--meter` are optional.
