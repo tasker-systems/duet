@@ -282,3 +282,101 @@ fn a_failed_send_stops_playing() {
     );
     assert_eq!((got, count), (Err("gone"), 2));
 }
+
+/// The notes, as (seconds, kind, key) for note-ons (0x90) and note-offs (0x80).
+fn notes(schedule: &Schedule) -> Vec<(f64, u8, u8)> {
+    schedule
+        .events()
+        .iter()
+        .filter(|e| matches!(e.message.kind(), 0x80 | 0x90))
+        .map(|e| (secs(e.at), e.message.kind(), e.message.bytes()[1]))
+        .collect()
+}
+
+/// Two tracks on one channel: a note ending in either track
+/// never cuts off the same key starting at that tick in another. Every track's note-offs
+/// at a tick come before any note-on there.
+#[test]
+fn a_note_ending_never_cuts_off_one_starting_with_it_in_another_track() {
+    let font = load_soundfont(&sine_font()).expect("the test font");
+    let a_alone = "tempo 120\nend 2.1.0\n\n[track \"A\" ch1]\n1.2.0 A4 1 100\n";
+    let both = "tempo 120\nend 2.1.0\n\n[track \"A\" ch1]\n1.2.0 A4 1 100\n\n\
+                [track \"B\" ch1]\n1.1.0 A4 1 100\n";
+    let schedule = Schedule::from_song(&song(both)).expect("schedule");
+    assert_eq!(
+        notes(&schedule),
+        [
+            (0.0, 0x90, 69),
+            (0.5, 0x80, 69),
+            (0.5, 0x90, 69),
+            (1.0, 0x80, 69)
+        ]
+    );
+
+    // And the synth hears A's note through its whole length, as it would alone.
+    let level = |text: &str| {
+        let (left, _) =
+            render(&Schedule::from_song(&song(text)).expect("s"), &font, RATE).expect("render");
+        let (from, to) = (RATE as usize * 7 / 10, RATE as usize * 95 / 100);
+        left[from..to].iter().map(|x| x.abs()).sum::<f32>() / (to - from) as f32
+    };
+    let (alone, with_b) = (level(a_alone), level(both));
+    assert!(
+        with_b > alone * 0.9,
+        "A's note: {with_b} with B, {alone} alone"
+    );
+}
+
+/// A program change in a later track applies to a note starting at the same tick on its
+/// channel in an earlier one.
+#[test]
+fn a_program_change_comes_before_a_note_starting_with_it() {
+    let schedule = Schedule::from_song(&song(
+        "tempo 120\nend 2.1.0\n\n[track \"A\" ch1]\n1.1.0 C4 1 80\n\n[track \"B\" ch1 prog40]\n",
+    ))
+    .expect("schedule");
+    let first: Vec<Vec<u8>> = schedule
+        .events()
+        .iter()
+        .take(2)
+        .map(|e| e.message.bytes().to_vec())
+        .collect();
+    assert_eq!(first, [vec![0xC0, 40], vec![0x90, 60, 80]]);
+}
+
+/// Two notes on one key that overlap sound as one key held to the later note's end:
+/// a note-on for each, and one note-off, so neither is cut short.
+#[test]
+fn overlapping_notes_on_one_key_each_sound_to_their_end() {
+    let font = load_soundfont(&sine_font()).expect("the test font");
+    let overlap = "tempo 120\nend 3.1.0\n\n[track \"P\" ch1]\n1.1.0 A4 2 100\n1.2.0 A4 2 100\n";
+    let schedule = Schedule::from_song(&song(overlap)).expect("schedule");
+    assert_eq!(
+        notes(&schedule),
+        [(0.0, 0x90, 69), (0.5, 0x90, 69), (1.5, 0x80, 69)]
+    );
+
+    // The second note still sounds in its last beat, after the first note's end at 1 s.
+    let (left, _) = render(&schedule, &font, RATE).expect("render");
+    let (from, to) = (RATE as usize * 12 / 10, RATE as usize * 145 / 100);
+    let level = left[from..to].iter().map(|x| x.abs()).sum::<f32>() / (to - from) as f32;
+    assert!(level > 0.01, "sounding at 1.2 to 1.45 s: {level}");
+}
+
+/// A note of no length starts, then ends at the same tick: it never leaves a key held.
+#[test]
+fn a_note_of_no_length_starts_then_ends() {
+    let schedule = Schedule::from_song(&song(
+        "tempo 120\nend 2.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 0 80\n1.1.0 E4 1 80\n",
+    ))
+    .expect("schedule");
+    assert_eq!(
+        notes(&schedule),
+        [
+            (0.0, 0x90, 60),
+            (0.0, 0x90, 64),
+            (0.0, 0x80, 60),
+            (0.5, 0x80, 64)
+        ]
+    );
+}

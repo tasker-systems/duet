@@ -424,15 +424,22 @@ duet play take.notes --port "IAC Driver"   # to a MIDI port: Logic, a synth, a D
   at its position, length, pitch, channel, program and velocity, with its controls and tempo
   changes. Channel 10 is drums. It needs nothing else running.
 - **The SoundFont** is `--soundfont`, else `[play] soundfont` in duet.toml, else the one duet
-  installs: `default.sf2` in the data directory (`~/.local/share/duet`, or `DUET_DATA_DIR`),
+  installs: `default.sf2` in the data directory (`~/.local/share/duet` on macOS and Linux, or
+  `$XDG_DATA_HOME/duet`; `%APPDATA%\duet\data` on Windows; or whatever `DUET_DATA_DIR` names),
   or in `share/duet` beside the binary's directory. With none, `duet play` fails saying where
   it looked; it never plays silence.
 - **`--port`** sends the same events, at the same times, to a MIDI port instead, with no
-  SoundFont. Give the port's name, or a part only one port's name holds. On macOS a port
-  exists only while the app that owns it runs, such as Logic, or the IAC Driver once it is
-  enabled in Audio MIDI Setup. An unknown name lists the ports there are.
+  SoundFont. Give the port's name, or a part only one port's name holds, in any case. On
+  macOS a port exists only while the app that owns it runs, such as Logic, or the IAC Driver
+  once it is enabled in Audio MIDI Setup. An unknown name lists the ports there are. If
+  playing stops early, on Ctrl-C or a failed send, duet turns off every note it left
+  sounding and the sustain pedal on each channel it used.
 - **What plays is the song's MIDI file**, exactly as `duet convert take.notes take.mid` writes
-  it. The synth renders in blocks of 64 samples, so an event sounds within 1.5 ms of its time.
+  it, with every track merged. At one moment, notes ending come before programs and controls,
+  and those before notes starting, so one track's note never cuts off another's. MIDI cannot
+  say which of two overlapping notes on one key a note-off ends, so the key is held until the
+  last of them ends: each note sounds at least to its own end. The synth renders in blocks of
+  64 samples, so an event sounds within 1.5 ms of its time.
 
 ## Configuration
 

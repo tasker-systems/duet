@@ -26,6 +26,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -88,10 +89,27 @@ impl Message {
         self.bytes[0] & 0xF0
     }
 
+    /// A note-on with a velocity above 0.
+    fn is_note_on(&self) -> bool {
+        self.kind() == 0x90 && self.bytes[2] > 0
+    }
+
+    /// A note-off, or a note-on with velocity 0, which MIDI reads as one.
+    fn is_note_off(&self) -> bool {
+        self.kind() == 0x80 || (self.kind() == 0x90 && self.bytes[2] == 0)
+    }
+
     fn data(&self) -> (u8, u8) {
         (self.bytes[1], self.bytes[2])
     }
 }
+
+// The order of messages at one tick, across every track.
+const ORDER_OFF: u8 = 0;
+const ORDER_CONTROL: u8 = 1;
+const ORDER_ON: u8 = 2;
+/// The note-off of a note of no length, after its own note-on.
+const ORDER_AFTER_ON: u8 = 3;
 
 /// A message and when it sounds, from the start of the song.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,9 +134,18 @@ impl Schedule {
         Schedule::from_midi(&song.to_midi()?)
     }
 
-    /// The events of a Standard MIDI File with metrical timing. Messages from every track
-    /// are merged by tick; at the same tick, the earlier track's come first, and each
-    /// track's keep their order in the file.
+    /// The events of a Standard MIDI File with metrical timing, merged from every track.
+    ///
+    /// Each track's note-ons and note-offs are paired as duet reads MIDI: a note-off ends
+    /// the earliest note still sounding on its key. At one tick, every track's note-offs
+    /// come first, then programs and controls, then note-ons, so a note ending never cuts
+    /// off one starting with it, and a program change applies to a note starting with it.
+    /// A note of no length ends just after it starts.
+    ///
+    /// MIDI cannot say which sounding note a note-off ends, so two notes on one key and
+    /// channel that overlap are sounded as one key held from the first note-on to the last
+    /// note's end: a note-on for each, and one note-off, when the last ends. So each note
+    /// sounds at least to its own end, whatever track it is in.
     pub fn from_midi(bytes: &[u8]) -> Result<Schedule> {
         let smf = Smf::parse(bytes).map_err(|e| Error::Events(e.to_string()))?;
         let Timing::Metrical(tpq) = smf.header.timing else {
@@ -130,10 +157,14 @@ impl Schedule {
         }
 
         let mut tempos: Vec<(u64, u32)> = Vec::new();
-        let mut messages: Vec<(u64, Message)> = Vec::new();
+        // (tick, order at that tick, message); the sort below is stable, so equal keys keep
+        // track order and then file order.
+        let mut messages: Vec<(u64, u8, Message)> = Vec::new();
         let mut end_tick = 0;
         for track in &smf.tracks {
             let mut tick = 0u64;
+            // Per (channel, key), the note-ons still sounding in this track, earliest first.
+            let mut sounding: HashMap<(u8, u8), VecDeque<(u64, Message)>> = HashMap::new();
             for event in track {
                 tick += u64::from(event.delta.as_int());
                 match event.kind {
@@ -142,18 +173,66 @@ impl Schedule {
                     }
                     TrackEventKind::Meta(MetaMessage::EndOfTrack) => end_tick = end_tick.max(tick),
                     TrackEventKind::Midi { channel, message } => {
-                        if let Some(message) = channel_message(channel.as_int(), message) {
-                            messages.push((tick, message));
+                        let Some(message) = channel_message(channel.as_int(), message) else {
+                            continue;
+                        };
+                        let key = (message.channel(), message.bytes[1]);
+                        if message.is_note_on() {
+                            sounding.entry(key).or_default().push_back((tick, message));
+                            messages.push((tick, ORDER_ON, message));
+                        } else if message.is_note_off() {
+                            // A note-off with nothing sounding on its key ends nothing.
+                            if let Some((start, _)) =
+                                sounding.get_mut(&key).and_then(VecDeque::pop_front)
+                            {
+                                let order = if start == tick {
+                                    ORDER_AFTER_ON
+                                } else {
+                                    ORDER_OFF
+                                };
+                                messages.push((tick, order, message));
+                            }
+                        } else {
+                            messages.push((tick, ORDER_CONTROL, message));
                         }
                     }
                     _ => {}
                 }
             }
             end_tick = end_tick.max(tick);
+            // A note left sounding at the end of its track ends there.
+            for (start, on) in sounding.into_values().flatten() {
+                let off = Message::new(&[0x80 | on.channel(), on.bytes[1], 64]);
+                let order = if start == tick {
+                    ORDER_AFTER_ON
+                } else {
+                    ORDER_OFF
+                };
+                messages.push((tick, order, off));
+            }
         }
-        // Stable: the same tick keeps track order, then file order.
-        messages.sort_by_key(|(tick, _)| *tick);
+        messages.sort_by_key(|&(tick, order, _)| (tick, order));
         tempos.sort_by_key(|(tick, _)| *tick);
+
+        // Hold a key while any note on it sounds: a note-off reaches the synth or port only
+        // when it ends the last of the notes sounding on its key and channel.
+        let mut held: HashMap<(u8, u8), u32> = HashMap::new();
+        let messages: Vec<(u64, Message)> = messages
+            .into_iter()
+            .filter_map(|(tick, _, message)| {
+                let key = (message.channel(), message.bytes[1]);
+                if message.is_note_on() {
+                    *held.entry(key).or_default() += 1;
+                } else if message.is_note_off() {
+                    let count = held.entry(key).or_default();
+                    *count = count.saturating_sub(1);
+                    if *count > 0 {
+                        return None;
+                    }
+                }
+                Some((tick, message))
+            })
+            .collect();
 
         let clock = Clock::new(tpq, &tempos);
         let events = messages
