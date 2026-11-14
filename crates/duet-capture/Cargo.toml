@@ -17,10 +17,10 @@ workspace = true
 [dependencies]
 audioadapter-buffers = "5.2.0"
 rubato = "5.1.0"
+rustfft = "6.4.1"
 serde = { version = "1", features = ["derive"] }
 symphonia = { version = "0.6.1", default-features = false, features = ["aac", "flac", "id3v1", "id3v2", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 thiserror = "2"
 
 [dev-dependencies]
-rustfft = "6.4.1"
 serde_json = "1"
