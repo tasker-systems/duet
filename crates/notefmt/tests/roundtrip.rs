@@ -527,3 +527,95 @@ fn sample_sketch_round_trips() {
     assert_eq!(back, song);
     assert_eq!(back.to_text(), text, "the sample is in canonical form");
 }
+
+#[test]
+fn track_names_with_brackets_round_trip() {
+    let names = ["Pad [verb]", "]", "[a] \"b\" ]c[", "x\\]"];
+    let mut song = Song::default();
+    for (i, name) in names.iter().enumerate() {
+        let mut track = notefmt::Track::new(*name, i as u8 + 1);
+        track.notes.push(notefmt::Note {
+            at: "1.1.0".parse().unwrap(),
+            pitch: "C4".parse().unwrap(),
+            beats: 1.0,
+            vel: 80,
+        });
+        song.tracks.push(track);
+    }
+    let from_midi = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+    let text = from_midi.to_text();
+    let back = Song::from_text(&text).unwrap();
+    assert_eq!(back, from_midi, "{text}");
+    let got: Vec<&str> = back.tracks.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(got, names);
+
+    let track = &Song::from_text("[track \"Pad [verb]\" ch2 prog5]  # strings\n")
+        .unwrap()
+        .tracks[0];
+    assert_eq!((track.name.as_str(), track.channel), ("Pad [verb]", 2));
+    assert_eq!(track.program, Some(5));
+
+    for bad in ["[track \"Pad [verb]\" ch1", "[track \"Pad ch1]"] {
+        match Song::from_text(bad) {
+            Err(notefmt::Error::Parse { line: 1, .. }) => {}
+            other => panic!("{bad}: expected a parse error on line 1, got {other:?}"),
+        }
+    }
+}
+
+fn notes_of(song: &Song) -> Vec<String> {
+    song.tracks[0]
+        .notes
+        .iter()
+        .map(|n| format!("{} {} {} {}", n.at, n.pitch, n.beats, n.vel))
+        .collect()
+}
+
+#[test]
+fn same_pitch_notes_that_start_together_keep_their_lengths() {
+    // Listed long first and short first, with a zero-length note among them: each note
+    // keeps its own length and velocity whatever order the text gives.
+    for lines in [
+        "1.1.0 C4 2 50\n1.1.0 C4 0.5 100\n1.1.0 C4 0 110\n",
+        "1.1.0 C4 0 110\n1.1.0 C4 0.5 100\n1.1.0 C4 2 50\n",
+    ] {
+        let text = format!("[track \"P\" ch1]\n{lines}");
+        let song = Song::from_text(&text).unwrap();
+        let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+        let mut got = notes_of(&back);
+        got.sort();
+        assert_eq!(
+            got,
+            ["1.1.0 C4 0 110", "1.1.0 C4 0.5 100", "1.1.0 C4 2 50"],
+            "{lines}"
+        );
+    }
+}
+
+#[test]
+fn overlapping_same_pitch_notes_round_trip_but_nested_ones_are_refused() {
+    // Overlapping, ending together, and starting where another ends: all kept exactly.
+    let text = "[track \"P\" ch1]\n\
+                1.1.0 C4 1 80\n1.1.240 C4 1 90\n\
+                2.1.0 D4 2 80\n2.2.0 D4 1 90\n\
+                3.1.0 E4 1 80\n3.2.0 E4 0 90\n";
+    let song = Song::from_text(text).unwrap();
+    let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+    assert_eq!(notes_of(&back), notes_of(&song));
+
+    // A note inside a longer note of the same pitch would come back changed, so writing
+    // MIDI refuses it and names both notes.
+    for inner in ["1.2.0 C4 0.5 100", "1.2.0 C4 0 100", "1.4.0 C4 0.5 100"] {
+        let text = format!("[track \"P\" ch1]\n1.1.0 C4 4 80\n{inner}\n1.2.0 D4 0.5 70\n");
+        let song = Song::from_text(&text).unwrap();
+        let err = song.to_midi().unwrap_err().to_string();
+        assert!(
+            err.contains("C4 at 1.2.0") || err.contains("C4 at 1.4.0"),
+            "{err}"
+        );
+        assert!(err.contains("inside the C4 at 1.1.0"), "{err}");
+    }
+    // The same notes on different channels are separate notes and are fine.
+    let text = "[track \"A\" ch1]\n1.1.0 C4 4 80\n[track \"B\" ch2]\n1.2.0 C4 0.5 100\n";
+    assert!(Song::from_text(text).unwrap().to_midi().is_ok());
+}

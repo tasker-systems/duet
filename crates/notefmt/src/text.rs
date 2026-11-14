@@ -144,10 +144,6 @@ impl Song {
             }
 
             if let Some(inner) = line.strip_prefix('[') {
-                let inner = inner
-                    .split_once(']')
-                    .map(|(inner, _)| inner)
-                    .ok_or_else(|| err("a track line needs a closing ]".into()))?;
                 if let Some(done) = track.take() {
                     song.tracks.push(done);
                 }
@@ -325,14 +321,18 @@ fn parse_quoted(s: &str) -> Result<(String, &str)> {
     Err(Error::invalid("a quoted name is missing its closing quote"))
 }
 
-/// Parses the inside of `[track "Name" ch1 prog0]`.
-fn parse_track_header(inner: &str) -> Result<Track> {
-    let rest = inner
-        .trim()
+/// Parses a track line, `[track "Name" ch1 prog0]`, from just after its `[`. The name is
+/// read first, so a name may hold `]`; anything after the closing `]` is ignored.
+fn parse_track_header(line: &str) -> Result<Track> {
+    let rest = line
+        .trim_start()
         .strip_prefix("track")
         .ok_or_else(|| Error::invalid("a track line looks like [track \"Piano\" ch1 prog0]"))?
         .trim_start();
     let (name, rest) = parse_quoted(rest)?;
+    let (rest, _) = rest
+        .split_once(']')
+        .ok_or_else(|| Error::invalid("a track line needs a closing ]"))?;
     let mut track = Track::new(name, 1);
     for word in rest.split_whitespace() {
         if let Some(ch) = word.strip_prefix("ch") {

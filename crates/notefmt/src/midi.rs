@@ -392,7 +392,8 @@ impl Song {
                 };
                 events.push((tick, 2, i, midi(message)));
             }
-            for (i, note) in track.notes.iter().enumerate() {
+            let mut timed_notes = Vec::with_capacity(track.notes.len());
+            for note in &track.notes {
                 if !(1..=127).contains(&note.vel) {
                     return Err(Error::invalid(format!(
                         "track '{}': note {} at {} has velocity {}, not 1 to 127",
@@ -401,6 +402,14 @@ impl Song {
                 }
                 let start = map.tick(note.at)?;
                 let len = ticks_from_beats(note.beats, tpq)?;
+                timed_notes.push((start, len, note));
+            }
+            check_no_nested_notes(&track.name, &timed_notes)?;
+            // A reader pairs each note-off with the earliest note-on still sounding on that
+            // key. Writing same-tick note-ons shortest first makes the first note-off belong
+            // to the note it ends, so notes that start together keep their own lengths.
+            timed_notes.sort_by_key(|(start, len, _)| (*start, *len));
+            for (i, &(start, len, note)) in timed_notes.iter().enumerate() {
                 let key = u7::new(note.pitch.midi());
                 events.push((
                     start,
@@ -484,6 +493,59 @@ impl Song {
         }
         Ok(map)
     }
+}
+
+/// Refuses a note that starts after another note of the same pitch and ends before it.
+///
+/// MIDI has no note ids: a note-off ends whichever note on that key a reader pairs it
+/// with. notefmt pairs the earliest note still sounding, so a nested note would come back
+/// with its length swapped with the outer note's. Rather than change the notes silently,
+/// writing them is an error. Notes that start together, or that only overlap, are fine.
+fn check_no_nested_notes(track: &str, notes: &[(u64, u64, &Note)]) -> Result<()> {
+    let mut by_key: HashMap<u8, Vec<(u64, u64, &Note)>> = HashMap::new();
+    for &(start, len, note) in notes {
+        by_key
+            .entry(note.pitch.midi())
+            .or_default()
+            .push((start, start + len, note));
+    }
+    for mut same in by_key.into_values() {
+        same.sort_by_key(|(start, end, _)| (*start, *end));
+        // The longest-lasting note among those that start strictly earlier.
+        let mut outer: Option<(u64, &Note)> = None;
+        let mut group_start = 0;
+        while group_start < same.len() {
+            let start = same[group_start].0;
+            let group_end = same[group_start..]
+                .iter()
+                .position(|(s, _, _)| *s != start)
+                .map_or(same.len(), |n| group_start + n);
+            for &(_, end, inner) in &same[group_start..group_end] {
+                if let Some((outer_end, outer_note)) = outer {
+                    if end < outer_end {
+                        return Err(Error::invalid(format!(
+                            "track '{track}': the {} at {} lies inside the {} at {}; MIDI \
+                             cannot keep a note of the same pitch inside another, so shorten \
+                             the note at {} to end by {}",
+                            inner.pitch,
+                            inner.at,
+                            outer_note.pitch,
+                            outer_note.at,
+                            outer_note.at,
+                            inner.at
+                        )));
+                    }
+                }
+            }
+            for &(_, end, note) in &same[group_start..group_end] {
+                if outer.is_none_or(|(outer_end, _)| end > outer_end) {
+                    outer = Some((end, note));
+                }
+            }
+            group_start = group_end;
+        }
+    }
+    Ok(())
 }
 
 /// Sorts timed events, turns them into delta times and ends the track.

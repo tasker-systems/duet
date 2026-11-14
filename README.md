@@ -99,6 +99,11 @@ Dropped: aftertouch, SysEx, markers, lyrics and other text events, and note-off 
 A MIDI track that mixes channels (as format 0 files do) becomes one track per channel, and
 files are always written as format 1, with tempo, meter and key in the first track.
 
+One thing MIDI cannot hold: a note that starts after another note of the same pitch and
+channel and ends before it. MIDI has no note ids, so its note-off would end the outer note
+instead. Converting such a song to MIDI is an error that names both notes. Notes that only
+overlap, or that start together, are kept exactly.
+
 There is no quantizing: played timing comes through as it was played. A quantize option is
 a likely next step.
 
