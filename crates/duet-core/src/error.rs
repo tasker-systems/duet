@@ -1,9 +1,6 @@
 /// Everything that can go wrong reading or writing a song.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The MIDI file could not be parsed, or uses a feature this crate does not support.
-    #[error("MIDI error: {0}")]
-    Midi(String),
     /// A line of the text format could not be parsed. `line` is 1-based.
     #[error("line {line}: {msg}")]
     Parse { line: usize, msg: String },

@@ -3,8 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::Result;
 use crate::pitch::Pitch;
-use crate::time::{Key, Position, TimeSig};
+use crate::time::{
+    Key, Position, TimeMap, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm,
+    ticks_from_beats,
+};
 
 /// A whole song: its tempo, meter and key, and its tracks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -127,5 +131,55 @@ impl Control {
         match self {
             Control::Cc { at, .. } | Control::Bend { at, .. } | Control::Program { at, .. } => *at,
         }
+    }
+}
+
+impl Song {
+    /// Puts the song in the form reading MIDI would give: lengths rounded to whole
+    /// ticks and written as their shortest decimal, tempos rounded to what MIDI stores,
+    /// and positions written in canonical bar.beat.tick form (so `1.1.960` in 4/4 at 480
+    /// ticks per quarter becomes `1.3.0`). The order of notes and controls is kept.
+    pub fn normalize(&mut self) -> Result<()> {
+        let tpq = self.ticks_per_quarter;
+        let bpm = |bpm: f64| micros_from_bpm(bpm).map(bpm_from_micros);
+        self.tempo_bpm = bpm(self.tempo_bpm)?;
+
+        let mut map = TimeMap::new(tpq, self.time_sig)?;
+        for change in &mut self.time_changes {
+            let tick = map.tick(change.at)?;
+            change.at = map.change_at_tick(tick, change.time_sig)?;
+        }
+        let canonical = |at| map.tick(at).map(|tick| map.position(tick));
+        for change in &mut self.tempo_changes {
+            change.at = canonical(change.at)?;
+            change.bpm = bpm(change.bpm)?;
+        }
+        for change in &mut self.key_changes {
+            change.at = canonical(change.at)?;
+        }
+        for track in &mut self.tracks {
+            for note in &mut track.notes {
+                note.at = canonical(note.at)?;
+                note.beats = beats_from_ticks(ticks_from_beats(note.beats, tpq)?, tpq);
+            }
+            for control in &mut track.controls {
+                let at = canonical(control.at())?;
+                match control {
+                    Control::Cc { at: a, .. }
+                    | Control::Bend { at: a, .. }
+                    | Control::Program { at: a, .. } => *a = at,
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The map from positions to ticks for this song's time signatures.
+    pub fn time_map(&self) -> Result<TimeMap> {
+        let mut map = TimeMap::new(self.ticks_per_quarter, self.time_sig)?;
+        for change in &self.time_changes {
+            map.change_at(change.at, change.time_sig)?;
+        }
+        Ok(map)
     }
 }

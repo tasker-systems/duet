@@ -1,19 +1,17 @@
-//! Convert MIDI to a readable, LLM-editable note format and back, exactly.
+//! The core of duet: the [`Song`] every format converts through, and the notefmt text.
 //!
 //! A [`Song`] holds tempo, meter, key and tracks of [`Note`]s placed at bar.beat.tick
-//! positions. It reads and writes Standard MIDI Files ([`Song::from_midi`],
-//! [`Song::to_midi`]), a one-note-per-line text format ([`Song::from_text`],
-//! [`Song::to_text`]), and anything serde supports, such as JSON and TOML.
+//! positions. It reads and writes notefmt, a one-note-per-line text format
+//! ([`Song::from_text`], [`Song::to_text`]), and anything serde supports, such as JSON and
+//! TOML. MIDI files are read and written by the `duet-midi` crate.
 //!
 //! ```
-//! use notefmt::Song;
+//! use duet_core::Song;
 //!
-//! let song = Song::from_text(
-//!     "tempo 92\ntime 4/4\nkey D minor\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n",
-//! )?;
-//! let midi = song.to_midi()?;
-//! assert_eq!(Song::from_midi(&midi)?, song);
-//! # Ok::<(), notefmt::Error>(())
+//! let text = "tempo 92\ntime 4/4\nkey D minor\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n";
+//! let song = Song::from_text(text)?;
+//! assert_eq!(Song::from_text(&song.to_text())?, song);
+//! # Ok::<(), duet_core::Error>(())
 //! ```
 //!
 //! Quantizing is a separate, explicit step: [`Song::quantized`] returns a new song on a
@@ -25,7 +23,6 @@
 #![forbid(unsafe_code)]
 
 mod error;
-mod midi;
 mod model;
 mod pitch;
 mod quantize;

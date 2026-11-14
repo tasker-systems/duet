@@ -1,4 +1,24 @@
 //! Reading and writing Standard MIDI Files with midly.
+//!
+//! [`Midi`] adds [`Midi::from_midi`] and [`Midi::to_midi`] to [`Song`]: bring it into
+//! scope and a song reads and writes MIDI.
+//!
+//! ```
+//! use duet_core::Song;
+//! use duet_midi::Midi;
+//!
+//! let song = Song::from_text(
+//!     "tempo 92\ntime 4/4\nkey D minor\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n",
+//! )?;
+//! let midi = song.to_midi()?;
+//! assert_eq!(Song::from_midi(&midi)?, song);
+//! # Ok::<(), duet_midi::Error>(())
+//! ```
+//!
+//! Round-trips are exact to the tick: every event kept is written back at the tick it
+//! was read from.
+
+#![forbid(unsafe_code)]
 
 use std::collections::{HashMap, VecDeque};
 
@@ -7,12 +27,41 @@ use midly::{
     Format, Header, MetaMessage, MidiMessage, PitchBend, Smf, Timing, TrackEvent, TrackEventKind,
 };
 
-use crate::error::{Error, Result};
-use crate::model::{Control, KeyChange, Note, Song, TempoChange, TimeChange, Track};
-use crate::pitch::Pitch;
-use crate::time::{
-    Key, TimeMap, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm, ticks_from_beats,
+use duet_core::time::{
+    Key, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm, ticks_from_beats,
 };
+use duet_core::{Control, KeyChange, Note, Pitch, Song, TempoChange, TimeChange, TimeMap, Track};
+
+/// Everything that can go wrong reading or writing MIDI.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// The MIDI file could not be parsed, or uses a feature this crate does not support.
+    #[error("MIDI error: {0}")]
+    Midi(String),
+    /// The song cannot be written as MIDI, such as a note nested inside one of the same
+    /// pitch.
+    #[error("invalid song: {0}")]
+    Invalid(String),
+    /// The song itself is invalid.
+    #[error(transparent)]
+    Song(#[from] duet_core::Error),
+}
+
+impl Error {
+    fn invalid(msg: impl Into<String>) -> Self {
+        Error::Invalid(msg.into())
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Reading and writing a [`Song`] as a Standard MIDI File.
+pub trait Midi: Sized {
+    /// Reads a Standard MIDI File.
+    fn from_midi(bytes: &[u8]) -> Result<Self>;
+    /// Writes a format 1 Standard MIDI File.
+    fn to_midi(&self) -> Result<Vec<u8>>;
+}
 
 const DEFAULT_TEMPO_MICROS: u32 = 500_000;
 
@@ -49,7 +98,7 @@ fn last_per_tick<T: Copy>(mut events: Vec<(u64, T)>) -> Vec<(u64, T)> {
     out
 }
 
-impl Song {
+impl Midi for Song {
     /// Reads a Standard MIDI File.
     ///
     /// Notes, tempo, time signature and key changes, track names, program changes,
@@ -60,7 +109,7 @@ impl Song {
     /// Black keys are spelled by the key in force where each note starts. A format 0
     /// file's track name is its sequence name, so it becomes the title. Names that are
     /// not UTF-8 are read with U+FFFD in place of each invalid byte.
-    pub fn from_midi(bytes: &[u8]) -> Result<Song> {
+    fn from_midi(bytes: &[u8]) -> Result<Song> {
         let smf = Smf::parse(bytes).map_err(|e| Error::Midi(e.to_string()))?;
         let tpq = match smf.header.timing {
             Timing::Metrical(tpq) => tpq.as_int(),
@@ -303,7 +352,7 @@ impl Song {
 
     /// Writes the song as a format 1 Standard MIDI File: a first track with the title,
     /// tempo, time signature and key, then one track per [`Track`].
-    pub fn to_midi(&self) -> Result<Vec<u8>> {
+    fn to_midi(&self) -> Result<Vec<u8>> {
         let tpq = self.ticks_per_quarter;
         if tpq == 0 || tpq > 0x7FFF {
             return Err(Error::invalid(format!(
@@ -466,60 +515,12 @@ impl Song {
             .map_err(|e| Error::Midi(e.to_string()))?;
         Ok(out)
     }
-
-    /// Puts the song in the form [`Song::from_midi`] would give: lengths rounded to whole
-    /// ticks and written as their shortest decimal, tempos rounded to what MIDI stores,
-    /// and positions written in canonical bar.beat.tick form (so `1.1.960` in 4/4 at 480
-    /// ticks per quarter becomes `1.3.0`). The order of notes and controls is kept.
-    pub fn normalize(&mut self) -> Result<()> {
-        let tpq = self.ticks_per_quarter;
-        let bpm = |bpm: f64| micros_from_bpm(bpm).map(bpm_from_micros);
-        self.tempo_bpm = bpm(self.tempo_bpm)?;
-
-        let mut map = TimeMap::new(tpq, self.time_sig)?;
-        for change in &mut self.time_changes {
-            let tick = map.tick(change.at)?;
-            change.at = map.change_at_tick(tick, change.time_sig)?;
-        }
-        let canonical = |at| map.tick(at).map(|tick| map.position(tick));
-        for change in &mut self.tempo_changes {
-            change.at = canonical(change.at)?;
-            change.bpm = bpm(change.bpm)?;
-        }
-        for change in &mut self.key_changes {
-            change.at = canonical(change.at)?;
-        }
-        for track in &mut self.tracks {
-            for note in &mut track.notes {
-                note.at = canonical(note.at)?;
-                note.beats = beats_from_ticks(ticks_from_beats(note.beats, tpq)?, tpq);
-            }
-            for control in &mut track.controls {
-                let at = canonical(control.at())?;
-                match control {
-                    Control::Cc { at: a, .. }
-                    | Control::Bend { at: a, .. }
-                    | Control::Program { at: a, .. } => *a = at,
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// The map from positions to ticks for this song's time signatures.
-    pub fn time_map(&self) -> Result<TimeMap> {
-        let mut map = TimeMap::new(self.ticks_per_quarter, self.time_sig)?;
-        for change in &self.time_changes {
-            map.change_at(change.at, change.time_sig)?;
-        }
-        Ok(map)
-    }
 }
 
 /// Refuses a note that starts after another note of the same pitch and ends before it.
 ///
 /// MIDI has no note ids: a note-off ends whichever note on that key a reader pairs it
-/// with. notefmt pairs the earliest note still sounding, so a nested note would come back
+/// with. this crate pairs the earliest note still sounding, so a nested note would come back
 /// with its length swapped with the outer note's. Rather than change the notes silently,
 /// writing them is an error. Notes that start together, or that only overlap, are fine.
 fn check_no_nested_notes(track: &str, notes: &[(u64, u64, &Note)]) -> Result<()> {

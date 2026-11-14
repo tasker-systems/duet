@@ -22,7 +22,7 @@ Guidance for agents working in this repository. It is a router: each topic lives
   departure is an entry in `.conventions/exceptions.toml` with its reason. *Why:* the conventions
   check fails on an unrecorded difference (CONS-3, CONS-4).
 - **The format promises exact round-trips.** A change to reading or writing MIDI, text, JSON or
-  TOML comes with a round-trip test in `crates/notefmt/tests/roundtrip.rs` that fails without it.
+  TOML comes with a round-trip test in `crates/duet-midi/tests/roundtrip.rs` that fails without it.
   *Why:* a silent change to a note is the one failure a user cannot see. Enforced only by review.
 
 Commits are conventional (`feat:`, `fix:`, `docs:`, `chore:`).

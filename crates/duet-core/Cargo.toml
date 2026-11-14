@@ -1,0 +1,18 @@
+[package]
+name = "duet-core"
+version = "0.1.0"
+description = "The Song every duet format converts through, quantizing, and the notefmt text format."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["midi", "music", "notation", "llm"]
+categories = ["multimedia::audio", "parser-implementations"]
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
