@@ -19,14 +19,14 @@ ideal), and the commit or version you tested.
 
 ## Scope
 
-In scope: the `notefmt` library and CLI in this repository, on the `main` branch. That includes
+In scope: the `duet` crates and CLI in this repository, on the `main` branch. That includes
 crashes, hangs or unbounded memory use on crafted MIDI, text, JSON or TOML input, and anything
 that makes a round-trip silently change a note.
 
 Out of scope:
 
 - Releases other than the latest commit on `main`. There are no maintained release branches.
-- Vulnerabilities in dependencies with no path to exploit through `notefmt`. Report those
+- Vulnerabilities in dependencies with no path to exploit through `duet`. Report those
   upstream. `cargo audit` and `cargo deny` already run in CI.
 - Files under `.conventions/baseline/`, which are projected from
   [tasker-systems/conventions](https://github.com/tasker-systems/conventions). Report those

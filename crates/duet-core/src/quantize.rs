@@ -114,7 +114,7 @@ impl Song {
     ///   so no played note disappears. A note that was already zero length stays zero length.
     /// - Controls, tempo, key and time signature changes are not moved.
     /// - Notes of the same pitch that quantizing puts one inside another are kept as they
-    ///   come out; [`Song::to_midi`] refuses them by name, as it does any nested note.
+    ///   come out; writing them to MIDI refuses them by name, as it does any nested note.
     ///
     /// Fails, naming the grid, when one step is not a whole number of this song's ticks.
     pub fn quantized(&self, grid: Grid) -> Result<Song> {

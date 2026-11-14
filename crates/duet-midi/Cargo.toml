@@ -1,0 +1,23 @@
+[package]
+name = "duet-midi"
+version = "0.1.0"
+description = "Read and write Standard MIDI Files as duet Songs, exactly."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["midi", "music", "notation", "llm"]
+categories = ["multimedia::audio", "parser-implementations"]
+
+[lints]
+workspace = true
+
+[dependencies]
+duet-core = { path = "../duet-core", version = "0.1.0" }
+midly = "0.5.3"
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
+toml = "1"

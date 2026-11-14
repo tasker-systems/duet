@@ -3,9 +3,17 @@
 Tooling for writing and editing music together with an LLM.
 
 LLMs can't read MIDI, and the text formats that do exist either quantize (ABC) or speak
-in ticks and note numbers (midicsv). The first tool here, **notefmt**, turns a MIDI file
-into one readable note per line, in bars, beats and note names, and turns it back into
-MIDI without losing a tick.
+in ticks and note numbers (midicsv). The tool here is **duet**. Its first format,
+**notefmt**, turns a MIDI file into one readable note per line, in bars, beats and note
+names, and turns it back into MIDI without losing a tick.
+
+The workspace is split by domain:
+
+| Crate | Holds |
+|---|---|
+| `duet-core` | the `Song` every format converts through, quantizing, and the notefmt text |
+| `duet-midi` | reading and writing Standard MIDI Files |
+| `duet-cli` | the `duet` binary |
 
 ## notefmt
 
@@ -35,14 +43,14 @@ The full example is [samples/sketch.txt](samples/sketch.txt).
 ### Install and run
 
 ```sh
-cargo install --path crates/notefmt
+cargo install --path crates/duet-cli
 
-notefmt convert take.mid take.txt      # MIDI to text
-notefmt convert take.txt take.mid      # text back to MIDI
-notefmt convert take.mid take.json     # or JSON, or .toml
-notefmt show take.mid                  # print as text
-notefmt show take.mid --to json
-notefmt quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
+duet convert take.mid take.txt      # MIDI to text
+duet convert take.txt take.mid      # text back to MIDI
+duet convert take.mid take.json     # or JSON, or .toml
+duet song show take.mid             # print as text
+duet song show take.mid --to json
+duet song quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
 ```
 
 Formats come from the file extension (`.mid`/`.midi`, `.json`, `.toml`, anything else is
@@ -120,7 +128,7 @@ Nothing is quantized unless you ask: played timing comes through as it was playe
 
 ### Quantizing
 
-`notefmt quantize` (or `Song::quantized` in the library) writes a copy with every note's
+`duet song quantize` (or `Song::quantized` in the library) writes a copy with every note's
 start and end moved to the nearest point of a grid. The input is never changed.
 
 - The grid is written `1/16` for sixteenths or `1/8t` for triplet eighths. A grid whose step
@@ -138,7 +146,8 @@ start and end moved to the nearest point of a grid. The input is never changed.
 ### As a library
 
 ```rust
-use notefmt::Song;
+use duet_core::Song;
+use duet_midi::Midi; // adds Song::from_midi and Song::to_midi
 
 let song = Song::from_midi(&std::fs::read("take.mid")?)?;
 let text = song.to_text();
@@ -165,7 +174,7 @@ CI also runs `cargo deny`, `cargo audit`, rustdoc with `-D warnings`, a build on
 [conventions](https://github.com/tasker-systems/conventions) baseline this repository is pinned to
 (see [CLAUDE.md](CLAUDE.md) and `.conventions/`).
 
-The round-trip tests in `crates/notefmt/tests` generate MIDI files with humanized timing,
+The round-trip tests in `crates/duet-midi/tests` generate MIDI files with humanized timing,
 sustain pedal, pitch bend, tempo and meter changes (including one in the middle of a bar),
 overlapping notes, and a format 0 file with several channels, at 96, 384, 480 and 960 ticks
 per quarter, and check every kept event survives MIDI to text to MIDI unchanged.

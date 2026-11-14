@@ -130,6 +130,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
+name = "duet-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "duet-core",
+ "duet-midi",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "duet-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "duet-midi"
+version = "0.1.0"
+dependencies = [
+ "duet-core",
+ "midly",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,19 +219,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "207d755f4cb882d20c4da58d707ca9130a0c9bc5061f657a4f299b8e36362b7a"
 dependencies = [
  "rayon",
-]
-
-[[package]]
-name = "notefmt"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "midly",
- "serde",
- "serde_json",
- "thiserror",
- "toml",
 ]
 
 [[package]]

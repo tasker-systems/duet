@@ -1,23 +1,18 @@
 [package]
-name = "notefmt"
+name = "duet-core"
 version = "0.1.0"
-description = "Convert MIDI to a readable, LLM-editable note format (text, JSON, TOML) and back, exactly."
+description = "The Song every duet format converts through, quantizing, and the notefmt text format."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 readme = "../../README.md"
 keywords = ["midi", "music", "notation", "llm"]
-categories = ["multimedia::audio", "command-line-utilities", "parser-implementations"]
+categories = ["multimedia::audio", "parser-implementations"]
 
 [lints]
 workspace = true
 
 [dependencies]
-midly = "0.5.3"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "1"
-clap = { version = "4", features = ["derive"] }
 thiserror = "2"
-anyhow = "1"

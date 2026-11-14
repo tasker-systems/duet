@@ -3,11 +3,12 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use duet_core::{Grid, Position, Song};
+use duet_midi::Midi;
 use midly::num::{u4, u7, u15, u24, u28};
 use midly::{
     Format, Header, MetaMessage, MidiMessage, PitchBend, Smf, Timing, TrackEvent, TrackEventKind,
 };
-use notefmt::{Grid, Position, Song};
 
 /// A note as absolute ticks: (channel, key, start, end, velocity).
 type RawNote = (u8, u8, u64, u64, u8);
@@ -512,7 +513,7 @@ fn errors_name_the_line() {
         ("[track \"P\" ch1]\n1.1.0 cc64 128", 2),
     ] {
         match Song::from_text(bad) {
-            Err(notefmt::Error::Parse { line: l, .. }) => assert_eq!(l, line, "{bad}"),
+            Err(duet_core::Error::Parse { line: l, .. }) => assert_eq!(l, line, "{bad}"),
             other => panic!("{bad}: expected a parse error, got {other:?}"),
         }
     }
@@ -533,8 +534,8 @@ fn track_names_with_brackets_round_trip() {
     let names = ["Pad [verb]", "]", "[a] \"b\" ]c[", "x\\]"];
     let mut song = Song::default();
     for (i, name) in names.iter().enumerate() {
-        let mut track = notefmt::Track::new(*name, i as u8 + 1);
-        track.notes.push(notefmt::Note {
+        let mut track = duet_core::Track::new(*name, i as u8 + 1);
+        track.notes.push(duet_core::Note {
             at: "1.1.0".parse().unwrap(),
             pitch: "C4".parse().unwrap(),
             beats: 1.0,
@@ -557,7 +558,7 @@ fn track_names_with_brackets_round_trip() {
 
     for bad in ["[track \"Pad [verb]\" ch1", "[track \"Pad ch1]"] {
         match Song::from_text(bad) {
-            Err(notefmt::Error::Parse { line: 1, .. }) => {}
+            Err(duet_core::Error::Parse { line: 1, .. }) => {}
             other => panic!("{bad}: expected a parse error on line 1, got {other:?}"),
         }
     }
@@ -691,7 +692,7 @@ fn header_lines_after_a_track_say_where_they_belong() {
     ] {
         let text = format!("[track \"P\" ch1]\n1.1.0 C4 1 80\n{line}\n");
         match Song::from_text(&text) {
-            Err(notefmt::Error::Parse { line: 3, msg }) => {
+            Err(duet_core::Error::Parse { line: 3, msg }) => {
                 assert!(msg.contains(&format!("'{kw}' is a header line")), "{msg}");
                 assert!(msg.contains("before the first [track]"), "{msg}");
             }
@@ -701,7 +702,7 @@ fn header_lines_after_a_track_say_where_they_belong() {
 }
 
 /// Whether an absolute tick is on `step`'s grid, which restarts at every bar line.
-fn on_grid(map: &notefmt::TimeMap, tick: u64, step: u64) -> bool {
+fn on_grid(map: &duet_core::TimeMap, tick: u64, step: u64) -> bool {
     let bar_start = map.tick(Position::bar(map.position(tick).bar)).unwrap();
     (tick - bar_start).is_multiple_of(step)
 }
