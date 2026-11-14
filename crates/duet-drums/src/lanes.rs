@@ -46,6 +46,32 @@ struct RawMap {
     lanes: toml::Table,
 }
 
+/// A change to one lane of a map, as a config file's `[lanes.<name>]` table gives it:
+/// each field it sets replaces the lane's, and the rest are kept. A patch for a name the
+/// map does not have adds a lane, and then needs a key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct LanePatch {
+    /// The MIDI key the lane plays.
+    pub key: Option<u8>,
+    /// The row group, which must be one the map orders, or `other`. A new lane with no
+    /// group goes in `other`, after every group the map orders.
+    pub group: Option<String>,
+    /// The lane's aliases, replacing any it had.
+    pub aliases: Option<Vec<String>>,
+}
+
+impl LanePatch {
+    /// A patch that sets only the key.
+    pub fn key(key: u8) -> LanePatch {
+        LanePatch {
+            key: Some(key),
+            ..LanePatch::default()
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawLane {
@@ -189,6 +215,69 @@ impl LaneMap {
                     });
                 }
             }
+        }
+        out.order
+            .retain(|g| out.lanes.iter().any(|l| &l.group == g));
+        out.check()?;
+        Ok(out)
+    }
+
+    /// This map with `patches` applied, in order, lane by lane: a patch for a lane the
+    /// map has changes the fields it sets, and one for a new name adds a lane. No lane is
+    /// ever removed, so a patch that would leave two lanes on one key, or one name or
+    /// alias on two lanes, is refused by name; move the other lane in the same patches.
+    pub fn patched(&self, patches: &[(String, LanePatch)]) -> Result<LaneMap> {
+        let mut out = self.clone();
+        for (name, patch) in patches {
+            if !valid_lane_name(name) {
+                return Err(Error::invalid(format!(
+                    "'{name}' is not a lane name: use lowercase letters, digits and hyphens"
+                )));
+            }
+            if let Some(group) = &patch.group
+                && group != OTHER_GROUP
+                && !out.order.contains(group)
+            {
+                return Err(Error::invalid(format!(
+                    "lane {name}: group '{group}' is not one of {}, or {OTHER_GROUP}",
+                    out.order.join(", ")
+                )));
+            }
+            match out.lanes.iter_mut().find(|l| &l.name == name) {
+                Some(lane) => {
+                    if let Some(key) = patch.key {
+                        lane.key = key;
+                    }
+                    if let Some(group) = &patch.group {
+                        lane.group = group.clone();
+                    }
+                    if let Some(aliases) = &patch.aliases {
+                        lane.aliases = aliases.clone();
+                    }
+                }
+                None => {
+                    let key = patch.key.ok_or_else(|| {
+                        Error::invalid(format!(
+                            "lane {name} is not in the {} map, so it needs a key",
+                            self.name
+                        ))
+                    })?;
+                    out.lanes.push(LaneDef {
+                        name: name.clone(),
+                        key,
+                        group: patch
+                            .group
+                            .clone()
+                            .unwrap_or_else(|| OTHER_GROUP.to_owned()),
+                        aliases: patch.aliases.clone().unwrap_or_default(),
+                    });
+                }
+            }
+        }
+        if out.lanes.iter().any(|l| l.group == OTHER_GROUP)
+            && !out.order.iter().any(|g| g == OTHER_GROUP)
+        {
+            out.order.push(OTHER_GROUP.to_owned());
         }
         out.order
             .retain(|g| out.lanes.iter().any(|l| &l.group == g));

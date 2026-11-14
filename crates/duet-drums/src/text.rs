@@ -52,7 +52,9 @@ const BLOCK_BARS: usize = 4;
 const BLOCK_STEPS: u32 = 64;
 
 /// Everything the header says.
-struct Header {
+struct Header<'a> {
+    /// The map `map gm` names: the built-in, or the one config gives.
+    base: &'a LaneMap,
     conductor: Song,
     grid: Option<Grid>,
     map: String,
@@ -71,8 +73,8 @@ struct Block {
 }
 
 /// Where the reader is: in the header, or in a block with the header settled.
-enum State {
-    Header(Header),
+enum State<'a> {
+    Header(Header<'a>),
     Body(Frame, Block),
 }
 
@@ -97,7 +99,7 @@ fn u7(s: &str, what: &str) -> Result<u8> {
         .ok_or_else(|| Error::invalid(format!("'{s}' is not a {what} from 0 to 127")))
 }
 
-impl Header {
+impl Header<'_> {
     fn apply(&mut self, line: &str) -> Result<()> {
         if self.conductor.apply_header_line(line)? {
             return Ok(());
@@ -106,7 +108,9 @@ impl Header {
         match w.as_slice() {
             ["grid", g] => self.grid = Some(g.parse()?),
             ["map", name] => {
-                LaneMap::builtin(name)?;
+                if *name != self.base.name() {
+                    LaneMap::builtin(name)?;
+                }
                 self.map = (*name).to_owned();
             }
             ["lane", name, key] => {
@@ -175,7 +179,11 @@ impl Header {
             .ok_or_else(|| Error::invalid("a drum grid needs a grid line, such as 'grid 1/16'"))?;
         let mut conductor = self.conductor;
         conductor.normalize()?;
-        let map = LaneMap::builtin(&self.map)?.overlaid(&self.lanes)?;
+        let map = if self.map == self.base.name() {
+            self.base.overlaid(&self.lanes)?
+        } else {
+            LaneMap::builtin(&self.map)?.overlaid(&self.lanes)?
+        };
         let mut out = DrumGrid::with_conductor(&conductor, grid);
         out.end = conductor.end;
         out.channel = self.channel.unwrap_or(map.channel());
@@ -342,7 +350,17 @@ impl DrumGrid {
     /// Parses the text form. The conductor comes back normalized, as
     /// [`Song::from_text`] gives it; cells come back as the velocities they stand for.
     pub fn from_text(text: &str) -> Result<DrumGrid> {
+        DrumGrid::from_text_in(text, &LaneMap::gm())
+    }
+
+    /// Parses the text form with `map gm` meaning `base`: the built-in map as a user's or
+    /// project's config extends or changes it. A row may then name a lane or alias the
+    /// config adds. The writer never depends on it: [`DrumGrid::to_text`] still names
+    /// `map gm` and writes a `lane` line for every lane the built-in map does not name on
+    /// that key, so what it writes reads the same with no config.
+    pub fn from_text_in(text: &str, base: &LaneMap) -> Result<DrumGrid> {
         let mut state = State::Header(Header {
+            base,
             conductor: Song::default(),
             grid: None,
             map: "gm".to_owned(),

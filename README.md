@@ -114,8 +114,9 @@ on every machine, whatever defaults each has set.
   That goes for notes, controls and tempo, meter or key changes, when reading, writing MIDI
   and quantizing. Nothing is cut to fit.
 - A song that names no end gets the default: the bar line after the last bar holding a
-  note or control, and never before a tempo, meter or key change. A file written from it
-  states that end.
+  note or control, and never before a tempo, meter or key change. `duet.toml` can change
+  the default (see [Configuration](#configuration)). A file written from it states that
+  end, so it reads the same wherever it goes.
 - Reading MIDI, the file's end (its latest end of track) becomes the song's when some
   track's end of track comes after the event before it, or when it lies past every event
   kept. A file whose tracks each end exactly at their last event cannot say whether it means
@@ -250,8 +251,8 @@ a grid that does not fit is refused by name.
 `ride` 51, the toms from `tom-high` 50 down to `tom-floor` 41, and so on. `duet drums
 lanes` lists them all with their aliases (`bd` for `kick`, `oh` for `hh-open`); a file may
 use an alias, and the grid then uses the lane's own name. Rows are written cymbals first,
-then hats, toms, snare, kick and percussion. The map is built into `duet` for now; user
-and project lane files come later.
+then hats, toms, snare, kick and percussion. A user's or project's `duet.toml` can add lanes, move them and give them aliases (see
+[Configuration](#configuration)).
 
 **To and from a song.** Rendering gives one track named `Drums` on the grid's channel:
 each hit is a note on its lane's key, one step long, with its velocity. Reading a song
@@ -274,6 +275,47 @@ and each is played at least once, as the writer leaves them.
 text is refused, naming the lane, bar and step; keep it in `.drums.json`, or snap it to the
 nearest level with `duet drums snap` (or `--snap-levels` when reading). A velocity exactly
 halfway between two levels goes to the louder one. Nothing snaps unless you ask.
+
+## Configuration
+
+`duet` reads `duet.toml` and `duet.local.toml` from two places, each file over the ones
+before it:
+
+1. the user config directory: `~/.config/duet` on macOS and Linux (or `$XDG_CONFIG_HOME/duet`),
+   `%APPDATA%\duet\config` on Windows, or whatever `DUET_CONFIG_DIR` names
+2. a project's `.duet/` directory: the nearest one from the working directory up
+
+```toml
+[song]
+end = { round-up = 4 }   # or "last-bar", the built-in
+
+[lanes.shaker-2]         # a new lane: it needs a key; it goes in the "other" group
+key = 82
+aliases = ["sh2"]
+
+[lanes.kick]             # a gm lane: only the fields given change
+aliases = ["bd", "boom"]
+```
+
+- **`[song] end`** is the end a song that names none gets when a file is written.
+  `"last-bar"` is the bar line after the last bar holding a note or control. `{ round-up = 4 }`
+  carries that on to the next multiple of 4 bars. The end is always written into the file, so
+  someone with other defaults reads the same song.
+- **`[lanes.<name>]`** adds a lane to the `gm` map, or changes one. The fields are `key`,
+  `group` (one of the map's groups, or `other`) and `aliases`. A file never removes a
+  built-in lane, so one that would put two lanes on one key is refused: move the other lane
+  too. Each file must leave a valid map.
+- **Config lanes are for reading.** A `.drums` row may use a config lane's name or alias, and
+  `duet drums read` names notes by the configured keys. Written `.drums` files never depend on
+  config: they say `map gm` and carry a `lane` line for every lane the built-in map does not
+  name on that key, so they read the same with no config at all.
+- A file that breaks a rule (bad TOML, a field `duet` does not know, two lanes on one key)
+  is refused, naming the file and the rule.
+
+```sh
+duet config path   # the directories, and each file in the order it is read
+duet config show   # the merged config as a duet.toml, each value with where it came from
+```
 
 ## Development
 

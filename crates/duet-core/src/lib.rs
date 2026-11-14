@@ -30,7 +30,7 @@ mod text;
 pub mod time;
 
 pub use error::{Error, Result};
-pub use model::{Control, KeyChange, Note, Song, TempoChange, TimeChange, Track};
+pub use model::{Control, EndRule, KeyChange, Note, Song, TempoChange, TimeChange, Track};
 pub use pitch::Pitch;
 pub use quantize::Grid;
 pub use time::{Key, Position, TimeMap, TimeSig};
