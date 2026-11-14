@@ -56,6 +56,10 @@ impl Song {
     /// controllers and pitch bend are kept exactly. Aftertouch, SysEx, markers, lyrics and
     /// other text events, and note-off velocities are dropped. A MIDI track that uses
     /// several channels becomes one [`Track`] per channel.
+    ///
+    /// Black keys are spelled by the key in force where each note starts. A format 0
+    /// file's track name is its sequence name, so it becomes the title. Names that are
+    /// not UTF-8 are read with U+FFFD in place of each invalid byte.
     pub fn from_midi(bytes: &[u8]) -> Result<Song> {
         let smf = Smf::parse(bytes).map_err(|e| Error::Midi(e.to_string()))?;
         let tpq = match smf.header.timing {
@@ -71,6 +75,7 @@ impl Song {
         let mut sigs: Vec<(u64, (u8, u8))> = Vec::new();
         let mut keys: Vec<(u64, (i8, bool))> = Vec::new();
         let mut title = None;
+        let single_track = smf.header.format == Format::SingleTrack;
         // (midi track index, channel, name, events), in file order.
         let mut parts: Vec<(usize, u8, Option<String>, ChannelEvents)> = Vec::new();
 
@@ -148,6 +153,11 @@ impl Song {
                 }
             }
 
+            // In a format 0 file the one track's name is the sequence name (SMF 1.0), so it
+            // becomes the title, and the tracks split from it by channel are named by channel.
+            if single_track {
+                title = name.take();
+            }
             channels.retain(|_, part| !part.notes.is_empty() || !part.controls.is_empty());
             if channels.is_empty() {
                 if title.is_none() {
@@ -219,18 +229,29 @@ impl Song {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        // Spell black keys the way the opening key does.
-        let flat = |midi: u8| key.is_some_and(|k| k.spells_flat(midi % 12));
+        // Spell each black key the way the key in force where the note starts spells it.
+        let key_ticks: Vec<(u64, Key)> = keys
+            .iter()
+            .map(|&(tick, k)| to_key(k).map(|k| (tick, k)))
+            .collect::<Result<_>>()?;
+        let flat = |start: u64, midi: u8| {
+            let in_force = key_ticks.partition_point(|(tick, _)| *tick <= start);
+            in_force > 0 && key_ticks[in_force - 1].1.spells_flat(midi % 12)
+        };
 
         let tracks = parts
             .into_iter()
             .map(|(index, ch, name, mut part)| {
                 part.notes.sort_by_key(|n| (n.start, n.key, n.len, n.vel));
                 part.controls.sort_by_key(|(tick, _)| *tick);
-                let mut track = Track::new(
-                    name.unwrap_or_else(|| format!("Track {}", index + 1)),
-                    ch + 1,
-                );
+                let name = name.unwrap_or_else(|| {
+                    if single_track {
+                        format!("Channel {}", ch + 1)
+                    } else {
+                        format!("Track {}", index + 1)
+                    }
+                });
+                let mut track = Track::new(name, ch + 1);
                 let mut controls = part.controls.into_iter().peekable();
                 if let Some((0, RawControl::Program(_))) = controls.peek()
                     && let Some((_, RawControl::Program(p))) = controls.next()
@@ -257,7 +278,7 @@ impl Song {
                     .map(|n| {
                         Ok(Note {
                             at: map.position(n.start),
-                            pitch: Pitch::new(n.key)?.spelled_flat(flat(n.key)),
+                            pitch: Pitch::new(n.key)?.spelled_flat(flat(n.start, n.key)),
                             beats: beats_from_ticks(n.len, tpq),
                             vel: n.vel,
                         })

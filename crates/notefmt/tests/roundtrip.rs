@@ -619,3 +619,83 @@ fn overlapping_same_pitch_notes_round_trip_but_nested_ones_are_refused() {
     let text = "[track \"A\" ch1]\n1.1.0 C4 4 80\n[track \"B\" ch2]\n1.2.0 C4 0.5 100\n";
     assert!(Song::from_text(text).unwrap().to_midi().is_ok());
 }
+
+#[test]
+fn black_keys_are_spelled_by_the_key_in_force() {
+    // D major spells sharps, and spells the A#/Bb outside its scale as A#; from bar 3 the
+    // key is Bb major, which spells both as flats. A note right on the change takes the
+    // new key.
+    let text = "key D major\nkey Bb major at 3.1.0\n\n[track \"P\" ch1]\n\
+                1.1.0 F#4 1 80\n2.1.0 A#4 1 80\n3.1.0 Bb4 1 80\n3.2.0 Eb4 1 80\n";
+    let song = Song::from_text(text).unwrap();
+    let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+    assert_eq!(
+        notes_of(&back),
+        [
+            "1.1.0 F#4 1 80",
+            "2.1.0 A#4 1 80",
+            "3.1.0 Bb4 1 80",
+            "3.2.0 Eb4 1 80"
+        ]
+    );
+    assert_eq!(back, song);
+}
+
+#[test]
+fn format_0_sequence_name_is_the_title() {
+    let (bytes, _) = played_take(480, Format::SingleTrack);
+    let song = Song::from_midi(&bytes).unwrap();
+    assert_eq!(song.title.as_deref(), Some("Sketch in D"));
+    // The tracks split from the one MIDI track by channel have no names of their own.
+    let names: Vec<(&str, u8)> = song
+        .tracks
+        .iter()
+        .map(|t| (t.name.as_str(), t.channel))
+        .collect();
+    assert_eq!(
+        names,
+        [("Channel 1", 1), ("Channel 2", 2), ("Channel 10", 10)]
+    );
+    // Written as format 1, the title and names come back unchanged.
+    assert_eq!(Song::from_midi(&song.to_midi().unwrap()).unwrap(), song);
+}
+
+#[test]
+fn names_that_are_not_utf8_are_read_with_replacement_characters() {
+    // Documented in the README: bytes that are not UTF-8 become U+FFFD.
+    let bytes = save(
+        Format::Parallel,
+        480,
+        vec![
+            track(vec![(0, meta(MetaMessage::TrackName(b"Caf\xe9")))]),
+            track(vec![
+                (0, meta(MetaMessage::TrackName(b"Pi\xe0no"))),
+                (0, on(0, 60, 80)),
+                (480, off(0, 60, false)),
+            ]),
+        ],
+    );
+    let song = Song::from_midi(&bytes).unwrap();
+    assert_eq!(song.title.as_deref(), Some("Caf\u{FFFD}"));
+    assert_eq!(song.tracks[0].name, "Pi\u{FFFD}no");
+}
+
+#[test]
+fn header_lines_after_a_track_say_where_they_belong() {
+    for (line, kw) in [
+        ("tempo 96 at 9.1.0", "tempo"),
+        ("time 3/4 at 17.1.0", "time"),
+        ("key A minor", "key"),
+        ("tpq 960", "tpq"),
+        ("title \"Late\"", "title"),
+    ] {
+        let text = format!("[track \"P\" ch1]\n1.1.0 C4 1 80\n{line}\n");
+        match Song::from_text(&text) {
+            Err(notefmt::Error::Parse { line: 3, msg }) => {
+                assert!(msg.contains(&format!("'{kw}' is a header line")), "{msg}");
+                assert!(msg.contains("before the first [track]"), "{msg}");
+            }
+            other => panic!("{line}: expected a parse error on line 3, got {other:?}"),
+        }
+    }
+}
