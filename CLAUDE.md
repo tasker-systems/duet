@@ -25,5 +25,9 @@ Guidance for agents working in this repository. It is a router: each topic lives
   TOML comes with a round-trip test in `crates/duet-midi/tests/roundtrip.rs` that fails without it,
   and a change to drum grids with one in `crates/duet-drums/tests/roundtrip.rs`.
   *Why:* a silent change to a note is the one failure a user cannot see. Enforced only by review.
+- **Tests that run the `duet` binary go in `crates/duet-e2e`.** It builds the binary for each
+  run, so a local run never tests a stale one. To show a new test fails on `main`, build `main`'s
+  binary in a separate checkout with its own `CARGO_TARGET_DIR` and set `DUET_E2E_BIN` to it.
+  *Why:* a test run against an old binary passes or fails for code that is not in the tree.
 
 Commits are conventional (`feat:`, `fix:`, `docs:`, `chore:`).

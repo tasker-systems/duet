@@ -106,11 +106,13 @@ jobs:
       # duet reads config from the user's directory and from a .duet above the working
       # directory. The tests must not: a developer's own duet.toml must never change what
       # they check. So run them again under a hostile config in both places.
-      - name: duet-cli tests ignore the developer's config
+      # duet-e2e builds the duet binary itself and drives it, so its tests run the working
+      # tree's binary, never a stale one.
+      - name: duet-cli and duet-e2e tests ignore the developer's config
         run: |
           mkdir .duet
-          cp crates/duet-cli/tests/hostile/duet.toml .duet/
-          DUET_CONFIG_DIR="$PWD/crates/duet-cli/tests/hostile" cargo test --locked -p duet-cli
+          cp crates/duet-e2e/hostile/duet.toml .duet/
+          DUET_CONFIG_DIR="$PWD/crates/duet-e2e/hostile" cargo test --locked -p duet-cli -p duet-e2e
           rm -r .duet
 
   msrv:

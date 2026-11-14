@@ -55,8 +55,11 @@ duet song show take.mid --to json
 duet song quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
 ```
 
-Formats come from the file extension (`.mid`/`.midi`, `.json`, `.toml`, anything else is
-text). Use `-` for standard input or output, with `--from` and `--to` to name the format.
+Formats come from the file name (`.mid`/`.midi`, `.json`, `.toml`, the drum grid forms
+`.drums`, `.drums.json` and `.drums.toml`, anything else is text). Use `-` for standard
+input or output, with `--from` and `--to` to name the format: `midi`, `text`, `json`,
+`toml`, or `drums`, `drums-json` and `drums-toml` for a grid. `convert` reads and writes
+[drum grids](#drum-grids) too; writing one needs `--grid`.
 
 ### The text format
 
@@ -218,6 +221,36 @@ duet drums snap take.drums.json take.drums       # velocities snapped to g, x an
 duet drums lanes                                 # the lanes and their keys
 ```
 
+`duet convert` goes between grids and every other format as well, by the same code:
+reading a grid it writes what `duet drums render` writes, and writing one from a song it
+takes `duet drums read`'s `--grid`, `--track`, `--bars` and `--snap-levels`, and writes and
+refuses what `duet drums read` does.
+
+```sh
+duet convert groove.drums groove.mid                 # the same as drums render
+duet convert take.mid take.drums --grid 1/16         # the same as drums read
+duet convert groove.drums groove.drums.json          # a straight copy to the exact form
+duet convert groove.drums sixteenths.drums --grid 1/16    # re-stepped through a song
+```
+
+Writing a grid from a song without `--grid` is refused, naming it: the step is never
+guessed. From a grid to a grid, with no `--grid`, the grid is copied as it is, read and
+written as `drums snap` does but without snapping: a lane with no hits, the grid's own
+`vel` levels and, in the exact forms, any velocity all survive. A velocity off the levels
+is refused as text unless `--snap-levels` is given. With `--grid`, the grid goes through a
+song at that step, as `drums render` then `drums read` would, so lanes with no hits are
+dropped. A grid flag that would do nothing (`--track` or `--bars` without `--grid` from a
+grid, or any grid flag for an output that is not a grid) is refused too, so no flag is
+silently ignored.
+
+**A name means the same to every command.** `.drums`, `.drums.json` and `.drums.toml` are
+grids, and every other name is a song's, even when the file holds the other: a song saved
+as `x.drums.json` is read as a grid. So a command that reads or writes a song (`drums
+render`'s output, `drums read`'s input, `song show`, `song quantize`) refuses a grid's name,
+and one that reads or writes a grid (`drums render`'s input, `drums read`'s output, `drums
+snap`) refuses a song's, rather than misreading the file. `--from` and `--to` say what a
+name does not, and `-` is .drums text on a grid's side.
+
 **Header.** The notefmt header lines (title, tpq, tempo, time, key and their `at`
 changes) mean what they mean in notefmt, plus:
 
@@ -344,6 +377,11 @@ per quarter, and check every kept event survives MIDI to text to MIDI unchanged.
 `crates/duet-drums/tests` generate drum grids in several meters (with a change of meter),
 grids and resolutions, with any velocity, ending in empty bars or inside a bar, and check
 grid → song → grid, through MIDI, JSON and TOML, and the text form all round-trip unchanged.
-`crates/duet-cli/tests/golden` holds what `duet` wrote from the samples before a song could
-name an end, and a test checks that every file written now holds the same music, event for
-event, and differs only by stating its end.
+`crates/duet-e2e` holds the tests that drive the `duet` binary end to end. It is never
+published. Each test run builds the binary with `cargo build -p duet-cli --bin duet` and runs
+what that build reports, so a test never runs a stale binary (set `DUET_E2E_BIN` to run
+another, such as one built from `main`). Its `golden/` holds what `duet` wrote from the
+samples before a song could name an end, and a test checks that every file written now holds
+the same music, event for event, and differs only by stating its end. CI runs it again, with
+duet-cli's tests, under the hostile config in `crates/duet-e2e/hostile`, so no test reads a
+developer's own config.

@@ -1,0 +1,22 @@
+[package]
+name = "duet-e2e"
+# Never published and never released: the version is a placeholder, not the workspace's.
+version = "0.0.0"
+description = "End-to-end tests of the duet binary: each run builds it, then drives it."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Reads cargo's build messages to find the binary it just built.
+serde_json = "1"
+
+[dev-dependencies]
+# The tests compare written MIDI event by event, and JSON and TOML as values.
+midly = "0.5.3"
+toml = "1"

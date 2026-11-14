@@ -10,15 +10,16 @@ mod drums;
 mod io;
 mod song;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
+use duet_core::Grid;
 
 use crate::config::{Config, Dirs};
-use crate::drums::DrumsCommand;
-use crate::io::{Format, format_of, read, write};
+use crate::drums::{DrumsCommand, ReadOptions};
+use crate::io::{AnyFormat, Format, read, write};
 use crate::song::SongCommand;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
@@ -31,17 +32,35 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Convert between formats. Formats come from the file extensions (.mid or .midi,
-    /// .json, .toml, anything else is notefmt text) unless --from or --to is given.
+    /// Convert between formats. Formats come from the file names (.mid or .midi, .json,
+    /// .toml, .drums, .drums.json, .drums.toml, anything else is notefmt text) unless
+    /// --from or --to is given. A drum grid is read as `duet drums render` reads it, and
+    /// written from a song as `duet drums read` writes it, which needs --grid. Grid to grid
+    /// is a straight copy, or with --grid goes through a song at that step.
     Convert {
         /// The file to read, or - for standard input.
         input: PathBuf,
         /// The file to write, or - for standard output.
         output: PathBuf,
         #[arg(long, value_enum)]
-        from: Option<Format>,
+        from: Option<AnyFormat>,
         #[arg(long, value_enum)]
-        to: Option<Format>,
+        to: Option<AnyFormat>,
+        /// Writing a drum grid: the step, such as 1/16 for sixteenths or 1/8t for triplet
+        /// eighths. Required to write a grid from a song; from a grid, it re-steps the grid
+        /// through a song, which drops unplayed lanes. Refused for any other output.
+        #[arg(long)]
+        grid: Option<Grid>,
+        /// Writing a drum grid: the drum track's name, as for `duet drums read`.
+        #[arg(long)]
+        track: Option<String>,
+        /// Writing a drum grid: how many bars it runs to, as for `duet drums read`.
+        #[arg(long)]
+        bars: Option<u32>,
+        /// Writing a drum grid: snap each velocity to the text levels, as for
+        /// `duet drums read`.
+        #[arg(long)]
+        snap_levels: bool,
     },
     /// Work on a song: show it, or quantize it.
     #[command(subcommand)]
@@ -74,15 +93,123 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
             output,
             from,
             to,
-        } => {
-            let from = from.unwrap_or_else(|| format_of(&input, Format::Text));
-            let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
-            write(&read(&input, from)?, &output, to, Config::load(dirs)?.end)
-        }
+            grid,
+            track,
+            bars,
+            snap_levels,
+        } => convert(
+            &input,
+            &output,
+            from,
+            to,
+            GridFlags {
+                grid,
+                track,
+                bars,
+                snap_levels,
+            },
+            &Config::load(dirs)?,
+        ),
         Command::Song(command) => song::run(command, &Config::load(dirs)?),
         Command::Drums(command) => drums::run(command, &Config::load(dirs)?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),
+    }
+}
+
+/// `duet convert`'s grid flags, as given.
+struct GridFlags {
+    grid: Option<Grid>,
+    track: Option<String>,
+    bars: Option<u32>,
+    snap_levels: bool,
+}
+
+/// Reads any format and writes any other. A grid is read by the code `duet drums render`
+/// reads with, and written from a song by the code `duet drums read` writes with, so they
+/// never disagree. Writing a grid from a song needs `--grid`. A grid written from a grid
+/// with no `--grid` is copied as it is; with `--grid`, it goes through a song at that step.
+/// A grid flag that would do nothing is refused, so a flag is never silently ignored.
+fn convert(
+    input: &Path,
+    output: &Path,
+    from: Option<AnyFormat>,
+    to: Option<AnyFormat>,
+    flags: GridFlags,
+    config: &Config,
+) -> Result<()> {
+    let text = AnyFormat::Song(Format::Text);
+    let from = from.unwrap_or_else(|| AnyFormat::of(input, text));
+    let to = to.unwrap_or_else(|| AnyFormat::of(output, text));
+    let GridFlags {
+        grid,
+        track,
+        bars,
+        snap_levels,
+    } = flags;
+    // Grid to grid with no step named: a straight copy, read and written as `drums snap`
+    // does, so nothing a song cannot hold (an unplayed lane, the grid's own levels) is lost.
+    if let (AnyFormat::Grid(from), AnyFormat::Grid(to), None) = (from, to, grid) {
+        let given: Vec<&str> = [(track.is_some(), "--track"), (bars.is_some(), "--bars")]
+            .into_iter()
+            .filter_map(|(set, flag)| set.then_some(flag))
+            .collect();
+        if !given.is_empty() {
+            bail!(
+                "{} {} for reading a song's drum track, and need --grid; without it, a grid \
+                 is copied as it is",
+                given.join(", "),
+                if given.len() == 1 { "is" } else { "are" },
+            );
+        }
+        let copy = drums::levels_for(drums::read_grid(input, from, config)?, snap_levels, to)?;
+        return drums::write_grid(&copy, output, to);
+    }
+    let song = match from {
+        AnyFormat::Song(format) => read(input, format)?,
+        AnyFormat::Grid(form) => drums::read_grid(input, form, config)?.to_song()?,
+    };
+    match to {
+        AnyFormat::Song(format) => {
+            let given: Vec<&str> = [
+                (grid.is_some(), "--grid"),
+                (track.is_some(), "--track"),
+                (bars.is_some(), "--bars"),
+                (snap_levels, "--snap-levels"),
+            ]
+            .into_iter()
+            .filter_map(|(set, flag)| set.then_some(flag))
+            .collect();
+            if !given.is_empty() {
+                bail!(
+                    "{} {} for writing a drum grid, and {} is not one; a grid is .drums, \
+                     .drums.json or .drums.toml, or --to drums, drums-json or drums-toml",
+                    given.join(", "),
+                    if given.len() == 1 { "is" } else { "are" },
+                    output.display()
+                );
+            }
+            write(&song, output, format, config.end)
+        }
+        AnyFormat::Grid(form) => {
+            let Some(grid) = grid else {
+                bail!(
+                    "writing a drum grid from a song needs --grid, the step, such as \
+                     --grid 1/16; duet never guesses it"
+                );
+            };
+            let options = ReadOptions {
+                grid,
+                track,
+                bars,
+                snap_levels,
+            };
+            drums::write_grid(
+                &drums::grid_of_song(&song, &options, form, config)?,
+                output,
+                form,
+            )
+        }
     }
 }
 

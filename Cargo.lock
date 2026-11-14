@@ -145,7 +145,6 @@ dependencies = [
  "duet-drums",
  "duet-midi",
  "etcetera",
- "midly",
  "serde",
  "serde_json",
  "toml",
@@ -168,6 +167,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "duet-e2e"
+version = "0.0.0"
+dependencies = [
+ "midly",
+ "serde_json",
  "toml",
 ]
 

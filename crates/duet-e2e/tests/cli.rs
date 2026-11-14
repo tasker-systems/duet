@@ -2,18 +2,9 @@
 //! songs could carry an end, now stating where it ends, and a drum grid that ends in
 //! empty bars comes back whole through MIDI with no bar count.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("duet-cli-{name}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
+use duet_e2e::{root, scratch};
 
 /// Runs duet with no config at all: an empty user config directory, and a working
 /// directory with no `.duet` above it.
@@ -29,12 +20,7 @@ fn duet(args: &[&Path]) {
 
 /// Runs duet in `cwd`, with `user` as its user config directory.
 fn duet_in(cwd: &Path, user: &Path, args: &[&Path]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_duet"))
-        .args(args)
-        .current_dir(cwd)
-        .env("DUET_CONFIG_DIR", user)
-        .output()
-        .expect("run duet")
+    duet_e2e::duet_with(cwd, user, args, b"")
 }
 
 /// Every line of `new` but its header's `end` line, and that line's position.
@@ -75,7 +61,7 @@ fn midi_tracks(bytes: &[u8]) -> (Vec<Vec<String>>, Vec<u64>) {
     (tracks, ends)
 }
 
-/// The golden files in `tests/golden` were written by duet at 145077f, before a song
+/// The golden files in `golden/` were written by duet at 145077f, before a song
 /// could name an end, from `samples/sketch.txt` and `samples/groove.drums` (which now
 /// state their ends, `end 5.1.0` and `end 3.1.0`, the defaults). Every file written now
 /// holds exactly the same music, every note, control and conductor event at the same
@@ -84,7 +70,7 @@ fn midi_tracks(bytes: &[u8]) -> (Vec<Vec<String>>, Vec<u64>) {
 #[test]
 fn every_output_holds_the_same_music_and_states_its_end() {
     let dir = scratch("golden");
-    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    let golden = duet_e2e::golden_dir();
     let sketch = root().join("samples/sketch.txt");
     let groove = root().join("samples/groove.drums");
     let out = |name: &str| dir.join(name);
