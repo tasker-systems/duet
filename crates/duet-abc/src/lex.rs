@@ -375,8 +375,13 @@ pub(crate) fn music(line: usize, code: &str) -> Result<Vec<(Span, Tok)>> {
                 let bars = cur.number().unwrap_or(1);
                 let bars = u32::try_from(bars)
                     .ok()
-                    .filter(|b| *b > 0)
-                    .ok_or_else(|| cur.err(span, "a multi-bar rest needs 1 or more bars"))?;
+                    .filter(|b| (1..=MAX_BAR_REST).contains(&u64::from(*b)))
+                    .ok_or_else(|| {
+                        cur.err(
+                            span,
+                            format!("a multi-bar rest holds 1 to {MAX_BAR_REST} bars"),
+                        )
+                    })?;
                 out.push((span, Tok::BarRest { bars }));
             }
             'y' => {
@@ -580,6 +585,13 @@ fn bar(cur: &mut Cursor<'_>, out: &mut Vec<(Span, Tok)>, span: Span) -> Result<(
     Ok(())
 }
 
+/// The highest ending number read. The reader plays two passes, so anything above 2 is
+/// refused by name there; this bound only keeps a range from growing without limit.
+const MAX_ENDING: u64 = 99;
+
+/// The most bars a multi-bar rest may hold.
+const MAX_BAR_REST: u64 = 9_999;
+
 /// `1`, `1,3`, `1-3` or `1,3,5-7` (§4.10).
 fn ending_list(cur: &mut Cursor<'_>, span: Span) -> Result<Vec<u32>> {
     let mut passes = Vec::new();
@@ -594,11 +606,15 @@ fn ending_list(cur: &mut Cursor<'_>, span: Span) -> Result<Vec<u32>> {
         } else {
             first
         };
-        for pass in first..=last {
-            passes.push(
-                u32::try_from(pass).map_err(|_| cur.err(span, "an ending number is too large"))?,
-            );
+        // Checked before the list is built, so a range like [1-4294967295 is an error, not
+        // four billion passes.
+        if first == 0 || last < first || last > MAX_ENDING {
+            return Err(cur.err(
+                span,
+                format!("an ending is numbered 1 to {MAX_ENDING}, low to high"),
+            ));
         }
+        passes.extend(first as u32..=last as u32);
         if cur.peek() == Some(',') && cur.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
             cur.bump();
         } else {

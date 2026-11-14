@@ -480,3 +480,26 @@ fn reserved_characters_are_listed_not_refused() {
         2
     );
 }
+
+#[test]
+fn a_tiny_file_cannot_make_the_reader_or_writer_build_without_limit() {
+    // Each is refused before anything is built: an ending range, a bar rest, a long song.
+    for body in [
+        "[1-4294967295 C8 |]",
+        "|1-99999999999999999999 C8 |]",
+        "Z4294967295 |]",
+    ] {
+        let abc = format!("X:1\nT:t\nM:4/4\nL:1/8\nK:C\n{body}\n");
+        assert!(
+            matches!(read(&abc), Err(Error::Parse { line: 6, .. })),
+            "{body}: {:?}",
+            read(&abc)
+        );
+    }
+    let far =
+        Song::from_text("end 200001.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 95\n").expect("song");
+    assert!(matches!(
+        write(&far, &WriteOptions::default()),
+        Err(Error::Unwritable { .. })
+    ));
+}

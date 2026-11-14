@@ -53,6 +53,10 @@ impl WriteOptions {
 
 const QUANTIZE_HINT: &str = "run duet song quantize --grid 1/16 first";
 
+/// The most bars a written tune holds. Every bar is laid out in memory, so a song that
+/// ends far away (a stray end of track, say) is refused rather than written.
+const MAX_BARS: u32 = 100_000;
+
 struct BarSpan {
     start: u64,
     len: u64,
@@ -438,6 +442,14 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
         let start = map.tick(Position::bar(number))?;
         if start >= end_tick {
             break;
+        }
+        if number > MAX_BARS {
+            return Err(unwritable(
+                end,
+                None,
+                format!("the song is longer than {MAX_BARS} bars"),
+                "set an earlier end, or trim the song",
+            ));
         }
         let next = map.tick(Position::bar(number + 1))?;
         let sig = map.sig_at(start);
