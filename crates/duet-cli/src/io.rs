@@ -72,6 +72,42 @@ impl AnyFormat {
     }
 }
 
+/// The song format of a path a command reads or writes as a song: `given` when the user
+/// named one, or else the path's name, by [`AnyFormat::of`]. A name that is a drum grid's is
+/// refused rather than misread, so a file name means the same thing to every command.
+pub fn song_format(
+    path: &Path,
+    given: Option<Format>,
+    default: Format,
+    what: &str,
+) -> Result<Format> {
+    if let Some(format) = given {
+        return Ok(format);
+    }
+    match AnyFormat::of(path, AnyFormat::Song(default)) {
+        AnyFormat::Song(format) => Ok(format),
+        AnyFormat::Grid(_) => anyhow::bail!(
+            "{} is a drum grid's name (.drums, .drums.json or .drums.toml), and {what} a \
+             song; duet convert goes between a grid and a song",
+            path.display()
+        ),
+    }
+}
+
+/// The form of a path a command reads or writes as a drum grid, by its name: `.drums`,
+/// `.drums.json` or `.drums.toml`, or `-` for .drums text. Any other name is a song's, and
+/// is refused rather than misread.
+pub fn grid_form(path: &Path, what: &str) -> Result<GridForm> {
+    match AnyFormat::of(path, AnyFormat::Grid(GridForm::Text)) {
+        AnyFormat::Grid(form) => Ok(form),
+        AnyFormat::Song(_) => anyhow::bail!(
+            "{} is not a drum grid's name, and {what} a grid; name it .drums, .drums.json or \
+             .drums.toml, or - for .drums text",
+            path.display()
+        ),
+    }
+}
+
 /// The song formats by their own names, then the grid forms as `drums`, `drums-json` and
 /// `drums-toml`. Built from [`Format`]'s own list, so a song format added there is a
 /// convert format too.

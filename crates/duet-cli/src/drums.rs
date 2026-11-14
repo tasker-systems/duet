@@ -10,12 +10,13 @@ use duet_core::{Grid, Song};
 use duet_drums::DrumGrid;
 
 use crate::config::Config;
-use crate::io::{Format, format_of, read, same_file, with_end, write};
+use crate::io::{Format, grid_form, read, same_file, song_format, with_end, write};
 
 #[derive(Subcommand)]
 pub enum DrumsCommand {
     /// Render a drum grid as a song: MIDI, notefmt text, JSON or TOML, by the output's
-    /// extension (.mid or .midi, .json, .toml, anything else is notefmt text).
+    /// name (.mid or .midi, .json, .toml, anything else is notefmt text) unless --to is
+    /// given. A grid's name (.drums, .drums.json, .drums.toml) as the output is refused.
     Render {
         /// The grid to read (.drums, .drums.json or .drums.toml), or - for .drums text
         /// on standard input.
@@ -30,6 +31,7 @@ pub enum DrumsCommand {
     /// and other tracks are not part of a grid, and are left out.
     Read {
         /// The song to read (MIDI, notefmt text, JSON or TOML), or - for standard input.
+        /// A grid's name is refused unless --from says what it holds.
         input: PathBuf,
         /// The grid to write (.drums, .drums.json or .drums.toml), or - for .drums text
         /// on standard output. Must not be the input.
@@ -57,10 +59,11 @@ pub enum DrumsCommand {
     /// Write a copy of a drum grid with every velocity snapped to the nearest of the text
     /// form's levels (g, x, X). The input is never changed.
     Snap {
-        /// The grid to read, or - for .drums text on standard input.
+        /// The grid to read (.drums, .drums.json or .drums.toml), or - for .drums text on
+        /// standard input.
         input: PathBuf,
-        /// The grid to write, or - for .drums text on standard output. Must not be the
-        /// input.
+        /// The grid to write (.drums, .drums.json or .drums.toml), or - for .drums text on
+        /// standard output. Must not be the input.
         output: PathBuf,
     },
     /// List the lanes of the gm map, as config extends or changes it: each name, its
@@ -74,24 +77,6 @@ pub enum GridForm {
     Text,
     Json,
     Toml,
-}
-
-/// `.drums.json` and `.drums.toml` (or any `.json` and `.toml`) are the exact forms;
-/// anything else, and `-`, is .drums text.
-fn form_of(path: &Path) -> GridForm {
-    if path == Path::new("-") {
-        return GridForm::Text;
-    }
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("json") => GridForm::Json,
-        Some("toml") => GridForm::Toml,
-        _ => GridForm::Text,
-    }
 }
 
 /// Reads a grid in a form. As .drums text, `map gm` means General MIDI with only the lanes
@@ -203,9 +188,10 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
     match command {
         DrumsCommand::Render { input, output, to } => {
             refuse_overwrite(&input, &output, "render")?;
-            let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
+            let form = grid_form(&input, "render reads")?;
+            let to = song_format(&output, to, Format::Text, "render writes")?;
             write(
-                &read_grid(&input, form_of(&input), config)?.to_song()?,
+                &read_grid(&input, form, config)?.to_song()?,
                 &output,
                 to,
                 config.end,
@@ -221,24 +207,28 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
             from,
         } => {
             refuse_overwrite(&input, &output, "read")?;
-            let from = from.unwrap_or_else(|| format_of(&input, Format::Midi));
+            let from = song_format(&input, from, Format::Midi, "read reads")?;
+            let form = grid_form(&output, "read writes")?;
             let options = ReadOptions {
                 grid,
                 track,
                 bars,
                 snap_levels,
             };
-            let form = form_of(&output);
             let drums = grid_of_song(&read(&input, from)?, &options, form, config)?;
             write_grid(&drums, &output, form)
         }
         DrumsCommand::Snap { input, output } => {
             refuse_overwrite(&input, &output, "snap")?;
-            let grid = read_grid(&input, form_of(&input), config)?;
+            let (from, to) = (
+                grid_form(&input, "snap reads")?,
+                grid_form(&output, "snap writes")?,
+            );
+            let grid = read_grid(&input, from, config)?;
             let snapped = grid.snapped_to_levels();
             let moved = moved_velocities(&grid, &snapped);
             eprintln!("duet: snapped {moved} velocities to the levels");
-            write_grid(&snapped, &output, form_of(&output))
+            write_grid(&snapped, &output, to)
         }
         DrumsCommand::Lanes => {
             let map = &config.lanes;
