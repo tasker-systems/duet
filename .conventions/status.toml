@@ -1,7 +1,7 @@
 # This repository's status for each baseline rule, in the register's vocabulary:
 # gated: <path>[#job], partial: …, practiced, convention: …, uncovered, unexamined, n/a.
 # `reviewed_at` is the baseline revision these statuses were reviewed against (check F).
-reviewed_at = "42a38bb809925d2c1e118baa7649b0713cd07a08"
+reviewed_at = "126db91fe37dbca23647ccd78412f4a152a849c6"
 [rules]
 "RUST-LINT-1" = "partial: the workspace table is pinned to the projection by the conventions check (.github/workflows/ci.yml#gate) and applied by clippy (.github/workflows/ci.yml#check); nothing checks that a new crate sets [lints] workspace = true"
 "RUST-LINT-2" = "gated: .github/workflows/ci.yml#check"
