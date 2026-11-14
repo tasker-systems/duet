@@ -55,8 +55,11 @@ duet song show take.mid --to json
 duet song quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
 ```
 
-Formats come from the file extension (`.mid`/`.midi`, `.json`, `.toml`, anything else is
-text). Use `-` for standard input or output, with `--from` and `--to` to name the format.
+Formats come from the file name (`.mid`/`.midi`, `.json`, `.toml`, the drum grid forms
+`.drums`, `.drums.json` and `.drums.toml`, anything else is text). Use `-` for standard
+input or output, with `--from` and `--to` to name the format: `midi`, `text`, `json`,
+`toml`, or `drums`, `drums-json` and `drums-toml` for a grid. `convert` reads and writes
+[drum grids](#drum-grids) too; writing one needs `--grid`.
 
 ### The text format
 
@@ -217,6 +220,22 @@ duet drums read take.mid take.drums.json --grid 1/16  # keeping every velocity
 duet drums snap take.drums.json take.drums       # velocities snapped to g, x and X
 duet drums lanes                                 # the lanes and their keys
 ```
+
+`duet convert` goes between grids and every other format as well, by the same code:
+reading a grid it writes what `duet drums render` writes, and writing one it takes
+`duet drums read`'s `--grid`, `--track`, `--bars` and `--snap-levels`, and writes and
+refuses what `duet drums read` does.
+
+```sh
+duet convert groove.drums groove.mid                 # the same as drums render
+duet convert take.mid take.drums --grid 1/16         # the same as drums read
+duet convert groove.drums groove.drums.json --grid 1/16   # text to the exact form
+```
+
+Writing a grid without `--grid` is refused, naming it: the step is never guessed. A grid
+flag given for an output that is not a grid is refused too, so no flag is silently
+ignored. `convert` reads a name ending `.drums.json` or `.drums.toml` as a grid, even when
+it holds a song; a plain `.json` or `.toml` is a song.
 
 **Header.** The notefmt header lines (title, tpq, tempo, time, key and their `at`
 changes) mean what they mean in notefmt, plus:

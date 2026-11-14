@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
-use duet_core::Grid;
+use duet_core::{Grid, Song};
 use duet_drums::DrumGrid;
 
 use crate::config::Config;
@@ -70,7 +70,7 @@ pub enum DrumsCommand {
 
 /// The forms a drum grid is stored in, by extension.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum GridForm {
+pub enum GridForm {
     Text,
     Json,
     Toml,
@@ -94,9 +94,10 @@ fn form_of(path: &Path) -> GridForm {
     }
 }
 
-/// Reads a grid. As .drums text, `map gm` means General MIDI with only the lanes and
-/// aliases config adds, and anything config sets that does not apply is said.
-fn read_grid(path: &Path, config: &Config) -> Result<DrumGrid> {
+/// Reads a grid in a form. As .drums text, `map gm` means General MIDI with only the lanes
+/// and aliases config adds, and anything config sets that does not apply is said.
+/// `duet convert` and the `duet drums` commands all read grids here.
+pub fn read_grid(path: &Path, form: GridForm, config: &Config) -> Result<DrumGrid> {
     let text = if path == Path::new("-") {
         let mut buf = String::new();
         io::stdin()
@@ -106,7 +107,7 @@ fn read_grid(path: &Path, config: &Config) -> Result<DrumGrid> {
     } else {
         fs::read_to_string(path).with_context(|| path.display().to_string())?
     };
-    let grid = match form_of(path) {
+    let grid = match form {
         GridForm::Text => {
             for notice in &config.text_notices {
                 eprintln!("duet: {notice}");
@@ -124,8 +125,10 @@ fn normalized(mut grid: DrumGrid) -> duet_drums::Result<DrumGrid> {
     Ok(grid)
 }
 
-fn write_grid(grid: &DrumGrid, path: &Path) -> Result<()> {
-    let bytes = match form_of(path) {
+/// Writes a grid in a form. `duet convert` and the `duet drums` commands all write grids
+/// here.
+pub fn write_grid(grid: &DrumGrid, path: &Path, form: GridForm) -> Result<()> {
+    let bytes = match form {
         GridForm::Text => grid.to_text()?.into_bytes(),
         GridForm::Json => {
             let mut s = serde_json::to_string_pretty(grid)?;
@@ -144,6 +147,48 @@ fn write_grid(grid: &DrumGrid, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// How to read a song's drum track into a grid: `duet drums read`'s flags, which
+/// `duet convert` takes too.
+pub struct ReadOptions {
+    /// The step.
+    pub grid: Grid,
+    /// The drum track's name, when it is not the one track on the map's channel.
+    pub track: Option<String>,
+    /// How many bars the grid runs to, when not to the song's end.
+    pub bars: Option<u32>,
+    /// Whether to snap velocities to the text levels.
+    pub snap_levels: bool,
+}
+
+/// Reads a song's drum track into the grid to be written in `form`: the song runs to its
+/// configured default end when it names none, nothing is moved to fit, a velocity off the
+/// levels is refused for the text form unless snapped, and what is left out is said on
+/// standard error. `duet convert` and `duet drums read` both read drum tracks here.
+pub fn grid_of_song(
+    song: &Song,
+    options: &ReadOptions,
+    form: GridForm,
+    config: &Config,
+) -> Result<DrumGrid> {
+    // A song that names no end runs to the configured default's.
+    let song = with_end(song, config.end)?;
+    let track = options.track.as_deref();
+    let mut drums = DrumGrid::from_song(&song, options.grid, &config.lanes, track, options.bars)?;
+    if options.snap_levels {
+        drums = drums.snapped_to_levels();
+    } else if form == GridForm::Text
+        && let Some((lane, bar, step, vel)) = drums.first_off_level()
+    {
+        bail!(
+            "{lane}, bar {bar}, step {step}: velocity {vel} is not one of the .drums \
+             text levels; pass --snap-levels to snap velocities to the levels, or \
+             write the exact form (.drums.json or .drums.toml)"
+        );
+    }
+    report_left_out(&song, track, &drums);
+    Ok(drums)
+}
+
 fn refuse_overwrite(input: &Path, output: &Path, what: &str) -> Result<()> {
     if input != Path::new("-") && same_file(input, output) {
         bail!(
@@ -160,7 +205,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
             refuse_overwrite(&input, &output, "render")?;
             let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
             write(
-                &read_grid(&input, config)?.to_song()?,
+                &read_grid(&input, form_of(&input), config)?.to_song()?,
                 &output,
                 to,
                 config.end,
@@ -177,31 +222,23 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
         } => {
             refuse_overwrite(&input, &output, "read")?;
             let from = from.unwrap_or_else(|| format_of(&input, Format::Midi));
-            // A song that names no end runs to the configured default's.
-            let song = with_end(&read(&input, from)?, config.end)?;
-            let mut drums =
-                DrumGrid::from_song(&song, grid, &config.lanes, track.as_deref(), bars)?;
-            if snap_levels {
-                drums = drums.snapped_to_levels();
-            } else if form_of(&output) == GridForm::Text
-                && let Some((lane, bar, step, vel)) = drums.first_off_level()
-            {
-                bail!(
-                    "{lane}, bar {bar}, step {step}: velocity {vel} is not one of the .drums \
-                     text levels; pass --snap-levels to snap velocities to the levels, or \
-                     write the exact form (.drums.json or .drums.toml)"
-                );
-            }
-            report_left_out(&song, track.as_deref(), &drums);
-            write_grid(&drums, &output)
+            let options = ReadOptions {
+                grid,
+                track,
+                bars,
+                snap_levels,
+            };
+            let form = form_of(&output);
+            let drums = grid_of_song(&read(&input, from)?, &options, form, config)?;
+            write_grid(&drums, &output, form)
         }
         DrumsCommand::Snap { input, output } => {
             refuse_overwrite(&input, &output, "snap")?;
-            let grid = read_grid(&input, config)?;
+            let grid = read_grid(&input, form_of(&input), config)?;
             let snapped = grid.snapped_to_levels();
             let moved = moved_velocities(&grid, &snapped);
             eprintln!("duet: snapped {moved} velocities to the levels");
-            write_grid(&snapped, &output)
+            write_grid(&snapped, &output, form_of(&output))
         }
         DrumsCommand::Lanes => {
             let map = &config.lanes;
@@ -238,7 +275,7 @@ fn moved_velocities(a: &DrumGrid, b: &DrumGrid) -> usize {
 
 /// Says on standard error what reading a drum track left out, so nothing is dropped
 /// silently. Note lengths are always dropped, and the help says so.
-fn report_left_out(song: &duet_core::Song, track: Option<&str>, grid: &DrumGrid) {
+fn report_left_out(song: &Song, track: Option<&str>, grid: &DrumGrid) {
     let drums = match track {
         Some(name) => song.tracks.iter().find(|t| t.name == name),
         None => song.tracks.iter().find(|t| t.channel == grid.channel),
