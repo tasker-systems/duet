@@ -22,10 +22,15 @@ const RUMBLE_MAX_HZ: f64 = 30.0;
 /// The least share of the window's energy in the low band for a hit to be a kick. Task 9 should
 /// tune it: a real beatboxed kick has a body in the low band and a click above it.
 const KICK_LOW_SHARE: f64 = 0.5;
-/// The least spectral centroid, in Hz, of a hit that is not a kick for it to be a hat; anything
+/// The least spectral centroid, in Hz, of the energy above the low band, for a hit that is not a kick for it to be a hat; anything
 /// lower is a snare. Task 9 should tune it: a snare's noise reaches into the highs, a closed
 /// hat's centre sits above it.
 const HAT_CENTROID_HZ: f64 = 5_000.0;
+
+/// How much of the window just before a hit is taken away from the window around it. Above 1,
+/// so the scatter between two looks at a decaying tail does not leave it standing. Task 9
+/// should tune it.
+const EARLIER_WEIGHT: f64 = 2.0;
 
 /// What decides the lane of a hit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,14 +50,14 @@ pub enum LaneMode {
 /// take tempo from the onsets of a rhythm take as it does from a melody's.
 ///
 /// In [`LaneMode::Asked`] a hit's lane is [`HitLane::Asked`]. In [`LaneMode::Beatbox`] it is
-/// chosen from the spectrum of the 40 ms around the onset (`BEFORE_SECS` and `AFTER_SECS`),
-/// Hann-windowed:
+/// chosen from the energy the 40 ms around the onset (`BEFORE_SECS` and `AFTER_SECS`) add to
+/// the 40 ms before them (`EARLIER_WEIGHT`), per bin of a Hann-windowed spectrum:
 ///
 /// - **Kick** when the share of energy below `LOW_BAND_MAX_HZ` is at least `KICK_LOW_SHARE`;
 /// - otherwise **Hat** when the spectral centroid is at least `HAT_CENTROID_HZ`;
 /// - otherwise **Snare**.
 ///
-/// Energy below `RUMBLE_MAX_HZ` is ignored. A hit's lane depends only on the audio in its
+/// A window with no energy at all is a Snare. Energy below `RUMBLE_MAX_HZ` is ignored. A hit's lane depends only on the audio in its
 /// window, so the events do not depend on how the stream is cut into chunks.
 pub struct Hits {
     mode: LaneMode,
@@ -115,9 +120,8 @@ impl Hits {
             .unwrap_or(0.0)
     }
 
-    /// The lane of a hit at `frame`, from the spectrum of the window around it.
-    fn classify(&self, frame: u64) -> HitLane {
-        let start = frame as i64 - self.before as i64;
+    /// The power spectrum of the window of `taper.len()` samples starting at stream frame `start`.
+    fn power(&self, start: i64) -> Vec<f64> {
         let size = self.fft.len();
         let mut spectrum: Vec<Complex<f32>> = (0..size)
             .map(|i| match self.taper.get(i) {
@@ -126,26 +130,47 @@ impl Hits {
             })
             .collect();
         self.fft.process(&mut spectrum);
-        let bin_hz = f64::from(self.rate) / size as f64;
-        let (mut total, mut low, mut weighted) = (0.0, 0.0, 0.0);
-        for (k, c) in spectrum[..=size / 2].iter().enumerate() {
+        spectrum[..=size / 2]
+            .iter()
+            .map(|c| f64::from(c.norm_sqr()))
+            .collect()
+    }
+
+    /// The lane of a hit at `frame`, from the energy it adds: the spectrum of the window around
+    /// it less that of the window just before and never below zero: for the low band as a whole, for
+    /// the bins above it one by one. A hit close
+    /// behind a louder one then is not read as the tail of the one before.
+    fn classify(&self, frame: u64) -> HitLane {
+        let start = frame as i64 - self.before as i64;
+        let now = self.power(start);
+        let earlier = self.power(start - self.taper.len() as i64);
+        let bin_hz = f64::from(self.rate) / self.fft.len() as f64;
+        // The low band is judged as a whole, since a tail beats from one look to the next in
+        // each of its bins; the bins above it, which no kick reaches, one by one.
+        let (mut low_now, mut low_earlier) = (0.0, 0.0);
+        let (mut high, mut weighted) = (0.0, 0.0);
+        for (k, (now, earlier)) in now.iter().zip(&earlier).enumerate() {
             let hz = k as f64 * bin_hz;
             if hz < RUMBLE_MAX_HZ {
                 continue;
             }
-            let power = f64::from(c.norm_sqr());
-            total += power;
-            weighted += power * hz;
             if hz < LOW_BAND_MAX_HZ {
-                low += power;
+                low_now += now;
+                low_earlier += earlier;
+            } else {
+                let power = (now - earlier * EARLIER_WEIGHT).max(0.0);
+                high += power;
+                weighted += power * hz;
             }
         }
+        let low = (low_now - low_earlier * EARLIER_WEIGHT).max(0.0);
+        let total = low + high;
         if total <= 0.0 {
             return HitLane::Snare;
         }
         if low / total >= KICK_LOW_SHARE {
             HitLane::Kick
-        } else if weighted / total >= HAT_CENTROID_HZ {
+        } else if weighted / high.max(f64::MIN_POSITIVE) >= HAT_CENTROID_HZ {
             HitLane::Hat
         } else {
             HitLane::Snare
@@ -366,5 +391,63 @@ mod tests {
         let found = hits(&run(&signal, 512, LaneMode::Beatbox));
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].1, HitLane::Kick);
+    }
+
+    #[test]
+    fn a_quiet_hat_close_behind_a_loud_kick_is_a_hat() {
+        for gap in [0.05, 0.055, 0.06] {
+            let mut signal = Vec::new();
+            for i in 0..3 {
+                let start = 0.5 + f64::from(i) * 1.0;
+                // The kick sounds 0.2 s, decaying with a 40 ms time constant: its tail, still
+                // 12 dB down at 80 ms, runs under the hat.
+                let mut kick = synth::noise_bursts(RATE, 4.0, &[(start, 0.2)], 40.0, 150.0, 0.8);
+                let first = (start * f64::from(RATE)) as usize;
+                for (i, s) in kick.iter_mut().enumerate().skip(first) {
+                    *s *= (-((i - first) as f32) / (0.04 * RATE as f32)).exp();
+                }
+                let hat =
+                    synth::noise_bursts(RATE, 4.0, &[(start + gap, 0.05)], 6_000.0, 10_000.0, 0.16);
+                if signal.is_empty() {
+                    signal = kick;
+                } else {
+                    synth::add(&mut signal, &kick);
+                }
+                synth::add(&mut signal, &hat);
+            }
+            let found = hits(&run(&signal, 1024, LaneMode::Beatbox));
+            let lanes: Vec<HitLane> = found.iter().map(|h| h.1).collect();
+            assert_eq!(
+                lanes,
+                [HitLane::Kick, HitLane::Hat].repeat(3),
+                "gap {gap}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hit_frames_are_on_the_timeline_the_stream_started_at() {
+        let signal = pattern();
+        let origin = 50_000;
+        let mut stage = Hits::new(RATE, LaneMode::Beatbox);
+        let mut out = Vec::new();
+        for (i, piece) in signal.chunks(1024).enumerate() {
+            let mono = Mono {
+                rate: RATE,
+                start_frame: origin + (i * 1024) as u64,
+                samples: piece.to_vec(),
+            };
+            stage.push(mono, &mut out).unwrap();
+        }
+        stage.finish(&mut out).unwrap();
+        let found = hits(&out);
+        let reference = hits(&run(&signal, 1024, LaneMode::Beatbox));
+        assert_eq!(found.len(), 3, "{found:?}");
+        for (late, plain) in found.iter().zip(&reference) {
+            assert_eq!(
+                (late.0, late.1, late.2),
+                (plain.0 + origin, plain.1, plain.2)
+            );
+        }
     }
 }
