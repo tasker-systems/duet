@@ -107,7 +107,7 @@ Statuses for **making-music**:
 | RUST-API-5 | partial: new_without_default and wrong_self_convention gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
 | RUST-API-6 | uncovered: no #[must_use] audit, and must_use_candidate is not on |
 | RUST-DOC-1 | uncovered: missing_docs is not on; the public API is documented by habit |
-| RUST-ERR-1 | uncovered: notefmt's Error is written by hand rather than with thiserror, and the CLI returns Box<dyn Error> rather than anyhow |
+| RUST-ERR-1 | practiced: notefmt's Error derives thiserror::Error behind a Result alias, and the CLI returns anyhow::Result with context on file errors; nothing checks that a new error type does the same |
 | RUST-ERR-2 | convention: judged in review |
 | RUST-ERR-3 | convention: judged in review; the four expect calls in library code state the invariant they rely on |
 | RUST-ERR-4 | practiced: no unwrap outside tests; unwrap_used is held off in the table, so nothing would catch a new one |

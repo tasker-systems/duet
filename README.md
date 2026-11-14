@@ -50,11 +50,12 @@ text). Use `-` for standard input or output, with `--from` and `--to` to name th
 ### The text format
 
 **Header**, before the first track. Every line is optional; the defaults are 480 ticks
-per quarter, 120 bpm and 4/4.
+per quarter, 120 bpm and 4/4. A header line after a `[track]` line is an error: tempo, meter and
+key are the whole song's, so they are never written inside a track.
 
 | Line | Meaning |
 | --- | --- |
-| `title "Name"` | Song name (the MIDI file's first track name) |
+| `title "Name"` | Song name: the MIDI sequence name (see below) |
 | `tpq 480` | Ticks per quarter note: the file's resolution |
 | `tempo 92` | Tempo at the start, in quarter notes per minute |
 | `time 6/8` | Time signature at the start |
@@ -79,8 +80,9 @@ optionally the General MIDI program (0 to 127) at the start. Then one event per 
   eighth note after beat 2. `1.2` means `1.2.0`, and offsets past the end of a beat carry
   on (`1.1.960` in 4/4 is read as `1.3.0`).
 - **Pitches** are scientific pitch names with middle C (MIDI 60) as `C4`. Sharps and flats
-  both work (`F#3`, `Bb2`). When reading MIDI, black keys are spelled the way the opening
-  key's scale spells them, so D minor gives `Bb` and `C#`.
+  both work (`F#3`, `Bb2`). When reading MIDI, black keys are spelled the way the scale of
+  the key in force where the note starts spells them, so D minor gives `Bb` and `C#`, and
+  after `key A major at 9.1.0` the same keys are `A#` and `C#`.
 - **Lengths** are in quarter notes, whatever the time signature: `1`, `0.5`, `1.5`, or a
   fraction like `1/3` for a triplet.
 - Lines starting with `#` are comments, and so is anything after a word that starts with `#`.
@@ -97,7 +99,16 @@ changes, controllers and pitch bend.
 
 Dropped: aftertouch, SysEx, markers, lyrics and other text events, and note-off velocity.
 A MIDI track that mixes channels (as format 0 files do) becomes one track per channel, and
-files are always written as format 1, with tempo, meter and key in the first track.
+files are always written as format 1, with the title, tempo, meter and key in the first track.
+
+The title is the sequence name, which MIDI keeps as a track name: the name of a format 1
+file's first track when that track holds no notes, or of the only track in a format 0 file.
+A format 0 file's tracks have no names of their own, so they are named `Channel 1`,
+`Channel 10` and so on.
+
+Names are text. A track name or title whose bytes are not UTF-8 (an old file written in
+Latin-1, say) is read with each invalid byte replaced by `�` (U+FFFD), so that name is not
+written back byte for byte. Notes and everything else above are unaffected.
 
 One thing MIDI cannot hold: a note that starts after another note of the same pitch and
 channel and ends before it. MIDI has no note ids, so its note-off would end the outer note

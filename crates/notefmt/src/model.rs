@@ -9,7 +9,8 @@ use crate::time::{Key, Position, TimeSig};
 /// A whole song: its tempo, meter and key, and its tracks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Song {
-    /// The song's name, from the first track of a MIDI file when that track holds no notes.
+    /// The song's name: the MIDI sequence name, from the first track of a format 1 file
+    /// when that track holds no notes, or from the only track of a format 0 file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// The file's resolution. Tick offsets in positions are counted in these ticks.

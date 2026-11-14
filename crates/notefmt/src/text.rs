@@ -18,7 +18,7 @@
 //! 3.1.0     prog  5
 //! ```
 //!
-//! Header lines come before the first track. A note line is position, pitch, length in
+//! Header lines come before the first track; one after a track is an error. A note line is position, pitch, length in
 //! quarter notes (a decimal or a fraction like `1/3`) and velocity. Lines starting with
 //! `#` are comments, and so is anything after a `#` that starts a word.
 
@@ -28,6 +28,10 @@ use crate::error::{Error, Result};
 use crate::model::{Control, KeyChange, Note, Song, TempoChange, TimeChange, Track};
 use crate::pitch::Pitch;
 use crate::time::{Key, Position, TimeSig, parse_beats};
+
+/// The words that start a header line. A header line inside a track is an error rather
+/// than a song-wide change, so where a tempo, meter or key change sits is never in doubt.
+const HEADER_KEYWORDS: [&str; 5] = ["title", "tpq", "tempo", "time", "key"];
 
 const HEADER_COMMENT: &str = "# notefmt v1: positions are bar.beat.tick, lengths are quarter notes";
 
@@ -226,6 +230,12 @@ impl Song {
                             )));
                         }
                     }
+                }
+                Some(_) if words.first().is_some_and(|w| HEADER_KEYWORDS.contains(w)) => {
+                    return Err(err(format!(
+                        "'{}' is a header line, and header lines go before the first [track]",
+                        words[0]
+                    )));
                 }
                 Some(track) => match words.as_slice() {
                     [at, what, rest @ ..] => {
