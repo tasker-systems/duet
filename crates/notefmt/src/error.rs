@@ -1,13 +1,14 @@
-use std::fmt;
-
 /// Everything that can go wrong reading or writing a song.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The MIDI file could not be parsed, or uses a feature this crate does not support.
+    #[error("MIDI error: {0}")]
     Midi(String),
     /// A line of the text format could not be parsed. `line` is 1-based.
+    #[error("line {line}: {msg}")]
     Parse { line: usize, msg: String },
     /// A value in a [`Song`](crate::Song) is out of range or inconsistent.
+    #[error("invalid song: {0}")]
     Invalid(String),
 }
 
@@ -23,17 +24,5 @@ impl Error {
         }
     }
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Midi(msg) => write!(f, "MIDI error: {msg}"),
-            Error::Parse { line, msg } => write!(f, "line {line}: {msg}"),
-            Error::Invalid(msg) => write!(f, "invalid song: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
