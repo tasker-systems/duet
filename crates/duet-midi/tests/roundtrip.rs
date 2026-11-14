@@ -535,12 +535,12 @@ fn track_names_with_brackets_round_trip() {
     let mut song = Song::default();
     for (i, name) in names.iter().enumerate() {
         let mut track = duet_core::Track::new(*name, i as u8 + 1);
-        track.notes.push(duet_core::Note {
-            at: "1.1.0".parse().unwrap(),
-            pitch: "C4".parse().unwrap(),
-            beats: 1.0,
-            vel: 80,
-        });
+        track.notes.push(duet_core::Note::new(
+            "1.1.0".parse().unwrap(),
+            "C4".parse().unwrap(),
+            1.0,
+            80,
+        ));
         song.tracks.push(track);
     }
     let from_midi = Song::from_midi(&song.to_midi().unwrap()).unwrap();

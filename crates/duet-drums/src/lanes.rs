@@ -14,6 +14,7 @@ const GM_TOML: &str = include_str!("../lanes.toml");
 
 /// One lane: a row of a drum grid.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LaneDef {
     /// The lane's name, such as `kick` or `hh-open`.
     pub name: String,
