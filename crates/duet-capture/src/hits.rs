@@ -22,7 +22,8 @@ const RUMBLE_MAX_HZ: f64 = 30.0;
 /// The least share of the window's energy in the low band for a hit to be a kick. Task 9 should
 /// tune it: a real beatboxed kick has a body in the low band and a click above it.
 const KICK_LOW_SHARE: f64 = 0.5;
-/// The least spectral centroid, in Hz, of the energy above the low band, for a hit that is not a kick for it to be a hat; anything
+/// The least spectral centroid, in Hz, of the energy above the low band, for a hit that is not
+/// a kick to be a hat; anything
 /// lower is a snare. Task 9 should tune it: a snare's noise reaches into the highs, a closed
 /// hat's centre sits above it.
 const HAT_CENTROID_HZ: f64 = 5_000.0;
@@ -57,8 +58,9 @@ pub enum LaneMode {
 /// - otherwise **Hat** when the spectral centroid is at least `HAT_CENTROID_HZ`;
 /// - otherwise **Snare**.
 ///
-/// A window with no energy at all is a Snare. Energy below `RUMBLE_MAX_HZ` is ignored. A hit's lane depends only on the audio in its
-/// window, so the events do not depend on how the stream is cut into chunks.
+/// A window with no energy at all is a Snare. Energy below `RUMBLE_MAX_HZ` is ignored. A hit's
+/// lane depends only on the audio in its window and the one before it, so the events do not
+/// depend on how the stream is cut into chunks.
 pub struct Hits {
     mode: LaneMode,
     onsets: Onsets,
@@ -137,9 +139,9 @@ impl Hits {
     }
 
     /// The lane of a hit at `frame`, from the energy it adds: the spectrum of the window around
-    /// it less that of the window just before and never below zero: for the low band as a whole, for
-    /// the bins above it one by one. A hit close
-    /// behind a louder one then is not read as the tail of the one before.
+    /// it less that of the window just before, never below zero. The low band is taken as a
+    /// whole, the bins above it one by one. A hit close behind a louder one is then not read as
+    /// the tail of the one before.
     fn classify(&self, frame: u64) -> HitLane {
         let start = frame as i64 - self.before as i64;
         let now = self.power(start);
@@ -198,15 +200,16 @@ impl Hits {
         {
             self.emit_hit(frame, strength, out);
         }
-        // Keep what the next waiting onset needs, and what an onset not yet settled will:
-        // one lies no further back than the onset stage's latency.
+        // Keep what the next waiting onset needs, back to the start of the window before its own,
+        // and what an onset not yet settled will: one lies no further back than the onset
+        // stage's latency.
         let unsettled = end.saturating_sub(self.onsets.latency_frames());
         let keep_from = self
             .waiting
             .front()
             .map_or(unsettled, |w| w.0.min(unsettled));
         let drop = keep_from
-            .saturating_sub(self.before)
+            .saturating_sub(self.before + self.taper.len() as u64)
             .saturating_sub(self.buffer_start)
             .min(self.buffer.len() as u64);
         self.buffer.drain(..drop as usize);
@@ -415,13 +418,23 @@ mod tests {
                 }
                 synth::add(&mut signal, &hat);
             }
-            let found = hits(&run(&signal, 1024, LaneMode::Beatbox));
-            let lanes: Vec<HitLane> = found.iter().map(|h| h.1).collect();
-            assert_eq!(
-                lanes,
-                [HitLane::Kick, HitLane::Hat].repeat(3),
-                "gap {gap}: {found:?}"
-            );
+            let reference = run(&signal, signal.len(), LaneMode::Beatbox);
+            for chunk in [1, 777, 1024, 4096] {
+                let events = run(&signal, chunk, LaneMode::Beatbox);
+                let found = hits(&events);
+                let lanes: Vec<HitLane> = found.iter().map(|h| h.1).collect();
+                assert_eq!(
+                    lanes,
+                    [HitLane::Kick, HitLane::Hat].repeat(3),
+                    "gap {gap}, chunk {chunk}: {found:?}"
+                );
+                assert_eq!(found, hits(&reference), "hits, gap {gap}, chunk {chunk}");
+                assert_eq!(
+                    onsets(&events),
+                    onsets(&reference),
+                    "onsets, gap {gap}, chunk {chunk}"
+                );
+            }
         }
     }
 
