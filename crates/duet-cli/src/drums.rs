@@ -158,11 +158,21 @@ pub fn grid_of_song(
     // A song that names no end runs to the configured default's.
     let song = with_end(song, config.end)?;
     let track = options.track.as_deref();
-    let mut drums = DrumGrid::from_song(&song, options.grid, &config.lanes, track, options.bars)?;
-    if options.snap_levels {
-        drums = drums.snapped_to_levels();
-    } else if form == GridForm::Text
-        && let Some((lane, bar, step, vel)) = drums.first_off_level()
+    let drums = DrumGrid::from_song(&song, options.grid, &config.lanes, track, options.bars)?;
+    let drums = levels_for(drums, options.snap_levels, form)?;
+    report_left_out(&song, track, &drums);
+    Ok(drums)
+}
+
+/// The grid ready to write in `form`: snapped to the text levels when asked, and otherwise
+/// refused for the text form when a velocity is off them. Nothing snaps unless asked.
+/// Reading a drum track and copying a grid both decide here.
+pub fn levels_for(grid: DrumGrid, snap_levels: bool, form: GridForm) -> Result<DrumGrid> {
+    if snap_levels {
+        return Ok(grid.snapped_to_levels());
+    }
+    if form == GridForm::Text
+        && let Some((lane, bar, step, vel)) = grid.first_off_level()
     {
         bail!(
             "{lane}, bar {bar}, step {step}: velocity {vel} is not one of the .drums \
@@ -170,8 +180,7 @@ pub fn grid_of_song(
              write the exact form (.drums.json or .drums.toml)"
         );
     }
-    report_left_out(&song, track, &drums);
-    Ok(drums)
+    Ok(grid)
 }
 
 fn refuse_overwrite(input: &Path, output: &Path, what: &str) -> Result<()> {

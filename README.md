@@ -222,19 +222,26 @@ duet drums lanes                                 # the lanes and their keys
 ```
 
 `duet convert` goes between grids and every other format as well, by the same code:
-reading a grid it writes what `duet drums render` writes, and writing one it takes
-`duet drums read`'s `--grid`, `--track`, `--bars` and `--snap-levels`, and writes and
+reading a grid it writes what `duet drums render` writes, and writing one from a song it
+takes `duet drums read`'s `--grid`, `--track`, `--bars` and `--snap-levels`, and writes and
 refuses what `duet drums read` does.
 
 ```sh
 duet convert groove.drums groove.mid                 # the same as drums render
 duet convert take.mid take.drums --grid 1/16         # the same as drums read
-duet convert groove.drums groove.drums.json --grid 1/16   # text to the exact form
+duet convert groove.drums groove.drums.json          # a straight copy to the exact form
+duet convert groove.drums sixteenths.drums --grid 1/16    # re-stepped through a song
 ```
 
-Writing a grid without `--grid` is refused, naming it: the step is never guessed. A grid
-flag given for an output that is not a grid is refused too, so no flag is silently
-ignored.
+Writing a grid from a song without `--grid` is refused, naming it: the step is never
+guessed. From a grid to a grid, with no `--grid`, the grid is copied as it is, read and
+written as `drums snap` does but without snapping: a lane with no hits, the grid's own
+`vel` levels and, in the exact forms, any velocity all survive. A velocity off the levels
+is refused as text unless `--snap-levels` is given. With `--grid`, the grid goes through a
+song at that step, as `drums render` then `drums read` would, so lanes with no hits are
+dropped. A grid flag that would do nothing (`--track` or `--bars` without `--grid` from a
+grid, or any grid flag for an output that is not a grid) is refused too, so no flag is
+silently ignored.
 
 **A name means the same to every command.** `.drums`, `.drums.json` and `.drums.toml` are
 grids, and every other name is a song's, even when the file holds the other: a song saved
