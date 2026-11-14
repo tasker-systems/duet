@@ -18,7 +18,9 @@
 
 mod error;
 mod event;
+mod notes;
 mod onset;
+mod pitch;
 mod prepare;
 mod source;
 mod stage;
@@ -27,7 +29,9 @@ mod synth;
 
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
+pub use notes::Melody;
 pub use onset::Onsets;
+pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, Prepare};
 pub use source::FileSource;
 pub use stage::{Chunk, Mono, Source, Stage};
