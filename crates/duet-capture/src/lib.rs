@@ -6,6 +6,10 @@
 //! speak is [`Event`]. Times inside the chain are sample frames at the analysis rate, not
 //! musical positions: musical time does not exist until a tempo does.
 //!
+//! Known boundary: [`FileSource`] refuses HE-AAC by name when the file's header declares it.
+//! HE-AAC signalled only inside the audio data decodes as AAC-LC at half bandwidth, without
+//! a refusal; catching it would mean comparing declared and decoded sample rates.
+//!
 //! The stream rule, from the design's anti-goals: "A stage that buffers the entire take to
 //! do its work, other than the final assembly into a `Song`, is a design failure."
 //! Live input would otherwise be a rewrite.
@@ -14,8 +18,12 @@
 
 mod error;
 mod event;
+mod prepare;
+mod source;
 mod stage;
 
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
+pub use prepare::{ANALYSIS_RATE, Prepare};
+pub use source::FileSource;
 pub use stage::{Chunk, Mono, Source, Stage};

@@ -10,3 +10,10 @@ brew "abcmidi"
 # FluidSynth, a SoundFont synth that opens a MIDI port: scripts/port-check.sh sends it
 # `duet play --port` and checks what it received.
 brew "fluid-synth"
+
+# lame, flac and vorbis-tools (oggenc): encode the MP3, FLAC and Ogg Vorbis fixtures for
+# duet-capture's decode tests, in scripts/capture-fixtures.sh. The AAC and HE-AAC fixtures use
+# macOS's own afconvert. Run the script only to regenerate fixtures; CI uses the committed files.
+brew "lame"
+brew "flac"
+brew "vorbis-tools"

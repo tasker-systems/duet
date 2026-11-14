@@ -15,8 +15,12 @@ include = ["src/**", "Cargo.toml"]
 workspace = true
 
 [dependencies]
+audioadapter-buffers = "5.2.0"
+rubato = "5.1.0"
 serde = { version = "1", features = ["derive"] }
+symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "flac", "vorbis", "wav", "ogg", "pcm"] }
 thiserror = "2"
 
 [dev-dependencies]
+rustfft = "6.4.1"
 serde_json = "1"
