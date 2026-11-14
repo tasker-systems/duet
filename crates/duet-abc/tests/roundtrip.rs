@@ -503,3 +503,34 @@ fn a_tiny_file_cannot_make_the_reader_or_writer_build_without_limit() {
         Err(Error::Unwritable { .. })
     ));
 }
+
+#[test]
+fn the_file_header_is_read_once_and_its_notices_listed_once() {
+    let abc = "C:someone\nN:a note\nM:3/4\n\nX:1\nT:a\nK:C\nC6 |]\n\nX:2\nT:b\nK:G\nG6 |]\n";
+    let book = Book::parse(abc).expect("parse");
+    // Its fields apply to every tune: both are in 3/4.
+    for tune in book.tunes() {
+        let reading = tune.to_song(&ReadOptions::default()).expect("read");
+        assert_eq!(reading.song.time_sig.to_string(), "3/4");
+        // A tune read on its own lists the header's notices, which apply to it.
+        assert!(
+            reading.notices.iter().any(|n| n.line == 1),
+            "{:?}",
+            reading.notices
+        );
+    }
+    // Reading the whole file lists them once.
+    let header_notices = duet_abc::check(abc)
+        .expect("check")
+        .into_iter()
+        .filter(|n| n.line <= 2)
+        .count();
+    assert_eq!(header_notices, 2);
+
+    // A refusal in the file header is every tune's, with the header's line.
+    let refused = Book::parse("U: T = !trill!\n\nX:1\nT:a\nM:3/4\nK:C\nC6 |]\n").expect("parse");
+    assert!(matches!(
+        refused.tunes()[0].to_song(&ReadOptions::default()),
+        Err(Error::Unsupported { line: 1, .. })
+    ));
+}

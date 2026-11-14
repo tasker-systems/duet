@@ -103,12 +103,13 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             let book = Book::parse(&text_of(&input)?)?;
             let mut out = String::new();
             let mut refused = 0;
-            for tune in book.tunes() {
+            let readings = book.read_all(&ReadOptions::default());
+            for (tune, reading) in book.tunes().iter().zip(readings) {
                 let name = match tune.title() {
                     Some(t) => format!("X:{} {t}", tune.x()),
                     None => format!("X:{}", tune.x()),
                 };
-                match tune.to_song(&ReadOptions::default()) {
+                match reading {
                     Ok(reading) => {
                         out.push_str(&format!(
                             "{name}: read, with {} notation-only construct{}\n",

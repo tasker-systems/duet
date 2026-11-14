@@ -1,7 +1,7 @@
 use duet_core::Position;
 
 /// Everything that can go wrong reading or writing ABC.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     /// The text is not valid ABC, or breaks a rule a song needs, such as a bar of the

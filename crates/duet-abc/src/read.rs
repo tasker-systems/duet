@@ -25,7 +25,7 @@ use duet_core::{
 
 use crate::error::{Error, Result};
 use crate::lex::{Acc, BarTok, LineKind, NoteTok, Span, Tok};
-use crate::parse::Tune;
+use crate::parse::{Line, Tune};
 use crate::ratio::Ratio;
 use crate::subset::{self, refuse, refuse_with};
 
@@ -156,7 +156,7 @@ enum Item {
 /// A chord being read: where it opened, its notes with their own lengths, and its text.
 type OpenChord = (Span, Vec<(EvNote, Ratio)>, String);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Voice {
     id: String,
     name: Option<String>,
@@ -202,7 +202,10 @@ impl Voice {
     }
 }
 
-struct Reader {
+/// The state of reading one tune. The file header's lines are applied to a `Reader` once,
+/// when the file is split, and each tune starts from a copy of it.
+#[derive(Debug, Clone)]
+pub(crate) struct Reader {
     notices: Vec<Notice>,
     title: Option<String>,
     meter: Option<TimeSig>,
@@ -1284,8 +1287,59 @@ impl Tune {
     /// A construct outside the subset is refused by name ([`Error::Unsupported`]), and a
     /// tune that is not valid ABC, or has a bar of the wrong length, fails with its line
     /// and column ([`Error::Parse`]). Nothing is moved, rounded or dropped to make it fit.
-    pub fn to_song(&self, _options: &ReadOptions) -> Result<Reading> {
-        let mut r = Reader {
+    pub fn to_song(&self, options: &ReadOptions) -> Result<Reading> {
+        self.read(options, true)
+    }
+
+    /// Reads the tune, with the file header's notices or without them.
+    pub(crate) fn read(
+        &self,
+        _options: &ReadOptions,
+        file_header_notices: bool,
+    ) -> Result<Reading> {
+        let (mut r, header_notices) = match &*self.header {
+            Ok(h) => (h.state.clone(), &h.notices),
+            Err(e) => return Err(e.clone()),
+        };
+        if file_header_notices {
+            r.notices = header_notices.clone();
+        }
+        r.x_line = self.line();
+        for line in self.classified()? {
+            r.line(&line)?;
+        }
+        if !r.in_body {
+            return Err(Error::parse(
+                r.x_line,
+                1,
+                "the tune's header never ends: a header ends with a K: field",
+            ));
+        }
+        r.into_song()
+    }
+}
+
+/// A file header, applied once: the state every tune in the file starts from, and the
+/// notices its lines gave, kept apart so that a tune copies only the state.
+#[derive(Debug)]
+pub(crate) struct FileHeader {
+    state: Reader,
+    notices: Vec<Notice>,
+}
+
+/// Applies a file header's lines once, for every tune in the file to start from (§2.2.2).
+pub(crate) fn read_file_header(lines: &[Line]) -> Result<FileHeader> {
+    let mut state = Reader::new();
+    for line in lines {
+        state.line(line)?;
+    }
+    let notices = std::mem::take(&mut state.notices);
+    Ok(FileHeader { state, notices })
+}
+
+impl Reader {
+    fn new() -> Reader {
+        Reader {
             notices: Vec::new(),
             title: None,
             meter: None,
@@ -1300,29 +1354,23 @@ impl Tune {
             beaming_noted: false,
             header_program: None,
             header_channel: None,
-            x_line: self.line(),
+            x_line: 0,
+        }
+    }
+
+    fn line(&mut self, line: &Line) -> Result<()> {
+        let span = Span {
+            line: line.number,
+            col: 1,
         };
-        for line in self.classified()? {
-            let span = Span {
-                line: line.number,
-                col: 1,
-            };
-            match &line.kind {
-                LineKind::Field { letter: 'X', .. } => {}
-                LineKind::Field { letter, value } => r.field(span, *letter, value, false)?,
-                LineKind::Directive(text) => r.directive(span, text)?,
-                LineKind::Music(tokens) => r.music(tokens)?,
-                LineKind::Nothing => {}
-            }
+        match &line.kind {
+            LineKind::Field { letter: 'X', .. } => {}
+            LineKind::Field { letter, value } => self.field(span, *letter, value, false)?,
+            LineKind::Directive(text) => self.directive(span, text)?,
+            LineKind::Music(tokens) => self.music(tokens)?,
+            LineKind::Nothing => {}
         }
-        if !r.in_body {
-            return Err(Error::parse(
-                r.x_line,
-                1,
-                "the tune's header never ends: a header ends with a K: field",
-            ));
-        }
-        r.into_song()
+        Ok(())
     }
 }
 

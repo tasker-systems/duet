@@ -1,8 +1,11 @@
 //! Splitting an ABC file into its file header and tunes (§2.2 of the ABC 2.1 standard),
 //! and each tune into classified lines.
 
+use std::sync::Arc;
+
 use crate::error::{Error, Result};
 use crate::lex::{self, LineKind};
+use crate::read::{FileHeader, ReadOptions, Reading, read_file_header};
 
 /// One line of a tune or file header, classified, with its 1-based line number.
 #[derive(Debug, Clone)]
@@ -22,9 +25,10 @@ pub struct Book {
 pub struct Tune {
     x: u32,
     title: Option<String>,
-    /// The file header's lines, which set defaults for every tune (§2.2.2), then the
     /// tune's own lines.
-    pub(crate) header: Vec<(usize, String)>,
+    /// The file header, applied once and shared by every tune in the file: it sets their
+    /// defaults (§2.2.2). An error in it is every tune's.
+    pub(crate) header: Arc<Result<FileHeader>>,
     pub(crate) lines: Vec<(usize, String)>,
 }
 
@@ -40,9 +44,10 @@ fn is_blank(line: &str) -> bool {
 impl Book {
     /// Splits a file into tunes. Each tune starts at an `X:` line and ends at the next
     /// empty line, or the end of the file. A first block of fields and directives before
-    /// any `X:` is the file header, and its lines are read before each tune's own. Free
-    /// text between tunes is skipped. Nothing inside a tune is read here: a tune that is
-    /// not valid ABC fails when it is read ([`Tune::to_song`]), not when it is found.
+    /// any `X:` is the file header: it is read once, here, and every tune starts from it.
+    /// Free text between tunes is skipped. A tune's own lines are not read here: a tune that
+    /// is not valid ABC fails when it is read ([`Tune::to_song`]), not when it is found, and
+    /// so does every tune when the file header is the one at fault.
     pub fn parse(text: &str) -> Result<Book> {
         // §8: Unix, DOS and old Macintosh line ends.
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
@@ -52,7 +57,7 @@ impl Book {
             .map(|(i, l)| (i + 1, l.trim_end()))
             .collect();
 
-        let mut file_header = Vec::new();
+        let mut file_header: Vec<Line> = Vec::new();
         let first_block_end = lines
             .iter()
             .position(|(_, l)| is_blank(l))
@@ -63,13 +68,16 @@ impl Book {
             .all(|(_, l)| l.starts_with('%') || (is_field(l) && !l.starts_with("X:")));
         let mut start = 0;
         if header_like && !first_block.is_empty() {
-            file_header = first_block
-                .iter()
-                .map(|(n, l)| (*n, (*l).to_owned()))
-                .collect();
+            for (n, l) in first_block {
+                file_header.push(Line {
+                    number: *n,
+                    kind: lex::classify(*n, l)?,
+                });
+            }
             start = first_block_end;
         }
 
+        let header = Arc::new(read_file_header(&file_header));
         let mut tunes = Vec::new();
         let mut i = start;
         while i < lines.len() {
@@ -99,7 +107,7 @@ impl Book {
             tunes.push(Tune {
                 x,
                 title,
-                header: file_header.clone(),
+                header: Arc::clone(&header),
                 lines: body,
             });
         }
@@ -114,6 +122,16 @@ impl Book {
     /// Every tune, in file order.
     pub fn tunes(&self) -> &[Tune] {
         &self.tunes
+    }
+
+    /// Reads every tune, in file order. The file header's notices are listed once, with
+    /// the first tune, though its lines apply to every tune.
+    pub fn read_all(&self, options: &ReadOptions) -> Vec<Result<Reading>> {
+        self.tunes
+            .iter()
+            .enumerate()
+            .map(|(i, tune)| tune.read(options, i == 0))
+            .collect()
     }
 
     /// The first tune numbered `x`.
@@ -138,13 +156,13 @@ impl Tune {
         self.lines.first().map_or(0, |(n, _)| *n)
     }
 
-    /// The file header's lines and the tune's own, classified. In the tune body, a line
-    /// such as `A:` is music, not a field: fields `A`-`G` and `X`-`Z` are not allowed in
-    /// the body, to avoid confusion with notes and rests (§3).
+    /// The tune's own lines, classified. In the tune body, a line such as `A:` is music,
+    /// not a field: fields `A`-`G` and `X`-`Z` are not allowed in the body, to avoid
+    /// confusion with notes and rests (§3).
     pub(crate) fn classified(&self) -> Result<Vec<Line>> {
         let mut out = Vec::new();
         let mut in_body = false;
-        for (number, text) in self.header.iter().chain(&self.lines) {
+        for (number, text) in &self.lines {
             let body_music = in_body
                 && text
                     .chars()
@@ -179,7 +197,10 @@ mod tests {
         let two = book.tune(2).unwrap();
         assert_eq!(two.title(), Some("Two"));
         assert_eq!(two.line(), 11);
-        assert_eq!(two.header.len(), 2, "the file header comes with each tune");
+        assert!(
+            std::sync::Arc::ptr_eq(&two.header, &book.tune(1).unwrap().header),
+            "the file header is read once and shared"
+        );
         assert_eq!(two.lines.len(), 5, "a comment line does not end a tune");
         assert!(Book::parse("just text\n").is_err());
     }

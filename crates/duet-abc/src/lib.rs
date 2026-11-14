@@ -82,11 +82,13 @@ pub use write::{Dynamics, WriteOptions, write};
 /// Reads every tune in a file, and returns the notation-only constructs they held, each
 /// with its line. Fails on the first tune that is not valid ABC, or that holds a construct
 /// outside the subset, naming the construct and its line.
+///
+/// The file header's notices are listed once, though its lines apply to every tune.
 pub fn check(text: &str) -> Result<Vec<Notice>> {
     let book = Book::parse(text)?;
     let mut notices = Vec::new();
-    for tune in book.tunes() {
-        notices.extend(tune.to_song(&ReadOptions::default())?.notices);
+    for reading in book.read_all(&ReadOptions::default()) {
+        notices.extend(reading?.notices);
     }
     Ok(notices)
 }
