@@ -61,7 +61,7 @@ Statuses for **making-music**:
 | API-JSON-4 | n/a: no HTTP API |
 | API-JSON-5 | n/a: no HTTP API |
 | CI-1 | gated: .github/workflows/ci.yml#gate |
-| CI-2 | partial: .github/workflows/ci.yml#ci-success aggregates every job; whether it is the only required check is a branch-protection setting, not yet set |
+| CI-2 | gated: .github/workflows/ci.yml#ci-success |
 | CI-3 | gated: .github/workflows/ci.yml#gate |
 | CI-4 | uncovered: no pre-commit hook |
 | CI-5 | practiced: ci.yml triggers on merge_group; no merge queue is configured |
