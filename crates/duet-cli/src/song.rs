@@ -7,7 +7,7 @@ use clap::Subcommand;
 use duet_core::Grid;
 
 use crate::config::Config;
-use crate::io::{Format, format_of, read, same_file, write};
+use crate::io::{Format, read, same_file, song_format, write};
 
 #[derive(Subcommand)]
 pub enum SongCommand {
@@ -39,7 +39,7 @@ pub enum SongCommand {
 pub fn run(command: SongCommand, config: &Config) -> Result<()> {
     match command {
         SongCommand::Show { input, from, to } => {
-            let from = from.unwrap_or_else(|| format_of(&input, Format::Midi));
+            let from = song_format(&input, from, Format::Midi, "song show reads")?;
             write(&read(&input, from)?, Path::new("-"), to, config.end)
         }
         SongCommand::Quantize {
@@ -55,8 +55,8 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
                     output.display()
                 );
             }
-            let from = from.unwrap_or_else(|| format_of(&input, Format::Text));
-            let to = to.unwrap_or_else(|| format_of(&output, Format::Text));
+            let from = song_format(&input, from, Format::Text, "quantize reads")?;
+            let to = song_format(&output, to, Format::Text, "quantize writes")?;
             write(
                 &read(&input, from)?.quantized(grid)?,
                 &output,

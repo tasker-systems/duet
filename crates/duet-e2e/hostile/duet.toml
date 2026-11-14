@@ -1,4 +1,4 @@
-# A hostile config for checking that duet-cli's tests are hermetic: CI runs the tests with
+# A hostile config for checking that duet-cli's and duet-e2e's tests are hermetic: CI runs the tests with
 # DUET_CONFIG_DIR pointing here and a copy in a .duet above the checkout. A test that
 # reads the developer's real config would see every one of these.
 [song]

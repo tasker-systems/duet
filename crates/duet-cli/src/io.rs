@@ -6,10 +6,13 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use clap::ValueEnum;
+use clap::builder::PossibleValue;
 use duet_core::{EndRule, Song};
 use duet_midi::Midi;
 
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+use crate::drums::GridForm;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Format {
     Midi,
     Text,
@@ -38,6 +41,104 @@ pub fn format_of(path: &Path, default: Format) -> Format {
         Some("toml") => Format::Toml,
         Some("abc") => Format::Abc,
         _ => Format::Text,
+    }
+}
+
+/// Every format `duet convert` goes between: a song's, or a drum grid's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AnyFormat {
+    Song(Format),
+    Grid(GridForm),
+}
+
+impl AnyFormat {
+    /// The format a path's name gives: `.drums` is .drums text, a `.json` or `.toml` whose
+    /// name ends `.drums.json` or `.drums.toml` is a grid's exact form, and anything else is
+    /// a song's format by [`format_of`]. `-` has no name, so it takes `default`.
+    pub fn of(path: &Path, default: AnyFormat) -> AnyFormat {
+        if path == Path::new("-") {
+            return default;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        if name.ends_with(".drums") {
+            AnyFormat::Grid(GridForm::Text)
+        } else if name.ends_with(".drums.json") {
+            AnyFormat::Grid(GridForm::Json)
+        } else if name.ends_with(".drums.toml") {
+            AnyFormat::Grid(GridForm::Toml)
+        } else {
+            AnyFormat::Song(format_of(path, Format::Text))
+        }
+    }
+}
+
+/// The song format of a path a command reads or writes as a song: `given` when the user
+/// named one, or else the path's name, by [`AnyFormat::of`]. A name that is a drum grid's is
+/// refused rather than misread, so a file name means the same thing to every command.
+pub fn song_format(
+    path: &Path,
+    given: Option<Format>,
+    default: Format,
+    what: &str,
+) -> Result<Format> {
+    if let Some(format) = given {
+        return Ok(format);
+    }
+    match AnyFormat::of(path, AnyFormat::Song(default)) {
+        AnyFormat::Song(format) => Ok(format),
+        AnyFormat::Grid(_) => anyhow::bail!(
+            "{} is a drum grid's name (.drums, .drums.json or .drums.toml), and {what} a \
+             song; duet convert goes between a grid and a song",
+            path.display()
+        ),
+    }
+}
+
+/// The form of a path a command reads or writes as a drum grid, by its name: `.drums`,
+/// `.drums.json` or `.drums.toml`, or `-` for .drums text. Any other name is a song's, and
+/// is refused rather than misread.
+pub fn grid_form(path: &Path, what: &str) -> Result<GridForm> {
+    match AnyFormat::of(path, AnyFormat::Grid(GridForm::Text)) {
+        AnyFormat::Grid(form) => Ok(form),
+        AnyFormat::Song(_) => anyhow::bail!(
+            "{} is not a drum grid's name, and {what} a grid; name it .drums, .drums.json or \
+             .drums.toml, or - for .drums text",
+            path.display()
+        ),
+    }
+}
+
+/// The song formats by their own names, then the grid forms as `drums`, `drums-json` and
+/// `drums-toml`. Built from [`Format`]'s own list, so a song format added there is a
+/// convert format too.
+impl ValueEnum for AnyFormat {
+    fn value_variants<'a>() -> &'a [Self] {
+        static ALL: std::sync::LazyLock<Vec<AnyFormat>> = std::sync::LazyLock::new(|| {
+            Format::value_variants()
+                .iter()
+                .copied()
+                .map(AnyFormat::Song)
+                .chain(
+                    [GridForm::Text, GridForm::Json, GridForm::Toml]
+                        .into_iter()
+                        .map(AnyFormat::Grid),
+                )
+                .collect()
+        });
+        &ALL
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        match self {
+            AnyFormat::Song(format) => format.to_possible_value(),
+            AnyFormat::Grid(GridForm::Text) => Some(PossibleValue::new("drums")),
+            AnyFormat::Grid(GridForm::Json) => Some(PossibleValue::new("drums-json")),
+            AnyFormat::Grid(GridForm::Toml) => Some(PossibleValue::new("drums-toml")),
+        }
     }
 }
 
@@ -127,7 +228,25 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
 mod tests {
     use duet_core::{Note, Position, Song, Track};
 
-    use super::{Format, read};
+    use std::path::Path;
+
+    use super::{AnyFormat, Format, read};
+    use crate::drums::GridForm;
+
+    #[test]
+    fn a_name_ending_drums_is_a_grid_and_a_plain_json_or_toml_is_a_song() {
+        let text = AnyFormat::Song(Format::Text);
+        let of = |name: &str| AnyFormat::of(Path::new(name), text);
+        assert_eq!(of("beat.drums"), AnyFormat::Grid(GridForm::Text));
+        assert_eq!(of("dir/Beat.DRUMS.JSON"), AnyFormat::Grid(GridForm::Json));
+        assert_eq!(of("beat.drums.toml"), AnyFormat::Grid(GridForm::Toml));
+        assert_eq!(of("song.json"), AnyFormat::Song(Format::Json));
+        assert_eq!(of("song.toml"), AnyFormat::Song(Format::Toml));
+        assert_eq!(of("drums.json"), AnyFormat::Song(Format::Json));
+        assert_eq!(of("take.mid"), AnyFormat::Song(Format::Midi));
+        assert_eq!(of("take.txt"), text);
+        assert_eq!(of("-"), text);
+    }
 
     #[test]
     fn read_normalizes_json_and_toml() {

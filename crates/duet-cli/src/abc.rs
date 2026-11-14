@@ -10,7 +10,7 @@ use duet_abc::{Book, Dynamics, ReadOptions, Tune, WriteOptions};
 use duet_core::Song;
 
 use crate::config::Config;
-use crate::io::{Format, format_of, read, same_file, with_end, write};
+use crate::io::{Format, read, same_file, song_format, with_end, write};
 
 #[derive(Subcommand)]
 pub enum AbcCommand {
@@ -161,7 +161,7 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
                 ),
             };
             let song = reading(tune)?;
-            let to = to.unwrap_or_else(|| format_of(&output, Format::Midi));
+            let to = song_format(&output, to, Format::Midi, "duet abc render writes")?;
             write(&song, &output, to, config.end)
         }
         AbcCommand::Write {
@@ -174,7 +174,7 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             if input != Path::new("-") && same_file(&input, &output) {
                 bail!("{} is the input; write makes a new file", output.display());
             }
-            let from = from.unwrap_or_else(|| format_of(&input, Format::Text));
+            let from = song_format(&input, from, Format::Text, "duet abc write reads")?;
             let song = with_end(&read(&input, from)?, config.end)?;
             let mut options = WriteOptions::default().with_dynamics(match dynamics {
                 DynamicsArg::Refuse => Dynamics::Refuse,

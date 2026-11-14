@@ -28,7 +28,3 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 etcetera = "0.11"
 serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
-# The CLI tests compare written MIDI event by event.
-midly = "0.5.3"
