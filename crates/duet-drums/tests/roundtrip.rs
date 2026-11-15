@@ -1,5 +1,5 @@
 //! Round-trips of drum grids: grid → song → grid under a lane map, through MIDI and the
-//! exact forms, text → grid → text, and the refusals that keep every conversion exact.
+//! grid's JSON, text → grid → text, and the refusals that keep every conversion exact.
 
 use duet_core::{Grid, Note, Position, Song, TimeChange, TimeSig, Track};
 use duet_drums::{Bar, DrumGrid, Lane, LaneMap, LanePatch, Levels};
@@ -196,9 +196,6 @@ fn the_drum_grid_round_trips_under_its_map() {
                     serde_json::from_str(&serde_json::to_string(&grid).expect("json"))
                         .expect("json back");
                 assert_eq!(json, grid, "JSON, {shape:?}");
-                let toml: DrumGrid =
-                    toml::from_str(&toml::to_string(&grid).expect("toml")).expect("toml back");
-                assert_eq!(toml, grid, "TOML, {shape:?}");
 
                 // On another channel, the drum track is found by name, and keeps it.
                 let mut moved = grid.clone();

@@ -30,7 +30,9 @@ pub const SOUNDFONT_NAME: &str = "default.sf2";
 
 #[derive(Args)]
 pub struct PlayArgs {
-    /// The song to play (MIDI, notefmt text, JSON or TOML), or - for standard input.
+    /// The song to play: a .duet document, MIDI or ABC by its name, notefmt text with
+    /// --from text, or - for standard input (a document if it starts with {, else notefmt
+    /// text).
     input: PathBuf,
     #[arg(long, value_enum)]
     from: Option<Format>,
@@ -46,7 +48,7 @@ pub struct PlayArgs {
 
 pub fn run(args: PlayArgs, config: &Config) -> Result<()> {
     let format = song_format(&args.input, args.from, Format::Text, "duet play reads")?;
-    let song = read(&args.input, format)?;
+    let song = read(&args.input, format, "duet play reads")?;
     let schedule = Schedule::from_song(&song)?;
     match args.port {
         Some(port) => to_port(&schedule, &port, &args.input),

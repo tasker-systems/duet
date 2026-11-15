@@ -20,8 +20,8 @@ pub enum AbcCommand {
         /// The ABC file to read, or - for standard input.
         input: PathBuf,
     },
-    /// Render one tune as a song: MIDI, notefmt text, JSON or TOML, by the output's
-    /// extension (.mid or .midi, .json, .toml, .notes or anything else is notefmt text).
+    /// Render one tune as a song: a document (.duet) or MIDI (.mid or .midi) by the output's
+    /// name, or notefmt text with --to text. Standard output is MIDI unless --to says.
     Render {
         /// The ABC file to read, or - for standard input.
         input: PathBuf,
@@ -36,7 +36,8 @@ pub enum AbcCommand {
     /// Write a song as ABC. Nothing is quantized: a note ABC cannot write where it is
     /// is refused by name.
     Write {
-        /// The song to read (MIDI, notefmt text, JSON or TOML), or - for standard input.
+        /// The song to read: a .duet document or MIDI by its name, notefmt text with --from
+        /// text, or - for standard input (a document if it starts with {, else notefmt text).
         input: PathBuf,
         /// The ABC file to write, or - for standard output. Must not be the input.
         output: PathBuf,
@@ -175,7 +176,7 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
                 bail!("{} is the input; write makes a new file", output.display());
             }
             let from = song_format(&input, from, Format::Text, "duet abc write reads")?;
-            let song = with_end(&read(&input, from)?, config.end)?;
+            let song = with_end(&read(&input, from, "duet abc write reads")?, config.end)?;
             let mut options = WriteOptions::default().with_dynamics(match dynamics {
                 DynamicsArg::Refuse => Dynamics::Refuse,
                 DynamicsArg::Nearest => Dynamics::Nearest,

@@ -1,8 +1,7 @@
-//! `duet convert` from a grid to a grid with no `--grid` is a straight copy: it reads and
-//! writes the grid as `duet drums snap` does, without snapping, so what a song cannot hold
-//! (a lane with no hits, the grid's own velocity levels, a velocity off them) survives any
-//! change of form. With `--grid`, the grid goes through a song at that step, as
-//! `drums render` then `drums read` would take it.
+//! `duet convert --from drums --to drums` with no `--grid` is a straight copy: it reads and
+//! writes the grid's text as `duet drums snap` does, without snapping, so what a song cannot
+//! hold (a lane with no hits, the grid's own velocity levels) survives. With `--grid`, the
+//! grid goes through a song at that step, as `drums render` then `drums read` would take it.
 
 use std::path::Path;
 
@@ -18,55 +17,46 @@ fn read(path: &Path) -> Vec<u8> {
     std::fs::read(path).expect("read")
 }
 
-/// Every grid form to every other is a copy: the text form comes back as `drums snap`
-/// writes it, the empty lane and the levels kept, and the exact forms match `drums snap`'s
-/// bytes too.
+/// A grid's text copied is what `drums snap` writes, the empty lane and the levels kept, and
+/// it says nothing.
 #[test]
-fn a_grid_copied_between_forms_loses_nothing() {
+fn a_grid_copied_loses_nothing() {
     let dir = scratch("copy");
     let keeps = dir.join("keeps.drums");
     std::fs::write(&keeps, KEEPS).expect("write");
     let sources = [
         keeps,
         root().join("samples/groove.drums"),
-        golden("groove.drums.json"),
+        golden("groove.drums"),
     ];
-    let forms = ["drums", "drums.json", "drums.toml"];
-    let mut copied = 0;
     for (i, source) in sources.iter().enumerate() {
-        for form in forms {
-            let a = dir.join(format!("{i}-convert.{form}"));
-            let b = dir.join(format!("{i}-snap.{form}"));
-            let conv = duet(&dir, &["convert", s(source), s(&a)]);
-            ok(&conv, &format!("convert {} to .{form}", source.display()));
-            ok(&duet(&dir, &["drums", "snap", s(source), s(&b)]), "snap");
-            assert!(
-                read(&a) == read(&b),
-                "{} to .{form}: convert and snap differ",
-                source.display()
-            );
-            assert!(
-                conv.stderr.is_empty(),
-                "a copy says nothing: {:?}",
-                conv.stderr
-            );
-            // And back to text: the same as the writer's form of the source.
-            let back = dir.join(format!("{i}-{form}-back.drums"));
-            ok(&duet(&dir, &["convert", s(&a), s(&back)]), "back");
-            let canon = dir.join(format!("{i}-canon.drums"));
-            ok(
-                &duet(&dir, &["drums", "snap", s(source), s(&canon)]),
-                "canon",
-            );
-            assert!(
-                read(&back) == read(&canon),
-                "{} via .{form}",
-                source.display()
-            );
-            copied += 1;
-        }
+        let a = dir.join(format!("{i}-convert.drums"));
+        let b = dir.join(format!("{i}-snap.drums"));
+        let conv = duet(
+            &dir,
+            &[
+                "convert",
+                s(source),
+                s(&a),
+                "--from",
+                "drums",
+                "--to",
+                "drums",
+            ],
+        );
+        ok(&conv, &format!("convert {}", source.display()));
+        ok(&duet(&dir, &["drums", "snap", s(source), s(&b)]), "snap");
+        assert!(
+            read(&a) == read(&b),
+            "{}: convert and snap differ",
+            source.display()
+        );
+        assert!(
+            conv.stderr.is_empty(),
+            "a copy says nothing: {:?}",
+            conv.stderr
+        );
     }
-    assert_eq!(copied, 9);
     let text = String::from_utf8(read(&dir.join("0-convert.drums"))).expect("utf-8");
     assert!(
         text.contains("\nride  | . . . . . . . . |"),
@@ -79,11 +69,10 @@ fn a_grid_copied_between_forms_loses_nothing() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// The exact form keeps any velocity: copied between the exact forms it is unchanged, and
-/// written as text it is refused, as `drums read` refuses it, until `--snap-levels` snaps it
-/// as `drums snap` does.
+/// A velocity off the text's levels is refused as a grid's text, as `drums read` refuses it,
+/// until `--snap-levels` snaps it as `drums read --snap-levels` does. Nothing snaps unasked.
 #[test]
-fn off_level_velocities_copy_exactly_and_snap_only_when_asked() {
+fn off_level_velocities_are_refused_and_snap_only_when_asked() {
     let dir = scratch("copy-levels");
     let take = dir.join("take.notes");
     std::fs::write(
@@ -91,49 +80,53 @@ fn off_level_velocities_copy_exactly_and_snap_only_when_asked() {
         "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n",
     )
     .expect("write");
-    let exact = dir.join("take.drums.json");
-    ok(
-        &duet(
-            &dir,
-            &["drums", "read", s(&take), s(&exact), "--grid", "1/16"],
-        ),
-        "exact",
-    );
-
-    let toml = dir.join("take.drums.toml");
-    let again = dir.join("again.drums.json");
-    ok(&duet(&dir, &["convert", s(&exact), s(&toml)]), "to toml");
-    ok(
-        &duet(&dir, &["convert", s(&toml), s(&again)]),
-        "back to json",
-    );
-    assert!(
-        read(&again) == read(&exact),
-        "the exact form is unchanged through TOML"
-    );
-
+    let args = |out: &Path| {
+        vec![
+            "convert".to_owned(),
+            s(&take).to_owned(),
+            s(out).to_owned(),
+            "--from".to_owned(),
+            "text".to_owned(),
+            "--to".to_owned(),
+            "drums".to_owned(),
+            "--grid".to_owned(),
+            "1/16".to_owned(),
+        ]
+    };
     let text = dir.join("take.drums");
-    let o = duet(&dir, &["convert", s(&exact), s(&text)]);
+    let o = duet(&dir, &args(&text));
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(
-        !o.status.success() && err.contains("is not one of the .drums text levels"),
+        !o.status.success() && err.contains("is not one of the drum grid text's levels"),
         "{err}"
     );
     assert!(err.contains("--snap-levels"), "{err}");
     assert!(!text.exists(), "nothing written");
 
+    let mut snap = args(&text);
+    snap.push("--snap-levels".to_owned());
+    ok(&duet(&dir, &snap), "snapped");
+    let read_snapped = dir.join("read.drums");
     ok(
-        &duet(&dir, &["convert", s(&exact), s(&text), "--snap-levels"]),
-        "snapped",
-    );
-    let snapped = dir.join("snapped.drums");
-    ok(
-        &duet(&dir, &["drums", "snap", s(&exact), s(&snapped)]),
-        "drums snap",
+        &duet(
+            &dir,
+            &[
+                "drums",
+                "read",
+                s(&take),
+                s(&read_snapped),
+                "--grid",
+                "1/16",
+                "--from",
+                "text",
+                "--snap-levels",
+            ],
+        ),
+        "drums read --snap-levels",
     );
     assert!(
-        read(&text) == read(&snapped),
-        "--snap-levels snaps as drums snap does"
+        read(&text) == read(&read_snapped),
+        "convert snaps as drums read does"
     );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
@@ -149,7 +142,20 @@ fn a_named_step_re_steps_a_grid_and_track_or_bars_need_one() {
 
     let a = dir.join("a.drums");
     ok(
-        &duet(&dir, &["convert", s(&keeps), s(&a), "--grid", "1/16"]),
+        &duet(
+            &dir,
+            &[
+                "convert",
+                s(&keeps),
+                s(&a),
+                "--from",
+                "drums",
+                "--to",
+                "drums",
+                "--grid",
+                "1/16",
+            ],
+        ),
         "re-step",
     );
     let (mid, b) = (dir.join("k.mid"), dir.join("b.drums"));
@@ -186,8 +192,16 @@ fn a_named_step_re_steps_a_grid_and_track_or_bars_need_one() {
             "--track, --bars are for reading",
         ),
     ] {
-        let out = dir.join("never.drums.json");
-        let mut args = vec!["convert", s(&keeps), s(&out)];
+        let out = dir.join("never.drums");
+        let mut args = vec![
+            "convert",
+            s(&keeps),
+            s(&out),
+            "--from",
+            "drums",
+            "--to",
+            "drums",
+        ];
         args.extend(flags);
         let o = duet(&dir, &args);
         let err = String::from_utf8_lossy(&o.stderr);
