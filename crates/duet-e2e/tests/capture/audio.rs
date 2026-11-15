@@ -50,9 +50,14 @@ pub fn clicks(secs: f64, clicks: &[(f64, f32)]) -> Vec<f32> {
 /// partials that rises over 5 ms and falls to silence over its last 20 ms, so each is attacked
 /// afresh, with a second of silence after.
 pub fn notes(lead: f64, notes: &[(u8, f64)]) -> Vec<f32> {
+    notes_off(lead, notes, 0.0)
+}
+
+/// [`notes`], every one sung `cents` off its key on A440.
+pub fn notes_off(lead: f64, notes: &[(u8, f64)], cents: f64) -> Vec<f32> {
     let mut out = silence(lead);
     for &(midi, secs) in notes {
-        let freq = 440.0 * ((f64::from(midi) - 69.0) / 12.0).exp2();
+        let freq = 440.0 * ((f64::from(midi) - 69.0 + cents / 100.0) / 12.0).exp2();
         let len = frames(secs);
         let (attack, release) = (frames(0.005) as f64, frames(0.02) as f64);
         for i in 0..len {

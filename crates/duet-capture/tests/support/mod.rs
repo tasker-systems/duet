@@ -1,16 +1,17 @@
 //! The reference corpus: loading `corpus/manifest.toml`, running each take through the
 //! library pipeline, and comparing the result with its hand-checked transcription.
 //!
-//! The pipeline is the one `duet capture` runs (`FileSource` → `Prepare` → `Melody` or `Hits`
-//! → `estimate` → `assemble`), then `Song::quantized`; the `duet` binary is not involved.
+//! The pipeline is the one `duet capture` runs (`FileSource` → `Prepare` → `Performance` and its
+//! reading on the take's own tuning, or `Hits` → `estimate` → `assemble`), then
+//! `Song::quantized`; the `duet` binary is not involved.
 
 #![expect(dead_code, reason = "each test file uses part of the support module")]
 
 use std::path::{Path, PathBuf};
 
 use duet_capture::{
-    ANALYSIS_RATE, Event, FileSource, Given, Hits, Kind, LaneMode, Melody, Mono, Prepare, Source,
-    Stage, assemble, estimate,
+    ANALYSIS_RATE, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono, Performance,
+    PerformanceFrames, Prepare, Source, Stage, assemble, estimate,
 };
 use duet_core::{Grid, Song, TimeSig};
 use duet_drums::LaneMap;
@@ -185,28 +186,62 @@ fn capture(take: &Take, path: &Path) -> Result<Song, String> {
         .map_err(|e| e.to_string())
 }
 
+/// The take's events, as `duet capture` finds them: a rhythm's from [`Hits`]; a melody's onsets
+/// from its [`Performance`], and its notes read from the performance on its own estimated
+/// tuning ([`duet_capture::read`]).
 fn analyse(path: &Path, melody: bool, mode: LaneMode) -> Result<Vec<Event>, String> {
     // The source's errors are duet-capture's, the stages' duet-dsp's: both become their message.
     let fail = |e: duet_capture::Error| e.to_string();
     let mut source = FileSource::open(path).map_err(fail)?;
     let mut prepare = Prepare::new(ANALYSIS_RATE);
-    let mut stage: Box<dyn Stage<In = Mono, Out = Event>> = if melody {
-        Box::new(Melody::new(ANALYSIS_RATE))
-    } else {
-        Box::new(Hits::new(ANALYSIS_RATE, mode))
+    let mut performance = Performance::new(ANALYSIS_RATE);
+    let mut hits = Hits::new(ANALYSIS_RATE, mode);
+    let (mut mono, mut events, mut layers) = (Vec::new(), Vec::new(), Vec::new());
+    let mut push = |m: Mono, events: &mut Vec<Event>, layers: &mut Vec<Layer1>| {
+        if melody {
+            performance.push(m, layers)
+        } else {
+            hits.push(m, events)
+        }
     };
-    let (mut mono, mut events) = (Vec::new(), Vec::new());
     while let Some(chunk) = source.next_chunk().map_err(fail)? {
         prepare.push(chunk, &mut mono).map_err(|e| fail(e.into()))?;
         for m in mono.drain(..) {
-            stage.push(m, &mut events).map_err(|e| fail(e.into()))?;
+            push(m, &mut events, &mut layers).map_err(|e| fail(e.into()))?;
         }
     }
     prepare.finish(&mut mono).map_err(|e| fail(e.into()))?;
     for m in mono.drain(..) {
-        stage.push(m, &mut events).map_err(|e| fail(e.into()))?;
+        push(m, &mut events, &mut layers).map_err(|e| fail(e.into()))?;
     }
-    stage.finish(&mut events).map_err(|e| fail(e.into()))?;
+    if !melody {
+        hits.finish(&mut events).map_err(|e| fail(e.into()))?;
+        return Ok(events);
+    }
+    performance
+        .finish(&mut layers)
+        .map_err(|e| fail(e.into()))?;
+    let mut frames = None;
+    for layer in layers {
+        match layer {
+            Layer1::Head(head) => frames = Some(PerformanceFrames::new(&head)),
+            Layer1::Frames(block) => frames
+                .as_mut()
+                .ok_or("frames before the head")?
+                .push(&block)
+                .map_err(|e| fail(e.into()))?,
+            Layer1::Onset { frame, strength } => events.push(Event::Onset { frame, strength }),
+            _ => {}
+        }
+    }
+    let frames = frames.ok_or("the take has no frames")?;
+    let reading = duet_capture::read(&frames, &events, None);
+    events.extend(reading.notes.iter().map(|n| n.event()));
+    events.sort_by_key(|e| match *e {
+        Event::Onset { frame, .. } | Event::Hit { frame, .. } => frame,
+        Event::Note { start, .. } => start,
+        _ => u64::MAX,
+    });
     Ok(events)
 }
 

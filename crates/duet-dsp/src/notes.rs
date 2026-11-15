@@ -223,6 +223,9 @@ struct Run {
     strength: Option<f32>,
     /// The last voiced frame taken into the run.
     last: u64,
+    /// The first frame taken on pitch: where the slide or scoop into the note ends and its held
+    /// pitch begins.
+    held_from: Option<u64>,
     /// Each frame's pitch, in fractional MIDI key numbers.
     pitches: Vec<f32>,
     /// Where the note is held: the mean of its latest `held` pitches.
@@ -255,6 +258,7 @@ impl Run {
             onset,
             strength,
             last: start,
+            held_from: None,
             pitches: Vec::new(),
             reference: 0.0,
             anchor: None,
@@ -269,6 +273,7 @@ impl Run {
 
     fn take(&mut self, frame: u64, pitch: f32, voiced: f32, level: f32) {
         self.take_off_pitch(frame, voiced, level);
+        self.held_from.get_or_insert(frame);
         self.pitches.push(pitch);
         if !self.has_held && self.pitches.len() >= self.hold {
             let recent = &self.pitches[self.pitches.len() - self.hold..];
@@ -337,6 +342,32 @@ fn level_strength(level: f32) -> f32 {
 /// A frame of a run: `(frame, pitch, voicing, level)`.
 type Taken = (u64, f32, f32, f32);
 
+/// A note as the segmenter finds it, before it is given a key: its time, where its held pitch
+/// begins, and the median of its held frames' pitch in fractional key numbers, on whatever
+/// reference the pitch was given in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Segment {
+    pub start: u64,
+    pub end: u64,
+    pub held_from: u64,
+    pub median: f32,
+    pub confidence: f32,
+    pub strength: f32,
+}
+
+impl Segment {
+    /// The note as [`Melody`] emits it: its key the median rounded to the nearest.
+    fn event(&self) -> Event {
+        Event::Note {
+            start: self.start,
+            end: self.end,
+            midi: self.median.round().clamp(0.0, 127.0) as u8,
+            confidence: self.confidence,
+            strength: self.strength,
+        }
+    }
+}
+
 /// Pitch on its way from one note to the next: it has left where the note was held, and has
 /// not yet arrived anywhere and stayed.
 struct Slide {
@@ -382,7 +413,7 @@ struct Slide {
 /// - An onset ends whatever note is sounding, so a scoop an onset cuts can be a note.
 ///
 /// It must be given every onset up to a pitch frame before that frame.
-struct Segmenter {
+pub(crate) struct Segmenter {
     hop: u64,
     shortest: u64,
     hold: usize,
@@ -402,7 +433,7 @@ struct Segmenter {
 }
 
 impl Segmenter {
-    fn new(rate: u32, hop: u64) -> Segmenter {
+    pub(crate) fn new(rate: u32, hop: u64) -> Segmenter {
         let frames = |secs: f64| (secs * f64::from(rate)).round() as u64;
         Segmenter {
             hop,
@@ -426,12 +457,31 @@ impl Segmenter {
         (self.hold as u64 + 1) * self.hop
     }
 
-    fn onset(&mut self, frame: u64, strength: f32) {
+    pub(crate) fn onset(&mut self, frame: u64, strength: f32) {
         self.onsets.push_back((frame, strength));
     }
 
+    /// Takes a pitch frame, its pitch in fractional key numbers on A440 from its
+    /// [`hz`](PitchFrame::hz), and emits every note it ends as an [`Event::Note`].
     fn pitch(&mut self, p: PitchFrame, out: &mut Vec<Event>) {
-        while let Some(onset) = self.onsets.pop_front_if(|o| o.0 <= p.frame) {
+        let mut segments = Vec::new();
+        let pitch = p.hz.map(|hz| 69.0 + 12.0 * (hz / 440.0).log2());
+        self.take_frame(p.frame, pitch, p.voiced, p.level, &mut segments);
+        out.extend(segments.iter().map(Segment::event));
+    }
+
+    /// Takes one frame: `pitch` in fractional key numbers on any one reference, or `None` when
+    /// unvoiced. Every note it ends goes to `out`.
+    pub(crate) fn take_frame(
+        &mut self,
+        frame: u64,
+        pitch: Option<f32>,
+        voiced: f32,
+        level: f32,
+        out: &mut Vec<Segment>,
+    ) {
+        let p = (frame, voiced, level);
+        while let Some(onset) = self.onsets.pop_front_if(|o| o.0 <= p.0) {
             self.departed.clear();
             self.slide = None;
             if let Some(run) = self.run.take() {
@@ -439,26 +489,22 @@ impl Segmenter {
             }
             self.pending = Some(onset);
         }
-        let Some(hz) = p.hz else {
+        let Some(pitch) = pitch else {
             self.close(out);
             return;
         };
-        let taken = (
-            p.frame,
-            69.0 + 12.0 * (hz / 440.0).log2(),
-            p.voiced,
-            p.level,
-        );
+        let (frame, voiced, level) = p;
+        let taken = (frame, pitch, voiced, level);
         if self.slide.is_some() {
             self.slide_on(taken);
             return;
         }
         let Some(run) = &mut self.run else {
             let onset = self.pending.take();
-            let since = |at: u64| p.frame - at;
+            let since = |at: u64| frame - at;
             let start = match onset {
                 Some((at, _)) if since(at) <= self.grace => at,
-                _ => p.frame.saturating_sub(self.hop / 2),
+                _ => frame.saturating_sub(self.hop / 2),
             };
             let onset = onset.filter(|&(at, _)| since(at) <= self.window);
             let mut run = Run::new(start, onset, onset.map(|o| o.1), (self.held, self.hold));
@@ -488,7 +534,7 @@ impl Segmenter {
 
     /// Ends the sounding note at `at`, where the pitch left it, and starts a slide there with
     /// the frames that have left it.
-    fn leave(&mut self, at: u64, departed: Vec<Taken>, out: &mut Vec<Event>) {
+    fn leave(&mut self, at: u64, departed: Vec<Taken>, out: &mut Vec<Segment>) {
         let Some(run) = self.run.take() else {
             return;
         };
@@ -540,7 +586,7 @@ impl Segmenter {
 
     /// Ends the sounding note after its last voiced frame. A slide that has not arrived is no
     /// note.
-    fn close(&mut self, out: &mut Vec<Event>) {
+    fn close(&mut self, out: &mut Vec<Segment>) {
         if let Some(slide) = self.slide.take()
             && self.pending.is_none()
         {
@@ -561,12 +607,19 @@ impl Segmenter {
     }
 
     fn finish(&mut self, out: &mut Vec<Event>) {
+        let mut segments = Vec::new();
+        self.close(&mut segments);
+        out.extend(segments.iter().map(Segment::event));
+    }
+
+    /// Ends the stream, emitting the note still sounding to `out`.
+    pub(crate) fn finish_segments(&mut self, out: &mut Vec<Segment>) {
         self.close(out);
     }
 
     /// Emits `run` as a note ending at `end`, unless it is shorter than the shortest note or too
     /// weakly voiced to be one. Returns whether it was emitted.
-    fn emit(&self, run: Run, end: u64, out: &mut Vec<Event>) -> bool {
+    fn emit(&self, run: Run, end: u64, out: &mut Vec<Segment>) -> bool {
         let confidence = run.voicing / run.frames.max(1) as f32;
         if run.pitches.is_empty()
             || end < run.start + self.shortest
@@ -574,10 +627,11 @@ impl Segmenter {
         {
             return false;
         }
-        out.push(Event::Note {
+        out.push(Segment {
             start: run.start,
             end,
-            midi: run.median().round().clamp(0.0, 127.0) as u8,
+            held_from: run.held_from.unwrap_or(run.start),
+            median: run.median(),
             confidence,
             strength: run.strength(),
         });

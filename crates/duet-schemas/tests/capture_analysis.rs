@@ -27,7 +27,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.0.json"))
+        .build(&read_json("schemas/capture-analysis/1.1.json"))
         .unwrap()
 }
 

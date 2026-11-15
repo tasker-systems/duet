@@ -4,8 +4,8 @@
 //! A given value is used exactly and is not stated: only an estimate is reported as one.
 
 use duet_capture::{
-    KeyEstimate, LeadIn, Merge, Origin, TempoAlternatives, Timing, WEAK_CONFIDENCE, felt_quarters,
-    is_compound,
+    KeyEstimate, LeadIn, Merge, Origin, Reading, TempoAlternatives, Timing, Tuning,
+    WEAK_CONFIDENCE, felt_quarters, is_compound,
 };
 use duet_core::{Grid, TimeSig};
 
@@ -46,6 +46,39 @@ pub fn timing(timing: &Timing, rate: u32) -> Vec<String> {
         ));
     }
     out
+}
+
+/// The tuning, stated only when it was estimated: A4 in Hz and in cents from 440 Hz, how
+/// widely the take spread about it, and how sure the estimate is.
+pub fn tuning(tuning: &Tuning) -> Option<String> {
+    let Origin::Estimated { confidence, .. } = tuning.a4 else {
+        return None;
+    };
+    let spread = tuning
+        .spread_cents
+        .map(|s| format!(", spread {}", cents(format!("{s:.0}"))))
+        .unwrap_or_default();
+    Some(format!(
+        "tuning: estimated A4 = {:.1} Hz ({}){spread}, {}",
+        tuning.a4_hz(),
+        cents(format!("{:+.0}", tuning.offset_cents())),
+        sureness(confidence)
+    ))
+}
+
+/// A whole number of cents, as written: `+1 cent`, `-12 cents`.
+fn cents(n: String) -> String {
+    if n.trim_start_matches(['+', '-']) == "1" {
+        format!("{n} cent")
+    } else {
+        format!("{n} cents")
+    }
+}
+
+/// How many notes were read, and how many of them are between keys on the take's tuning.
+pub fn notes_read(reading: &Reading) -> String {
+    let n = reading.notes.len();
+    format!("notes: {n} read, {} between keys", reading.between_keys())
 }
 
 /// The key, stated only when it was estimated, with its relative major or minor.
@@ -153,6 +186,20 @@ fn sureness(confidence: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_estimated_tuning_is_stated_and_a_given_one_is_not() {
+        let estimated: Tuning = serde_json::from_value(serde_json::json!({
+            "a4": { "estimated": { "value": 6944.0, "confidence": 0.62 } },
+            "spread_cents": 26.4
+        }))
+        .expect("a tuning");
+        assert_eq!(
+            tuning(&estimated).as_deref(),
+            Some("tuning: estimated A4 = 451.3 Hz (+44 cents), spread 26 cents, confidence 0.62")
+        );
+        assert_eq!(tuning(&Tuning::given(6944.0)), None);
+    }
 
     fn sig(s: &str) -> TimeSig {
         s.parse().expect("a time signature")

@@ -62,6 +62,7 @@ mod onset;
 mod performance;
 mod pitch;
 mod prepare;
+mod reading;
 mod stage;
 #[cfg(test)]
 mod synth;
@@ -78,6 +79,10 @@ pub use performance::{
 };
 pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
+pub use reading::{
+    A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reading, Tuning, a4_cents_of_hz,
+    estimate_tuning, read,
+};
 pub use stage::{Chunk, Mono, Stage};
 pub use timing::{
     BeatTempo, Given, Origin, TempoAlternatives, Timing, WEAK_CONFIDENCE, beat_series, estimate,

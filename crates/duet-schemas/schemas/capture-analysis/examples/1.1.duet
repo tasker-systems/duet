@@ -1,0 +1,165 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.1.json",
+  "duet": {
+    "kind": "capture-analysis",
+    "version": "1.1",
+    "tool": {
+      "name": "duet",
+      "version": "0.2.0"
+    }
+  },
+  "body": {
+    "rate": 22050,
+    "events": [
+      {
+        "type": "onset",
+        "frame": 11025,
+        "strength": 0.8125
+      },
+      {
+        "type": "note",
+        "start": 11100,
+        "end": 21600,
+        "midi": 63,
+        "confidence": 0.93,
+        "strength": 0.8125
+      },
+      {
+        "type": "onset",
+        "frame": 22050,
+        "strength": 0.5
+      },
+      {
+        "type": "note",
+        "start": 22100,
+        "end": 32600,
+        "midi": 67,
+        "confidence": 0.875,
+        "strength": 0.5
+      },
+      {
+        "type": "hit",
+        "frame": 33075,
+        "lane": "asked",
+        "strength": 0.25
+      }
+    ],
+    "timing": {
+      "tempo_bpm": {
+        "estimated": {
+          "value": 120.0,
+          "confidence": 0.84
+        }
+      },
+      "tempo_alternatives": {
+        "half": 60.0,
+        "double": 240.0
+      },
+      "beat_period_frames": 11025.0,
+      "meter": {
+        "given": "4/4"
+      },
+      "downbeat_frame": {
+        "estimated": {
+          "value": 11025,
+          "confidence": 0.62
+        }
+      }
+    },
+    "key": {
+      "key": {
+        "estimated": {
+          "value": "Eb major",
+          "confidence": 0.71
+        }
+      },
+      "alternative": "C minor",
+      "histogram": [
+        0.0,
+        0.0,
+        0.125,
+        0.25,
+        0.0,
+        0.0,
+        0.0,
+        0.375,
+        0.125,
+        0.0,
+        0.125,
+        0.0
+      ],
+      "scores": [
+        [
+          "Eb major",
+          0.71
+        ],
+        [
+          "C minor",
+          0.64
+        ],
+        [
+          "Bb major",
+          0.52
+        ]
+      ]
+    },
+    "beats": [
+      {
+        "beat": 0,
+        "secs": 0.5,
+        "bpm": 119.5
+      },
+      {
+        "beat": 1,
+        "secs": 1.002,
+        "bpm": 120.25
+      }
+    ],
+    "grid": "1/16",
+    "offsets": [
+      {
+        "note": 0,
+        "moved_ms": -3.4,
+        "moved_steps": -0.027
+      },
+      {
+        "note": 1,
+        "moved_ms": 2.25,
+        "moved_steps": 0.018
+      }
+    ],
+    "reading": {
+      "tuning": {
+        "a4": {
+          "estimated": {
+            "value": 6913.4,
+            "confidence": 0.81
+          }
+        },
+        "spread_cents": 9.25
+      },
+      "notes": [
+        {
+          "start": 11100,
+          "end": 21600,
+          "held_from": 11356,
+          "key": 63,
+          "centre": -2.5,
+          "between_keys": false,
+          "confidence": 0.93,
+          "strength": 0.8125
+        },
+        {
+          "start": 22100,
+          "end": 32600,
+          "held_from": 22612,
+          "key": 67,
+          "centre": 38.0,
+          "between_keys": true,
+          "confidence": 0.875,
+          "strength": 0.5
+        }
+      ]
+    }
+  }
+}

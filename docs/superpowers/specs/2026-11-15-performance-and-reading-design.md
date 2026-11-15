@@ -134,6 +134,14 @@ ReadNote {
   - For live input later, the tuning firms up as frames arrive. Notes are decoded by fixed-lag Viterbi (question 4) under the tuning so far, and read again if the tuning moves by more than a few cents. That is the same "provisional under the tempo so far" that `assemble` already promises live input.
   - *Amendment to the stream rule:* the reading joins `estimate` and `assemble` as a function over settled output.
 
+> **Built (2026-11-15, build task 3):** `duet_dsp::read` and `estimate_tuning`, with `--tuning`; the reading is `capture-analysis` 1.1's optional `reading` (additive). Where it departs from the above:
+> - **The peak is a 30-cent window's, not a 1-cent bin's.** The bin whose ±15-cent window holds the most weight is the peak, refined by that window's weighted mean. A take sung 40 cents flat whose flattest notes sit 52 flat has its heaviest single bin at +48, a key away; its heaviest window is where it is sung. Confidence is still the share within ±15 cents.
+> - **A frame's pitch is smoothed over 0.2 s before it is binned,** and is steady when that smoothed pitch moves no more than 10 cents over 50 ms. Unsmoothed, a vibrato's steady frames are its extremes, which make two peaks either side of where it is sung.
+> - **The notes are segmented from the performance's cents** (`fine_hz`, to 0.1 cent), by `Melody`'s rules, so the reading is a function of the kept performance and its onsets alone. `Melody` itself is unchanged and still segments the 10-cent track; the two agree within a frame on synthetic takes, and the corpus passes on the reading.
+> - **The key is not in `Reading`:** it stays the analysis's `key`, estimated by assembly from the read notes.
+> - **No ndarray yet:** the reading's maths is one 1-D histogram. Unvoiced frames load as `NaN` in one `f32` column (`PerformanceFrames`), and every use tests for it first.
+> - **A given tuning is at most 100 cents from 440 Hz:** a single reference cannot tell a take sung 60 cents sharp from one sung 40 flat of the key above.
+
 **Witnesses:**
 - A synthetic melody sung 44 cents sharp, then 40 cents flat, reads the keys it reads in tune. This fails on `main` today.
 - A take on A440 reads as it does today.
