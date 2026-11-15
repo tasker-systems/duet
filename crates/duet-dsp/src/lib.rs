@@ -8,14 +8,20 @@
 //!
 //! ```text
 //! Chunk --> Prepare --Mono--> Melody | Hits --Event--> estimate --Timing--> (assembly)
+//!                               |
+//!                               +-- Performance --Layer1--> (the performance, frames and onsets)
 //! ```
 //!
 //! - A source of audio yields [`Chunk`]s of interleaved samples at any rate and channel count.
 //! - [`Prepare`] downmixes to one channel and resamples to [`ANALYSIS_RATE`], so every stage
 //!   after it can assume both. Its output is [`Mono`].
-//! - [`Melody`] (pitch tracking by [`PitchTrack`], onsets by [`Onsets`], segmented into notes)
-//!   and [`Hits`] (onsets, each given a lane by [`LaneMode`]) turn mono audio into [`Event`]s:
-//!   [`Event::Note`], [`Event::Hit`] and [`Event::Onset`], with [`HitLane`] naming a hit's lane.
+//! - [`Performance`] (pitch tracking by [`PitchTrack`], onsets by [`Onsets`]) keeps every
+//!   settled pitch frame, as a [`PerformanceHead`] and [`FrameBlock`]s in absolute cents
+//!   ([`absolute_cents`]), beside its onsets: the performance of a melody take, before any
+//!   reading of it. This crate only makes them; duet-schemas writes them as a document.
+//! - [`Melody`] (a [`Performance`], segmented into notes) and [`Hits`] (onsets, each given a
+//!   lane by [`LaneMode`]) turn mono audio into [`Event`]s: [`Event::Note`], [`Event::Hit`]
+//!   and [`Event::Onset`], with [`HitLane`] naming a hit's lane.
 //! - [`estimate`] reads the settled onsets and fills in whatever [`Given`] leaves out, as a
 //!   [`Timing`]: tempo, meter and downbeat, each an [`Origin`] (given, or estimated with a
 //!   confidence). [`beat_series`] gives the tempo from each beat to the next.
@@ -53,6 +59,7 @@ mod hits;
 mod key;
 mod notes;
 mod onset;
+mod performance;
 mod pitch;
 mod prepare;
 mod stage;
@@ -66,6 +73,9 @@ pub use hits::{Hits, LaneMode};
 pub use key::{KeyEstimate, estimate_key};
 pub use notes::Melody;
 pub use onset::Onsets;
+pub use performance::{
+    FrameBlock, Layer1, Performance, PerformanceHead, PitchUnit, absolute_cents,
+};
 pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use stage::{Chunk, Mono, Stage};

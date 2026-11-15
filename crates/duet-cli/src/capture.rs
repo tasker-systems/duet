@@ -5,22 +5,28 @@
 //! ([`statement`]). Every refusal comes before anything is written, and nothing is
 //! overwritten. Once the take is analysed, the performance (`.notes` and `.capture.json`) is
 //! written whatever becomes of the score, which is written, or reported as failed, after it.
+//!
+//! A melody take also writes its every pitch frame, as a `performance` stream,
+//! `STEM.performance.duet.jsonl`, through duet-schemas ([`PerformanceFile`]). Its lines are
+//! written as the frames settle; it is kept once the `.notes` and `.capture.json` are written,
+//! and removed again when the capture fails before then.
 
 mod statement;
 
 use std::fs;
-use std::io::Write as _;
+use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
-    ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Melody, Mono, Prepare,
-    Quantized, Source, Stage, assemble, estimate, merge_collisions, quantize_apart,
-    quantize_offsets,
+    ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Melody, Mono,
+    PerformanceHead, Prepare, Quantized, Source, Stage, assemble, estimate, merge_collisions,
+    quantize_apart, quantize_offsets,
 };
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
+use duet_schemas::{Stream, Tool};
 
 use crate::config::Config;
 use crate::drums::{GridForm, ReadOptions, grid_of_song, moved_velocities, refuse_overwrite};
@@ -29,7 +35,8 @@ use crate::io::with_end;
 #[derive(Subcommand)]
 pub enum CaptureCommand {
     /// Capture a sung or played melody: notes, their pitches and the key, written as
-    /// STEM.notes (exactly as played) and STEM.abc (quantized to --grid).
+    /// STEM.notes (exactly as played) and STEM.abc (quantized to --grid), with every pitch
+    /// frame in STEM.performance.duet.jsonl.
     Melody(TakeArgs),
     /// Capture a tapped or beatboxed rhythm: hits in lanes, written as STEM.notes (exactly
     /// as played) and STEM.drums (quantized to --grid). Without --lane, each hit is told
@@ -97,7 +104,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     // Every failure from here on is the take's, so it names the take. FileSource's own errors
     // name it already.
     let named = || args.input.display().to_string();
-    let events = analyse(&args.input, take, args.lane.is_some())?;
+    let (events, performance) = analyse(&args.input, take, args.lane.is_some(), &outputs)?;
     let what = match take {
         Take::Melody => "notes",
         Take::Rhythm => "hits",
@@ -161,6 +168,9 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         eprintln!("{line}");
     }
     write_all(&[(&outputs.notes, &notes), (&outputs.analysis, &analysis)])?;
+    if let Some(performance) = performance {
+        performance.keep();
+    }
 
     let wrote = || {
         format!(
@@ -337,6 +347,8 @@ struct Outputs {
     notes: PathBuf,
     score: PathBuf,
     analysis: PathBuf,
+    /// A melody's performance stream.
+    performance: Option<PathBuf>,
 }
 
 impl Outputs {
@@ -356,9 +368,13 @@ impl Outputs {
                 Take::Rhythm => ".drums",
             }),
             analysis: named(".capture.json"),
+            performance: (take == Take::Melody).then(|| named(".performance.duet.jsonl")),
         };
-        let all = [&outputs.notes, &outputs.score, &outputs.analysis];
-        for path in all {
+        let all: Vec<&PathBuf> = [&outputs.notes, &outputs.score, &outputs.analysis]
+            .into_iter()
+            .chain(&outputs.performance)
+            .collect();
+        for &path in &all {
             refuse_overwrite(input, path, "capture")?;
         }
         for path in all {
@@ -374,21 +390,63 @@ impl Outputs {
     }
 }
 
+/// The take's analysis stage: a melody's keeps its performance, written to the file as it
+/// settles.
+enum Analyser {
+    Melody(Box<Melody>, PerformanceFile),
+    Rhythm(Box<Hits>),
+}
+
+impl Analyser {
+    fn push(&mut self, mono: Mono, events: &mut Vec<Event>) -> Result<()> {
+        match self {
+            Self::Melody(melody, file) => {
+                let mut kept = Vec::new();
+                melody.push_keeping(mono, events, &mut kept)?;
+                file.write(kept)
+            }
+            Self::Rhythm(hits) => Ok(hits.push(mono, events)?),
+        }
+    }
+
+    fn finish(&mut self, events: &mut Vec<Event>) -> Result<()> {
+        match self {
+            Self::Melody(melody, file) => {
+                let mut kept = Vec::new();
+                melody.finish_keeping(events, &mut kept)?;
+                file.write(kept)?;
+                file.flush()
+            }
+            Self::Rhythm(hits) => Ok(hits.finish(events)?),
+        }
+    }
+}
+
 /// The take's settled events: the file through `Prepare` and the take's analysis stage, to
-/// the end of the stream.
-fn analyse(input: &Path, take: Take, asked: bool) -> Result<Vec<Event>> {
+/// the end of the stream. For a melody, also its performance file, written in full but not yet
+/// kept.
+fn analyse(
+    input: &Path,
+    take: Take,
+    asked: bool,
+    outputs: &Outputs,
+) -> Result<(Vec<Event>, Option<PerformanceFile>)> {
     let mut source = FileSource::open(input)?;
     let mut prepare = Prepare::new(ANALYSIS_RATE);
-    let mut stage: Box<dyn Stage<In = Mono, Out = Event>> = match take {
-        Take::Melody => Box::new(Melody::new(ANALYSIS_RATE)),
-        Take::Rhythm => Box::new(Hits::new(
+    let mut stage = match (take, &outputs.performance) {
+        (Take::Melody, Some(path)) => Analyser::Melody(
+            Box::new(Melody::new(ANALYSIS_RATE)),
+            PerformanceFile::create(path)?,
+        ),
+        (Take::Melody, None) => bail!("a melody take has a performance file"),
+        (Take::Rhythm, _) => Analyser::Rhythm(Box::new(Hits::new(
             ANALYSIS_RATE,
             if asked {
                 LaneMode::Asked
             } else {
                 LaneMode::Beatbox
             },
-        )),
+        ))),
     };
     let (mut mono, mut events) = (Vec::new(), Vec::new());
     // The source's errors name the file; the stages' are named here.
@@ -404,7 +462,84 @@ fn analyse(input: &Path, take: Take, asked: bool) -> Result<Vec<Event>> {
         stage.push(m, &mut events).with_context(named)?;
     }
     stage.finish(&mut events).with_context(named)?;
-    Ok(events)
+    let performance = match stage {
+        Analyser::Melody(_, file) => Some(file),
+        Analyser::Rhythm(_) => None,
+    };
+    Ok((events, performance))
+}
+
+/// A melody's `performance` stream, written through duet-schemas a line at a time as its frames
+/// settle: the envelope and head first, then one block of frames a line. It is created new, and
+/// removed again when dropped before [`keep`](PerformanceFile::keep), so a capture that fails
+/// leaves it behind no more than its other outputs.
+struct PerformanceFile {
+    path: PathBuf,
+    file: Option<BufWriter<fs::File>>,
+    headed: bool,
+}
+
+impl PerformanceFile {
+    /// Creates the file, which must not exist yet.
+    fn create(path: &Path) -> Result<PerformanceFile> {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .with_context(|| path.display().to_string())?;
+        Ok(PerformanceFile {
+            path: path.to_path_buf(),
+            file: Some(BufWriter::new(file)),
+            headed: false,
+        })
+    }
+
+    /// Writes the head, the first time it comes, and every block of frames.
+    fn write(&mut self, kept: Vec<Layer1>) -> Result<()> {
+        for layer in kept {
+            let line = match layer {
+                Layer1::Head(head) if !self.headed => {
+                    self.headed = true;
+                    let tool = Tool::new("duet", env!("CARGO_PKG_VERSION"));
+                    Stream::<PerformanceHead>::new(tool, head).head_line()?
+                }
+                Layer1::Frames(block) if self.headed => {
+                    Stream::<PerformanceHead>::record_line(&block)?
+                }
+                Layer1::Frames(_) => bail!("a performance's frames came before its head"),
+                _ => continue,
+            };
+            self.out()?
+                .write_all(line.as_bytes())
+                .with_context(|| self.path.display().to_string())?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.out()?
+            .flush()
+            .with_context(|| self.path.display().to_string())
+    }
+
+    fn out(&mut self) -> Result<&mut BufWriter<fs::File>> {
+        self.file
+            .as_mut()
+            .with_context(|| format!("{} is already closed", self.path.display()))
+    }
+
+    /// Keeps the file: the capture has written its performance.
+    fn keep(mut self) {
+        self.file = None;
+    }
+}
+
+impl Drop for PerformanceFile {
+    fn drop(&mut self) {
+        if self.file.take().is_some() {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 /// The quantized score of an assembled take with its lead-in taken out, when quantizing has

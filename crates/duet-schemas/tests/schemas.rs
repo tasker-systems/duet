@@ -6,8 +6,10 @@
 //! - A committed file whose shape differs (compared with every `description` stripped): fails,
 //!   naming the kind, and asks for a version bump by the rule in the design's question 3.
 //! - A committed file that differs only in descriptions: fails, and asks only to regenerate.
-//! - Every committed version has an example (`<kind>/examples/<version>.duet`), which reads with
-//!   this build's reader and validates against its version's schema.
+//! - Every committed version has an example (`<kind>/examples/<version>.duet`, or
+//!   `<version>.duet.jsonl` for a stream's kind), which reads with this build's reader and
+//!   validates against its version's schema: a stream's first line against the schema, and each
+//!   later line on its own against the schema's `$defs/Record`.
 //!
 //! An older schema file is never regenerated, since the code no longer produces it: it is frozen
 //! by review, and its example proves the reader still honours it.
@@ -18,9 +20,10 @@ use std::path::{Path, PathBuf};
 use duet_core::{
     Control, Key, Note, Pitch, Position, Song, TempoChange, TimeChange, TimeSig, Track,
 };
+use duet_dsp::{FrameBlock, PerformanceHead};
 use duet_schemas::{
-    AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, From, KINDS, KindInfo, Notice, Tool, Version,
-    read_envelope,
+    AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, Framing, From, KINDS, KindInfo, Notice, Stream,
+    Tool, Version, read_envelope,
 };
 use serde_json::{Value, json};
 
@@ -35,8 +38,14 @@ fn schema_path(name: &str, version: Version) -> String {
     format!("crates/duet-schemas/schemas/{name}/{version}.json")
 }
 
-fn example_path(name: &str, version: Version) -> String {
-    format!("crates/duet-schemas/schemas/{name}/examples/{version}.duet")
+fn example_path(info: &KindInfo, version: Version) -> String {
+    let name = info.name;
+    match info.framing {
+        Framing::Stream => {
+            format!("crates/duet-schemas/schemas/{name}/examples/{version}.duet.jsonl")
+        }
+        _ => format!("crates/duet-schemas/schemas/{name}/examples/{version}.duet"),
+    }
 }
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -249,14 +258,26 @@ fn a_property_named_description_is_shape_not_description() {
 /// Every committed envelope schema, by its `$id`, so that a kind's `$ref` to it resolves without
 /// any network or file resolver.
 fn validator(schema: &Value) -> jsonschema::Validator {
+    validator_with(schema, &[])
+}
+
+/// A validator for each later line of a stream whose schema is `stream`: its `$defs/Record`, by
+/// reference, with the stream's schema registered beside the envelopes.
+fn record_validator(stream: &Value) -> jsonschema::Validator {
+    let id = stream["$id"].as_str().unwrap();
+    validator_with(&json!({ "$ref": format!("{id}#/$defs/Record") }), &[stream])
+}
+
+/// [`validator`], with `more` schemas registered by their `$id` too.
+fn validator_with(schema: &Value, more: &[&Value]) -> jsonschema::Validator {
     let envelopes: Vec<Value> = committed_versions(ENVELOPE)
         .into_iter()
         .map(|v| read_json(&repo_path(&schema_path(ENVELOPE, v))).unwrap())
         .collect();
     let mut registry = jsonschema::Registry::new();
-    for envelope in &envelopes {
+    for schema in envelopes.iter().chain(more.iter().copied()) {
         registry = registry
-            .add(envelope["$id"].as_str().unwrap(), envelope)
+            .add(schema["$id"].as_str().unwrap(), schema)
             .unwrap();
     }
     let registry = registry.prepare().unwrap();
@@ -315,19 +336,27 @@ fn every_committed_example_reads_and_validates_against_its_version() {
             info.name
         );
         for version in versions {
-            let relative = example_path(info.name, version);
+            let relative = example_path(info, version);
             let path = repo_path(&relative);
             if bless && version == info.version && !path.exists() {
                 fs::create_dir_all(path.parent().unwrap()).unwrap();
-                fs::write(&path, example(info.name).write().unwrap()).unwrap();
+                fs::write(&path, example_text(info)).unwrap();
             }
             let text = fs::read_to_string(&path)
                 .unwrap_or_else(|_| panic!("{} {version} has no example: {relative}", info.name));
-            let envelope = read_envelope(&text).unwrap_or_else(|e| panic!("{relative}: {e}"));
+            let first = match info.framing {
+                Framing::Stream => text.lines().next().unwrap_or_default(),
+                _ => &text,
+            };
+            let envelope = read_envelope(first).unwrap_or_else(|e| panic!("{relative}: {e}"));
             assert_eq!(
                 (envelope.kind.as_str(), envelope.version),
                 (info.name, version)
             );
+            if info.framing == Framing::Stream {
+                check_stream_example(info, version, &text, &relative);
+                continue;
+            }
             let doc = AnyDocument::read(&text).unwrap_or_else(|e| panic!("{relative}: {e}"));
             assert_eq!(doc.kind(), info.name);
             let schema = committed_schema(info.name, version);
@@ -345,6 +374,71 @@ fn every_committed_example_reads_and_validates_against_its_version() {
             }
         }
     }
+}
+
+/// A stream's example: it reads with this build's reader, its first line validates against its
+/// version's schema, and each later line validates on its own against the schema's
+/// `$defs/Record`.
+fn check_stream_example(info: &KindInfo, version: Version, text: &str, relative: &str) {
+    let written = match info.name {
+        "performance" => Stream::<PerformanceHead>::read(text)
+            .and_then(|stream| stream.write())
+            .unwrap_or_else(|e| panic!("{relative}: {e}")),
+        other => panic!("no stream reader is named for {other}"),
+    };
+    let schema = committed_schema(info.name, version);
+    let (head, records) = (validator(&schema), record_validator(&schema));
+    let mut lines = text.lines().enumerate();
+    let (_, first) = lines.next().expect("a stream has a first line");
+    assert_valid(
+        &head,
+        &serde_json::from_str(first).unwrap(),
+        &format!("{relative}:1"),
+    );
+    let mut later = 0;
+    for (n, line) in lines {
+        let what = format!("{relative}:{}", n + 1);
+        assert_valid(&records, &serde_json::from_str(line).unwrap(), &what);
+        later += 1;
+    }
+    assert!(later > 0, "{relative} has no record to validate");
+    if version == info.version {
+        assert_eq!(written, text, "{relative} is not as this build writes it");
+    }
+}
+
+/// The text of the example committed at a kind's current version, when blessing writes it.
+fn example_text(info: &KindInfo) -> String {
+    match info.framing {
+        Framing::Stream => example_stream(info.name),
+        _ => example(info.name).write().unwrap(),
+    }
+}
+
+/// A stream's example: every column, voiced and unvoiced frames, and a short last block.
+fn example_stream(name: &str) -> String {
+    assert_eq!(name, "performance", "no example is defined for {name}");
+    let mut stream = Stream::new(
+        Tool::new("duet", "0.2.0"),
+        PerformanceHead::new(22_050, 256, 512),
+    );
+    stream.records = vec![
+        FrameBlock::new(
+            512,
+            vec![None, Some(6907.9), Some(6908.3), Some(6907.1)],
+            vec![0.01, 0.912_345_7, 0.957_1, 0.880_6],
+            vec![0.000_12, 0.213_7, 0.241_05, 0.238_9],
+        )
+        .unwrap(),
+        FrameBlock::new(
+            1536,
+            vec![Some(6913.0), None],
+            vec![0.794_2, 0.010_3],
+            vec![0.198_8, 0.002_1],
+        )
+        .unwrap(),
+    ];
+    stream.write().unwrap()
 }
 
 /// The example committed at a kind's current version, when blessing writes it.

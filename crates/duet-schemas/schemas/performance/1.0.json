@@ -1,0 +1,130 @@
+{
+  "$defs": {
+    "FrameBlock": {
+      "additionalProperties": false,
+      "description": "A run of consecutive pitch frames, as columns: frame `k` of the block sits at sample frame\n`start + k·hop`, and has `pitch[k]`, `voicing[k]` and `level[k]`. The three columns have one\nlength.",
+      "properties": {
+        "level": {
+          "description": "Each frame's level: the root mean square of its integration window.",
+          "items": {
+            "format": "float",
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "pitch": {
+          "description": "Each frame's fundamental, in the head's unit to 0.1, or `null` where the smoothed track\nsays the frame is unvoiced.",
+          "items": {
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "start": {
+          "description": "The sample frame the block's first frame sits at, on the take's timeline.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "voicing": {
+          "description": "Each frame's own voicing probability, before smoothing.",
+          "items": {
+            "format": "float",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "start",
+        "pitch",
+        "voicing",
+        "level"
+      ],
+      "type": "object"
+    },
+    "PerformanceHead": {
+      "additionalProperties": false,
+      "description": "What every frame of a performance shares: the first line's head.",
+      "properties": {
+        "first_frame": {
+          "description": "The sample frame the first pitch frame sits at, on the take's timeline at `rate`: the\nmiddle of its integration window.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hop": {
+          "description": "Sample frames from one pitch frame to the next.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "rate": {
+          "description": "The analysis rate, in Hz: what every frame number counts.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "unit": {
+          "$ref": "#/$defs/PitchUnit",
+          "description": "The unit of every block's `pitch`."
+        }
+      },
+      "required": [
+        "rate",
+        "hop",
+        "first_frame",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "PitchUnit": {
+      "description": "The pitch unit a performance is written in.",
+      "oneOf": [
+        {
+          "const": "absolute-cents",
+          "description": "Absolute cents, `1200·log2(hz/440) + 6900`: MIDI's numbering at 100 a key, so 6900.0 is\n440 Hz and 6907.9 is 442 Hz. A unit, not a reading: it maps one-to-one onto Hz, and is\nnever rounded to a key.",
+          "type": "string"
+        }
+      ]
+    },
+    "Record": {
+      "$ref": "#/$defs/FrameBlock"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/performance/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The first line of a .duet.jsonl stream of kind performance, at schema version 1.0.",
+  "properties": {
+    "$schema": {
+      "const": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/performance/1.0.json"
+    },
+    "duet": {
+      "$ref": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",
+      "properties": {
+        "kind": {
+          "const": "performance"
+        },
+        "version": {
+          "const": "1.0"
+        }
+      }
+    },
+    "head": {
+      "$ref": "#/$defs/PerformanceHead"
+    }
+  },
+  "required": [
+    "duet",
+    "head"
+  ],
+  "title": "duet performance 1.0",
+  "type": "object"
+}

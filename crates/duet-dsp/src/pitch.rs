@@ -38,6 +38,9 @@ const SWITCH_PROB: f32 = 0.01;
 const NEGLIGIBLE: f32 = 1e-6;
 /// How far behind the newest frame the smoothing settles a frame. Longer is steadier and later.
 const LAG_SECS: f64 = 0.2;
+/// How far, in pitch bins, a frame's own candidate may be from its smoothed state and still
+/// refine it: half a semitone.
+const REFINE_BINS: usize = BINS_PER_SEMITONE / 2;
 
 /// One settled frame of the pitch track.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,8 +48,14 @@ const LAG_SECS: f64 = 0.2;
 pub struct PitchFrame {
     /// Where the frame sits, on the input [`Mono`] timeline: the middle of its integration window.
     pub frame: u64,
-    /// The fundamental, when the smoothed track says the frame is voiced.
+    /// The fundamental, when the smoothed track says the frame is voiced: the centre of the
+    /// smoothed state's 10-cent bin. Notes are segmented from this.
     pub hz: Option<f32>,
+    /// The same fundamental, refined: the frequency of the frame's own most probable candidate
+    /// within half a semitone of the smoothed state, whose period is placed between samples by a
+    /// parabola through its trough. The bin's centre when no candidate is that near. `None`
+    /// exactly when [`hz`](Self::hz) is. The performance is written from this.
+    pub fine_hz: Option<f32>,
     /// The frame's own voicing probability, before smoothing: the candidates' total.
     pub voiced: f32,
     /// The root mean square of the frame's integration window: how loud the frame is.
@@ -81,8 +90,18 @@ pub struct PitchTrack {
     buffer_start: usize,
     /// The next window to analyse.
     next_window: usize,
-    /// Frames analysed but not yet settled: where each sits, its voicing probability and level.
-    unsettled: VecDeque<(u64, f32, f32)>,
+    /// Frames analysed but not yet settled: where each sits, its voicing probability, its level
+    /// and its candidates.
+    unsettled: VecDeque<Unsettled>,
+}
+
+/// A frame analysed but not yet settled.
+struct Unsettled {
+    frame: u64,
+    voiced: f32,
+    level: f32,
+    /// Its candidates, as `(pitch bin, Hz, probability)`.
+    candidates: Vec<(usize, f32, f32)>,
 }
 
 impl std::fmt::Debug for PitchTrack {
@@ -125,6 +144,22 @@ impl PitchTrack {
         self.hop as u64
     }
 
+    /// The rate the track expects.
+    pub(crate) fn rate(&self) -> u32 {
+        self.rate
+    }
+
+    /// Where the first frame sits, once the first input has been pushed.
+    pub(crate) fn first_frame(&self) -> Option<u64> {
+        self.origin.map(|_| self.frame_of(0))
+    }
+
+    /// The pitch bin a frequency falls in, clamped to the range.
+    fn bin_of(&self, hz: f64) -> usize {
+        let bin = (12.0 * BINS_PER_SEMITONE as f64 * (hz / FMIN_HZ).log2()).round();
+        (bin.max(0.0) as usize).min(self.hmm.bins - 1)
+    }
+
     /// Where window `k` is placed: the middle of its integration window.
     fn frame_of(&self, k: usize) -> u64 {
         self.origin.unwrap_or(0) + (k * self.hop + self.yin.window / 2) as u64
@@ -140,8 +175,19 @@ impl PitchTrack {
             let (candidates, level) = self.yin.candidates(samples);
             let voiced = candidates.iter().fold(0.0, |total, c| total + c.1).min(1.0);
             let observation = self.observation(&candidates, voiced);
-            self.unsettled
-                .push_back((self.frame_of(self.next_window), voiced, level));
+            let candidates = candidates
+                .iter()
+                .map(|&(period, probability)| {
+                    let hz = f64::from(self.rate) / f64::from(period);
+                    (self.bin_of(hz), hz as f32, probability)
+                })
+                .collect();
+            self.unsettled.push_back(Unsettled {
+                frame: self.frame_of(self.next_window),
+                voiced,
+                level,
+                candidates,
+            });
             self.next_window += 1;
             if let Some(state) = self.hmm.step(&observation) {
                 self.settle(state, out);
@@ -161,9 +207,7 @@ impl PitchTrack {
         let bins = self.hmm.bins;
         let mut likelihood = vec![0.0; bins];
         for &(period, probability) in candidates {
-            let hz = f64::from(self.rate) / f64::from(period);
-            let bin = (12.0 * BINS_PER_SEMITONE as f64 * (hz / FMIN_HZ).log2()).round();
-            likelihood[(bin.max(0.0) as usize).min(bins - 1)] += probability;
+            likelihood[self.bin_of(f64::from(self.rate) / f64::from(period))] += probability;
         }
         let unvoiced = ((1.0 - voiced) / bins as f32 + f32::MIN_POSITIVE).ln();
         let mut observation: Vec<f32> = likelihood
@@ -176,15 +220,28 @@ impl PitchTrack {
 
     /// Emits the oldest unsettled frame, now settled in `state`.
     fn settle(&mut self, state: usize, out: &mut Vec<PitchFrame>) {
-        let (frame, voiced, level) = self
+        let Unsettled {
+            frame,
+            voiced,
+            level,
+            candidates,
+        } = self
             .unsettled
             .pop_front()
             .expect("the smoothing settles only frames it was given");
         let hz = (state < self.hmm.bins)
             .then(|| (FMIN_HZ * (state as f64 / (12 * BINS_PER_SEMITONE) as f64).exp2()) as f32);
+        let fine_hz = hz.map(|centre| {
+            candidates
+                .iter()
+                .filter(|(bin, _, _)| bin.abs_diff(state) <= REFINE_BINS)
+                .max_by(|a, b| a.2.total_cmp(&b.2))
+                .map_or(centre, |&(_, hz, _)| hz)
+        });
         out.push(PitchFrame {
             frame,
             hz,
+            fine_hz,
             voiced,
             level,
         });

@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use crate::error::Result;
 use crate::event::Event;
-use crate::onset::Onsets;
-use crate::pitch::{PitchFrame, PitchTrack};
+use crate::performance::{Layer1, Performance};
+use crate::pitch::PitchFrame;
 use crate::stage::{Mono, Stage};
 
 /// The shortest note: a voiced run shorter than this is dropped as a fragment.
@@ -49,9 +49,11 @@ const STRENGTH_WINDOW_SECS: f64 = 0.2;
 /// real takes.
 const STRENGTH_PER_ROOT_LEVEL: f32 = 0.06;
 
-/// Notes from a take: pitch tracking and onset detection, segmented into notes.
+/// Notes from a take: its [`Performance`] (pitch tracking and onset detection), segmented into
+/// notes.
 ///
-/// It runs [`PitchTrack`] and [`Onsets`] over the same input and emits both every
+/// It runs [`PitchTrack`](crate::PitchTrack) and [`Onsets`](crate::Onsets) over the same input,
+/// as [`Performance`] does, and emits both every
 /// [`Event::Onset`], as it settles, and every [`Event::Note`]. A note is held pitch in a run of
 /// voiced frames, split at onsets and where the pitch moves away and holds somewhere new; pitch
 /// still moving between two notes is a slide, never a note of its own. Its `midi` is the median
@@ -66,9 +68,14 @@ const STRENGTH_PER_ROOT_LEVEL: f32 = 0.06;
 /// onset up to it has settled, and a note is emitted once it has ended, which
 /// [`latency_frames`](Stage::latency_frames) bounds. The onsets and the notes do not depend on how
 /// the stream is cut into chunks, but how they interleave in `out` does.
+///
+/// [`push_keeping`](Melody::push_keeping) and [`finish_keeping`](Melody::finish_keeping) also
+/// keep the performance the notes are segmented from: its head and frame blocks, exactly as
+/// [`Performance`] emits them. Notes are segmented from each frame's
+/// [`hz`](PitchFrame::hz), the performance is written from its
+/// [`fine_hz`](PitchFrame::fine_hz).
 pub struct Melody {
-    pitch: PitchTrack,
-    onsets: Onsets,
+    performance: Performance,
     segmenter: Segmenter,
     /// The stream's first frame and the frames received since, for the onset horizon.
     origin: Option<u64>,
@@ -80,8 +87,7 @@ pub struct Melody {
 impl std::fmt::Debug for Melody {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Melody")
-            .field("pitch", &self.pitch)
-            .field("onsets", &self.onsets)
+            .field("performance", &self.performance)
             .finish_non_exhaustive()
     }
 }
@@ -89,11 +95,10 @@ impl std::fmt::Debug for Melody {
 impl Melody {
     /// A stage for mono input at `rate`.
     pub fn new(rate: u32) -> Melody {
-        let pitch = PitchTrack::new(rate);
-        let segmenter = Segmenter::new(rate, pitch.hop());
+        let performance = Performance::new(rate);
+        let segmenter = Segmenter::new(rate, performance.hop());
         Melody {
-            pitch,
-            onsets: Onsets::new(rate),
+            performance,
             segmenter,
             origin: None,
             received: 0,
@@ -112,33 +117,73 @@ impl Melody {
     }
 }
 
-impl Stage for Melody {
-    type In = Mono;
-    type Out = Event;
+impl Melody {
+    /// [`Stage::push`], keeping the performance: its head and every block of frames that
+    /// settles go to `performance` (never [`Layer1::Onset`]: the onsets are `out`'s
+    /// [`Event::Onset`]s).
+    ///
+    /// # Errors
+    ///
+    /// As [`Stage::push`].
+    pub fn push_keeping(
+        &mut self,
+        input: Mono,
+        out: &mut Vec<Event>,
+        performance: &mut Vec<Layer1>,
+    ) -> Result<()> {
+        self.push_inner(input, out, Some(performance))
+    }
 
-    fn push(&mut self, input: Mono, out: &mut Vec<Event>) -> Result<()> {
-        let mut onsets = Vec::new();
-        self.onsets.push(input.clone(), &mut onsets)?;
+    /// [`Stage::finish`], keeping the rest of the performance, as
+    /// [`push_keeping`](Melody::push_keeping) does.
+    ///
+    /// # Errors
+    ///
+    /// As [`Stage::finish`].
+    pub fn finish_keeping(
+        &mut self,
+        out: &mut Vec<Event>,
+        performance: &mut Vec<Layer1>,
+    ) -> Result<()> {
+        self.finish_inner(out, Some(performance))
+    }
+
+    fn push_inner(
+        &mut self,
+        input: Mono,
+        out: &mut Vec<Event>,
+        performance: Option<&mut Vec<Layer1>>,
+    ) -> Result<()> {
         let origin = *self.origin.get_or_insert(input.start_frame);
-        self.received += input.samples.len() as u64;
-        let mut frames = Vec::new();
-        self.pitch.push(input, &mut frames)?;
+        let samples = input.samples.len() as u64;
+        let (mut frames, mut onsets) = (Vec::new(), Vec::new());
+        self.performance.push_raw(input, &mut frames, &mut onsets)?;
+        self.received += samples;
+        if let Some(kept) = performance {
+            self.performance.keep(&frames, kept);
+        }
         self.take_onsets(onsets, out);
         self.waiting.extend(frames);
         // Every onset at or before this frame has been emitted.
-        let horizon = (origin + self.received).saturating_sub(self.onsets.latency_frames());
+        let horizon = (origin + self.received).saturating_sub(self.performance.onset_latency());
         while let Some(frame) = self.waiting.pop_front_if(|p| p.frame <= horizon) {
             self.segmenter.pitch(frame, out);
         }
         Ok(())
     }
 
-    fn finish(&mut self, out: &mut Vec<Event>) -> Result<()> {
-        let mut onsets = Vec::new();
-        self.onsets.finish(&mut onsets)?;
+    fn finish_inner(
+        &mut self,
+        out: &mut Vec<Event>,
+        performance: Option<&mut Vec<Layer1>>,
+    ) -> Result<()> {
+        let (mut frames, mut onsets) = (Vec::new(), Vec::new());
+        self.performance.finish_raw(&mut frames, &mut onsets)?;
+        if let Some(kept) = performance {
+            self.performance.keep(&frames, kept);
+            self.performance.keep_last(kept);
+        }
         self.take_onsets(onsets, out);
-        let mut frames = Vec::new();
-        self.pitch.finish(&mut frames)?;
         self.waiting.extend(frames);
         for frame in self.waiting.drain(..) {
             self.segmenter.pitch(frame, out);
@@ -146,11 +191,24 @@ impl Stage for Melody {
         self.segmenter.finish(out);
         Ok(())
     }
+}
+
+impl Stage for Melody {
+    type In = Mono;
+    type Out = Event;
+
+    fn push(&mut self, input: Mono, out: &mut Vec<Event>) -> Result<()> {
+        self.push_inner(input, out, None)
+    }
+
+    fn finish(&mut self, out: &mut Vec<Event>) -> Result<()> {
+        self.finish_inner(out, None)
+    }
 
     fn latency_frames(&self) -> u64 {
-        self.pitch
-            .latency_frames()
-            .max(self.onsets.latency_frames())
+        self.performance
+            .pitch_latency()
+            .max(self.performance.onset_latency())
             + self.segmenter.latency()
     }
 }
@@ -534,6 +592,7 @@ fn take(run: &mut Run, (frame, pitch, voiced, level): Taken) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PitchTrack;
     use crate::synth;
 
     const RATE: u32 = 22_050;
@@ -865,6 +924,7 @@ mod tests {
                     PitchFrame {
                         frame,
                         hz,
+                        fine_hz: hz,
                         voiced,
                         level,
                     },
@@ -905,6 +965,7 @@ mod tests {
             let p = PitchFrame {
                 frame,
                 hz,
+                fine_hz: hz,
                 voiced: 1.0,
                 level: 0.1,
             };
@@ -1116,6 +1177,7 @@ mod tests {
             let p = PitchFrame {
                 frame: 256 * k as u64,
                 hz,
+                fine_hz: hz,
                 voiced: if hz.is_some() { 1.0 } else { 0.0 },
                 level: 0.1,
             };

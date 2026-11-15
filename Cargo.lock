@@ -493,6 +493,7 @@ dependencies = [
  "duet-drums",
  "duet-midi",
  "duet-play",
+ "duet-schemas",
  "etcetera",
  "midir",
  "serde",
@@ -529,6 +530,7 @@ dependencies = [
  "duet-core",
  "rubato",
  "rustfft",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -573,6 +575,7 @@ name = "duet-schemas"
 version = "0.2.0"
 dependencies = [
  "duet-core",
+ "duet-dsp",
  "jsonschema",
  "schemars",
  "serde",

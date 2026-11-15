@@ -37,12 +37,15 @@
 //!
 //! Each kind's schema, and the envelope's, is generated from the Rust types with `schemars`
 //! ([`schema`]) and committed under `crates/duet-schemas/schemas/<kind>/<major>.<minor>.json`,
-//! with an example document beside it in `examples/<major>.<minor>.duet`. The `$id` of each is
-//! its [`schema_url`]. The gate (`tests/schemas.rs`) fails when a schema's shape changes
+//! with an example document beside it in `examples/<major>.<minor>.duet` (`.duet.jsonl` for a
+//! stream's kind, whose every later line the gate validates on its own against the schema's
+//! `$defs/Record`). The `$id` of each is its [`schema_url`]. The gate (`tests/schemas.rs`) fails when a schema's shape changes
 //! without a version change, and asks only to regenerate when its descriptions alone change:
 //! `DUET_BLESS_SCHEMAS=1 cargo test -p duet-schemas` writes them.
 //!
-//! The kinds this build knows are [`KINDS`]. [`AnyDocument`] reads a `.duet` of any of them by
+//! The kinds this build knows are [`KINDS`]: `song` 1.0, a document, and `performance` 1.0, a
+//! stream of duet-dsp's [`PerformanceHead`](duet_dsp::PerformanceHead) and
+//! [`FrameBlock`](duet_dsp::FrameBlock)s. [`AnyDocument`] reads a `.duet` of any document kind by
 //! its envelope.
 //!
 //! # The rule
@@ -64,6 +67,7 @@ mod envelope;
 mod error;
 mod frame;
 mod kind;
+mod performance;
 mod registry;
 pub mod schema;
 mod song;

@@ -160,6 +160,69 @@ fn melody_writes_notes_and_abc_beside_the_input() {
 }
 
 #[test]
+fn melody_writes_its_performance_beside_its_other_outputs_and_never_overwrites_it() {
+    let dir = scratch("capture-performance");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    ok(&capture(&dir, &["melody", s(&wav)]), "capture melody");
+    assert_eq!(
+        files(&dir),
+        [
+            "tune.abc",
+            "tune.capture.json",
+            "tune.notes",
+            "tune.performance.duet.jsonl",
+            "tune.wav"
+        ]
+    );
+    let path = dir.join("tune.performance.duet.jsonl");
+    let text = read(&path);
+    let mut lines = text.lines();
+    let first: serde_json::Value = serde_json::from_str(lines.next().expect("a head")).unwrap();
+    assert_eq!(first["duet"]["kind"], "performance", "{first}");
+    assert_eq!(first["duet"]["version"], "1.0", "{first}");
+    assert_eq!(first["duet"]["tool"]["name"], "duet", "{first}");
+    assert_eq!(first["head"]["unit"], "absolute-cents", "{first}");
+    let hop = first["head"]["hop"].as_u64().expect("hop");
+    let mut next = first["head"]["first_frame"].as_u64().expect("first_frame");
+    let mut pitches = Vec::new();
+    for line in lines {
+        let block: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(block["start"].as_u64(), Some(next), "{line}");
+        let column = |name: &str| block[name].as_array().expect(name).clone();
+        let pitch = column("pitch");
+        assert_eq!(pitch.len(), column("voicing").len());
+        assert_eq!(pitch.len(), column("level").len());
+        next += pitch.len() as u64 * hop;
+        pitches.extend(pitch.iter().map(serde_json::Value::as_f64));
+    }
+    // The take is 16.5 s at 22 050 Hz, a frame every hop.
+    let seconds = pitches.len() as f64 * hop as f64 / 22_050.0;
+    assert!((16.0..18.0).contains(&seconds), "{seconds}");
+    assert!(pitches.iter().any(Option::is_none), "the lead-in is voiced");
+    // Its first note is E-flat 4, 6300 cents, held a second from 0.5 s.
+    let held: Vec<f64> = pitches[86..120]
+        .iter()
+        .map(|p| p.expect("voiced"))
+        .collect();
+    assert!(held.iter().all(|p| (p - 6300.0).abs() < 20.0), "{held:?}");
+
+    // Run again with the other outputs gone: the performance alone is refused, and kept.
+    for other in ["tune.abc", "tune.capture.json", "tune.notes"] {
+        std::fs::remove_file(dir.join(other)).expect("remove");
+    }
+    let out = capture(&dir, &["melody", s(&wav)]);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("tune.performance.duet.jsonl exists") && err.contains("never overwrites"),
+        "{err}"
+    );
+    assert_eq!(read(&path), text);
+    assert_eq!(files(&dir), ["tune.performance.duet.jsonl", "tune.wav"]);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
 fn rhythm_writes_notes_and_drums() {
     let dir = scratch("capture-rhythm");
     let wav = take(&dir, "beat.wav", &kick_and_hat());
@@ -724,6 +787,10 @@ fn all_written(dir: &Path, input: &str, stem: &str, score: &str) {
         format!("{stem}.notes"),
         format!("{stem}{score}"),
     ];
+    // A melody's performance; a rhythm take has none.
+    if score == ".abc" {
+        want.push(format!("{stem}.performance.duet.jsonl"));
+    }
     want.sort();
     assert_eq!(files(dir), want);
 }

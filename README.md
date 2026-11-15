@@ -474,7 +474,7 @@ options; everything about the timing that is left out is estimated and stated.
 - **`-o`, `--output <stem>`** is the output files' stem. Without it, the input's name without
   its extension, beside the input.
 
-**Files written.** Three, all beside each other, and none ever overwrites a file that exists
+**Files written.** Three, and a melody's performance, all beside each other, and none ever overwrites a file that exists
 (the whole capture is refused before anything is written). Once the take is analysed, the
 `.notes` and the `.capture.json` are always written; if the score then cannot be, that is
 reported after them, and they stay:
@@ -489,6 +489,12 @@ reported after them, and they stay:
   confidence); a melody's key, with its pitch-class histogram and every key's score; the tempo
   from each beat to the next, so drift is a series and not a feeling; and how far quantizing
   moved each note, in milliseconds and in grid steps.
+- `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
+  it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
+  the first frame and the unit); each later line is about a second of frames as the columns
+  `pitch` (absolute cents, `1200·log2(hz/440) + 6900`, so 6900.0 is A440, to 0.1 cent, `null`
+  when unvoiced), `voicing` and `level`. It is written as the frames settle, and kept with the
+  `.notes` and `.capture.json`. A three-minute take's is about 370 KB.
 
 **Formats.** WAV, FLAC, MP3, Ogg Vorbis and AAC in M4A are read, a packet at a time, so a long
 take is never held in memory whole. A damaged stretch that cannot be decoded is heard as silence
