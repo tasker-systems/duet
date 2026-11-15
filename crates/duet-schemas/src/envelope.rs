@@ -1,5 +1,6 @@
 //! The envelope: the `duet` object that says what a file is.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::Version;
@@ -24,7 +25,7 @@ pub fn schema_url(kind: &str, version: Version) -> String {
 
 /// The name and version of what wrote a file. Information only: no reader checks it or
 /// branches on it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Tool {
@@ -46,7 +47,7 @@ impl Tool {
 ///
 /// It is a fact about this file, not about the music, so it lives in the envelope: two
 /// documents with the same body are the same song.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct From {
@@ -73,7 +74,7 @@ impl From {
 }
 
 /// A construct an outside format's reader read but did not carry, such as an ABC slur.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Notice {
@@ -110,11 +111,12 @@ impl Notice {
 /// ([`read_envelope`](crate::read_envelope)). A [`Document`](crate::Document) or
 /// [`Stream`](crate::Stream) builds it on write from its kind, so a writer always writes the
 /// version it speaks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Envelope {
     /// The kind's name, lowercase with hyphens: `song`, `drum-grid`.
+    #[schemars(regex(pattern = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"))]
     pub kind: String,
     /// The kind's schema version the body is written at.
     pub version: Version,

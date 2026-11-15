@@ -28,6 +28,23 @@
 //! - A writer writes the version it speaks: a [`Document`] takes its kind and version from its
 //!   [`Kind`], never from the file it was read from.
 //!
+//! - **A change to the envelope's shape is a new major version of every kind.** The envelope has
+//!   no version of its own in a file: every kind's schema names the one envelope schema
+//!   ([`ENVELOPE_VERSION`]), and a reader refuses a field it does not know. So a field added to
+//!   the envelope, to [`Tool`], [`From`] or [`Notice`] is one that every older reader refuses.
+//!
+//! # The schemas, and the gate
+//!
+//! Each kind's schema, and the envelope's, is generated from the Rust types with `schemars`
+//! ([`schema`]) and committed under `crates/duet-schemas/schemas/<kind>/<major>.<minor>.json`,
+//! with an example document beside it in `examples/<major>.<minor>.duet`. The `$id` of each is
+//! its [`schema_url`]. The gate (`tests/schemas.rs`) fails when a schema's shape changes
+//! without a version change, and asks only to regenerate when its descriptions alone change:
+//! `DUET_BLESS_SCHEMAS=1 cargo test -p duet-schemas` writes them.
+//!
+//! The kinds this build knows are [`KINDS`]. [`AnyDocument`] reads a `.duet` of any of them by
+//! its envelope.
+//!
 //! # The rule
 //!
 //! **No crate below `duet-schemas` reads or writes an enveloped document.** The kind crates
@@ -47,13 +64,19 @@ mod envelope;
 mod error;
 mod frame;
 mod kind;
+mod registry;
+pub mod schema;
+mod song;
 mod version;
 
 pub use envelope::{Envelope, From, Notice, SCHEMA_BASE, Tool, schema_url};
 pub use error::{Error, Result};
 pub use frame::{Document, Stream, read_envelope};
 pub use kind::{Kind, StreamKind};
+pub use registry::{AnyDocument, ENVELOPE_INFO, Framing, KINDS, KindInfo, kind};
+pub use schema::{ENVELOPE, ENVELOPE_VERSION};
 pub use version::Version;
 
+#[cfg(test)]
 #[cfg(test)]
 mod tests;

@@ -26,6 +26,7 @@ mod error;
 mod model;
 mod pitch;
 mod quantize;
+mod schema;
 mod text;
 pub mod time;
 

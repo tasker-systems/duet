@@ -9,13 +9,20 @@ rust-version.workspace = true
 readme = "../../README.md"
 keywords = ["midi", "music", "json-schema", "llm"]
 categories = ["multimedia::audio", "encoding"]
-include = ["src/**", "Cargo.toml"]
+include = ["src/**", "schemas/**", "Cargo.toml"]
 
 [lints]
 workspace = true
 
 [dependencies]
+duet-core = { path = "../duet-core", version = "0.2.0" }
+schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: every float a document holds reads back to the same bits.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
+
+[dev-dependencies]
+# Validates every committed example and every round-trip document against its committed schema.
+# No default features: no HTTP or file resolver, so every reference resolves to a committed file.
+jsonschema = { version = "0.60.2", default-features = false }

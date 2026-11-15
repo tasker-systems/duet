@@ -1,5 +1,6 @@
 //! The `Kind` trait: a data structure with a name and a schema version.
 
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -12,8 +13,9 @@ use crate::Version;
 ///
 /// The body serializes exactly as the type does: the envelope adds nothing to it. A body type
 /// denies unknown fields (`#[serde(deny_unknown_fields)]`), so that a misspelled or newer field
-/// is refused by name rather than dropped.
-pub trait Kind: Serialize + DeserializeOwned {
+/// is refused by name rather than dropped. Its `JsonSchema` is the committed schema's body, so it
+/// must describe what the type writes: derived, or written by hand for a type serialized by hand.
+pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
     /// The kind's name, lowercase with hyphens: `song`, `drum-grid`.
     const NAME: &'static str;
     /// The version this build reads up to and writes.
@@ -38,7 +40,7 @@ pub trait Kind: Serialize + DeserializeOwned {
 /// [`Record`](StreamKind::Record) per line, each of which reads on its own.
 pub trait StreamKind: Kind {
     /// One line after the first.
-    type Record: Serialize + DeserializeOwned;
+    type Record: Serialize + DeserializeOwned + JsonSchema;
 
     /// Reads a record written at `minor`, as [`Kind::read_minor`] reads a head.
     ///
