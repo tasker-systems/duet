@@ -631,29 +631,40 @@ mod tests {
         assert!(stage.push(mono(500), &mut Vec::new()).is_err());
     }
 
+    /// Our track against the reference pYIN's, frame by frame: within 50 cents wherever both say
+    /// voiced, on at least 80 frames.
+    ///
+    /// pYIN's reading is a committed recording, `tests/fixtures/pyin-scale.txt`, whose header
+    /// gives the pyin version and settings; pyin itself is not a dependency, since it pulls in
+    /// zip 0.5, which `cargo audit` refuses. To re-record, add `pyin = "1.2.0"` under
+    /// `[dev-dependencies]`, add this recorder to these tests, run it as the fixture's header
+    /// says, and remove both again:
+    ///
+    /// ```text
+    /// #[test]
+    /// fn record_pyin_scale() {
+    ///     use pyin::{Framing, PYINExecutor};
+    ///     let stage = PitchTrack::new(RATE);
+    ///     let mut reference = PYINExecutor::<f32>::new(
+    ///         FMIN_HZ, FMAX_HZ, RATE, stage.frame_len, Some(stage.yin.window),
+    ///         Some(stage.hop), Some(1.0 / BINS_PER_SEMITONE as f64),
+    ///     );
+    ///     let (_, f0, voiced, prob) = reference.pyin(&scale(), f32::NAN, Framing::Valid);
+    ///     let mut text = String::new();
+    ///     for (k, ((f, v), p)) in f0.iter().zip(&voiced).zip(&prob).enumerate() {
+    ///         let f = if *v { format!("{f}") } else { "-".to_string() };
+    ///         text.push_str(&format!("{k} {f} {p}\n"));
+    ///     }
+    ///     std::fs::write(std::env::var("PYIN_OUT").unwrap(), text).unwrap();
+    /// }
+    /// ```
     #[test]
     fn our_track_agrees_with_pyin_on_a_scale() {
-        use pyin::{Framing, PYINExecutor};
-
-        let signal = scale();
-        let ours = track(&signal, 1000);
-        // The same frames as ours: frame `k` of both starts `k` hops into the take.
-        let stage = PitchTrack::new(RATE);
-        let mut reference = PYINExecutor::<f32>::new(
-            FMIN_HZ,
-            FMAX_HZ,
-            RATE,
-            stage.frame_len,
-            Some(stage.yin.window),
-            Some(stage.hop),
-            Some(1.0 / BINS_PER_SEMITONE as f64),
-        );
-        let (_, f0, voiced, _) = reference.pyin(&signal, f32::NAN, Framing::Valid);
+        let ours = track(&scale(), 1000);
         let mut compared = 0;
-        for (k, (ours, (&theirs, &their_voicing))) in
-            ours.iter().zip(f0.iter().zip(&voiced)).enumerate()
-        {
-            if let (Some(hz), true) = (ours.hz, their_voicing) {
+        for (k, theirs) in pyin_reading().into_iter().enumerate() {
+            let ours = ours[k];
+            if let (Some(hz), Some(theirs)) = (ours.hz, theirs) {
                 compared += 1;
                 assert!(
                     cents(hz, theirs).abs() <= 50.0,
@@ -663,5 +674,25 @@ mod tests {
         }
         // The notes span 1.25 s, about 107 frames: most must be compared, or the test is empty.
         assert!(compared >= 80, "only {compared} frames voiced in both");
+    }
+
+    /// The recorded pYIN f0 of each frame, `None` where it says unvoiced.
+    fn pyin_reading() -> Vec<Option<f32>> {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/pyin-scale.txt");
+        let text = std::fs::read_to_string(path).expect("the pyin recording is committed");
+        text.lines()
+            .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+            .enumerate()
+            .map(|(k, line)| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                assert_eq!(fields.len(), 3, "{line}");
+                assert_eq!(
+                    fields[0].parse::<usize>(),
+                    Ok(k),
+                    "frames out of order: {line}"
+                );
+                (fields[1] != "-").then(|| fields[1].parse().expect("f0 is a number"))
+            })
+            .collect()
     }
 }
