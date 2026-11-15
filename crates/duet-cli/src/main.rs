@@ -12,6 +12,7 @@ mod drums;
 mod io;
 mod play;
 mod song;
+mod view;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -70,6 +71,13 @@ enum Command {
         #[arg(long)]
         snap_levels: bool,
     },
+    /// Render a document as a text view: notes of a song, a grid of a drum grid, or a grid of
+    /// a song's drum track with --as grid. The first line names the view and the document it
+    /// was rendered from, so `duet apply` can read it back.
+    View(view::ViewArgs),
+    /// Read an edited view back: --onto the document it was rendered from, keeping what the
+    /// view does not show, or -o a new document from a lossless view.
+    Apply(view::ApplyArgs),
     /// Work on a song: show it, or quantize it.
     #[command(subcommand)]
     Song(SongCommand),
@@ -135,6 +143,8 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
         Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
         Command::Capture(command) => capture::run(command, &Config::load(dirs)?),
         Command::Play(args) => play::run(args, &Config::load(dirs)?),
+        Command::View(args) => view::run_view(args, &Config::load(dirs)?),
+        Command::Apply(args) => view::run_apply(args, &Config::load(dirs)?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),
     }

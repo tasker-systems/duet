@@ -72,7 +72,8 @@ fn refusal(path: &Path, named: &Named, what: &str) -> String {
         ),
         Named::View => format!(
             "{path} is not a duet document or an outside format: duet reads .duet, .mid and \
-             .abc by name. notefmt text is a view, read only when --from text says so"
+             .abc by name. Its text is a view: read it into a document with `duet apply {path} \
+             -o <new.duet>` (or --onto the document it came from), or name it with --from text"
         ),
         Named::Song(_) | Named::Unknown => format!(
             "{path}: duet reads and writes .duet, .mid (.midi, .smf) and .abc by name; name \
