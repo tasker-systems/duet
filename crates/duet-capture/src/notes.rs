@@ -174,6 +174,10 @@ struct Run {
     /// left the note.
     anchor: Option<f32>,
     held: usize,
+    /// Whether its pitch has ever held: stayed within [`ARRIVED_SEMITONES`] for `hold` frames.
+    /// A run that leaves before it has held was a scoop, not a note.
+    has_held: bool,
+    hold: usize,
     /// Every frame taken, on pitch or off it: what its voicing and level are averaged over.
     frames: usize,
     voicing: f32,
@@ -181,7 +185,12 @@ struct Run {
 }
 
 impl Run {
-    fn new(start: u64, onset: Option<(u64, f32)>, strength: Option<f32>, held: usize) -> Run {
+    fn new(
+        start: u64,
+        onset: Option<(u64, f32)>,
+        strength: Option<f32>,
+        (held, hold): (usize, usize),
+    ) -> Run {
         Run {
             start,
             onset,
@@ -191,6 +200,8 @@ impl Run {
             reference: 0.0,
             anchor: None,
             held,
+            has_held: false,
+            hold,
             frames: 0,
             voicing: 0.0,
             level: 0.0,
@@ -200,6 +211,10 @@ impl Run {
     fn take(&mut self, frame: u64, pitch: f32, voiced: f32, level: f32) {
         self.take_off_pitch(frame, voiced, level);
         self.pitches.push(pitch);
+        if !self.has_held && self.pitches.len() >= self.hold {
+            let recent = &self.pitches[self.pitches.len() - self.hold..];
+            self.has_held = spread(recent) <= ARRIVED_SEMITONES;
+        }
         let from = self.pitches.len().saturating_sub(self.held);
         let recent = &self.pitches[from..];
         self.reference = recent.iter().sum::<f32>() / recent.len() as f32;
@@ -231,6 +246,16 @@ impl Run {
         self.strength
             .unwrap_or_else(|| level_strength(self.level / self.frames.max(1) as f32))
     }
+}
+
+/// How widely `pitches` spread, in semitones.
+fn spread(pitches: &[f32]) -> f32 {
+    let (low, high) = pitches
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(low, high), &p| {
+            (low.min(p), high.max(p))
+        });
+    high - low
 }
 
 fn median(pitches: &[f32]) -> f32 {
@@ -273,7 +298,10 @@ struct Slide {
 /// than [`ARRIVED_SEMITONES`]. The next note then starts where the slide began, so a slide into
 /// a note is part of the note it arrives at, but only the held frames give the note its pitch.
 /// A slide is never a note of its own: one that ends at an onset or in silence before it holds
-/// is dropped. A pitch that dips away and comes back to where it was is a slide too, so it
+/// is dropped. A voice that comes in moving, after silence or an onset, has not held either:
+/// until its frames over [`CHANGE_HOLD_SECS`] spread no wider than [`ARRIVED_SEMITONES`], it
+/// is a scoop into the note it reaches, which starts where the voice came in. A pitch that dips
+/// away and comes back to where it was is a slide too, so it
 /// splits one pitch into two notes, as a voiced consonant between two syllables does.
 ///
 /// Where a note is held is the mean of its latest [`HELD_SECS`], so vibrato and a slow drift
@@ -289,8 +317,9 @@ struct Slide {
 ///   be a note.
 /// - A vibrato of a full half semitone either side at 7 swings a second, on a note that also
 ///   drifts half a semitone, can leave it at some phases of its swing and split it in two.
-/// - A note that starts after silence or an onset is not a slide, so a scoop or slide at its
-///   start is read as the note's own frames and can split off as a note of its own.
+/// - A note that starts after silence or an onset and has not yet held, a scoop into it, is the
+///   start of the note it reaches when the pitch moves on. One that holds for
+///   [`CHANGE_HOLD_SECS`], however low the scoop, is a note of its own.
 ///
 /// It must be given every onset up to a pitch frame before that frame.
 struct Segmenter {
@@ -372,7 +401,7 @@ impl Segmenter {
                 _ => p.frame.saturating_sub(self.hop / 2),
             };
             let onset = onset.filter(|&(at, _)| since(at) <= self.window);
-            let mut run = Run::new(start, onset, onset.map(|o| o.1), self.held);
+            let mut run = Run::new(start, onset, onset.map(|o| o.1), (self.held, self.hold));
             take(&mut run, taken);
             self.run = Some(run);
             return;
@@ -403,16 +432,26 @@ impl Segmenter {
         let Some(run) = self.run.take() else {
             return;
         };
-        let (strength, inherited, onset) = (run.strength(), run.strength, run.onset);
-        let emitted = self.emit(run, at, out);
-        // A note split off by a pitch change keeps the strength of the note before it; one
-        // split off a dropped fragment is as if the fragment had not been.
-        self.slide = Some(Slide {
-            start: at,
-            strength: if emitted { Some(strength) } else { inherited },
-            onset: if emitted { None } else { onset },
-            frames: Vec::new(),
-        });
+        if !run.has_held {
+            // It never held: a scoop into the note it reaches, which starts where it did.
+            self.slide = Some(Slide {
+                start: run.start,
+                strength: run.strength,
+                onset: run.onset,
+                frames: Vec::new(),
+            });
+        } else {
+            let (strength, inherited, onset) = (run.strength(), run.strength, run.onset);
+            let emitted = self.emit(run, at, out);
+            // A note split off by a pitch change keeps the strength of the note before it; one
+            // split off a dropped fragment is as if the fragment had not been.
+            self.slide = Some(Slide {
+                start: at,
+                strength: if emitted { Some(strength) } else { inherited },
+                onset: if emitted { None } else { onset },
+                frames: Vec::new(),
+            });
+        }
         // A run can start only once `hold` frames have arrived, so at the last of these.
         for frame in departed {
             self.slide_on(frame);
@@ -426,13 +465,12 @@ impl Segmenter {
         };
         slide.frames.push(taken);
         let recent = &slide.frames[slide.frames.len().saturating_sub(self.hold)..];
-        let (low, high) = recent.iter().fold((f32::MAX, f32::MIN), |(low, high), f| {
-            (low.min(f.1), high.max(f.1))
-        });
-        if recent.len() == self.hold && high - low <= ARRIVED_SEMITONES {
+        let pitches: Vec<f32> = recent.iter().map(|f| f.1).collect();
+        if recent.len() == self.hold && spread(&pitches) <= ARRIVED_SEMITONES {
             // Arrived and holding: the next note, from where the slide began, pitched only by
             // the frames that hold.
-            let mut next = Run::new(slide.start, None, slide.strength, self.held);
+            let mut next = Run::new(slide.start, None, slide.strength, (self.held, self.hold));
+            next.has_held = true;
             for &frame in recent {
                 take(&mut next, frame);
             }
@@ -1113,6 +1151,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_scoop_at_a_notes_start_is_part_of_the_note_it_reaches() {
+        // The voice comes in low, wobbling, and scoops up: its first 70 ms never hold, so they
+        // are the start of the note they reach, not a note of their own.
+        let wobble = [50.6, 49.6, 50.3, 49.8, 50.2, 49.7];
+        let scoop: Vec<Option<f32>> = wobble.iter().map(|&p| Some(p)).collect();
+        let pitches = [vec![None; 5], scoop, line(50.0, 54.0, 6), held(54.0, 40)].concat();
+        let found = segment_pitches(&pitches);
+        assert_eq!(midis(&found), vec![54], "{found:?}");
+        // It starts where the voice does, half a hop before its first frame.
+        assert_eq!(found[0].0, 5 * 256 - 128, "{found:?}");
+    }
+
+    #[test]
+    fn a_short_note_that_holds_before_a_step_is_kept() {
+        // 70 ms held still, then a quick step: a note, however short.
+        let pitches = [
+            vec![None; 5],
+            held(50.0, 6),
+            line(50.0, 54.0, 3),
+            held(54.0, 40),
+        ]
+        .concat();
+        assert_eq!(midis(&segment_pitches(&pitches)), vec![50, 54]);
     }
 
     #[test]
