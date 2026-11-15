@@ -1,5 +1,6 @@
 //! Every kind this build knows, and a document of any of them.
 
+use duet_capture::Analysis;
 use duet_core::Song;
 use duet_dsp::PerformanceHead;
 use serde_json::Value;
@@ -48,7 +49,11 @@ const fn stream<K: StreamKind>() -> KindInfo {
 }
 
 /// Every kind this build reads and writes.
-pub const KINDS: &[KindInfo] = &[document::<Song>(), stream::<PerformanceHead>()];
+pub const KINDS: &[KindInfo] = &[
+    document::<Song>(),
+    document::<Analysis>(),
+    stream::<PerformanceHead>(),
+];
 
 /// The envelope's schema, as a [`KindInfo`] whose name is [`ENVELOPE`](crate::ENVELOPE). It is
 /// no kind, but the gate commits and checks it like one.
@@ -70,6 +75,7 @@ pub fn kind(name: &str) -> Option<&'static KindInfo> {
 #[non_exhaustive]
 pub enum AnyDocument {
     Song(Document<Song>),
+    CaptureAnalysis(Document<Analysis>),
 }
 
 impl AnyDocument {
@@ -84,6 +90,9 @@ impl AnyDocument {
         let envelope = read_envelope(text)?;
         match kind(&envelope.kind) {
             Some(info) if info.name == Song::NAME => Document::read(text).map(Self::Song),
+            Some(info) if info.name == Analysis::NAME => {
+                Document::read(text).map(Self::CaptureAnalysis)
+            }
             Some(info) if info.framing == Framing::Stream => Err(Error::Framing {
                 found: "document (.duet, with a `body`)",
                 expected: "stream (.duet.jsonl), as its kind is",
@@ -104,6 +113,7 @@ impl AnyDocument {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::Song(_) => Song::NAME,
+            Self::CaptureAnalysis(_) => Analysis::NAME,
         }
     }
 
@@ -115,6 +125,7 @@ impl AnyDocument {
     pub fn write(&self) -> Result<String> {
         match self {
             Self::Song(doc) => doc.write(),
+            Self::CaptureAnalysis(doc) => doc.write(),
         }
     }
 }

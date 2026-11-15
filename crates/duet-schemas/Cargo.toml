@@ -15,6 +15,7 @@ include = ["src/**", "schemas/**", "Cargo.toml"]
 workspace = true
 
 [dependencies]
+duet-capture = { path = "../duet-capture", version = "0.2.0" }
 duet-core = { path = "../duet-core", version = "0.2.0" }
 duet-dsp = { path = "../duet-dsp", version = "0.2.0" }
 schemars = "1.2.3"

@@ -19,6 +19,8 @@ duet-abc = { path = "../duet-abc", version = "0.2.0" }
 duet-core = { path = "../duet-core", version = "0.2.0" }
 duet-drums = { path = "../duet-drums", version = "0.2.0" }
 duet-dsp = { path = "../duet-dsp", version = "0.2.0" }
+# The analysis types derive their schema here: duet-schemas commits it as capture-analysis 1.0.
+schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
 symphonia = { version = "0.6.1", default-features = false, features = ["aac", "flac", "id3v1", "id3v2", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 thiserror = "2"
