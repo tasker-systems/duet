@@ -6,8 +6,9 @@
 
 mod support;
 
+use duet_capture::{Loss, ReaderName};
 use support::{
-    TakeKind, Verdict, asked_key, compare_melody, compare_rhythm, manifest, played, read,
+    TakeKind, Verdict, asked_key, compare_melody, compare_rhythm, manifest, played, read, read_by,
 };
 
 /// One take's verdict; a refusal to run it at all is a failure too.
@@ -45,6 +46,85 @@ fn every_reference_take_matches_its_transcription() {
             eprintln!("reported: {line}");
         }
         failures.extend(verdict.failures);
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failure(s):\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// The loss's three terms, as a row of the per-take table.
+fn row(loss: &Loss) -> String {
+    format!(
+        "pitch {:8.1}  unread {:6.1}  notes {:6.1}  total {:8.1}",
+        loss.pitch,
+        loss.unread,
+        loss.notes,
+        loss.total()
+    )
+}
+
+/// The note HMM must match every melody take's transcription as the rules do, and both
+/// readings' losses are reported per take, as their three terms, with each term the HMM is
+/// worse on named.
+#[test]
+fn the_note_hmm_matches_every_melody_transcription_and_both_losses_are_reported() {
+    let manifest = manifest();
+    let mut failures = Vec::new();
+    for take in manifest.take.iter().filter(|t| t.kind == TakeKind::Melody) {
+        let name = &take.file;
+        let mut losses = Vec::new();
+        for reader in [ReaderName::Rules, ReaderName::Hmm] {
+            let (reading, read) = match read_by(take, reader) {
+                Ok(both) => both,
+                Err(e) => {
+                    failures.push(format!("{name} ({reader:?}): {e}"));
+                    continue;
+                }
+            };
+            let loss = read
+                .and_then(|r| r.residual)
+                .map(|r| (r.loss, r.read_frames, r.unread_frames));
+            if reader == ReaderName::Hmm {
+                let found = played(&reading.found, reading.grid);
+                let expected = played(&reading.expected, reading.grid);
+                match (expected, found) {
+                    (Ok(expected), Ok(found)) => {
+                        let verdict = compare_melody(name, &expected, &found);
+                        failures.extend(verdict.failures.iter().map(|f| format!("hmm: {f}")));
+                    }
+                    (Err(e), _) | (_, Err(e)) => failures.push(format!("{name}: {e}")),
+                }
+            }
+            losses.extend(loss.map(|l| (reader, l)));
+        }
+        for (reader, (loss, read, unread)) in &losses {
+            eprintln!(
+                "loss: {name:<24} {:<5}  {}  (frames read {read}, unread {unread})",
+                format!("{reader:?}").to_lowercase(),
+                row(loss)
+            );
+        }
+        if let [(_, (rules, ..)), (_, (hmm, ..))] = losses.as_slice() {
+            let worse: Vec<&str> = [
+                ("pitch", hmm.pitch > rules.pitch),
+                ("unread", hmm.unread > rules.unread),
+                ("notes", hmm.notes > rules.notes),
+            ]
+            .into_iter()
+            .filter_map(|(term, worse)| worse.then_some(term))
+            .collect();
+            eprintln!(
+                "loss: {name:<24} the hmm is worse on: {}",
+                if worse.is_empty() {
+                    "nothing".to_owned()
+                } else {
+                    worse.join(", ")
+                }
+            );
+        }
     }
     assert!(
         failures.is_empty(),

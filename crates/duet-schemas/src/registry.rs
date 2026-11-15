@@ -78,7 +78,8 @@ pub fn kind(name: &str) -> Option<&'static KindInfo> {
 pub enum AnyDocument {
     Song(Document<Song>),
     DrumGrid(Document<DrumGrid>),
-    CaptureAnalysis(Document<Analysis>),
+    /// Boxed: an analysis holds a take's every event and its reading, and is far the largest.
+    CaptureAnalysis(Box<Document<Analysis>>),
 }
 
 impl AnyDocument {
@@ -95,7 +96,7 @@ impl AnyDocument {
             Some(info) if info.name == Song::NAME => Document::read(text).map(Self::Song),
             Some(info) if info.name == DrumGrid::NAME => Document::read(text).map(Self::DrumGrid),
             Some(info) if info.name == Analysis::NAME => {
-                Document::read(text).map(Self::CaptureAnalysis)
+                Document::read(text).map(|doc| Self::CaptureAnalysis(Box::new(doc)))
             }
             Some(info) if info.framing == Framing::Stream => Err(Error::Framing {
                 found: "document (.duet, with a `body`)",

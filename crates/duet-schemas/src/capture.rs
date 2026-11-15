@@ -16,7 +16,11 @@ use crate::{Kind, Version};
 /// **1.2** adds the residual, also additive: each read note's optional `residual` (centre,
 /// drift, vibrato, slide, fall and rest) and the reading's optional `residual` (the centres'
 /// histogram and slope, the read and unread frames, and the loss as its three terms).
+///
+/// **1.3** adds the reading's optional `reader`, also additive: which reader chose its notes
+/// (`rules` or `hmm`) and the cost per note `c` it chose them with, which the loss's `notes`
+/// term counts. A 1.2 document's reading has none, and was read by the rules.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 2);
+    const VERSION: Version = Version::new(1, 3);
 }

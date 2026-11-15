@@ -18,7 +18,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.0 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.3 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -28,7 +28,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.2.json"))
+        .build(&read_json("schemas/capture-analysis/1.3.json"))
         .unwrap()
 }
 
@@ -112,7 +112,7 @@ fn round_trip(analysis: Analysis) -> (String, Value) {
     let AnyDocument::CaptureAnalysis(any) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
-    assert_eq!(any, doc);
+    assert_eq!(*any, doc);
     let value: Value = serde_json::from_str(&text).unwrap();
     assert_valid(&value);
     assert!(
@@ -157,6 +157,11 @@ fn an_estimated_analysis_round_trips_exactly_and_validates() {
             "{term}: {reading}"
         );
     }
+    // The reader, since 1.3: the rules, with the loss's cost per note.
+    assert_eq!(
+        reading["reader"],
+        json!({ "name": "rules", "note_cost": 4.0 })
+    );
     assert!(body["key"]["key"]["estimated"].is_object(), "{body}");
 }
 
