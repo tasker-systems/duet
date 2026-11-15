@@ -493,6 +493,7 @@ dependencies = [
  "duet-drums",
  "duet-midi",
  "duet-play",
+ "duet-schemas",
  "etcetera",
  "midir",
  "serde",
@@ -554,7 +555,6 @@ dependencies = [
  "midly",
  "serde_json",
  "thiserror 2.0.21",
- "toml",
 ]
 
 [[package]]

@@ -417,18 +417,6 @@ fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
     let from_text = Song::from_text(&text).unwrap();
     assert_eq!(from_text, song, "text round-trip; text was:\n{text}");
     assert_eq!(from_text.to_text(), text, "text is stable");
-    let json = serde_json::to_string_pretty(&song).unwrap();
-    assert_eq!(
-        serde_json::from_str::<Song>(&json).unwrap(),
-        song,
-        "JSON round-trip"
-    );
-    let toml_text = toml::to_string(&song).unwrap();
-    assert_eq!(
-        toml::from_str::<Song>(&toml_text).unwrap(),
-        song,
-        "TOML round-trip"
-    );
     check_document(&song);
     check_document(&read);
 
@@ -884,9 +872,6 @@ fn no_read_write_or_conversion_quantizes_unasked() {
     let _ = song.quantized("1/16".parse().unwrap()).unwrap();
     assert_eq!(song, before, "quantizing changed the song it was called on");
     let through_all = Song::from_text(&song.to_text()).unwrap();
-    let through_all: Song =
-        serde_json::from_str(&serde_json::to_string(&through_all).unwrap()).unwrap();
-    let through_all: Song = toml::from_str(&toml::to_string(&through_all).unwrap()).unwrap();
     let through_all = Document::<Song>::read(
         &Document::new(Tool::new("duet", "test"), through_all)
             .write()
@@ -966,10 +951,6 @@ fn a_midi_files_end_of_track_survives() {
 
         let from_text = Song::from_text(&song.to_text()).unwrap();
         assert_eq!(from_text, song, "text");
-        let json: Song = serde_json::from_str(&serde_json::to_string(&song).unwrap()).unwrap();
-        assert_eq!(json, song, "JSON");
-        let toml_song: Song = toml::from_str(&toml::to_string(&song).unwrap()).unwrap();
-        assert_eq!(toml_song, song, "TOML");
         check_document(&song);
 
         let written = from_text.to_midi().unwrap();
@@ -1135,7 +1116,7 @@ fn key_texts(bytes: &[u8]) -> Vec<(u64, String)> {
 }
 
 #[test]
-fn a_key_with_a_mode_round_trips_through_text_json_toml_and_midi() {
+fn a_key_with_a_mode_round_trips_through_text_a_document_and_midi() {
     // D dorian has no sharps or flats, and E phrygian at bar 3 has none either: only the
     // mode tells them from C major, so only the duet:key event carries it through MIDI.
     let text = "key D dorian\nkey E phrygian at 3.1.0\nkey G mixolydian at 4.1.0\n\
@@ -1159,11 +1140,11 @@ fn a_key_with_a_mode_round_trips_through_text_json_toml_and_midi() {
     let text = song.to_text();
     assert!(text.contains("key D dorian\n"), "{text}");
     assert_eq!(Song::from_text(&text).unwrap(), song, "text round-trip");
-    let json = serde_json::to_string(&song).unwrap();
-    assert!(json.contains("\"D dorian\""), "{json}");
-    assert_eq!(serde_json::from_str::<Song>(&json).unwrap(), song, "JSON");
-    let toml_text = toml::to_string(&song).unwrap();
-    assert_eq!(toml::from_str::<Song>(&toml_text).unwrap(), song, "TOML");
+    let doc = Document::new(Tool::new("duet", "test"), song.clone())
+        .write()
+        .unwrap();
+    assert!(doc.contains("\"key\": \"D dorian\""), "{doc}");
+    check_document(&song);
 
     // MIDI holds each key's own signature, and a duet:key event beside each mode.
     let midi = song.to_midi().unwrap();

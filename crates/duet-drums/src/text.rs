@@ -425,8 +425,7 @@ impl DrumGrid {
     /// not name, or names on another key, gets a `lane` line.
     ///
     /// Fails, naming the lane, bar and step, when a hit's velocity is not one of the
-    /// grid's [levels](DrumGrid::levels): the text cannot hold it. Write the exact form
-    /// (JSON or TOML) instead, or snap the velocities first
+    /// grid's [levels](DrumGrid::levels): the text cannot hold it. Snap the velocities first
     /// ([`DrumGrid::snapped_to_levels`]).
     pub fn to_text(&self) -> Result<String> {
         self.check()?;
@@ -434,8 +433,7 @@ impl DrumGrid {
             let l = self.levels;
             return Err(Error::invalid(format!(
                 "{lane}, bar {bar}, step {step}: velocity {vel} is not a level of the text form \
-                 (g {}, x {}, X {}); write the exact form (.drums.json or .drums.toml), or \
-                 snap velocities to the levels first",
+                 (g {}, x {}, X {}); snap velocities to the levels first",
                 l.ghost, l.hit, l.accent
             )));
         }

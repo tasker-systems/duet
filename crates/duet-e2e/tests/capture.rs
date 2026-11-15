@@ -639,7 +639,14 @@ fn an_empty_lead_in_is_removed_from_the_score_only() {
     ok(
         &duet(
             &dir,
-            &["abc", "render", s(&dir.join("tune.abc")), s(&rendered)],
+            &[
+                "abc",
+                "render",
+                s(&dir.join("tune.abc")),
+                s(&rendered),
+                "--to",
+                "text",
+            ],
         ),
         "abc render",
     );
