@@ -255,28 +255,58 @@ pub struct Verdict {
 }
 
 /// A melody against its transcription, aligned by the step each note starts on, over notes of
-/// at least an eighth on either side. An expected long note fails when no long note found
-/// starts on its step with its pitch; a long note found on a step where the transcription has
-/// no note fails as invented or split. Shorter notes, on either side, are reported only.
+/// at least an eighth on either side, each note matched to at most one on the other side by its
+/// step and pitch:
+/// - every expected long note needs a long note found of its own on its step with its pitch, or
+///   it fails, so two expected on one step need two found;
+/// - every long note found must then match an expected note on its step with its pitch, or it
+///   fails as invented, split or wrong, whatever else the transcription has on that step;
+/// - shorter notes, on either side, are reported only: an expected short note with no note
+///   found to match, and a short note found on a step where nothing is expected.
 pub fn compare_melody(take: &str, expected: &[Played], found: &[Played]) -> Verdict {
     let is_long = |p: &Played| p.milli_beats as f64 / 1000.0 >= EIGHTH_BEATS;
+    let same = |a: &Played, b: &Played| a.step == b.step && a.midi == b.midi;
     let mut verdict = Verdict::default();
-    for want in expected {
-        let hit = found
-            .iter()
-            .any(|got| is_long(got) && got.step == want.step && got.midi == want.midi);
-        if is_long(want) && !hit {
+    let (mut want_used, mut got_used) = (vec![false; expected.len()], vec![false; found.len()]);
+    // Takes the first note of `notes` not yet used, that `fits`, and marks it used.
+    let take_first = |notes: &[Played], used: &mut [bool], fits: &dyn Fn(&Played) -> bool| {
+        let i = (0..notes.len()).find(|&i| !used[i] && fits(&notes[i]))?;
+        used[i] = true;
+        Some(i)
+    };
+
+    for (w, want) in expected.iter().enumerate() {
+        if is_long(want) {
+            want_used[w] = true;
+            if take_first(found, &mut got_used, &|got| is_long(got) && same(got, want)).is_none() {
+                verdict.failures.push(format!(
+                    "{take}: expected note: pitch {} at {}, found {}",
+                    want.midi,
+                    want.at(),
+                    near(found, want.step)
+                ));
+            }
+        }
+    }
+    for (g, got) in found.iter().enumerate() {
+        if got_used[g] || !is_long(got) {
+            continue;
+        }
+        got_used[g] = true;
+        if take_first(expected, &mut want_used, &|want| same(want, got)).is_none() {
             verdict.failures.push(format!(
-                "{take}: expected note: pitch {} at {}, found {}",
-                want.midi,
-                want.at(),
-                near(found, want.step)
+                "{take}: extra note: found pitch {} at {}, expected {}",
+                got.midi,
+                got.at(),
+                near(expected, got.step)
             ));
-        } else if !is_long(want)
-            && !found
-                .iter()
-                .any(|g| g.step == want.step && g.midi == want.midi)
-        {
+        }
+    }
+    for (w, want) in expected.iter().enumerate() {
+        if want_used[w] {
+            continue;
+        }
+        if take_first(found, &mut got_used, &|got| same(got, want)).is_none() {
             verdict.reported.push(format!(
                 "{take}: short expected note: pitch {} at {}, found {}",
                 want.midi,
@@ -285,23 +315,16 @@ pub fn compare_melody(take: &str, expected: &[Played], found: &[Played]) -> Verd
             ));
         }
     }
-    for got in found {
-        if expected.iter().any(|want| want.step == got.step) {
+    for (g, got) in found.iter().enumerate() {
+        if got_used[g] || expected.iter().any(|want| want.step == got.step) {
             continue;
         }
-        let message = format!(
-            "{take}: extra note: found pitch {} at {}, expected {}",
+        verdict.reported.push(format!(
+            "{take}: extra note: found pitch {} at {}, expected {} (shorter than an eighth)",
             got.midi,
             got.at(),
             near(expected, got.step)
-        );
-        if is_long(got) {
-            verdict.failures.push(message);
-        } else {
-            verdict
-                .reported
-                .push(format!("{message} (shorter than an eighth)"));
-        }
+        ));
     }
     verdict
 }

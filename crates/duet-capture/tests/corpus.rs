@@ -164,6 +164,43 @@ mod comparisons {
     }
 
     #[test]
+    fn a_long_note_of_the_wrong_pitch_over_an_expected_short_note_fails() {
+        let v = compare_melody(
+            "t",
+            &[p(0, 60, 1.0), p(4, 62, 0.25)],
+            &[p(0, 60, 1.0), p(4, 63, 1.0)],
+        );
+        assert_eq!(v.failures.len(), 1, "{:?}", v.failures);
+        assert!(
+            v.failures[0].contains("extra note: found pitch 63 at step 4"),
+            "{:?}",
+            v.failures
+        );
+    }
+
+    #[test]
+    fn a_second_long_note_on_a_matched_step_fails() {
+        let v = compare_melody("t", &[p(0, 60, 1.0)], &[p(0, 60, 1.0), p(0, 60, 1.0)]);
+        assert_eq!(v.failures.len(), 1, "{:?}", v.failures);
+        assert!(
+            v.failures[0].contains("extra note: found pitch 60 at step 0"),
+            "{:?}",
+            v.failures
+        );
+    }
+
+    #[test]
+    fn duplicate_expected_notes_need_a_found_note_each() {
+        let v = compare_melody("t", &[p(0, 60, 1.0), p(0, 60, 1.0)], &[p(0, 60, 1.0)]);
+        assert_eq!(v.failures.len(), 1, "{:?}", v.failures);
+        assert!(
+            v.failures[0].contains("expected note: pitch 60 at step 0"),
+            "{:?}",
+            v.failures
+        );
+    }
+
+    #[test]
     fn an_extra_long_note_fails_as_invented_or_split() {
         let v = compare_melody("t", &[p(0, 60, 2.0)], &[p(0, 60, 1.0), p(4, 60, 1.0)]);
         assert_eq!(v.failures.len(), 1, "{:?}", v.failures);
