@@ -74,6 +74,11 @@ pub fn lead_in(lead_in: LeadIn, downbeat_tick: u64, meter: TimeSig, tpq: u16) ->
     }
 }
 
+/// The snap, stated only when a velocity moved: how many, and to what.
+pub fn snapped(moved: usize, to: &str) -> String {
+    format!("velocities: {moved} snapped to {to}; the .notes keeps them exact")
+}
+
 /// The felt beat of a compound meter at `quarter_bpm`, such as `dotted quarter = 90` in 6/8
 /// at 135.
 fn felt_beat(meter: TimeSig, quarter_bpm: f64) -> Option<String> {

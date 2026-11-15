@@ -77,7 +77,7 @@ pub use lex::Span;
 pub use parse::{Book, Tune};
 pub use read::{Notice, ReadOptions, Reading, key_from_name, pickup_meter_for};
 pub use subset::{REFUSED, Refusal};
-pub use write::{Dynamics, WriteOptions, write};
+pub use write::{Dynamics, WriteOptions, off_level_velocities, write};
 
 /// Reads every tune in a file, and returns the notation-only constructs they held, each
 /// with its line. Fails on the first tune that is not valid ABC, or that holds a construct

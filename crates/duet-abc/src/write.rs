@@ -415,6 +415,22 @@ impl TrackWriter<'_> {
     }
 }
 
+/// Whether a velocity is one of the dynamics' levels, which ABC writes as it is.
+fn is_level(vel: u8) -> bool {
+    DYNAMICS.iter().any(|(_, v)| *v == vel)
+}
+
+/// How many of the song's notes have a velocity that is not a dynamic's level: the notes
+/// [`write()`] snaps under [`Dynamics::Nearest`], and refuses otherwise. 0 means writing the
+/// song changes no velocity.
+pub fn off_level_velocities(song: &Song) -> usize {
+    song.tracks
+        .iter()
+        .flat_map(|t| &t.notes)
+        .filter(|n| !is_level(n.vel))
+        .count()
+}
+
 /// Writes a song as one ABC tune, `X:1`.
 ///
 /// Refused, naming what and where ([`Error::Unwritable`]): a note off the 1/64-note grid
@@ -642,7 +658,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
         let mut groups: Vec<Group> = Vec::new();
         for (start, end, i) in timed {
             let note = &track.notes[i];
-            let vel = if DYNAMICS.iter().any(|(_, v)| *v == note.vel) {
+            let vel = if is_level(note.vel) {
                 note.vel
             } else if options.dynamics == Dynamics::Nearest {
                 snapped = true;
@@ -887,6 +903,23 @@ mod tests {
         ));
         song.tracks.push(track);
         song
+    }
+
+    #[test]
+    fn off_level_velocities_are_the_ones_nearest_snaps() {
+        let mut song = first_bar_song(
+            TimeSig::new(4, 4).unwrap(),
+            TimeSig::new(4, 4).unwrap(),
+            1920,
+        );
+        assert_eq!(off_level_velocities(&song), 0, "80 is mf's level");
+        let note = song.tracks[0].notes[0].clone();
+        song.tracks[0].notes[0].vel = 81;
+        assert_eq!(off_level_velocities(&song), 1);
+        let nearest = WriteOptions::default().with_dynamics(Dynamics::Nearest);
+        assert!(write(&song, &nearest).unwrap().contains("snapped"));
+        song.tracks[0].notes[0] = note;
+        assert!(!write(&song, &nearest).unwrap().contains("snapped"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
-use duet_abc::{Dynamics, WriteOptions};
+use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
     ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Melody, Mono, Prepare,
     Source, Stage, assemble, estimate, quantize_offsets,
@@ -21,7 +21,7 @@ use duet_capture::{
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 
 use crate::config::Config;
-use crate::drums::{GridForm, ReadOptions, grid_of_song, refuse_overwrite};
+use crate::drums::{GridForm, ReadOptions, grid_of_song, moved_velocities, refuse_overwrite};
 use crate::io::with_end;
 
 #[derive(Subcommand)]
@@ -88,6 +88,8 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         Take::Melody => "notes",
         Take::Rhythm => "hits",
     };
+    // Checked before the tempo is estimated: silence has no onsets either, and "too few onsets,
+    // give --tempo" would send the user after the wrong fix.
     if !events.iter().any(|e| match take {
         Take::Melody => matches!(e, Event::Note { .. }),
         Take::Rhythm => matches!(e, Event::Hit { .. }),
@@ -144,12 +146,13 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         Take::Melody => {
             let options = WriteOptions::default().with_dynamics(Dynamics::Nearest);
             let abc = duet_abc::write(&with_end(score, config.end)?, &options)?;
-            if abc.lines().any(|l| l.starts_with(ABC_SNAPPED)) {
-                stderr_said.push(
-                    "velocities: snapped to the nearest dynamic's level in the .abc; the \
-                     .notes keeps them exact"
-                        .to_owned(),
-                );
+            // The ABC writer states the snap in the file itself.
+            let moved = off_level_velocities(score);
+            if moved > 0 {
+                stderr_said.push(statement::snapped(
+                    moved,
+                    "the nearest dynamic's level in the .abc",
+                ));
             }
             commented(&abc, "%", &score_said)
         }
@@ -158,13 +161,18 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
                 grid: args.grid,
                 track: None,
                 bars: None,
-                snap_levels: true,
+                snap_levels: false,
             };
-            let grid = grid_of_song(score, &options, GridForm::Text, config)?;
-            let snapped = "velocities: snapped to the levels of the .drums text (g, x, X); the \
-                           .notes keeps them exact";
-            score_said.push(snapped.to_owned());
-            stderr_said.push(snapped.to_owned());
+            // Read with every velocity kept (the exact form's rule), then snapped here, so the
+            // moves can be counted as `duet drums snap` counts them.
+            let exact = grid_of_song(score, &options, GridForm::Json, config)?;
+            let grid = exact.snapped_to_levels();
+            let moved = moved_velocities(&exact, &grid);
+            if moved > 0 {
+                let snapped = statement::snapped(moved, "the levels of the .drums text (g, x, X)");
+                score_said.push(snapped.clone());
+                stderr_said.push(snapped);
+            }
             commented(&grid.to_text()?, "#", &score_said)
         }
     };
@@ -174,22 +182,27 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     for line in &stderr_said {
         eprintln!("{line}");
     }
-    write_new(&outputs.notes, &notes)?;
-    write_new(&outputs.score, &score_text)?;
-    write_new(&outputs.analysis, &analysis)
+    write_all(&[
+        (&outputs.notes, &notes),
+        (&outputs.score, &score_text),
+        (&outputs.analysis, &analysis),
+    ])
 }
-
-/// The start of the comment the ABC writer adds when it snaps a velocity to a dynamic.
-const ABC_SNAPPED: &str = "% duet: velocities were snapped";
 
 /// Refuses a flag the take cannot use, before anything is read, and reads the key.
 fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
+    if let Some(bpm) = args.tempo
+        && !(bpm.is_finite() && bpm > 0.0)
+    {
+        bail!("--tempo {bpm}: a tempo must be a positive number of quarter notes a minute");
+    }
     match take {
         Take::Melody => {
             if args.lane.is_some() {
                 bail!("--lane is for a rhythm take; a melody's notes are pitched, not in lanes");
             }
             if let Some(bpm) = args.tempo
+                && bpm.is_finite()
                 && bpm.fract() != 0.0
             {
                 bail!(
@@ -341,15 +354,40 @@ fn commented(text: &str, prefix: &str, lines: &[String]) -> String {
     out
 }
 
-/// Writes a file that must not exist yet.
+/// Writes each file, none of which may exist yet. When one fails, the ones this call wrote
+/// are removed again, so a failed capture leaves nothing behind, and the error says so.
+fn write_all(files: &[(&Path, &str)]) -> Result<()> {
+    for (i, (path, text)) in files.iter().enumerate() {
+        if let Err(e) = write_new(path, text) {
+            let removed: Vec<String> = files[..i]
+                .iter()
+                .filter(|(p, _)| fs::remove_file(p).is_ok())
+                .map(|(p, _)| p.display().to_string())
+                .collect();
+            if removed.is_empty() {
+                return Err(e);
+            }
+            return Err(e.context(format!(
+                "capture wrote nothing: removed {} again",
+                removed.join(" and ")
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Writes a file that must not exist yet. A file it created but could not fill is removed.
 fn write_new(path: &Path, text: &str) -> Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .with_context(|| path.display().to_string())?;
-    file.write_all(text.as_bytes())
-        .with_context(|| path.display().to_string())
+    if let Err(e) = file.write_all(text.as_bytes()) {
+        let _ = fs::remove_file(path);
+        return Err(e).with_context(|| path.display().to_string());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -417,6 +455,22 @@ mod tests {
                 .expect("ok")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_failed_write_removes_what_was_written() {
+        let dir = std::env::temp_dir().join(format!("duet-capture-write-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let first = dir.join("take.notes");
+        let second = dir.join("missing").join("take.abc");
+        let err = write_all(&[(&first, "notes\n"), (&second, "abc\n")]).unwrap_err();
+        assert!(!first.exists(), "the .notes was left behind");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("removed") && message.contains("take.notes"),
+            "{message}"
+        );
+        std::fs::remove_dir_all(&dir).expect("clean up");
     }
 
     #[test]

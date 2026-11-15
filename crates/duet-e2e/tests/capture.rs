@@ -12,7 +12,7 @@ use std::process::Output;
 
 use duet_core::Song;
 use duet_drums::DrumGrid;
-use duet_e2e::{duet, duet_with, ok, s, scratch};
+use duet_e2e::{duet, duet_with, ok, root, s, scratch};
 
 /// A melody in E-flat major at 120 a minute, from half a second in: the tonic triad and
 /// scale, with the tonic and dominant held longest.
@@ -146,6 +146,13 @@ fn melody_writes_notes_and_abc_beside_the_input() {
     ok(&out, "capture melody");
     let song = Song::from_text(&read(&dir.join("tune.notes"))).expect(".notes parses again");
     assert!(song.tracks[0].notes.len() >= 20, "{song:?}");
+    // Onset strengths give velocities off the dynamics' levels, so the ABC snaps them.
+    let err = stderr(&out);
+    assert!(
+        err.lines().any(|l| l.starts_with("velocities: ")
+            && l.contains("snapped to the nearest dynamic's level in the .abc")),
+        "{err}"
+    );
     let check = duet(&dir, &["abc", "check", s(&dir.join("tune.abc"))]);
     ok(&check, "abc check");
     assert!(dir.join("tune.capture.json").is_file());
@@ -607,5 +614,71 @@ fn an_empty_lead_in_is_removed_from_the_score_only() {
     assert_eq!(score.time_sig.to_string(), "4/4", "{abc}");
     assert!(score.time_changes.is_empty(), "{abc}");
     assert_eq!(ticks(&score)[0], 0, "{abc}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A given tempo and meter are used exactly, on a take whose estimate would differ (120 and
+/// 4/4), and neither is stated as an estimate.
+#[test]
+fn a_given_tempo_and_meter_override_the_estimate() {
+    let dir = scratch("capture-given-meter");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    let out = capture(
+        &dir,
+        &["melody", s(&wav), "--tempo", "97", "--meter", "3/4"],
+    );
+    ok(&out, "capture melody --tempo 97 --meter 3/4");
+    let err = stderr(&out);
+    assert!(!err.contains("tempo: estimated"), "{err}");
+    assert!(!err.contains("meter: estimated"), "{err}");
+    let abc = read(&dir.join("tune.abc"));
+    assert!(abc.lines().any(|l| l == "M:3/4"), "{abc}");
+    assert!(abc.lines().any(|l| l == "Q:1/4=97"), "{abc}");
+    let notes = Song::from_text(&read(&dir.join("tune.notes"))).expect("parses");
+    assert_eq!(notes.tempo_bpm, 97.0);
+    let meters: Vec<String> = std::iter::once(notes.time_sig)
+        .chain(notes.time_changes.iter().map(|c| c.time_sig))
+        .map(|t| t.to_string())
+        .collect();
+    assert_eq!(meters.last().map(String::as_str), Some("3/4"), "{meters:?}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
+fn a_tempo_that_is_not_a_number_is_refused() {
+    let dir = scratch("capture-nan");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    for tempo in ["NaN", "inf", "-90"] {
+        let out = capture(&dir, &["melody", s(&wav), &format!("--tempo={tempo}")]);
+        assert!(!out.status.success(), "{tempo}");
+        assert!(
+            stderr(&out).contains("positive number"),
+            "{tempo}: {}",
+            stderr(&out)
+        );
+    }
+    assert_eq!(files(&dir), ["tune.wav"]);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// Audio that cannot be decoded is refused by the binary, naming the file, with nothing
+/// written.
+#[test]
+fn undecodable_audio_is_refused_by_name() {
+    let dir = scratch("capture-undecodable");
+    let text = dir.join("words.mp3");
+    std::fs::write(&text, "this is words, not music\n".repeat(200)).expect("write");
+    let he_aac = root().join("crates/duet-capture/tests/fixtures/he-aac.m4a");
+    for (input, stem, codec) in [(&text, "words", None), (&he_aac, "he-aac", Some("HE-AAC"))] {
+        let out = capture(&dir, &["melody", s(input), "-o", s(&dir.join(stem))]);
+        assert!(!out.status.success(), "{stem}");
+        let err = stderr(&out);
+        let name = input.file_name().and_then(|n| n.to_str()).expect("name");
+        assert!(err.contains("cannot decode") && err.contains(name), "{err}");
+        if let Some(codec) = codec {
+            assert!(err.contains(codec), "{err}");
+        }
+    }
+    assert_eq!(files(&dir), ["words.mp3"]);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }

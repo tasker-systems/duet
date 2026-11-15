@@ -263,7 +263,8 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
     }
 }
 
-fn moved_velocities(a: &DrumGrid, b: &DrumGrid) -> usize {
+/// How many velocities differ between a grid and its snapped copy.
+pub fn moved_velocities(a: &DrumGrid, b: &DrumGrid) -> usize {
     a.bars
         .iter()
         .zip(&b.bars)

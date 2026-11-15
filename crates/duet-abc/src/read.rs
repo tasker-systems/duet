@@ -1317,21 +1317,15 @@ pub fn key_from_name(name: &str) -> Result<Key> {
     Ok(key)
 }
 
-/// An error about a name given on its own, with the line and column that only mean something
-/// in a file taken out.
+/// An error about a name given on its own, without the line and column that only mean
+/// something in a file. The text is the error's own, so it says what the error says.
 fn without_position(e: Error) -> Error {
-    match e {
-        Error::Parse { msg, .. } => Error::Invalid(msg),
-        Error::Unsupported {
-            construct,
-            found,
-            hint,
-            ..
-        } => Error::Invalid(format!(
-            "{found} is refused: {construct} is not read in this version ({hint})"
-        )),
-        other => other,
-    }
+    let (Error::Parse { line, col, .. } | Error::Unsupported { line, col, .. }) = e else {
+        return e;
+    };
+    let text = e.to_string();
+    let at = format!("line {line}, col {col}: ");
+    Error::Invalid(text.strip_prefix(&at).unwrap_or(&text).to_owned())
 }
 
 impl Tune {
@@ -1609,5 +1603,18 @@ mod tests {
             let err = key_from_name(name).unwrap_err().to_string();
             assert!(!err.contains("line 1"), "{name}: {err}");
         }
+    }
+
+    #[test]
+    fn a_refused_key_says_what_the_refusal_says() {
+        let in_a_tune = crate::Book::parse("X:1\nM:4/4\nK:none\nC|\n")
+            .unwrap()
+            .tunes()[0]
+            .to_song(&ReadOptions::default())
+            .unwrap_err()
+            .to_string();
+        let alone = key_from_name("none").unwrap_err().to_string();
+        assert!(in_a_tune.ends_with(&alone), "{in_a_tune} / {alone}");
+        assert!(alone.starts_with("K:none is refused"), "{alone}");
     }
 }
