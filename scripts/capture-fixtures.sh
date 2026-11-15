@@ -4,7 +4,8 @@
 #
 # fixtures: crates/duet-capture/tests/fixtures, a one-second 440 Hz sine, mono at 44.1 kHz
 #   (tone-mono44) and stereo at 48 kHz (tone-stereo48), as WAV, FLAC, MP3, Ogg Vorbis and AAC-LC
-#   M4A, plus he-aac.m4a, a declared HE-AAC file. The WAV files are byte-stable (plain
+#   M4A, plus he-aac.m4a, a declared HE-AAC file, and notes22.flac and notes44.flac, five short
+#   tones at 22.05 and 44.1 kHz for the tests that damage a file. The WAV files are byte-stable (plain
 #   arithmetic); the FLAC files are for a given flac version; the MP3, Ogg and M4A files
 #   depend on the encoder versions (lame, oggenc, afconvert) and came out different bytes
 #   on another machine.
@@ -67,11 +68,38 @@ make() {
   afconvert -f m4af -d aac "$wav" "$fixtures/$stem.m4a"
 }
 
+# tone_notes <path> <rate>: five 0.1 s tones of 440 Hz, a 5 ms rise and fall each, starting
+# at 0.25, 0.75, 1.25, 1.75 and 2.25 s, in 2.5 s of mono 16-bit audio. The tests damage the
+# FLAC of it and look for the later tones' onsets where they are in the undamaged file.
+tone_notes() {
+  python3 -I - "$1" "$2" <<'PY'
+import math, struct, sys, wave
+path, rate = sys.argv[1], int(sys.argv[2])
+samples = [0] * round(2.5 * rate)
+ramp, length = round(0.005 * rate), round(0.1 * rate)
+for start in (0.25, 0.75, 1.25, 1.75, 2.25):
+    first = round(start * rate)
+    for n in range(length):
+        envelope = min(1.0, n / ramp, (length - 1 - n) / ramp)
+        samples[first + n] = round(16384 * envelope * math.sin(2 * math.pi * 440 * n / rate))
+with wave.open(path, "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(rate)
+    w.writeframes(b"".join(struct.pack("<h", x) for x in samples))
+PY
+}
+
 make_fixtures() {
   mkdir -p "$fixtures"
   rm -f "$fixtures"/*
   make tone-mono44 44100 1 2
   make tone-stereo48 48000 2 1
+  # Tones to damage: at the analysis rate (passed through) and at twice it (resampled).
+  tone_notes "$work/notes22.wav" 22050
+  flac --silent --force -o "$fixtures/notes22.flac" "$work/notes22.wav"
+  tone_notes "$work/notes44.wav" 44100
+  flac --silent --force -o "$fixtures/notes44.flac" "$work/notes44.wav"
   # Declared HE-AAC: the AAC-LC source is encoded as HE-AAC v1 at a low bit rate.
   afconvert -f m4af -d aach -b 48000 "$work/tone-stereo48.wav" "$fixtures/he-aac.m4a"
   ls -l "$fixtures"

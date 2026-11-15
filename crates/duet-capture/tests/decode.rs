@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use duet_capture::{ANALYSIS_RATE, Error, FileSource, Mono, Prepare, Source, Stage};
+use duet_capture::{ANALYSIS_RATE, Error, Event, FileSource, Mono, Onsets, Prepare, Source, Stage};
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
 
@@ -185,4 +185,96 @@ fn a_damaged_packet_leaves_a_gap_in_start_frames_not_a_drift() {
     }
     assert!(decoded < 44_100, "nothing was damaged: {decoded} frames");
     assert_eq!(end, 44_100, "the stream's end drifted");
+}
+
+/// Every undamaged fixture comes as chunks that follow on from frame 0 with no gap and end at
+/// exactly its length: a gap counted where there is none would move every note after it.
+#[test]
+fn an_undamaged_file_comes_whole_from_frame_0() {
+    let tones = ["wav", "flac", "mp3", "ogg", "m4a"];
+    let mut files: Vec<(String, u64)> = Vec::new();
+    for (stem, rate) in [("tone-mono44", 44_100), ("tone-stereo48", 48_000)] {
+        files.extend(tones.iter().map(|ext| (format!("{stem}.{ext}"), rate)));
+    }
+    files.push(("notes22.flac".into(), 55_125));
+    files.push(("notes44.flac".into(), 110_250));
+    for (name, total) in files {
+        let mut source = FileSource::open(&fixture(&name)).unwrap();
+        let mut next = 0;
+        while let Some(chunk) = source.next_chunk().unwrap() {
+            assert_eq!(chunk.start_frame, next, "{name}: a chunk out of place");
+            next += chunk.samples.len() as u64 / u64::from(chunk.channels);
+        }
+        assert_eq!(next, total, "{name}: the stream ends at the wrong frame");
+    }
+}
+
+/// A copy of a fixture with 200 bytes inverted, three fifths of the way into the file. In the
+/// two `notes` fixtures that costs the FLAC reader a few thousand frames before 1 s, which it
+/// skips, leaving a gap in the chunks' start frames.
+fn damaged(name: &str) -> PathBuf {
+    let mut bytes = fs::read(fixture(name)).unwrap();
+    let from = bytes.len() * 3 / 5;
+    for byte in &mut bytes[from..from + 200] {
+        *byte ^= 0xff;
+    }
+    let path = scratch(&format!("damaged-{name}"));
+    fs::write(&path, bytes).unwrap();
+    path
+}
+
+/// The frames a file decodes to, counted chunk by chunk.
+fn decoded_frames(path: &Path) -> u64 {
+    let mut source = FileSource::open(path).unwrap();
+    let mut frames = 0;
+    while let Some(chunk) = source.next_chunk().unwrap() {
+        frames += chunk.samples.len() as u64 / u64::from(chunk.channels);
+    }
+    frames
+}
+
+/// The onset frames found in a file, through `FileSource`, `Prepare` and `Onsets`.
+fn onsets_in(path: &Path) -> Vec<u64> {
+    let mut onsets = Onsets::new(ANALYSIS_RATE);
+    let mut events = Vec::new();
+    for mono in prepared(path) {
+        onsets.push(mono, &mut events).unwrap();
+    }
+    onsets.finish(&mut events).unwrap();
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Onset { frame, .. } => Some(*frame),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A damaged file, passed through at the analysis rate or resampled to it, still reaches the
+/// analysis whole: the tones after the damage (the last two, from 1.75 s) have their onsets
+/// where the undamaged file has them, within a hop of the onset stage's 128 frames, and
+/// nothing fails.
+#[test]
+fn a_damaged_file_keeps_its_later_onsets_where_they_were() {
+    const HOP: u64 = 128;
+    let after = (1.7 * f64::from(ANALYSIS_RATE)) as u64;
+    for name in ["notes22.flac", "notes44.flac"] {
+        let clean: Vec<u64> = onsets_in(&fixture(name))
+            .into_iter()
+            .filter(|&f| f >= after)
+            .collect();
+        assert!(clean.len() >= 2, "{name}: {clean:?}");
+        let path = damaged(name);
+        assert!(
+            decoded_frames(&path) < decoded_frames(&fixture(name)),
+            "{name}: nothing was damaged"
+        );
+        let found = onsets_in(&path);
+        for &want in &clean {
+            assert!(
+                found.iter().any(|f| f.abs_diff(want) <= HOP),
+                "{name}: no onset within a hop of frame {want}: {found:?}"
+            );
+        }
+    }
 }

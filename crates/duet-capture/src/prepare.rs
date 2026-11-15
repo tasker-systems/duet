@@ -15,6 +15,11 @@ const RESAMPLE_CHUNK: usize = 1024;
 
 /// Downmixes to one channel and resamples to one rate, so every stage after it can assume both.
 ///
+/// Its output is one unbroken stream from the first chunk's start frame. A gap between input
+/// chunks, where a [`Source`](crate::Source) left out a damaged packet, is filled with
+/// silence of the gap's length, so everything after it keeps its true time; a chunk that starts
+/// before the end of the last one is refused.
+///
 /// The input rate is the first chunk's, and a later chunk at another rate is refused.
 /// Resampling holds back its filter delay and up to one step of input, which
 /// [`latency_frames`](Stage::latency_frames) reports once the first chunk has fixed the rate.
@@ -22,6 +27,8 @@ const RESAMPLE_CHUNK: usize = 1024;
 pub struct Prepare {
     rate: u32,
     input_rate: Option<u32>,
+    /// Where the next input chunk should start, at the input rate.
+    next_input: Option<u64>,
     resampling: Option<Resampling>,
 }
 
@@ -31,6 +38,7 @@ impl Prepare {
         Prepare {
             rate,
             input_rate: None,
+            next_input: None,
             resampling: None,
         }
     }
@@ -41,7 +49,7 @@ impl Stage for Prepare {
     type Out = Mono;
 
     fn push(&mut self, input: Chunk, out: &mut Vec<Mono>) -> Result<()> {
-        let mono = downmix(&input)?;
+        let mut mono = downmix(&input)?;
         match self.input_rate {
             None => {
                 self.input_rate = Some(input.rate);
@@ -59,10 +67,32 @@ impl Stage for Prepare {
             Some(_) => {}
         }
 
+        let start_frame = match self.next_input {
+            None => input.start_frame,
+            Some(next) if input.start_frame >= next => {
+                let gap = usize::try_from(input.start_frame - next).map_err(|_| {
+                    Error::Invalid(format!(
+                        "the audio skips {} s, too long a gap to fill",
+                        seconds(input.start_frame - next, input.rate)
+                    ))
+                })?;
+                mono.splice(0..0, std::iter::repeat_n(0.0, gap));
+                next
+            }
+            Some(next) => {
+                return Err(Error::Invalid(format!(
+                    "the audio goes back from {} s to {} s; a recording only runs forward",
+                    seconds(next, input.rate),
+                    seconds(input.start_frame, input.rate)
+                )));
+            }
+        };
+        self.next_input = Some(start_frame + mono.len() as u64);
+
         match &mut self.resampling {
             None => out.push(Mono {
                 rate: self.rate,
-                start_frame: input.start_frame,
+                start_frame,
                 samples: mono,
             }),
             Some(resampling) => {
@@ -84,6 +114,11 @@ impl Stage for Prepare {
     fn latency_frames(&self) -> u64 {
         self.resampling.as_ref().map_or(0, Resampling::latency)
     }
+}
+
+/// `frame` at `rate` as seconds, to the millisecond.
+fn seconds(frame: u64, rate: u32) -> String {
+    format!("{:.3}", frame as f64 / f64::from(rate))
 }
 
 /// The mean of each frame's channels.
@@ -342,6 +377,53 @@ mod tests {
                 next += m.samples.len() as u64;
             }
         }
+    }
+
+    #[test]
+    fn a_gap_between_chunks_is_filled_with_silence_on_both_paths() {
+        // 3000 frames, a gap of 2000, and 3000 more: 8000 frames at 44.1 kHz, 4000 at half.
+        for (rate, total) in [(22_050, 8000), (44_100, 4000)] {
+            let mut prepare = Prepare::new(22_050);
+            let out = run(
+                &mut prepare,
+                vec![
+                    chunk(rate, 1, 0, vec![0.5; 3000]),
+                    chunk(rate, 1, 5000, vec![0.5; 3000]),
+                ],
+            );
+            let mut next = 0;
+            for m in &out {
+                assert_eq!(m.start_frame, next, "{rate} Hz");
+                next += m.samples.len() as u64;
+            }
+            assert_eq!(next, total, "{rate} Hz");
+        }
+        let mut prepare = Prepare::new(22_050);
+        let out = run(
+            &mut prepare,
+            vec![
+                chunk(22_050, 1, 0, vec![0.5; 3]),
+                chunk(22_050, 1, 5, vec![0.5; 3]),
+            ],
+        );
+        let samples: Vec<f32> = out.iter().flat_map(|m| m.samples.clone()).collect();
+        assert_eq!(samples, [0.5, 0.5, 0.5, 0.0, 0.0, 0.5, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn a_chunk_that_goes_back_is_refused_in_seconds() {
+        let mut prepare = Prepare::new(22_050);
+        prepare
+            .push(chunk(22_050, 1, 0, vec![0.0; 22_050]), &mut Vec::new())
+            .unwrap();
+        let err = prepare
+            .push(chunk(22_050, 1, 11_025, vec![0.0; 100]), &mut Vec::new())
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("1.000 s") && message.contains("0.500 s"),
+            "{message}"
+        );
     }
 
     #[test]

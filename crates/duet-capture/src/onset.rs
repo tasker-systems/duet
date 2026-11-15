@@ -198,9 +198,10 @@ impl Stage for Onsets {
         let origin = *self.origin.get_or_insert(input.start_frame);
         if input.start_frame != origin + self.received {
             return Err(Error::Invalid(format!(
-                "a chunk starts at frame {} where the stream is at frame {}",
-                input.start_frame,
-                origin + self.received
+                "the audio breaks off at {:.3} s and picks up at {:.3} s; onset detection needs it \
+                 unbroken, as Prepare gives it",
+                (origin + self.received) as f64 / f64::from(self.rate),
+                input.start_frame as f64 / f64::from(self.rate)
             )));
         }
         self.received += input.samples.len() as u64;
@@ -404,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn a_chunk_that_skips_ahead_is_refused() {
+    fn a_chunk_that_skips_ahead_is_refused_in_seconds() {
         let mut stage = Onsets::new(RATE);
         let mono = |start_frame| Mono {
             rate: RATE,
@@ -412,6 +413,12 @@ mod tests {
             samples: vec![0.0; 100],
         };
         stage.push(mono(0), &mut Vec::new()).unwrap();
-        assert!(stage.push(mono(500), &mut Vec::new()).is_err());
+        let err = stage.push(mono(500), &mut Vec::new()).unwrap_err();
+        // Said in the recording's time: it breaks off after 100 frames and resumes at 500.
+        let message = err.to_string();
+        assert!(
+            message.contains("breaks off at 0.005 s") && message.contains("picks up at 0.023 s"),
+            "{message}"
+        );
     }
 }

@@ -24,6 +24,10 @@ use crate::stage::{Chunk, Source};
 /// WAV, FLAC, MP3, Ogg Vorbis and AAC-LC in M4A are decoded; the file is never held in
 /// memory whole. Anything else is refused by name with [`Error::Undecodable`].
 ///
+/// A damaged packet, whether the reader skips it or the decoder refuses it, is left out, and
+/// its frames are left as a gap in the chunks' start frames, so what follows keeps its true
+/// time. [`Prepare`](crate::Prepare) fills the gap with silence.
+///
 /// HE-AAC is refused when the file's header declares it (audio object type 5 or 29, which
 /// is how afconvert and most encoders write it). AAC in M4A is trimmed to its true length by
 /// the file's `iTunSMPB` tag (Symphonia does not, for MP4): without it a decode starts with
@@ -40,6 +44,9 @@ pub struct FileSource {
     /// Where the last packet ended, in the track's time base (frames), to notice packets the
     /// container reader skipped.
     packet_end: Option<i64>,
+    /// Whether a packet has yielded frames yet. A gap is only counted after one has: packets
+    /// before the first frames (Vorbis's first packet yields none) are not a skip.
+    started: bool,
     gapless: Option<Gapless>,
 }
 
@@ -127,6 +134,7 @@ impl FileSource {
             track_id,
             next_frame: 0,
             packet_end: None,
+            started: false,
             gapless,
         })
     }
@@ -143,8 +151,11 @@ impl Source for FileSource {
             if packet.track_id != self.track_id {
                 continue;
             }
-            // A reader that skips a damaged packet leaves a gap in the timestamps; count it.
-            if let Some(end) = self.packet_end {
+            // A reader that skips a damaged packet leaves a gap in the timestamps; count it, once
+            // the stream has started.
+            if self.started
+                && let Some(end) = self.packet_end
+            {
                 self.next_frame += u64::try_from(packet.pts.get() - end).unwrap_or(0);
             }
             self.packet_end = Some(packet.pts.get().saturating_add_unsigned(packet.dur.get()));
@@ -184,6 +195,7 @@ impl Source for FileSource {
                 samples,
             };
             self.next_frame += frames;
+            self.started = true;
             return Ok(Some(chunk));
         }
     }

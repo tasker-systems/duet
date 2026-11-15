@@ -487,9 +487,10 @@ reported after them, and they stay:
   moved each note, in milliseconds and in grid steps.
 
 **Formats.** WAV, FLAC, MP3, Ogg Vorbis and AAC in M4A are read, a packet at a time, so a long
-take is never held in memory whole. A file that is not audio, or uses a codec duet cannot
-decode, is refused naming the file and the codec. HE-AAC is refused by name when the file's
-header declares it. Known limit: HE-AAC signalled only inside the audio data, with a plain
+take is never held in memory whole. A damaged stretch that cannot be decoded is heard as silence
+of its true length, so every note after it keeps its time. A file that is not audio, or uses a
+codec duet cannot decode, is refused naming the file and the codec. HE-AAC is refused by name
+when the file's header declares it. Known limit: HE-AAC signalled only inside the audio data, with a plain
 AAC-LC header, decodes as AAC-LC at half bandwidth without a refusal. Catching it would mean
 comparing the declared and decoded sample rates, which capture does not do.
 
