@@ -157,3 +157,51 @@ pub fn ok(out: &Output, what: &str) {
 pub fn s(path: &Path) -> &str {
     path.to_str().expect("utf-8 path")
 }
+
+/// Writes `text`, a song's notes view, to `dir/name` and reads it into a song document beside
+/// it with `duet apply --as notes`, the one way duet reads a view's text: `take.notes` becomes
+/// `take.duet`. Returns the document's path.
+///
+/// # Panics
+///
+/// When the text cannot be written or `duet apply` refuses it.
+pub fn notes_doc(dir: &Path, name: &str, text: &str) -> PathBuf {
+    applied(dir, name, text, "notes")
+}
+
+/// Writes `text`, a drum grid's grid view, to `dir/name` and reads it into a drum-grid document
+/// beside it with `duet apply --as grid`: `beat.drums` becomes `beat.duet`. Returns the
+/// document's path.
+///
+/// # Panics
+///
+/// When the text cannot be written or `duet apply` refuses it.
+pub fn grid_doc(dir: &Path, name: &str, text: &str) -> PathBuf {
+    applied(dir, name, text, "grid")
+}
+
+fn applied(dir: &Path, name: &str, text: &str, view: &str) -> PathBuf {
+    let from = dir.join(name);
+    std::fs::write(&from, text).expect("write the view");
+    let doc = from.with_extension("duet");
+    let out = duet(dir, &["apply", s(&from), "--as", view, "-o", s(&doc)]);
+    ok(&out, &format!("duet apply {name}"));
+    doc
+}
+
+/// The text of a document's view, `duet view <doc> --as <view>`, with its header line, the
+/// first, left out: what `--to text` or `--to drums` once wrote. `args` are more flags, such
+/// as `--snap-levels`.
+///
+/// # Panics
+///
+/// When `duet view` refuses the document.
+pub fn view_text(dir: &Path, doc: &Path, view: &str, args: &[&str]) -> String {
+    let mut all = vec!["view", s(doc), "--as", view];
+    all.extend_from_slice(args);
+    let out = duet(dir, &all);
+    ok(&out, &format!("duet view {}", doc.display()));
+    let text = String::from_utf8(out.stdout).expect("a view is UTF-8");
+    text.split_once('\n')
+        .map_or(String::new(), |(_, rest)| rest.to_owned())
+}

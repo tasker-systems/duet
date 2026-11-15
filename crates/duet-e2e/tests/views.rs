@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use duet_e2e::{duet, duet_with, golden, ok, root, s, scratch};
+use duet_e2e::{duet, duet_with, golden, notes_doc, ok, root, s, scratch};
 use serde_json::Value;
 
 fn read(path: &Path) -> Vec<u8> {
@@ -302,26 +302,16 @@ fn each_one_cell_edit_changes_exactly_one_note() {
 #[test]
 fn an_off_level_velocity_survives_view_and_apply_unedited() {
     let dir = scratch("views-off-level");
-    let take = dir.join("take.notes");
-    std::fs::write(
-        &take,
+    let take = notes_doc(
+        &dir,
+        "take.notes",
         "[track \"Kit\" ch10]\n1.1.0 C2 0.25 101\n1.2.0 D2 0.25 7\n",
-    )
-    .expect("write");
-    let doc = dir.join("take.duet");
+    );
+    let doc = dir.join("grid.duet");
     ok(
         &duet(
             &dir,
-            &[
-                "drums",
-                "read",
-                s(&take),
-                s(&doc),
-                "--grid",
-                "1/16",
-                "--from",
-                "text",
-            ],
+            &["drums", "read", s(&take), s(&doc), "--grid", "1/16"],
         ),
         "a drum-grid document",
     );
@@ -329,7 +319,7 @@ fn an_off_level_velocity_survives_view_and_apply_unedited() {
         &dir,
         &["view", s(&doc)],
         &[
-            "velocity 101 is not one of the drum grid text's levels",
+            "velocity 101 is not one of the grid view's levels",
             "--snap-levels",
         ],
     );
@@ -513,4 +503,17 @@ fn apply_onto_keeps_the_envelope_and_views_drop_from() {
     ok(&o, "apply - -o");
     assert_eq!(json(&dir.join("stdin.duet"))["body"], json(&doc)["body"]);
     std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// `apply -o` writes a document as every writer does, stating where its song ends: a view
+/// that names no end, as an old `.notes` file may not, gets the default's.
+#[test]
+fn apply_o_states_the_end_of_a_view_that_names_none() {
+    let dir = scratch("views-end");
+    let doc = notes_doc(
+        &dir,
+        "take.notes",
+        "[track \"P\" ch1]\n1.1.0 C4 1 80\n2.3.0 D4 1 80\n",
+    );
+    assert_eq!(json(&doc)["body"]["end"], "3.1.0", "{}", text(&doc));
 }

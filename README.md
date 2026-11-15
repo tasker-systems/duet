@@ -103,8 +103,8 @@ cargo install --path crates/duet-cli
 
 duet convert take.mid take.duet                  # MIDI to a song document
 duet convert take.duet take.mid                  # and back
-duet convert take.mid take.notes --to text       # MIDI to notefmt text
-duet convert take.notes take.duet --from text    # text to a document
+duet view take.mid > take.notes                  # MIDI to notefmt text, a view
+duet apply take.notes -o take.duet               # text to a document
 duet song show take.duet                         # print as text
 duet song quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
 ```
@@ -113,21 +113,31 @@ duet song quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteen
 read by its envelope: the kind it names decides what it is, never the file's name, so a
 command that reads a song refuses a document of another kind, naming the kind. `.mid`
 (`.midi`, `.smf`) and `.abc` are the outside formats, read and written by their names. No
-other name means a format. notefmt text is a view of a song, so a `.notes` file is read only
-when `--from text` says so, and written with `--to text`. `.json`, `.toml`, `.drums.json` and
-`.drums.toml` are no longer read or written: a song document's body is what a song's `.json`
-held. Use `-` for standard input or output: standard input is a document when its first
-non-blank byte is `{`, and otherwise the command's default (`--from` names it: `duet`, `midi`,
-`abc` or `text`). `convert` reads and writes [drum grids](#drum-grids) too, with `--from drums`
-and `--to drums`; writing one needs `--grid`.
+other name means a format, and `--from` and `--to` name one (`duet`, `midi` or `abc`). notefmt
+text and a drum grid's text are [views](#views-duet-view-and-duet-apply) of a document: only
+`duet view` writes them and only `duet apply` reads them. Any other command refuses a `.notes`,
+`.drums` or `.txt` name, or any name that is not a format's, pointing at `duet apply <file> -o
+<new.duet>`. `.json`, `.toml`, `.drums.json` and `.drums.toml` are no longer read or written: a
+song document's body is what a song's `.json` held. Use `-` for standard input or output.
+Standard input is read by what it holds: a document when its first non-blank byte is `{`, MIDI
+when it starts with `MThd`, and ABC with `--from abc`; text there is refused, pointing at
+`duet apply - -o -`. Standard output is a document unless `--to` names another format (`abc
+render` writes MIDI, and `song show` prints notefmt text), so one command pipes into the next:
+
+```sh
+duet apply sketch.notes -o - | duet play -       # play a view's text, no file in between
+```
+
+`convert` reads and writes [drum-grid documents](#drum-grids) too; writing one from a song needs
+`--grid`.
 
 **A document says where its song came from.** A song imported from ABC or MIDI records it in
 the envelope's `from`: `{"format": "midi"}`, or for ABC the tune's `X:` number and every
 notation-only construct the reader read but did not carry (a slur, an annotation), each at its
 line and column, as `duet abc check` lists them. The provenance follows the song: a `.duet`
 read and written again keeps its `from` unchanged, and so does `song quantize`. Going out to
-ABC or MIDI and in again replaces it, since that import is the song's new provenance. A song
-read from notefmt text has none.
+ABC or MIDI and in again replaces it, since that import is the song's new provenance. A
+document `duet apply -o` makes from a view has none.
 
 ### Views: `duet view` and `duet apply`
 
@@ -172,8 +182,10 @@ step or the channel changed in a partial view, and a lane or bar added or remove
 refused by name: change the conductor in the notes view, which shows the whole song. A lossy view
 makes no document of its own: `-o` refuses it, naming `--onto`.
 
-`--from text`, `--to text`, `--from drums` and `--to drums` stay beside the views, for piping a
-view's text straight through `convert` and the song and drum commands.
+**`view` and `apply` are the one way to text.** `--from text`, `--to text`, `--from drums` and
+`--to drums` were removed: clap refuses each, pointing here. A one-shot pipes instead:
+`duet apply x.notes -o - | duet play -`. `duet song show` still prints a song as notefmt text,
+with no header, for reading.
 
 ### The text format
 
@@ -332,22 +344,31 @@ kick    | X . . . . . . X . . X . . . . . | X . . . . . . X . . X . . X . . |
 
 That is [samples/groove.drums](samples/groove.drums). A drum grid is a matrix: one
 velocity per lane and step over the whole grid, 0 for no hit, with each bar's step count.
-That is its text form. Its document is a drum-grid `.duet`, which holds the matrix itself:
-`bar_steps` and one lanes × steps tensor, `vel`, so it keeps any velocity from 1 to 127.
+That is its text, the drum grid's `grid` view. Its document is a drum-grid `.duet`, which holds
+the matrix itself: `bar_steps` and one lanes × steps tensor, `vel`, so it keeps any velocity
+from 1 to 127.
 
 ```sh
-duet drums render groove.drums groove.mid        # to MIDI (or a song .duet, or --to text)
+duet apply groove.drums -o groove.duet           # the grid's text to a drum-grid document
+duet drums render groove.duet groove.mid         # to MIDI (or a song .duet)
 duet drums read take.mid take.duet --grid 1/16   # a song's drum track to a drum-grid document
-duet drums read take.mid take.drums --grid 1/16  # or to the grid's text
-duet drums snap take.duet take.drums             # velocities snapped to g, x and X
+duet view take.duet --as grid > take.drums       # and its text, to read or edit
+duet drums snap take.duet snapped.duet           # velocities snapped to g, x and X
 duet drums lanes                                 # the lanes and their keys
 ```
 
 The grid side of each `duet drums` command (`render`'s input, `read`'s output, `snap`'s both)
-is a drum grid: a `.duet` is a drum-grid document, read by its envelope, and any other name is
-the grid's text. A name that is something else is refused rather than misread: a song's
-(`.mid`, `.abc`), a stream (`.duet.jsonl`), or `.json` and `.toml`. A song document there is
-refused, naming its kind. The song side is a song's, as for every other command.
+is a drum-grid document: a `.duet`, read by its envelope, or `-` for one on standard input or
+output. Any other name is refused rather than misread: a grid's text (`.drums`, or any name that
+is not a format's), pointing at `duet apply`; a song's (`.mid`, `.abc`); a stream
+(`.duet.jsonl`); or `.json` and `.toml`. A song document there is refused, naming its kind. The
+song side is a song's, as for every other command.
+
+**`drums snap` stays.** `duet view --snap-levels` shows a grid snapped, but `duet apply --onto`
+then keeps each velocity exact wherever its level is unchanged, by design, so snapping through
+views needs `view --snap-levels -o - | apply - -o new.duet`, two commands and a pipe that drop
+the count of what moved. `drums snap` is the one step that commits snapped velocities to a
+document and says how many moved.
 
 `duet convert` goes between grids and every other format as well, by the same code:
 reading a grid it writes what `duet drums render` writes, and writing one from a song it
@@ -355,22 +376,19 @@ takes `duet drums read`'s `--grid`, `--track`, `--bars` and `--snap-levels`, and
 refuses what `duet drums read` does.
 
 ```sh
-duet convert groove.drums groove.mid --from drums              # the same as drums render
+duet convert groove.duet groove.mid                            # the same as drums render
 duet convert take.mid take.duet --grid 1/16                    # the same as drums read
-duet convert groove.drums groove.duet --from drums             # text to a drum-grid document
-duet convert groove.duet copy.drums --to drums                 # and back to text
-duet convert groove.drums sixteenths.drums --from drums --to drums --grid 1/16  # re-stepped
+duet convert groove.duet copy.duet                             # a straight copy
+duet convert groove.duet sixteenths.duet --grid 1/16           # re-stepped
 ```
 
-A `.duet` output keeps what was read: a grid read (a drum-grid document, or a grid's text with
-`--from drums`) is written as a drum-grid document, and so is a grid made from a song with
-`--grid`. A song is written as a song document; `duet drums render` makes a song of a grid.
+A `.duet` output keeps what was read: a drum-grid document read is written as one, and so is a
+grid made from a song with `--grid`. A song is written as a song document; `duet drums render` makes a song of a grid.
 
 Writing a grid from a song without `--grid` is refused, naming it: the step is never
 guessed. From a grid to a grid, with no `--grid`, the grid is copied as it is, read and
 written as `drums snap` does but without snapping: a lane with no hits, the grid's own
-`vel` levels and, in a document, any velocity survive. A velocity off the levels is refused as
-text unless `--snap-levels` is given. With `--grid`, the grid goes through a
+`vel` levels and any velocity survive; `--snap-levels` snaps them. With `--grid`, the grid goes through a
 song at that step, as `drums render` then `drums read` would, so lanes with no hits are
 dropped. A grid flag that would do nothing (`--track` or `--bars` without `--grid` from a
 grid, or any grid flag for an output that is not a grid) is refused too, so no flag is
@@ -429,16 +447,17 @@ Grid → song → grid gives back the same grid, through MIDI too, with no bar c
 trailing empty bars and a mid-bar end included, when its lanes are in the map's row order
 and each is played at least once, as the writer leaves them.
 
-**Velocities.** The text holds three levels. Writing a velocity that is not one of them as
-text is refused, naming the lane, bar and step; keep it in a drum-grid `.duet`, or snap it
-to the nearest level with `--snap-levels` when reading (or `duet drums snap`). A velocity
+**Velocities.** The text holds three levels. A `grid` view of a velocity that is not one of
+them is refused, naming the lane, bar and step, unless `--snap-levels` shows it snapped; a
+drum-grid `.duet` keeps it, and `--snap-levels` on `duet drums read` (or `duet drums snap`)
+snaps it to the nearest level for good. A velocity
 exactly halfway between two levels goes to the louder one. Nothing snaps unless you ask.
 
 ## ABC
 
 ```sh
 duet abc check tunes.abc                      # what each tune holds that a song does not carry
-duet abc render tunes.abc tune.mid --tune 2   # one tune as MIDI (or .duet, or --to text)
+duet abc render tunes.abc tune.mid --tune 2   # one tune as MIDI (or .duet)
 duet abc write take.duet take.abc --unit 1/4  # a song as ABC, X:1
 duet convert tune.abc tune.mid                # .abc works both ways, for a file of one tune
 ```
@@ -488,7 +507,7 @@ program, on a developer's machine, to check this crate's reading (see Developmen
 duet play take.duet                        # through the built-in synth, to the speakers
 duet play take.mid --soundfont GM.sf2      # with a SoundFont of your choosing
 duet play take.duet --port "IAC Driver"    # to a MIDI port: Logic, a synth, a DAW
-duet play take.notes --from text           # notefmt text, named as such
+duet apply take.notes -o - | duet play -   # a view's text, through apply
 ```
 
 - **The built-in synth** sounds the song with a General MIDI SoundFont (`.sf2`): every note

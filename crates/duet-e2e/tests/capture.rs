@@ -851,22 +851,15 @@ fn an_empty_lead_in_is_removed_from_the_score_only() {
             .any(|l| l.contains("removed from the score")),
         "{abc}"
     );
-    let rendered = dir.join("rendered.notes");
+    let rendered = dir.join("rendered.duet");
     ok(
         &duet(
             &dir,
-            &[
-                "abc",
-                "render",
-                s(&dir.join("tune.abc")),
-                s(&rendered),
-                "--to",
-                "text",
-            ],
+            &["abc", "render", s(&dir.join("tune.abc")), s(&rendered)],
         ),
         "abc render",
     );
-    let score = Song::from_text(&read(&rendered)).expect("parses");
+    let score = song_of(&rendered);
     assert_eq!(score.time_sig.to_string(), "4/4", "{abc}");
     assert!(score.time_changes.is_empty(), "{abc}");
     assert_eq!(ticks(&score)[0], 0, "{abc}");

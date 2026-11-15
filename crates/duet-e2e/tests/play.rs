@@ -1,11 +1,12 @@
 //! `duet play` end to end, as far as a machine with no audio device or MIDI port can
 //! take it: every way it refuses to start, which is before it opens either. Sound and
 //! port output themselves are witnessed only by a local run. It plays a song document: the
-//! sample is converted to one, and reading it gets as far as looking for a SoundFont.
+//! sample's notes view is applied into one, and reading it gets as far as looking for a
+//! SoundFont.
 
 use std::path::Path;
 
-use duet_e2e::{duet, duet_with, ok, root, s, scratch};
+use duet_e2e::{duet, duet_with, notes_doc, ok, root, s, scratch};
 
 fn stderr(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
@@ -16,7 +17,7 @@ fn sample_in(dir: &Path) -> String {
     let doc = dir.join("sketch.duet");
     let notes = root().join("samples/sketch.notes");
     ok(
-        &duet(dir, &["convert", s(&notes), s(&doc), "--from", "text"]),
+        &duet(dir, &["apply", s(&notes), "-o", s(&doc)]),
         "the sample as a .duet",
     );
     s(&doc).to_owned()
@@ -145,9 +146,20 @@ fn soundfont_and_port_together_are_refused() {
 #[test]
 fn a_song_that_cannot_be_midi_is_refused_first() {
     let dir = scratch("play-bad");
-    let bad = dir.join("bad.notes");
-    std::fs::write(&bad, "end 1.2.0\n\n[track \"P\" ch1]\n1.1.0 C4 4 80\n").expect("write");
-    let out = duet(&dir, &["play", s(&bad), "--from", "text"]);
+    // duet writes no such document, so the end is moved by hand, past what `apply` checks.
+    let bad = notes_doc(
+        &dir,
+        "bad.notes",
+        "end 2.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 4 80\n",
+    );
+    let doc = std::fs::read_to_string(&bad).expect("the document");
+    assert!(doc.contains("\"end\": \"2.1.0\""), "{doc}");
+    std::fs::write(
+        &bad,
+        doc.replace("\"end\": \"2.1.0\"", "\"end\": \"1.2.0\""),
+    )
+    .expect("edit");
+    let out = duet(&dir, &["play", s(&bad)]);
     assert!(!out.status.success());
     let err = stderr(&out);
     assert!(err.contains("past the song's end"), "{err}");
@@ -179,7 +191,7 @@ fn play_refuses_what_is_not_a_song_by_name() {
     let grid = dir.join("beat.duet");
     let beat = root().join("samples/groove.drums");
     ok(
-        &duet(&dir, &["drums", "snap", s(&beat), s(&grid)]),
+        &duet(&dir, &["apply", s(&beat), "-o", s(&grid)]),
         "a drum-grid document",
     );
     let out = duet(&dir, &["play", s(&grid)]);
@@ -197,8 +209,45 @@ fn play_refuses_what_is_not_a_song_by_name() {
     assert!(!out.status.success());
     let err = stderr(&out);
     assert!(
-        err.contains("sketch.notes") && err.contains("--from text"),
+        err.contains("sketch.notes")
+            && err.contains(&format!("`duet apply {} -o <new.duet>`", notes.display())),
         "{err}"
+    );
+    assert!(!err.contains("SoundFont"), "{err}");
+
+    // The same text on standard input is refused too, pointing at `duet apply - -o -`.
+    let text = std::fs::read(&notes).expect("the sample");
+    let out = duet_with(&dir, &dir.join("no-config"), &["play", "-"], &text);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(err.contains("`duet apply - -o -`"), "{err}");
+    assert!(!err.contains("SoundFont"), "{err}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A view's text plays through `duet apply`, piped: `duet apply sketch.notes -o - | duet play
+/// -` gets as far as looking for a SoundFont, so the song was read.
+#[test]
+fn a_view_applied_to_standard_output_pipes_into_play() {
+    let dir = scratch("play-pipe");
+    let notes = root().join("samples/sketch.notes");
+    let applied = duet(&dir, &["apply", s(&notes), "-o", "-"]);
+    ok(&applied, "duet apply sketch.notes -o -");
+    assert!(
+        applied.stdout.starts_with(b"{"),
+        "a document on standard output"
+    );
+    let out = duet_with(
+        &dir,
+        &dir.join("no-config"),
+        &["play", "-"],
+        &applied.stdout,
+    );
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("no SoundFont to play with"),
+        "{}",
+        stderr(&out)
     );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
