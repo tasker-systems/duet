@@ -466,6 +466,7 @@ dependencies = [
  "cpal",
  "ctrlc",
  "duet-abc",
+ "duet-capture",
  "duet-core",
  "duet-drums",
  "duet-midi",
@@ -501,6 +502,8 @@ dependencies = [
 name = "duet-e2e"
 version = "0.0.0"
 dependencies = [
+ "duet-core",
+ "duet-drums",
  "midly",
  "serde_json",
  "toml",

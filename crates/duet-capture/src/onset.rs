@@ -31,13 +31,13 @@ const ONSET_POSITION: f64 = 0.75;
 ///
 /// Each window's flux is the rise in log-compressed magnitude since the window one hop
 /// earlier, summed over bins and averaged. A frame is an onset when its flux is the peak of
-/// the frames around it and exceeds their local mean by [`THRESHOLD_OFFSET`]. Everything before
+/// the frames around it and exceeds their local mean by `THRESHOLD_OFFSET`. Everything before
 /// the stream is taken to be silence, so a take that opens already sounding has an onset at its
 /// start, placed exactly at the first input frame rather than at the usual position in the window.
 ///
 /// `strength` is the peak's mean rise per bin, scaled to 0..=1.
 ///
-/// An onset is held back by [`LOOKAHEAD_SECS`] of frames and one window, which
+/// An onset is held back by `LOOKAHEAD_SECS` of frames and one window, which
 /// [`latency_frames`](Stage::latency_frames) reports. Windows sit at fixed offsets from the
 /// first input frame, so the events do not depend on how the stream is cut into chunks.
 pub struct Onsets {

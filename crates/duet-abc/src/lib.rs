@@ -75,7 +75,7 @@ mod write;
 pub use error::{Error, Result};
 pub use lex::Span;
 pub use parse::{Book, Tune};
-pub use read::{Notice, ReadOptions, Reading, pickup_meter_for};
+pub use read::{Notice, ReadOptions, Reading, key_from_name, pickup_meter_for};
 pub use subset::{REFUSED, Refusal};
 pub use write::{Dynamics, WriteOptions, write};
 

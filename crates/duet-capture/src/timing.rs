@@ -587,12 +587,14 @@ fn steps_per_beat(meter: TimeSig, given: bool) -> &'static [u32] {
 
 /// Whether the meter's felt beat is a dotted note: 6/8, 9/8, 12/8 and the like. Only eighths
 /// and shorter group in threes here: 6/4 is treated as simple, six quarter beats.
-fn is_compound(meter: TimeSig) -> bool {
+///
+/// The estimate reads accents by this rule, so anything that states a felt beat uses it too.
+pub fn is_compound(meter: TimeSig) -> bool {
     meter.den >= 8 && meter.num > 3 && meter.num.is_multiple_of(3)
 }
 
 /// The felt beat, in quarter notes: a dotted quarter (1.5) in 6/8, a quarter in 4/4.
-fn felt_quarters(meter: TimeSig) -> f64 {
+pub fn felt_quarters(meter: TimeSig) -> f64 {
     let beat = if is_compound(meter) { 3.0 } else { 1.0 };
     beat * 4.0 / f64::from(meter.den)
 }

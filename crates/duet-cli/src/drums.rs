@@ -183,7 +183,7 @@ pub fn levels_for(grid: DrumGrid, snap_levels: bool, form: GridForm) -> Result<D
     Ok(grid)
 }
 
-fn refuse_overwrite(input: &Path, output: &Path, what: &str) -> Result<()> {
+pub fn refuse_overwrite(input: &Path, output: &Path, what: &str) -> Result<()> {
     if input != Path::new("-") && same_file(input, output) {
         bail!(
             "{} is the input; {what} writes a new file and never changes its input",

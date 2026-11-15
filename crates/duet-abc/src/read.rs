@@ -1298,6 +1298,42 @@ pub fn pickup_meter_for(len_ticks: u64, ticks_per_quarter: u16, meter: TimeSig) 
     )
 }
 
+/// The key an ABC key name gives, read exactly as the value of a `K:` field is: `Eb`, `Bm`,
+/// `F#m`, `D dorian`. Anything that names a key from outside, such as a command line, reads it
+/// here, so it means what `K:` means in a tune.
+///
+/// Fails, as `K:` does, on a name that is no key (`K:none`, a clef alone), and on anything
+/// after the key, such as a clef or a property: a name is only a key.
+pub fn key_from_name(name: &str) -> Result<Key> {
+    let mut reader = Reader::new();
+    let at = Span { line: 1, col: 1 };
+    let key = reader.parse_key(at, name).map_err(without_position)?;
+    if let Some(notice) = reader.notices.first() {
+        return Err(Error::invalid(format!(
+            "'{name}' holds '{}' after the key; a key name is only a key",
+            notice.found
+        )));
+    }
+    Ok(key)
+}
+
+/// An error about a name given on its own, with the line and column that only mean something
+/// in a file taken out.
+fn without_position(e: Error) -> Error {
+    match e {
+        Error::Parse { msg, .. } => Error::Invalid(msg),
+        Error::Unsupported {
+            construct,
+            found,
+            hint,
+            ..
+        } => Error::Invalid(format!(
+            "{found} is refused: {construct} is not read in this version ({hint})"
+        )),
+        other => other,
+    }
+}
+
 impl Tune {
     /// Reads the tune as a song, with the notation-only constructs it held.
     ///
@@ -1547,5 +1583,31 @@ impl Reader {
             song,
             notices: self.notices,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_name_reads_as_k_reads_it() {
+        for (name, want) in [
+            ("Eb", "Eb major"),
+            ("Bm", "B minor"),
+            ("F#m", "F# minor"),
+            ("D dorian", "D dorian"),
+            ("Amin", "A minor"),
+        ] {
+            assert_eq!(key_from_name(name).unwrap().to_string(), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_name_that_is_no_key_is_refused_without_a_position() {
+        for name in ["none", "bass", "", "Eb clef=bass", "Eb middle=c", "Hx"] {
+            let err = key_from_name(name).unwrap_err().to_string();
+            assert!(!err.contains("line 1"), "{name}: {err}");
+        }
     }
 }

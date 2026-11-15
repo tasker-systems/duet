@@ -1,0 +1,430 @@
+//! `duet capture`: a recorded take in; the exact performance (`.notes`), a quantized score
+//! (`.abc` for a melody, `.drums` for a rhythm) and the analysis (`.capture.json`) out.
+//!
+//! Every estimate is stated on standard error and as a comment in the `.notes` and the score
+//! ([`statement`]). Every refusal comes before anything is written, and nothing is
+//! overwritten.
+
+mod statement;
+
+use std::fs;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+use clap::{Args, Subcommand};
+use duet_abc::{Dynamics, WriteOptions};
+use duet_capture::{
+    ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Melody, Mono, Prepare,
+    Source, Stage, assemble, estimate, quantize_offsets,
+};
+use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
+
+use crate::config::Config;
+use crate::drums::{GridForm, ReadOptions, grid_of_song, refuse_overwrite};
+use crate::io::with_end;
+
+#[derive(Subcommand)]
+pub enum CaptureCommand {
+    /// Capture a sung or played melody: notes, their pitches and the key, written as
+    /// STEM.notes (exactly as played) and STEM.abc (quantized to --grid).
+    Melody(TakeArgs),
+    /// Capture a tapped or beatboxed rhythm: hits in lanes, written as STEM.notes (exactly
+    /// as played) and STEM.drums (quantized to --grid). Without --lane, each hit is told
+    /// apart by sound as a kick, snare or closed hat.
+    Rhythm(TakeArgs),
+}
+
+/// What both kinds of take are captured with. Anything about the timing left out is
+/// estimated from the take and stated.
+#[derive(Args)]
+pub struct TakeArgs {
+    /// The recording: WAV, FLAC, MP3, Ogg Vorbis, or AAC in an MP4 (.m4a).
+    input: PathBuf,
+    /// The tempo, in quarter notes per minute, used exactly. A melody's must be a whole
+    /// number: its ABC states the tempo in Q:, which holds only a whole number.
+    #[arg(long)]
+    tempo: Option<f64>,
+    /// The meter, such as 4/4 or 6/8, used exactly.
+    #[arg(long)]
+    meter: Option<TimeSig>,
+    /// A melody's key, as ABC names it in K: (Eb, Bm, F#m), used exactly. It changes how
+    /// notes are spelled, never which notes they are.
+    #[arg(long)]
+    key: Option<String>,
+    /// Where bar 1 starts, in seconds from the start of the recording.
+    #[arg(long)]
+    downbeat: Option<f64>,
+    /// The step the score is quantized to, such as 1/16 or 1/8t. The .notes is never
+    /// quantized.
+    #[arg(long, default_value = "1/16")]
+    grid: Grid,
+    /// A rhythm's lane, such as hh or kick: every hit goes to it (a tapped take).
+    #[arg(long)]
+    lane: Option<String>,
+    /// The output files' stem: STEM.notes, STEM.abc or STEM.drums, and STEM.capture.json.
+    /// Without it, the input's name without its extension, beside it.
+    #[arg(short, long, value_name = "STEM")]
+    output: Option<PathBuf>,
+}
+
+/// Which kind of take is captured.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Take {
+    Melody,
+    Rhythm,
+}
+
+pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
+    let (take, args) = match command {
+        CaptureCommand::Melody(args) => (Take::Melody, args),
+        CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
+    };
+    let key = flags(take, &args)?;
+    let outputs = Outputs::new(&args.input, args.output.as_deref(), take)?;
+
+    let events = analyse(&args.input, take, args.lane.is_some())?;
+    let what = match take {
+        Take::Melody => "notes",
+        Take::Rhythm => "hits",
+    };
+    if !events.iter().any(|e| match take {
+        Take::Melody => matches!(e, Event::Note { .. }),
+        Take::Rhythm => matches!(e, Event::Hit { .. }),
+    }) {
+        return Err(Error::NothingFound { what }.into());
+    }
+    let given = Given {
+        tempo_bpm: args.tempo,
+        meter: args.meter,
+        downbeat_secs: args.downbeat,
+    };
+    let timing = estimate(&events, ANALYSIS_RATE, &given)?;
+    let kind = match take {
+        Take::Melody => Kind::Melody,
+        Take::Rhythm => Kind::Rhythm {
+            lanes: config.lanes.clone(),
+            asked: args.lane.clone(),
+        },
+    };
+    let mut captured = assemble(&events, ANALYSIS_RATE, &timing, key, &kind)?;
+
+    let quantized = captured.song.quantized(args.grid)?;
+    let ms_per_quarter = 1000.0 * timing.beat_period_frames / f64::from(ANALYSIS_RATE);
+    captured.analysis.offsets =
+        quantize_offsets(&captured.song, &quantized, args.grid, ms_per_quarter)?;
+    let meter = *timing.meter.value();
+    let trimmed = without_empty_lead_in(&quantized, captured.downbeat_tick, meter)?;
+
+    let mut said = statement::timing(&timing, ANALYSIS_RATE);
+    said.extend(statement::key(captured.analysis.key.as_ref()));
+    let lead_in = statement::lead_in(
+        captured.lead_in,
+        captured.downbeat_tick,
+        meter,
+        captured.song.ticks_per_quarter,
+    );
+    let notes_said = [said.clone(), vec![lead_in.clone()]].concat();
+    let mut score_said = said.clone();
+    let mut stderr_said = notes_said.clone();
+    if trimmed.is_some() {
+        score_said.push(statement::LEAD_IN_REMOVED.to_owned());
+        stderr_said.push(statement::LEAD_IN_REMOVED.to_owned());
+    } else {
+        score_said.push(lead_in);
+    }
+    let score = trimmed.as_ref().unwrap_or(&quantized);
+
+    let notes = commented(
+        &with_end(&captured.song, config.end)?.to_text(),
+        "#",
+        &notes_said,
+    );
+    let score_text = match take {
+        Take::Melody => {
+            let options = WriteOptions::default().with_dynamics(Dynamics::Nearest);
+            let abc = duet_abc::write(&with_end(score, config.end)?, &options)?;
+            if abc.lines().any(|l| l.starts_with(ABC_SNAPPED)) {
+                stderr_said.push(
+                    "velocities: snapped to the nearest dynamic's level in the .abc; the \
+                     .notes keeps them exact"
+                        .to_owned(),
+                );
+            }
+            commented(&abc, "%", &score_said)
+        }
+        Take::Rhythm => {
+            let options = ReadOptions {
+                grid: args.grid,
+                track: None,
+                bars: None,
+                snap_levels: true,
+            };
+            let grid = grid_of_song(score, &options, GridForm::Text, config)?;
+            let snapped = "velocities: snapped to the levels of the .drums text (g, x, X); the \
+                           .notes keeps them exact";
+            score_said.push(snapped.to_owned());
+            stderr_said.push(snapped.to_owned());
+            commented(&grid.to_text()?, "#", &score_said)
+        }
+    };
+    let mut analysis = serde_json::to_string_pretty(&captured.analysis)?;
+    analysis.push('\n');
+
+    for line in &stderr_said {
+        eprintln!("{line}");
+    }
+    write_new(&outputs.notes, &notes)?;
+    write_new(&outputs.score, &score_text)?;
+    write_new(&outputs.analysis, &analysis)
+}
+
+/// The start of the comment the ABC writer adds when it snaps a velocity to a dynamic.
+const ABC_SNAPPED: &str = "% duet: velocities were snapped";
+
+/// Refuses a flag the take cannot use, before anything is read, and reads the key.
+fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
+    match take {
+        Take::Melody => {
+            if args.lane.is_some() {
+                bail!("--lane is for a rhythm take; a melody's notes are pitched, not in lanes");
+            }
+            if let Some(bpm) = args.tempo
+                && bpm.fract() != 0.0
+            {
+                bail!(
+                    "--tempo {bpm}: a melody's tempo must be a whole number of bpm, because \
+                     its ABC states the tempo as Q:1/4=<bpm> and ABC's Q: holds only a whole \
+                     number; give --tempo {} or {}",
+                    bpm.floor(),
+                    bpm.ceil()
+                );
+            }
+        }
+        Take::Rhythm => {
+            if args.key.is_some() {
+                bail!("--key is for a melody take; a rhythm take has no key");
+            }
+        }
+    }
+    args.key
+        .as_deref()
+        .map(|name| duet_abc::key_from_name(name).with_context(|| format!("--key {name}")))
+        .transpose()
+}
+
+/// The files a capture writes, each checked before any is written.
+struct Outputs {
+    notes: PathBuf,
+    score: PathBuf,
+    analysis: PathBuf,
+}
+
+impl Outputs {
+    /// The outputs at `stem`, or at the input's name without its extension. Refused when one
+    /// is the input or already exists, since capture never overwrites a file.
+    fn new(input: &Path, stem: Option<&Path>, take: Take) -> Result<Outputs> {
+        let stem = stem.map_or_else(|| input.with_extension(""), Path::to_path_buf);
+        let named = |ext: &str| {
+            let mut path = stem.clone().into_os_string();
+            path.push(ext);
+            PathBuf::from(path)
+        };
+        let outputs = Outputs {
+            notes: named(".notes"),
+            score: named(match take {
+                Take::Melody => ".abc",
+                Take::Rhythm => ".drums",
+            }),
+            analysis: named(".capture.json"),
+        };
+        let all = [&outputs.notes, &outputs.score, &outputs.analysis];
+        for path in all {
+            refuse_overwrite(input, path, "capture")?;
+        }
+        for path in all {
+            if path.exists() {
+                bail!(
+                    "{} exists; capture writes new files and never overwrites one, so move it \
+                     or name another stem with -o",
+                    path.display()
+                );
+            }
+        }
+        Ok(outputs)
+    }
+}
+
+/// The take's settled events: the file through `Prepare` and the take's analysis stage, to
+/// the end of the stream.
+fn analyse(input: &Path, take: Take, asked: bool) -> Result<Vec<Event>> {
+    let mut source = FileSource::open(input)?;
+    let mut prepare = Prepare::new(ANALYSIS_RATE);
+    let mut stage: Box<dyn Stage<In = Mono, Out = Event>> = match take {
+        Take::Melody => Box::new(Melody::new(ANALYSIS_RATE)),
+        Take::Rhythm => Box::new(Hits::new(
+            ANALYSIS_RATE,
+            if asked {
+                LaneMode::Asked
+            } else {
+                LaneMode::Beatbox
+            },
+        )),
+    };
+    let (mut mono, mut events) = (Vec::new(), Vec::new());
+    while let Some(chunk) = source.next_chunk()? {
+        prepare.push(chunk, &mut mono)?;
+        for m in mono.drain(..) {
+            stage.push(m, &mut events)?;
+        }
+    }
+    prepare.finish(&mut mono)?;
+    for m in mono.drain(..) {
+        stage.push(m, &mut events)?;
+    }
+    stage.finish(&mut events)?;
+    Ok(events)
+}
+
+/// The quantized score of an assembled take with its lead-in taken out, when quantizing has
+/// left no note in the lead-in: every note and control moves back by `downbeat_tick`, the
+/// song starts in `meter`, and the change to it at bar 2 is dropped. `None` when the score
+/// has no lead-in, or a note or control still lies in it.
+///
+/// The song is one `assemble` built, so its only meter change is the one after a pickup, and
+/// it has no tempo or key changes and names no end.
+fn without_empty_lead_in(score: &Song, downbeat_tick: u64, meter: TimeSig) -> Result<Option<Song>> {
+    if downbeat_tick == 0 {
+        return Ok(None);
+    }
+    let from = score.time_map()?;
+    let to = TimeMap::new(score.ticks_per_quarter, meter)?;
+    let moved = |at: Position| -> Result<Option<Position>> {
+        let tick = from.tick(at)?;
+        Ok(tick.checked_sub(downbeat_tick).map(|t| to.position(t)))
+    };
+    let mut out = score.clone();
+    out.time_sig = meter;
+    out.time_changes.retain(|c| c.at != Position::bar(2));
+    for track in &mut out.tracks {
+        for note in &mut track.notes {
+            let Some(at) = moved(note.at)? else {
+                return Ok(None);
+            };
+            note.at = at;
+        }
+        for control in &mut track.controls {
+            let at = match control {
+                Control::Cc { at, .. } | Control::Bend { at, .. } | Control::Program { at, .. } => {
+                    at
+                }
+                other => bail!("capture cannot move a {other:?} out of a lead-in"),
+            };
+            let Some(new) = moved(*at)? else {
+                return Ok(None);
+            };
+            *at = new;
+        }
+    }
+    Ok(Some(out))
+}
+
+/// `text` with `lines` as comments starting `prefix`, after its first line: the notefmt or
+/// drum grid version line, or the ABC tune's `X:`.
+fn commented(text: &str, prefix: &str, lines: &[String]) -> String {
+    let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
+    let mut out = format!("{first}\n");
+    for line in lines {
+        out.push_str(&format!("{prefix} {line}\n"));
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Writes a file that must not exist yet.
+fn write_new(path: &Path, text: &str) -> Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| path.display().to_string())?;
+    file.write_all(text.as_bytes())
+        .with_context(|| path.display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use duet_core::{Note, Pitch, TimeChange, Track};
+
+    fn sig(s: &str) -> TimeSig {
+        s.parse().expect("a time signature")
+    }
+
+    /// A song with a one-beat pickup before 4/4 and notes at `ticks`.
+    fn with_pickup(ticks: &[u64]) -> Song {
+        let mut song = Song::default();
+        song.time_sig = sig("1/4");
+        song.time_changes.push(TimeChange {
+            at: Position::bar(2),
+            time_sig: sig("4/4"),
+        });
+        let map = song.time_map().expect("map");
+        let mut track = Track::new("melody", 1);
+        for &t in ticks {
+            track.notes.push(Note::new(
+                map.position(t),
+                Pitch::new(60).expect("C4"),
+                1.0,
+                80,
+            ));
+        }
+        song.tracks.push(track);
+        song
+    }
+
+    #[test]
+    fn an_empty_pickup_is_taken_out() {
+        let song = with_pickup(&[480, 960, 2400]);
+        let out = without_empty_lead_in(&song, 480, sig("4/4"))
+            .expect("moves")
+            .expect("the pickup is empty");
+        assert_eq!(out.time_sig, sig("4/4"));
+        assert!(out.time_changes.is_empty());
+        let at: Vec<String> = out.tracks[0]
+            .notes
+            .iter()
+            .map(|n| n.at.to_string())
+            .collect();
+        assert_eq!(at, ["1.1.0", "1.2.0", "2.1.0"]);
+    }
+
+    #[test]
+    fn a_pickup_with_a_note_in_it_stays() {
+        let song = with_pickup(&[0, 480]);
+        assert!(
+            without_empty_lead_in(&song, 480, sig("4/4"))
+                .expect("ok")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_song_with_no_lead_in_is_left_alone() {
+        let song = with_pickup(&[0]);
+        assert!(
+            without_empty_lead_in(&song, 0, sig("4/4"))
+                .expect("ok")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn comments_go_after_the_first_line() {
+        let lines = ["tempo: estimated 92 bpm".to_owned()];
+        assert_eq!(
+            commented("X:1\nT:x\n", "%", &lines),
+            "X:1\n% tempo: estimated 92 bpm\nT:x\n"
+        );
+    }
+}

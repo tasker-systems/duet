@@ -43,4 +43,7 @@ pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, Prepare};
 pub use source::FileSource;
 pub use stage::{Chunk, Mono, Source, Stage};
-pub use timing::{BeatTempo, Given, Origin, Timing, WEAK_CONFIDENCE, beat_series, estimate};
+pub use timing::{
+    BeatTempo, Given, Origin, Timing, WEAK_CONFIDENCE, beat_series, estimate, felt_quarters,
+    is_compound,
+};
