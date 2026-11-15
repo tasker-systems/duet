@@ -1,25 +1,39 @@
 #!/usr/bin/env bash
-# Regenerates crates/duet-capture/tests/fixtures: a one-second 440 Hz sine, mono at 44.1 kHz
-# (tone-mono44) and stereo at 48 kHz (tone-stereo48), as WAV, FLAC, MP3, Ogg Vorbis and AAC-LC
-# M4A, plus he-aac.m4a, a declared HE-AAC file. It also regenerates the reference corpus's
-# synthetic take, crates/duet-capture/corpus/synthetic-melody.flac: eight quarter-note sine
-# tones at 120 bpm, starting a quarter of a second in. It is made by arithmetic alone, so a
-# rerun gives the same samples. The tests use the committed files; run this only to change them.
+# Regenerates generated audio for duet-capture's tests. Usage: capture-fixtures.sh [fixtures|corpus|all]
+# (default corpus). It never touches tests/fixtures unless asked.
 #
-# Needs lame, flac and oggenc (scripts/dev-setup.sh, or `brew bundle`), and macOS's afconvert,
-# which makes the AAC-LC (-d aac) and HE-AAC (-d aach) files. macOS only.
+# fixtures: crates/duet-capture/tests/fixtures, a one-second 440 Hz sine, mono at 44.1 kHz
+#   (tone-mono44) and stereo at 48 kHz (tone-stereo48), as WAV, FLAC, MP3, Ogg Vorbis and AAC-LC
+#   M4A, plus he-aac.m4a, a declared HE-AAC file. The WAV files are byte-stable (plain
+#   arithmetic); the FLAC files are for a given flac version; the MP3, Ogg and M4A files
+#   depend on the encoder versions (lame, oggenc, afconvert) and came out different bytes
+#   on another machine.
+#   Needs lame, flac, oggenc and macOS's afconvert (-d aac for AAC-LC, -d aach for HE-AAC).
+# corpus: the reference corpus's synthetic takes in crates/duet-capture/corpus:
+#   synthetic-melody.flac (eight quarter-note sine tones at 120 bpm) and
+#   synthetic-beatbox.flac (kick, snare and hat noise bursts, two bars at 120 bpm). Both are
+#   made by arithmetic and a seeded generator, then encoded losslessly by flac, so they are
+#   byte-stable for a given flac version, and were byte-identical across two runs here. Needs flac and python3.
+#
+# The tests use the committed files; run this only to change them. macOS only.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-out="$root/crates/duet-capture/tests/fixtures"
+fixtures="$root/crates/duet-capture/tests/fixtures"
+corpus="$root/crates/duet-capture/corpus"
+target="${1:-corpus}"
 
 [[ "$(uname -s)" == Darwin ]] || { echo "error: capture-fixtures runs on macOS only (afconvert)" >&2; exit 1; }
-for tool in lame flac oggenc afconvert python3; do
+case "$target" in
+  fixtures) tools=(lame flac oggenc afconvert python3) ;;
+  corpus) tools=(flac python3) ;;
+  all) tools=(lame flac oggenc afconvert python3) ;;
+  *) echo "usage: capture-fixtures.sh [fixtures|corpus|all]" >&2; exit 2 ;;
+esac
+for tool in "${tools[@]}"; do
   command -v "$tool" >/dev/null || { echo "error: no $tool; run scripts/dev-setup.sh" >&2; exit 1; }
 done
 
-mkdir -p "$out"
-rm -f "$out"/*
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -46,26 +60,29 @@ PY
 make() {
   local stem="$1" rate="$2" channels="$3" width="$4" wav="$work/$1.wav"
   sine "$wav" "$rate" "$channels" 2
-  sine "$out/$stem.wav" "$rate" "$channels" "$width"
-  flac --silent --force -o "$out/$stem.flac" "$wav"
-  lame --silent -b 128 "$wav" "$out/$stem.mp3"
-  oggenc --quiet -q 3 -o "$out/$stem.ogg" "$wav"
-  afconvert -f m4af -d aac "$wav" "$out/$stem.m4a"
+  sine "$fixtures/$stem.wav" "$rate" "$channels" "$width"
+  flac --silent --force -o "$fixtures/$stem.flac" "$wav"
+  lame --silent -b 128 "$wav" "$fixtures/$stem.mp3"
+  oggenc --quiet -q 3 -o "$fixtures/$stem.ogg" "$wav"
+  afconvert -f m4af -d aac "$wav" "$fixtures/$stem.m4a"
 }
 
-make tone-mono44 44100 1 2
-make tone-stereo48 48000 2 1
-
-# Declared HE-AAC: the AAC-LC source is encoded as HE-AAC v1 at a low bit rate.
-afconvert -f m4af -d aach -b 48000 "$work/tone-stereo48.wav" "$out/he-aac.m4a"
+make_fixtures() {
+  mkdir -p "$fixtures"
+  rm -f "$fixtures"/*
+  make tone-mono44 44100 1 2
+  make tone-stereo48 48000 2 1
+  # Declared HE-AAC: the AAC-LC source is encoded as HE-AAC v1 at a low bit rate.
+  afconvert -f m4af -d aach -b 48000 "$work/tone-stereo48.wav" "$fixtures/he-aac.m4a"
+  ls -l "$fixtures"
+}
 
 # The corpus's synthetic melody: C4 E4 G4 C5 G4 E4 C4 C4 as quarter notes at 120 bpm (0.5 s
 # each, the last 50 ms of each silent so repeated pitches are two notes), from 0.25 s in, with
 # a 5 ms fade at each end of a tone. 16 kHz mono, 16-bit. The manifest gives the tempo, the
 # meter and the downbeat (0.25 s), so only the pitches and onsets are read from the audio.
-corpus="$root/crates/duet-capture/corpus"
-mkdir -p "$corpus"
-python3 -I - "$work/synthetic-melody.wav" <<'PY'
+make_synthetic_melody() {
+  python3 -I - "$work/synthetic-melody.wav" <<'PY'
 import math, struct, sys, wave
 rate = 16000
 midis = [60, 64, 67, 72, 67, 64, 60, 60]
@@ -86,6 +103,53 @@ with wave.open(sys.argv[1], "wb") as w:
     w.setframerate(rate)
     w.writeframes(b"".join(struct.pack("<h", x) for x in samples))
 PY
-flac --silent --force -o "$corpus/synthetic-melody.flac" "$work/synthetic-melody.wav"
+  flac --silent --force -o "$corpus/synthetic-melody.flac" "$work/synthetic-melody.wav"
+}
 
-ls -l "$out" "$corpus"
+# The corpus's synthetic beatbox: two bars of 4/4 at 120 bpm, eighth notes from 0.25 s in,
+# kick hat snare hat kick hat snare hat each bar. A kick is noise limited to 40-150 Hz
+# (0.1 s), a snare 1-4 kHz (0.1 s), a hat 6-10 kHz (0.05 s), each a sum of 48 sine partials
+# at frequencies and phases from a seeded generator, with a 2 ms attack and 30 ms decay.
+# 22.05 kHz mono, 16-bit. The manifest gives the tempo, the meter and the downbeat (0.25 s).
+make_synthetic_beatbox() {
+  python3 -I - "$work/synthetic-beatbox.wav" <<'PY'
+import math, random, struct, sys, wave
+rate = 22050
+kinds = {"kick": (40.0, 150.0, 0.1), "snare": (1000.0, 4000.0, 0.1), "hat": (6000.0, 10000.0, 0.05)}
+bar = ["kick", "hat", "snare", "hat", "kick", "hat", "snare", "hat"]
+lead, eighth, amplitude, partials = 0.25, 0.25, 0.4, 48
+rng = random.Random(20261114)
+total = round((lead + eighth * len(bar) * 2 + 0.25) * rate)
+samples = [0.0] * total
+for i, kind in enumerate(bar * 2):
+    low, high, length = kinds[kind]
+    parts = [(low + (high - low) * rng.random(), 2 * math.pi * rng.random()) for _ in range(partials)]
+    first = round((lead + i * eighth) * rate)
+    count = round(length * rate)
+    attack, decay = round(0.002 * rate), round(0.03 * rate)
+    for n in range(count):
+        t = (first + n) / rate
+        total_sum = sum(math.sin(2 * math.pi * f * t + p) for f, p in parts)
+        envelope = min(n / attack, (count - 1 - n) / decay, 1.0)
+        samples[first + n] += total_sum / math.sqrt(partials) * envelope * amplitude
+with wave.open(sys.argv[1], "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(rate)
+    w.writeframes(b"".join(struct.pack("<h", max(-32768, min(32767, round(32767 * x)))) for x in samples))
+PY
+  flac --silent --force -o "$corpus/synthetic-beatbox.flac" "$work/synthetic-beatbox.wav"
+}
+
+make_corpus() {
+  mkdir -p "$corpus"
+  make_synthetic_melody
+  make_synthetic_beatbox
+  ls -l "$corpus"
+}
+
+case "$target" in
+  fixtures) make_fixtures ;;
+  corpus) make_corpus ;;
+  all) make_fixtures; make_corpus ;;
+esac

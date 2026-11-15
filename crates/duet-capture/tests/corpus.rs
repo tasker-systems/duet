@@ -148,9 +148,56 @@ mod comparisons {
         let v = compare_melody("t", &[p(0, 60, 1.0), p(4, 62, 1.0)], &[p(0, 60, 1.0)]);
         assert_eq!(v.failures.len(), 1, "{:?}", v.failures);
         assert!(
-            v.failures[0].contains("note 2 at step 4"),
+            v.failures[0].contains("expected note: pitch 62 at step 4"),
             "{:?}",
             v.failures
         );
+    }
+
+    #[test]
+    fn an_extra_short_note_in_the_middle_fails_no_later_long_note() {
+        let expected = [p(0, 60, 1.0), p(4, 62, 1.0), p(8, 64, 1.0)];
+        let found = [p(0, 60, 1.0), p(2, 61, 0.25), p(4, 62, 1.0), p(8, 64, 1.0)];
+        let v = compare_melody("t", &expected, &found);
+        assert!(v.failures.is_empty(), "{:?}", v.failures);
+        assert_eq!(v.reported.len(), 1, "{:?}", v.reported);
+    }
+
+    #[test]
+    fn an_extra_long_note_fails_as_invented_or_split() {
+        let v = compare_melody("t", &[p(0, 60, 2.0)], &[p(0, 60, 1.0), p(4, 60, 1.0)]);
+        assert_eq!(v.failures.len(), 1, "{:?}", v.failures);
+        assert!(
+            v.failures[0].contains("extra note: found pitch 60 at step 4"),
+            "{:?}",
+            v.failures
+        );
+    }
+}
+
+/// Manifest entries are checked, and a bad one names its take.
+mod entries {
+    use super::support::Take;
+
+    fn take(kind: &str, lane: &str) -> Take {
+        let text = format!(
+            "file = \"x.flac\"\nkind = \"{kind}\"\nprovenance = \"p\"\nlicence = \"l\"\nexpected = \"x.notes\"\n{lane}"
+        );
+        toml::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn a_tapped_take_needs_a_lane() {
+        let e = take("tapped", "").check().unwrap_err();
+        assert!(e.contains("tapped take needs `lane`"), "{e}");
+        assert!(take("tapped", "lane = \"hh\"").check().is_ok());
+    }
+
+    #[test]
+    fn a_lane_is_only_for_a_tapped_take() {
+        for kind in ["melody", "beatboxed"] {
+            let e = take(kind, "lane = \"hh\"").check().unwrap_err();
+            assert!(e.contains(&format!("a {kind} take has none")), "{e}");
+        }
     }
 }

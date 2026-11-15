@@ -80,6 +80,18 @@ impl TakeKind {
 }
 
 impl Take {
+    /// A tapped take must name its lane, and no other kind may.
+    pub fn check(&self) -> Result<(), String> {
+        match (self.kind, &self.lane) {
+            (TakeKind::Tapped, None) => Err("a tapped take needs `lane`".to_owned()),
+            (TakeKind::Melody | TakeKind::Beatboxed, Some(lane)) => Err(format!(
+                "`lane = \"{lane}\"` is for a tapped take; a {} take has none",
+                self.kind.name()
+            )),
+            _ => Ok(()),
+        }
+    }
+
     /// Synthetic takes witness the harness, not a goal clause.
     pub fn is_synthetic(&self) -> bool {
         self.provenance.starts_with("synthetic")
@@ -93,7 +105,14 @@ pub fn corpus_dir() -> PathBuf {
 pub fn manifest() -> Manifest {
     let path = corpus_dir().join("manifest.toml");
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    toml::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    let manifest: Manifest =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    for take in &manifest.take {
+        if let Err(e) = take.check() {
+            panic!("manifest entry {}: {e}", take.file);
+        }
+    }
+    manifest
 }
 
 /// Both of a take's songs, quantized to its grid.
@@ -235,50 +254,70 @@ pub struct Verdict {
     pub reported: Vec<String>,
 }
 
-/// A melody against its transcription, note by note in order. An expected note of at least
-/// an eighth fails when it is missing, or has a different pitch or step; a shorter one, and
-/// any note found beyond the expected ones, is reported.
+/// A melody against its transcription, aligned by the step each note starts on, over notes of
+/// at least an eighth on either side. An expected long note fails when no long note found
+/// starts on its step with its pitch; a long note found on a step where the transcription has
+/// no note fails as invented or split. Shorter notes, on either side, are reported only.
 pub fn compare_melody(take: &str, expected: &[Played], found: &[Played]) -> Verdict {
+    let is_long = |p: &Played| p.milli_beats as f64 / 1000.0 >= EIGHTH_BEATS;
     let mut verdict = Verdict::default();
-    for (i, want) in expected.iter().enumerate() {
-        let long = want.milli_beats as f64 / 1000.0 >= EIGHTH_BEATS;
-        let message = match found.get(i) {
-            None => Some(format!(
-                "{take}: note {} at {} (pitch {}) is missing; the capture has only {} notes",
-                i + 1,
-                want.at(),
-                want.midi,
-                found.len()
-            )),
-            Some(got) if got.midi != want.midi || got.step != want.step => Some(format!(
-                "{take}: note {}: expected pitch {} at {}, found pitch {} at {}",
-                i + 1,
+    for want in expected {
+        let hit = found
+            .iter()
+            .any(|got| is_long(got) && got.step == want.step && got.midi == want.midi);
+        if is_long(want) && !hit {
+            verdict.failures.push(format!(
+                "{take}: expected note: pitch {} at {}, found {}",
                 want.midi,
                 want.at(),
-                got.midi,
-                got.at()
-            )),
-            Some(_) => None,
-        };
-        if let Some(message) = message {
-            if long {
-                verdict.failures.push(message);
-            } else {
-                verdict
-                    .reported
-                    .push(format!("{message} (shorter than an eighth)"));
-            }
+                near(found, want.step)
+            ));
+        } else if !is_long(want)
+            && !found
+                .iter()
+                .any(|g| g.step == want.step && g.midi == want.midi)
+        {
+            verdict.reported.push(format!(
+                "{take}: short expected note: pitch {} at {}, found {}",
+                want.midi,
+                want.at(),
+                near(found, want.step)
+            ));
         }
     }
-    for (i, extra) in found.iter().enumerate().skip(expected.len()) {
-        verdict.reported.push(format!(
-            "{take}: note {}: extra, pitch {} at {}",
-            i + 1,
-            extra.midi,
-            extra.at()
-        ));
+    for got in found {
+        if expected.iter().any(|want| want.step == got.step) {
+            continue;
+        }
+        let message = format!(
+            "{take}: extra note: found pitch {} at {}, expected {}",
+            got.midi,
+            got.at(),
+            near(expected, got.step)
+        );
+        if is_long(got) {
+            verdict.failures.push(message);
+        } else {
+            verdict
+                .reported
+                .push(format!("{message} (shorter than an eighth)"));
+        }
     }
     verdict
+}
+
+/// The notes within two steps of `step`, for a failure to say what was found nearby.
+fn near(notes: &[Played], step: u64) -> String {
+    let nearby: Vec<String> = notes
+        .iter()
+        .filter(|p| p.step.abs_diff(step) <= 2)
+        .map(|p| format!("pitch {} at {}", p.midi, p.at()))
+        .collect();
+    if nearby.is_empty() {
+        "no note near".to_owned()
+    } else {
+        nearby.join(", ")
+    }
 }
 
 /// A rhythm against its transcription as sets of (step, key): any missing or extra hit
