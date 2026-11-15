@@ -144,10 +144,11 @@ impl<T> Origin<T> {
 pub struct Timing {
     /// Quarter notes per minute. An estimate is a whole number.
     pub tempo_bpm: Origin<f64>,
-    /// Half and double the tempo, the likeliest other readings of it. They are stated as
-    /// alternatives only when the tempo is estimated: a given tempo is not reported as an
-    /// estimate, so neither are its half and double.
-    pub tempo_alternatives: (f64, f64),
+    /// Half and double an estimated tempo, the likeliest other readings of it. `None` for a
+    /// given tempo, which is not reported as an estimate, so neither are its half and double,
+    /// and the analysis leaves them out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tempo_alternatives: Option<(f64, f64)>,
     /// Frames per quarter note, the period notes are placed by. For an estimated tempo it is the
     /// period measured on the grid, not the rounded `tempo_bpm` (92.4 a minute is stated as 92
     /// but placed at 92.4); for a given tempo it is exactly `60 * rate / tempo_bpm`.
@@ -263,7 +264,10 @@ pub fn estimate(onsets: &[Event], rate: u32, given: &Given) -> Result<Timing> {
         },
     };
     Ok(Timing {
-        tempo_alternatives: alternatives(*tempo_bpm.value()),
+        tempo_alternatives: match tempo_bpm {
+            Origin::Given(_) => None,
+            Origin::Estimated { value, .. } => Some(alternatives(value)),
+        },
         tempo_bpm,
         beat_period_frames,
         meter: match given.meter {
@@ -362,7 +366,7 @@ fn without_pulse(onsets: &[Onset], rate: f64, bpm: f64, given: &Given) -> Timing
     };
     Timing {
         tempo_bpm: Origin::Given(bpm),
-        tempo_alternatives: alternatives(bpm),
+        tempo_alternatives: None,
         beat_period_frames: 60.0 * rate / bpm,
         meter: match given.meter {
             Some(meter) => Origin::Given(meter),
@@ -965,7 +969,7 @@ mod tests {
         let timing = estimate(&onsets, RATE, &given).unwrap();
         assert_eq!(timing.tempo_bpm, Origin::Given(97.0));
         assert_eq!(timing.meter, Origin::Given(meter("3/4")));
-        assert_eq!(timing.tempo_alternatives, (48.5, 194.0));
+        assert_eq!(timing.tempo_alternatives, None);
     }
 
     #[test]
@@ -985,7 +989,7 @@ mod tests {
         let (bpm, confidence) = estimated(&timing.tempo_bpm);
         assert_eq!(bpm, 120.0);
         assert!(confidence >= WEAK_CONFIDENCE, "confidence {confidence}");
-        assert_eq!(timing.tempo_alternatives, (60.0, 240.0));
+        assert_eq!(timing.tempo_alternatives, Some((60.0, 240.0)));
     }
 
     #[test]
@@ -993,7 +997,7 @@ mod tests {
         let onsets = onsets_of(&pattern(92.4, LEAD, 20.0, &[0.5]));
         let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
         assert_eq!(estimated(&timing.tempo_bpm).0, 92.0);
-        assert_eq!(timing.tempo_alternatives, (46.0, 184.0));
+        assert_eq!(timing.tempo_alternatives, Some((46.0, 184.0)));
     }
 
     #[test]
@@ -1492,7 +1496,7 @@ mod tests {
                 value: 135.0,
                 confidence: 0.75,
             },
-            tempo_alternatives: (67.5, 270.0),
+            tempo_alternatives: Some((67.5, 270.0)),
             beat_period_frames: 9_800.25,
             meter: Origin::Given(meter("6/8")),
             downbeat_frame: Origin::Estimated {
@@ -1504,6 +1508,19 @@ mod tests {
         let back: Timing = serde_json::from_str(&json).unwrap();
         assert_eq!(back, timing);
         assert!(json.contains(r#""meter":{"given":"6/8"}"#), "{json}");
+        assert!(
+            json.contains(r#""tempo_alternatives":[67.5,270.0]"#),
+            "{json}"
+        );
+        // A given tempo has no alternatives to give, and the analysis leaves them out.
+        let given = Timing {
+            tempo_bpm: Origin::Given(135.0),
+            tempo_alternatives: None,
+            ..timing
+        };
+        let json = serde_json::to_string(&given).unwrap();
+        assert!(!json.contains("tempo_alternatives"), "{json}");
+        assert_eq!(serde_json::from_str::<Timing>(&json).unwrap(), given);
         let beat = BeatTempo {
             beat: 3,
             secs: 1.5,

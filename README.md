@@ -466,7 +466,8 @@ options; everything about the timing that is left out is estimated and stated.
   `1/8t`. The `.notes` is never quantized.
 - **`--lane <name>`** (rhythm) puts every hit in that lane, such as `hh` or `kick`. It is how a
   tapped take is read; without it a rhythm take is read as beatboxed. Lane names resolve
-  through the configured lane map, so aliases from `duet.toml` apply.
+  through the configured lane map, so aliases from `duet.toml` apply. A melody's notes are
+  pitched, not in lanes, and `--lane` is refused for one.
 - **`-o`, `--output <stem>`** is the output files' stem. Without it, the input's name without
   its extension, beside the input.
 

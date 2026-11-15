@@ -427,7 +427,7 @@ mod tests {
     fn given(bpm: f64, meter_text: &str, downbeat: f64) -> Timing {
         Timing {
             tempo_bpm: Origin::Given(bpm),
-            tempo_alternatives: (bpm / 2.0, bpm * 2.0),
+            tempo_alternatives: None,
             beat_period_frames: 60.0 * f64::from(RATE) / bpm,
             meter: Origin::Given(meter(meter_text)),
             downbeat_frame: Origin::Given(frame(downbeat)),

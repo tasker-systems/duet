@@ -667,9 +667,24 @@ mod tests {
     /// ```
     #[test]
     fn our_track_agrees_with_pyin_on_a_scale() {
-        let ours = track(&scale(), 1000);
+        let signal = scale();
+        let ours = track(&signal, 1000);
+        let reading = pyin_reading();
+        // One frame for each of ours whose window lies whole in the signal, which is what pyin's
+        // Framing::Valid reads; ours goes on over the zero-padded end, which pyin does not. A
+        // reading cut short would leave our frames unchecked without a word.
+        let stage = PitchTrack::new(RATE);
+        let whole = (signal.len() - stage.frame_len) / stage.hop + 1;
+        assert!(ours.len() >= whole, "our track has {} frames", ours.len());
+        assert_eq!(
+            reading.len(),
+            whole,
+            "the pyin reading has {} frames; {whole} of our {} have whole windows",
+            reading.len(),
+            ours.len()
+        );
         let mut compared = 0;
-        for (k, theirs) in pyin_reading().into_iter().enumerate() {
+        for (k, theirs) in reading.into_iter().enumerate() {
             let ours = ours[k];
             if let (Some(hz), Some(theirs)) = (ours.hz, theirs) {
                 compared += 1;

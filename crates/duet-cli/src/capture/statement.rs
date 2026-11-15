@@ -16,7 +16,9 @@ pub const LEAD_IN_REMOVED: &str = "lead-in: removed from the score, where no not
 pub fn timing(timing: &Timing, rate: u32) -> Vec<String> {
     let mut out = Vec::new();
     if let Origin::Estimated { value, confidence } = timing.tempo_bpm {
-        let (half, double) = timing.tempo_alternatives;
+        let (half, double) = timing
+            .tempo_alternatives
+            .unwrap_or((value / 2.0, value * 2.0));
         let felt = felt_beat(*timing.meter.value(), value)
             .map(|f| format!(" ({f})"))
             .unwrap_or_default();
@@ -206,7 +208,6 @@ mod tests {
     fn given_values_are_not_stated() {
         let timing: Timing = serde_json::from_value(serde_json::json!({
             "tempo_bpm": { "given": 92.5 },
-            "tempo_alternatives": [46.25, 185.0],
             "beat_period_frames": 14_302.7,
             "meter": { "given": "6/8" },
             "downbeat_frame": { "given": 0 },

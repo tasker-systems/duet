@@ -210,6 +210,33 @@ fn a_given_tempo_is_not_reported_as_an_estimate() {
     assert!(!notes.contains("tempo: estimated"), "{notes}");
     assert_eq!(Song::from_text(&notes).expect("parses").tempo_bpm, 120.0);
     assert!(read(&dir.join("tune.abc")).contains("Q:1/4=120"));
+    // Nor are its half and double, in the analysis.
+    let json: serde_json::Value =
+        serde_json::from_str(&read(&dir.join("tune.capture.json"))).expect("JSON");
+    assert!(json["timing"].get("tempo_alternatives").is_none(), "{json}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
+fn a_given_downbeat_is_not_reported_as_an_estimate() {
+    let dir = scratch("capture-given-downbeat");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    let out = capture(&dir, &["melody", s(&wav), "--downbeat", "0.5"]);
+    ok(&out, "capture melody --downbeat 0.5");
+    let err = stderr(&out);
+    assert!(!err.contains("downbeat:"), "{err}");
+    // The tempo is still estimated and stated: only the downbeat was given.
+    assert!(err.contains("tempo: estimated"), "{err}");
+    for file in ["tune.notes", "tune.abc"] {
+        let text = read(&dir.join(file));
+        assert!(!text.contains("downbeat: estimated"), "{file}: {text}");
+    }
+    let json: serde_json::Value =
+        serde_json::from_str(&read(&dir.join("tune.capture.json"))).expect("JSON");
+    assert!(
+        json["timing"]["downbeat_frame"]["given"].is_number(),
+        "{json}"
+    );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -531,7 +558,12 @@ fn silence_is_refused() {
     for (kind, what) in [("melody", "no notes"), ("rhythm", "no hits")] {
         let out = capture(&dir, &[kind, s(&wav)]);
         assert!(!out.status.success(), "{kind}");
-        assert!(stderr(&out).contains(what), "{kind}: {}", stderr(&out));
+        let err = stderr(&out);
+        assert!(err.contains(what), "{kind}: {err}");
+        assert!(
+            err.contains("quiet.wav"),
+            "{kind}: the file is not named: {err}"
+        );
     }
     assert_eq!(files(&dir), ["quiet.wav"]);
     std::fs::remove_dir_all(&dir).expect("clean up");
@@ -548,6 +580,7 @@ fn too_few_onsets_ask_for_a_tempo() {
     let out = capture(&dir, &["rhythm", s(&wav), "--lane", "hh"]);
     assert!(!out.status.success());
     assert!(stderr(&out).contains("--tempo"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("two.wav"), "{}", stderr(&out));
     assert_eq!(files(&dir), ["two.wav"]);
     let out = capture(&dir, &["rhythm", s(&wav), "--lane", "hh", "--tempo", "120"]);
     ok(&out, "with --tempo");

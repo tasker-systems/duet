@@ -94,6 +94,9 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         .with_context(|| format!("--grid {grid}"))?;
     let outputs = Outputs::new(&args.input, args.output.as_deref(), take)?;
 
+    // Every failure from here on is the take's, so it names the take. FileSource's own errors
+    // name it already.
+    let named = || args.input.display().to_string();
     let events = analyse(&args.input, take, args.lane.is_some())?;
     let what = match take {
         Take::Melody => "notes",
@@ -105,14 +108,14 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         Take::Melody => matches!(e, Event::Note { .. }),
         Take::Rhythm => matches!(e, Event::Hit { .. }),
     }) {
-        return Err(Error::NothingFound { what }.into());
+        return Err(anyhow::Error::from(Error::NothingFound { what }).context(named()));
     }
     let given = Given {
         tempo_bpm: args.tempo,
         meter: args.meter,
         downbeat_secs: args.downbeat,
     };
-    let timing = estimate(&events, ANALYSIS_RATE, &given)?;
+    let timing = estimate(&events, ANALYSIS_RATE, &given).with_context(named)?;
     let kind = match take {
         Take::Melody => Kind::Melody,
         Take::Rhythm => Kind::Rhythm {
@@ -120,7 +123,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
             asked: args.lane.clone(),
         },
     };
-    let mut captured = assemble(&events, ANALYSIS_RATE, &timing, key, &kind)?;
+    let mut captured = assemble(&events, ANALYSIS_RATE, &timing, key, &kind).with_context(named)?;
 
     // The score's grid is settled before the analysis is written, since the analysis gives
     // each note's quantize offset in its steps. A failure here is the score's, reported once
@@ -161,7 +164,8 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
 
     let wrote = || {
         format!(
-            "{} not written; {} and {} hold the performance",
+            "{}: {} not written; {} and {} hold the performance",
+            named(),
             outputs.score.display(),
             outputs.notes.display(),
             outputs.analysis.display()
@@ -387,17 +391,19 @@ fn analyse(input: &Path, take: Take, asked: bool) -> Result<Vec<Event>> {
         )),
     };
     let (mut mono, mut events) = (Vec::new(), Vec::new());
+    // The source's errors name the file; the stages' are named here.
+    let named = || input.display().to_string();
     while let Some(chunk) = source.next_chunk()? {
-        prepare.push(chunk, &mut mono)?;
+        prepare.push(chunk, &mut mono).with_context(named)?;
         for m in mono.drain(..) {
-            stage.push(m, &mut events)?;
+            stage.push(m, &mut events).with_context(named)?;
         }
     }
-    prepare.finish(&mut mono)?;
+    prepare.finish(&mut mono).with_context(named)?;
     for m in mono.drain(..) {
-        stage.push(m, &mut events)?;
+        stage.push(m, &mut events).with_context(named)?;
     }
-    stage.finish(&mut events)?;
+    stage.finish(&mut events).with_context(named)?;
     Ok(events)
 }
 
