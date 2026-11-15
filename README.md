@@ -121,6 +121,14 @@ non-blank byte is `{`, and otherwise the command's default (`--from` names it: `
 `abc` or `text`). `convert` reads and writes [drum grids](#drum-grids) too, with `--from drums`
 and `--to drums`; writing one needs `--grid`.
 
+**A document says where its song came from.** A song imported from ABC or MIDI records it in
+the envelope's `from`: `{"format": "midi"}`, or for ABC the tune's `X:` number and every
+notation-only construct the reader read but did not carry (a slur, an annotation), each at its
+line and column, as `duet abc check` lists them. The provenance follows the song: a `.duet`
+read and written again keeps its `from` unchanged, and so does `song quantize`. Going out to
+ABC or MIDI and in again replaces it, since that import is the song's new provenance. A song
+read from notefmt text has none.
+
 ### The text format
 
 **Header**, before the first track. Every line is optional; the defaults are 480 ticks

@@ -7,7 +7,7 @@ use clap::Subcommand;
 use duet_core::Grid;
 
 use crate::config::Config;
-use crate::io::{Format, read, same_file, song_format, write};
+use crate::io::{Format, read_with_from, same_file, song_format, write_from};
 
 #[derive(Subcommand)]
 pub enum SongCommand {
@@ -43,12 +43,8 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
     match command {
         SongCommand::Show { input, from, to } => {
             let from = song_format(&input, from, Format::Midi, "song show reads")?;
-            write(
-                &read(&input, from, "song show reads")?,
-                Path::new("-"),
-                to,
-                config.end,
-            )
+            let (song, origin) = read_with_from(&input, from, "song show reads")?;
+            write_from(&song, Path::new("-"), to, config.end, origin.as_ref())
         }
         SongCommand::Quantize {
             input,
@@ -65,11 +61,15 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
             }
             let from = song_format(&input, from, Format::Text, "quantize reads")?;
             let to = song_format(&output, to, Format::Text, "quantize writes")?;
-            write(
-                &read(&input, from, "quantize reads")?.quantized(grid)?,
+            // Quantizing keeps where the song came from: the notices still name what the
+            // import did not carry.
+            let (song, origin) = read_with_from(&input, from, "quantize reads")?;
+            write_from(
+                &song.quantized(grid)?,
                 &output,
                 to,
                 config.end,
+                origin.as_ref(),
             )
         }
     }

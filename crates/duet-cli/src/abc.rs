@@ -8,9 +8,10 @@ use anyhow::{Context, Result, bail};
 use clap::{Subcommand, ValueEnum};
 use duet_abc::{Book, Dynamics, ReadOptions, Tune, WriteOptions};
 use duet_core::Song;
+use duet_schemas::{From, Notice};
 
 use crate::config::Config;
-use crate::io::{Format, read, same_file, song_format, with_end, write};
+use crate::io::{Format, read, same_file, song_format, with_end, write_from};
 
 #[derive(Subcommand)]
 pub enum AbcCommand {
@@ -72,8 +73,11 @@ fn text_of(path: &Path) -> Result<String> {
 }
 
 /// Reads a tune, and says on standard error how many notation-only constructs it held,
-/// so nothing is dropped silently.
-pub fn reading(tune: &Tune) -> Result<Song> {
+/// so nothing is dropped silently. They come back as the song's provenance, `from`: the
+/// format, the tune's `X:` number, and each notice at its line and column, as a `.duet`
+/// written from the song records them. A refused construct fails the read, so none is ever
+/// recorded.
+pub fn reading(tune: &Tune) -> Result<(Song, From)> {
     let reading = tune.to_song(&ReadOptions::default())?;
     let n = reading.notices.len();
     if n > 0 {
@@ -84,7 +88,16 @@ pub fn reading(tune: &Tune) -> Result<Song> {
             if n == 1 { "" } else { "s" }
         );
     }
-    Ok(reading.song)
+    let mut from = From::new("abc");
+    from.tune = Some(tune.x().to_string());
+    from.notices = reading.notices.iter().map(notice).collect();
+    Ok((reading.song, from))
+}
+
+/// duet-abc's notice, as the envelope records it.
+fn notice(n: &duet_abc::Notice) -> Notice {
+    let at = |v: usize| u32::try_from(v).unwrap_or(u32::MAX);
+    Notice::new(at(n.line), at(n.col), n.construct, n.found.clone())
 }
 
 fn unit_of(text: &str) -> Result<(u32, u32)> {
@@ -161,9 +174,9 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
                     book.tunes().len()
                 ),
             };
-            let song = reading(tune)?;
+            let (song, from) = reading(tune)?;
             let to = song_format(&output, to, Format::Midi, "duet abc render writes")?;
-            write(&song, &output, to, config.end)
+            write_from(&song, &output, to, config.end, Some(&from))
         }
         AbcCommand::Write {
             input,

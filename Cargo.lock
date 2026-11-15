@@ -544,6 +544,7 @@ version = "0.0.0"
 dependencies = [
  "duet-core",
  "duet-drums",
+ "jsonschema",
  "midly",
  "serde_json",
  "toml",
