@@ -17,3 +17,6 @@ brew "fluid-synth"
 brew "lame"
 brew "flac"
 brew "vorbis-tools"
+
+# for converting recordings easily
+brew "ffmpeg"
