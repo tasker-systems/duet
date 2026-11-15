@@ -531,10 +531,34 @@ pub fn example_analysis() -> Analysis {
             },
             "notes": [
                 { "start": 11100, "end": 21600, "held_from": 11356, "key": 63, "centre": -2.5,
-                  "between_keys": false, "confidence": 0.93, "strength": 0.8125 },
+                  "between_keys": false, "confidence": 0.93, "strength": 0.8125,
+                  "residual": {
+                      "centre": -1.75,
+                      "drift": { "cents_per_sec": 4.5, "range_cents": 2.125 },
+                      "modulation": { "rate_hz": 5.75, "depth_cents": 31.5 },
+                      "scoop": { "cents": -180.0, "ms": 92.875 },
+                      "rest_cents": 3.25,
+                      "frames": 41
+                  } },
                 { "start": 22100, "end": 32600, "held_from": 22612, "key": 67, "centre": 38.0,
-                  "between_keys": true, "confidence": 0.875, "strength": 0.5 }
-            ]
+                  "between_keys": true, "confidence": 0.875, "strength": 0.5,
+                  "residual": {
+                      "centre": 37.5,
+                      "drift": { "cents_per_sec": -1.25, "range_cents": 0.5 },
+                      "fall": { "cents": -95.0, "ms": 58.0 },
+                      "rest_cents": 2.0,
+                      "frames": 40
+                  } }
+            ],
+            "residual": {
+                "centres": { "from_cents": -50.0, "bin_cents": 10.0,
+                             "counts": [0, 0, 0, 0, 1, 0, 0, 0, 1, 0] },
+                "centre_cents_per_sec": 78.5,
+                "between_keys": 1,
+                "read_frames": 81,
+                "unread_frames": 3,
+                "loss": { "pitch": 31.25, "unread": 3.0, "notes": 8.0 }
+            }
         }
     }))
     .expect("the example analysis reads")

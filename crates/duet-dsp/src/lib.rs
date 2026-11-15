@@ -63,6 +63,7 @@ mod performance;
 mod pitch;
 mod prepare;
 mod reading;
+mod residual;
 mod stage;
 #[cfg(test)]
 mod synth;
@@ -82,6 +83,10 @@ pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use reading::{
     A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reading, Tuning, a4_cents_of_hz,
     estimate_tuning, read,
+};
+pub use residual::{
+    CentreHistogram, Drift, LOSS_SIGMA_CENTS, LOSS_UNREAD, Loss, Modulation, NoteResidual,
+    TakeResidual, Transition, residual,
 };
 pub use stage::{Chunk, Mono, Stage};
 pub use timing::{
