@@ -808,6 +808,9 @@ scripts/fetch-soundfont.sh           # just the SoundFont, to duet's data direct
 scripts/port-check.sh                # duet play --port to FluidSynth, then check what arrived
 scripts/port-check.sh --interrupt 4  # the same, with Ctrl-C after 4 seconds
 scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's audio (macOS)
+scripts/duet-listen.sh TAKE --stem STEM [--reading hmm=OTHER.capture.duet] [--moments FILE]
+                                     # hear a take against its readings, moment by moment
+scripts/listen/check.sh              # duet-listen.sh's clips land at their windows
 ```
 
 - **The SoundFont** is the one duet's installer will fetch, pinned in `scripts/soundfont.env`
@@ -825,6 +828,24 @@ scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's 
   synthetic takes (the default), `all` both. Its encoders (`lame`, `flac`, `vorbis-tools`) are
   in the `Brewfile`; the AAC and HE-AAC files use macOS's own `afconvert`. CI uses the committed
   files, so run it only to change them.
+- **`duet-listen.sh`** is for checking a reading by ear.
+  - **What it builds:** clips of the whole take and of each named moment, for the stem's
+    reading and for any `--reading` beside it. Each clip has the take on the left and the
+    reading's sine on the right, raised 6 dB.
+  - **Two versions of each clip:**
+    - legato, as `duet capture compare` plays it, with the sine held through gaps;
+    - gapped, with the sine silent wherever the reading has no note, so a dropped note is
+      heard as a gap.
+  - **Playing them:** a menu plays one clip at a time. `N` plays clip N legato, `Ng` plays it
+    gapped, and `q` quits. While a clip plays, it shows where the clip is in the take and
+    which note is being read.
+  - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
+    the start of the take, with a free-text label. A line starting with `#` is a comment.
+    `scripts/listen/synthetic-melody.moments` is an example.
+  - **Clips of a licence-restricted take are copies of it.** Keep them, and its moments
+    file, out of git.
+  - **`scripts/listen/check.sh`** builds the synthetic corpus melody's clips and checks each
+    one's length against its window. CI does not run it.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.
