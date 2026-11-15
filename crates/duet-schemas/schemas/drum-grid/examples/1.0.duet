@@ -1,0 +1,144 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/drum-grid/1.0.json",
+  "duet": {
+    "kind": "drum-grid",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.2.0"
+    }
+  },
+  "body": {
+    "title": "The Example Groove",
+    "ticks_per_quarter": 480,
+    "tempo_bpm": 96.0,
+    "time_sig": "4/4",
+    "key": "A minor",
+    "time_changes": [
+      {
+        "at": "2.1.0",
+        "time_sig": "3/4"
+      }
+    ],
+    "end": "3.3.0",
+    "grid": "1/8",
+    "channel": 11,
+    "levels": {
+      "ghost": 30,
+      "hit": 80,
+      "accent": 110
+    },
+    "lanes": [
+      {
+        "name": "hh",
+        "key": 42
+      },
+      {
+        "name": "snare",
+        "key": 38
+      },
+      {
+        "name": "kick",
+        "key": 36
+      },
+      {
+        "name": "cajon",
+        "key": 80
+      }
+    ],
+    "bar_steps": [
+      8,
+      6,
+      6
+    ],
+    "vel": {
+      "shape": [
+        4,
+        20
+      ],
+      "dtype": "u8",
+      "data": [
+        80,
+        64,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        0,
+        0,
+        0,
+        0,
+        110,
+        0,
+        0,
+        0,
+        110,
+        30,
+        0,
+        0,
+        110,
+        0,
+        0,
+        0,
+        0,
+        0,
+        110,
+        0,
+        0,
+        0,
+        127,
+        0,
+        0,
+        101,
+        110,
+        0,
+        0,
+        0,
+        110,
+        0,
+        0,
+        0,
+        110,
+        0,
+        110,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        30,
+        0,
+        0,
+        0,
+        30,
+        0,
+        0,
+        0,
+        0,
+        0,
+        30,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  }
+}

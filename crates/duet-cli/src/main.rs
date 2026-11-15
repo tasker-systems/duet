@@ -24,7 +24,7 @@ use crate::abc::AbcCommand;
 use crate::capture::CaptureCommand;
 use crate::config::{Config, Dirs};
 use crate::drums::{DrumsCommand, ReadOptions};
-use crate::io::{AnyFormat, Format, read, song_format, write};
+use crate::io::{AnyFormat, Format, GridForm, Loaded, read_any, song_format, write};
 use crate::song::SongCommand;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
@@ -37,12 +37,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Convert between formats. A .duet is a document, read by its envelope; .mid (.midi,
-    /// .smf) is MIDI and .abc is ABC. No other name means a format: --from and --to name
-    /// notefmt text (text) and a drum grid's text (drums), and standard input is a document
-    /// when it starts with {. A drum grid is read as `duet drums render` reads it, and
-    /// written from a song as `duet drums read` writes it, which needs --grid. Grid to grid
-    /// is a straight copy, or with --grid goes through a song at that step.
+    /// Convert between formats. A .duet is a document, read by its envelope: a song, or a
+    /// drum grid. .mid (.midi, .smf) is MIDI and .abc is ABC. No other name means a format:
+    /// --from and --to name notefmt text (text) and a drum grid's text (drums), and standard
+    /// input is a document when it starts with {. A .duet output keeps what was read: a grid
+    /// is written as a drum-grid document, as is one made from a song with --grid. A grid is
+    /// read as `duet drums render` reads it, and written from a song as `duet drums read`
+    /// writes it, which needs --grid. Grid to grid is a straight copy, or with --grid goes
+    /// through a song at that step.
     Convert {
         /// The file to read, or - for standard input.
         input: PathBuf,
@@ -151,6 +153,10 @@ struct GridFlags {
 /// never disagree. Writing a grid from a song needs `--grid`. A grid written from a grid
 /// with no `--grid` is copied as it is; with `--grid`, it goes through a song at that step.
 /// A grid flag that would do nothing is refused, so a flag is never silently ignored.
+///
+/// A `.duet` output keeps what was read: a grid read (a drum-grid document, or a grid's text
+/// with `--from drums`) is written as a drum-grid document, as is a grid made from a song with
+/// `--grid`; a song is written as a song document. `duet drums render` makes a song of a grid.
 fn convert(
     input: &Path,
     output: &Path,
@@ -159,23 +165,43 @@ fn convert(
     flags: GridFlags,
     config: &Config,
 ) -> Result<()> {
-    let side = |path: &Path, given: Option<AnyFormat>, what: &str| -> Result<AnyFormat> {
-        match given {
-            Some(format) => Ok(format),
-            None => song_format(path, None, Format::Text, what).map(AnyFormat::Song),
-        }
-    };
-    let from = side(input, from, "convert reads")?;
-    let to = side(output, to, "convert writes")?;
     let GridFlags {
         grid,
         track,
         bars,
         snap_levels,
     } = flags;
+    let any_grid_flag = grid.is_some() || track.is_some() || bars.is_some() || snap_levels;
+    let read = match from {
+        Some(AnyFormat::Grid) => Loaded::Grid(drums::read_grid(
+            input,
+            Some(GridForm::Text),
+            "convert reads",
+            config,
+        )?),
+        Some(AnyFormat::Song(format)) => read_any(input, format, "convert reads")?,
+        None => {
+            let format = song_format(input, None, Format::Text, "convert reads")?;
+            read_any(input, format, "convert reads")?
+        }
+    };
+    // The grid form to write, when a grid is written.
+    let to_grid = match to {
+        Some(AnyFormat::Grid) => Some(GridForm::Text),
+        given => {
+            let given = given.and_then(|f| match f {
+                AnyFormat::Song(format) => Some(format),
+                AnyFormat::Grid => None,
+            });
+            let format = song_format(output, given, Format::Text, "convert writes")?;
+            let grid_in = matches!(read, Loaded::Grid(_));
+            (format == Format::Duet && (grid_in || any_grid_flag)).then_some(GridForm::Document)
+        }
+    };
     // Grid to grid with no step named: a straight copy, read and written as `drums snap`
-    // does, so nothing a song cannot hold (an unplayed lane, the grid's own levels) is lost.
-    if let (AnyFormat::Grid, AnyFormat::Grid, None) = (from, to, grid) {
+    // does, so nothing a song cannot hold (an unplayed lane, the grid's own levels, in a
+    // document any velocity) is lost.
+    if let (Loaded::Grid(source), Some(form), None) = (&read, to_grid, grid) {
         let given: Vec<&str> = [(track.is_some(), "--track"), (bars.is_some(), "--bars")]
             .into_iter()
             .filter_map(|(set, flag)| set.then_some(flag))
@@ -188,18 +214,19 @@ fn convert(
                 if given.len() == 1 { "is" } else { "are" },
             );
         }
-        let copy = drums::levels_for(
-            drums::read_grid(input, "convert reads", config)?,
-            snap_levels,
-        )?;
-        return drums::write_grid(&copy, output, "convert writes");
+        let copy = if snap_levels {
+            source.snapped_to_levels()
+        } else {
+            source.clone()
+        };
+        return drums::write_grid(&copy, output, Some(form), "convert writes");
     }
-    let song = match from {
-        AnyFormat::Song(format) => read(input, format, "convert reads")?,
-        AnyFormat::Grid => drums::read_grid(input, "convert reads", config)?.to_song()?,
+    let song = match read {
+        Loaded::Song(song) => song,
+        Loaded::Grid(grid) => grid.to_song()?,
     };
-    match to {
-        AnyFormat::Song(format) => {
+    let Some(form) = to_grid else {
+        if any_grid_flag {
             let given: Vec<&str> = [
                 (grid.is_some(), "--grid"),
                 (track.is_some(), "--track"),
@@ -209,37 +236,38 @@ fn convert(
             .into_iter()
             .filter_map(|(set, flag)| set.then_some(flag))
             .collect();
-            if !given.is_empty() {
-                bail!(
-                    "{} {} for writing a drum grid, and {} is not one; a grid's text is \
-                     written with --to drums",
-                    given.join(", "),
-                    if given.len() == 1 { "is" } else { "are" },
-                    output.display()
-                );
-            }
-            write(&song, output, format, config.end)
+            bail!(
+                "{} {} for writing a drum grid, and {} is not one; a grid is written as a \
+                 .duet, or as its text with --to drums",
+                given.join(", "),
+                if given.len() == 1 { "is" } else { "are" },
+                output.display()
+            );
         }
-        AnyFormat::Grid => {
-            let Some(grid) = grid else {
-                bail!(
-                    "writing a drum grid from a song needs --grid, the step, such as \
-                     --grid 1/16; duet never guesses it"
-                );
-            };
-            let options = ReadOptions {
-                grid,
-                track,
-                bars,
-                snap_levels,
-            };
-            drums::write_grid(
-                &drums::grid_of_song(&song, &options, config)?,
-                output,
-                "convert writes",
-            )
-        }
-    }
+        let format = match to {
+            Some(AnyFormat::Song(format)) => format,
+            _ => song_format(output, None, Format::Text, "convert writes")?,
+        };
+        return write(&song, output, format, config.end);
+    };
+    let Some(grid) = grid else {
+        bail!(
+            "writing a drum grid from a song needs --grid, the step, such as --grid 1/16; duet \
+             never guesses it"
+        );
+    };
+    let options = ReadOptions {
+        grid,
+        track,
+        bars,
+        snap_levels,
+    };
+    drums::write_grid(
+        &drums::grid_of_song(&song, &options, config)?,
+        output,
+        Some(form),
+        "convert writes",
+    )
 }
 
 fn stdout(text: &str) -> Result<()> {

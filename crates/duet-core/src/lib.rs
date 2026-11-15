@@ -27,6 +27,7 @@ mod model;
 mod pitch;
 mod quantize;
 mod schema;
+mod tensor;
 mod text;
 pub mod time;
 
@@ -34,4 +35,5 @@ pub use error::{Error, Result};
 pub use model::{Control, EndRule, KeyChange, Note, Song, TempoChange, TimeChange, Track};
 pub use pitch::Pitch;
 pub use quantize::Grid;
+pub use tensor::{Dtype, Element, Tensor};
 pub use time::{Key, Mode, Position, TimeMap, TimeSig};

@@ -444,6 +444,9 @@ fn example_stream(name: &str) -> String {
 
 /// The example committed at a kind's current version, when blessing writes it.
 fn example(name: &str) -> AnyDocument {
+    if name == "drum-grid" {
+        return AnyDocument::DrumGrid(Document::new(Tool::new("duet", "0.2.0"), example_grid()));
+    }
     if name == "capture-analysis" {
         return AnyDocument::CaptureAnalysis(Document::new(
             Tool::new("duet", "0.2.0"),
@@ -458,6 +461,30 @@ fn example(name: &str) -> AnyDocument {
     doc.from = Some(from);
     doc.statements = vec!["the slur on bar 2 is notation only, and is not carried".into()];
     AnyDocument::Song(doc)
+}
+
+/// A grid that uses every field: a meter change (so bars differ in length), its own levels,
+/// a lane gm does not name, another channel, an end inside its last bar, and velocities off
+/// the text's levels, which only the document holds.
+fn example_grid() -> duet_drums::DrumGrid {
+    let text = "title \"The Example Groove\"\ntpq 480\ntempo 96\ntime 4/4\ntime 3/4 at 2.1.0\n\
+        key A minor\nend 3.3.0\ngrid 1/8\nmap gm\nchannel 11\nvel g 30 x 80 X 110\n\
+        lane cajon 80\n\n[bars 1-3]\n\
+        hh    | x x x x x x x x | x x x x x x | x x x x . . |\n\
+        snare | . . X . . . X g | . . X . . . | . . X . . . |\n\
+        kick  | X . . X X . . . | X . . . X . | X . . . . . |\n\
+        cajon | . g . . . g . . | . . . g . . | . . . . . . |\n";
+    let mut grid = duet_drums::DrumGrid::from_text(text).expect("the example's text reads");
+    let mut rows: Vec<Vec<u8>> = (0..grid.lanes.len())
+        .map(|l| grid.row(l).to_vec())
+        .collect();
+    rows[0][1] = 64;
+    rows[2][0] = 127;
+    rows[2][3] = 101;
+    let bar_steps = grid.bar_steps.clone();
+    grid.set_matrix(bar_steps, rows).expect("a whole matrix");
+    grid.check().expect("the example is a valid grid");
+    grid
 }
 
 /// A melody take's analysis that uses every field: each kind of event, an estimated tempo with
@@ -731,8 +758,8 @@ fn an_unknown_field_inside_a_song_body_is_refused_by_name() {
             "{path}: {err}"
         );
     }
-    doc["duet"]["kind"] = json!("drum-grid");
-    doc["$schema"] = json!(duet_schemas::schema_url("drum-grid", Version::new(1, 0)));
+    doc["duet"]["kind"] = json!("lute-tab");
+    doc["$schema"] = json!(duet_schemas::schema_url("lute-tab", Version::new(1, 0)));
     let err = AnyDocument::read(&doc.to_string()).unwrap_err();
-    assert!(err.to_string().contains("knows no kind drum-grid"), "{err}");
+    assert!(err.to_string().contains("knows no kind lute-tab"), "{err}");
 }

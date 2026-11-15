@@ -8,6 +8,9 @@ pub enum Error {
     /// A value in a [`Song`](crate::Song) is out of range or inconsistent.
     #[error("invalid song: {0}")]
     Invalid(String),
+    /// A [`Tensor`](crate::Tensor)'s shape, number type or numbers do not agree.
+    #[error("invalid tensor: {0}")]
+    Tensor(String),
 }
 
 impl Error {

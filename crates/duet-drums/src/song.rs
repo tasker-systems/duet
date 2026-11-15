@@ -4,7 +4,7 @@ use duet_core::time::beats_from_ticks;
 use duet_core::{Grid, Note, Pitch, Song, Track};
 
 use crate::error::{Error, Result};
-use crate::grid::{Bar, DrumGrid, Lane};
+use crate::grid::{DrumGrid, Lane};
 use crate::lanes::LaneMap;
 
 /// The name of the track a drum grid becomes.
@@ -22,16 +22,17 @@ impl DrumGrid {
         let step = self.step_ticks()?;
         let beats = beats_from_ticks(step, self.ticks_per_quarter);
         let mut track = Track::new(DRUM_TRACK, self.channel);
-        for bar in &self.bars {
-            let shape = self.bar_shape(&map, step, bar.bar)?;
-            for s in 0..bar.steps as usize {
-                for (lane, row) in self.lanes.iter().zip(&bar.vel) {
-                    if row[s] > 0 {
+        for bar in 1..=self.bar_count() {
+            let shape = self.bar_shape(&map, step, bar)?;
+            for s in 0..shape.steps as usize {
+                for (l, lane) in self.lanes.iter().enumerate() {
+                    let vel = self.bar_row(l, bar)[s];
+                    if vel > 0 {
                         track.notes.push(Note::new(
                             map.position(shape.start + s as u64 * step),
                             Pitch::new(lane.key)?,
                             beats,
-                            row[s],
+                            vel,
                         ));
                     }
                 }
@@ -146,21 +147,26 @@ impl DrumGrid {
             })
             .collect();
 
-        for number in 1..=count {
-            let shape = out.bar_shape(&map, step, number)?;
-            out.bars.push(Bar {
-                bar: number,
-                steps: shape.steps,
-                vel: vec![vec![0; shape.steps as usize]; out.lanes.len()],
-            });
-        }
+        let bar_steps = (1..=count)
+            .map(|number| out.bar_shape(&map, step, number).map(|shape| shape.steps))
+            .collect::<Result<Vec<u32>>>()?;
+        let starts: Vec<usize> = bar_steps
+            .iter()
+            .scan(0, |at, steps| {
+                let start = *at;
+                *at += *steps as usize;
+                Some(start)
+            })
+            .collect();
+        let total: usize = bar_steps.iter().map(|s| *s as usize).sum();
+        let mut rows = vec![vec![0; total]; out.lanes.len()];
         for (lane, bar, s, vel, at) in hits {
             let row = out
                 .lanes
                 .iter()
                 .position(|l| l.name == lane.name)
                 .expect("every hit's lane is among the grid's lanes");
-            let cell = &mut out.bars[bar as usize - 1].vel[row][s];
+            let cell = &mut rows[row][starts[bar as usize - 1] + s];
             if *cell != 0 {
                 return Err(Error::invalid(format!(
                     "two hits on {} at {at} (bar {bar}, step {}); a cell holds one hit",
@@ -170,6 +176,7 @@ impl DrumGrid {
             }
             *cell = vel;
         }
+        out.set_matrix(bar_steps, rows)?;
         out.check()?;
         Ok(out)
     }

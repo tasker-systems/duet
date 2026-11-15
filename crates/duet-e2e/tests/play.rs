@@ -177,16 +177,17 @@ fn a_song_document_on_standard_input_is_played() {
 fn play_refuses_what_is_not_a_song_by_name() {
     let dir = scratch("play-kind");
     let grid = dir.join("beat.duet");
-    std::fs::write(
-        &grid,
-        "{\"duet\":{\"kind\":\"drum-grid\",\"version\":\"1.0\",\"tool\":{\"name\":\"duet\",\"version\":\"0\"}},\"body\":{}}\n",
-    )
-    .expect("write");
+    let beat = root().join("samples/groove.drums");
+    ok(
+        &duet(&dir, &["drums", "snap", s(&beat), s(&grid)]),
+        "a drum-grid document",
+    );
     let out = duet(&dir, &["play", s(&grid)]);
     assert!(!out.status.success());
     let err = stderr(&out);
     assert!(
-        err.contains("beat.duet") && err.contains("drum-grid"),
+        err.contains("beat.duet is a drum-grid document, and duet play reads a song")
+            && err.contains("duet drums render makes a song of one"),
         "{err}"
     );
     assert!(!err.contains("SoundFont"), "{err}");

@@ -2,6 +2,7 @@
 
 use duet_capture::Analysis;
 use duet_core::Song;
+use duet_drums::DrumGrid;
 use duet_dsp::PerformanceHead;
 use serde_json::Value;
 
@@ -51,6 +52,7 @@ const fn stream<K: StreamKind>() -> KindInfo {
 /// Every kind this build reads and writes.
 pub const KINDS: &[KindInfo] = &[
     document::<Song>(),
+    document::<DrumGrid>(),
     document::<Analysis>(),
     stream::<PerformanceHead>(),
 ];
@@ -75,6 +77,7 @@ pub fn kind(name: &str) -> Option<&'static KindInfo> {
 #[non_exhaustive]
 pub enum AnyDocument {
     Song(Document<Song>),
+    DrumGrid(Document<DrumGrid>),
     CaptureAnalysis(Document<Analysis>),
 }
 
@@ -90,6 +93,7 @@ impl AnyDocument {
         let envelope = read_envelope(text)?;
         match kind(&envelope.kind) {
             Some(info) if info.name == Song::NAME => Document::read(text).map(Self::Song),
+            Some(info) if info.name == DrumGrid::NAME => Document::read(text).map(Self::DrumGrid),
             Some(info) if info.name == Analysis::NAME => {
                 Document::read(text).map(Self::CaptureAnalysis)
             }
@@ -113,6 +117,7 @@ impl AnyDocument {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::Song(_) => Song::NAME,
+            Self::DrumGrid(_) => DrumGrid::NAME,
             Self::CaptureAnalysis(_) => Analysis::NAME,
         }
     }
@@ -125,6 +130,7 @@ impl AnyDocument {
     pub fn write(&self) -> Result<String> {
         match self {
             Self::Song(doc) => doc.write(),
+            Self::DrumGrid(doc) => doc.write(),
             Self::CaptureAnalysis(doc) => doc.write(),
         }
     }

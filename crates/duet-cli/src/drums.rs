@@ -1,8 +1,8 @@
-//! `duet drums`: drum grids, as their text.
+//! `duet drums`: drum grids, as drum-grid documents (`.duet`) or as their text.
 //!
-//! Until drum-grid documents exist, a grid is read and written as its text whatever the file is
-//! named: the grid side of each command means a grid. A name that is something else is refused
-//! ([`grid_path`]), and a `.duet` is read by its envelope and refused naming its kind.
+//! The grid side of each command means a grid: a `.duet` is a drum-grid document, read by its
+//! envelope, and any other name is the grid's text. A name that is something else is refused
+//! ([`grid_form`]). A document holds any velocity; the text holds only its levels.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -14,15 +14,17 @@ use duet_drums::DrumGrid;
 
 use crate::config::Config;
 use crate::io::{
-    Format, grid_path, read, read_grid_text, same_file, song_format, with_end, write, write_bytes,
+    Format, GridForm, GridSource, grid_document, grid_form, read, read_grid_source, same_file,
+    song_format, with_end, write, write_bytes,
 };
 
 #[derive(Subcommand)]
 pub enum DrumsCommand {
-    /// Render a drum grid's text as a song: a document (.duet), MIDI (.mid or .midi) or ABC
+    /// Render a drum grid as a song: a song document (.duet), MIDI (.mid or .midi) or ABC
     /// (.abc) by the output's name, or notefmt text with --to text or on standard output.
     Render {
-        /// The grid's text, or - for standard input.
+        /// The grid: a drum-grid document (.duet), the grid's text by any other name, or - for
+        /// standard input (a document if it starts with {, else the grid's text).
         input: PathBuf,
         /// The song to write, or - for notefmt text on standard output. Must not be the input.
         output: PathBuf,
@@ -36,7 +38,8 @@ pub enum DrumsCommand {
         /// The song to read (a .duet document, MIDI or ABC by its name, or notefmt text with
         /// --from text), or - for standard input: a document if it starts with {, else MIDI.
         input: PathBuf,
-        /// The grid's text to write, or - for standard output. Must not be the input.
+        /// The grid to write: a drum-grid document (.duet), which keeps any velocity, the grid's
+        /// text by any other name, or - for its text on standard output. Must not be the input.
         output: PathBuf,
         /// The step, such as 1/16 for sixteenths or 1/8t for triplet eighths.
         #[arg(long)]
@@ -51,19 +54,19 @@ pub enum DrumsCommand {
         #[arg(long)]
         bars: Option<u32>,
         /// Snap each velocity to the nearest of the text's levels (g, x, X) as the track is
-        /// read. Without it, a velocity that is not a level is refused, since the text holds
-        /// only its levels.
+        /// read. Without it, every velocity is kept: a document holds it, and the text refuses
+        /// one that is not a level.
         #[arg(long)]
         snap_levels: bool,
         #[arg(long, value_enum)]
         from: Option<Format>,
     },
-    /// Write a copy of a drum grid's text with every velocity snapped to the nearest of the
-    /// text's levels (g, x, X). The input is never changed.
+    /// Write a copy of a drum grid with every velocity snapped to the nearest of the text's
+    /// levels (g, x, X). The input is never changed.
     Snap {
-        /// The grid's text to read, or - for standard input.
+        /// The grid to read, as for `render`.
         input: PathBuf,
-        /// The grid's text to write, or - for standard output. Must not be the input.
+        /// The grid to write, as for `read`. Must not be the input.
         output: PathBuf,
     },
     /// List the lanes of the gm map, as config extends or changes it: each name, its
@@ -71,24 +74,46 @@ pub enum DrumsCommand {
     Lanes,
 }
 
-/// Reads a grid's text. `map gm` means General MIDI with only the lanes and aliases config
-/// adds, and anything config sets that does not apply is said. `duet convert` and the
-/// `duet drums` commands all read grids here.
-pub fn read_grid(path: &Path, what: &str, config: &Config) -> Result<DrumGrid> {
-    grid_path(path, what, false)?;
-    let text = read_grid_text(path, what)?;
-    for notice in &config.text_notices {
-        eprintln!("duet: {notice}");
+/// Reads a grid, in `form` or else the form its path gives ([`grid_form`]). As text,
+/// `map gm` means General MIDI with only the lanes and aliases config adds, and anything config
+/// sets that does not apply is said. `duet convert` and the `duet drums` commands all read
+/// grids here.
+pub fn read_grid(
+    path: &Path,
+    form: Option<GridForm>,
+    what: &str,
+    config: &Config,
+) -> Result<DrumGrid> {
+    let form = match form {
+        Some(form) => form,
+        None => grid_form(path, what)?,
+    };
+    match read_grid_source(path, form, what)? {
+        GridSource::Grid(grid) => Ok(*grid),
+        GridSource::Text(text) => {
+            for notice in &config.text_notices {
+                eprintln!("duet: {notice}");
+            }
+            Ok(DrumGrid::from_text_in(&text, &config.text_lanes)?)
+        }
     }
-    Ok(DrumGrid::from_text_in(&text, &config.text_lanes)?)
 }
 
-/// Writes a grid's text, refusing a velocity off the text's levels. `duet convert` and the
-/// `duet drums` commands all write grids here.
-pub fn write_grid(grid: &DrumGrid, path: &Path, what: &str) -> Result<()> {
-    grid_path(path, what, true)?;
-    let grid = levels_for(grid.clone(), false)?;
-    write_bytes(path, grid.to_text()?.as_bytes())
+/// Writes a grid, in `form` or else the form its path gives: a drum-grid document, which holds
+/// any velocity, or the grid's text, which refuses a velocity off its levels. `duet convert`
+/// and the `duet drums` commands all write grids here.
+pub fn write_grid(grid: &DrumGrid, path: &Path, form: Option<GridForm>, what: &str) -> Result<()> {
+    let form = match form {
+        Some(form) => form,
+        None => grid_form(path, what)?,
+    };
+    match form {
+        GridForm::Document => write_bytes(path, grid_document(grid)?.as_bytes()),
+        GridForm::Text => {
+            let grid = levels_for(grid.clone(), false)?;
+            write_bytes(path, grid.to_text()?.as_bytes())
+        }
+    }
 }
 
 /// How to read a song's drum track into a grid: `duet drums read`'s flags, which
@@ -123,8 +148,7 @@ pub fn grid_of_song(song: &Song, options: &ReadOptions, config: &Config) -> Resu
 }
 
 /// The grid ready to write as text: snapped to the text levels when asked, and otherwise
-/// refused when a velocity is off them. Nothing snaps unless asked. Reading a drum track and
-/// copying a grid both decide here.
+/// refused when a velocity is off them. Nothing snaps unless asked.
 pub fn levels_for(grid: DrumGrid, snap_levels: bool) -> Result<DrumGrid> {
     if snap_levels {
         return Ok(grid.snapped_to_levels());
@@ -132,7 +156,8 @@ pub fn levels_for(grid: DrumGrid, snap_levels: bool) -> Result<DrumGrid> {
     if let Some((lane, bar, step, vel)) = grid.first_off_level() {
         bail!(
             "{lane}, bar {bar}, step {step}: velocity {vel} is not one of the drum grid \
-             text's levels; pass --snap-levels to snap velocities to the levels"
+             text's levels; pass --snap-levels to snap velocities to the levels, or write a \
+             drum-grid document (.duet), which keeps them"
         );
     }
     Ok(grid)
@@ -154,7 +179,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
             refuse_overwrite(&input, &output, "render")?;
             let to = song_format(&output, to, Format::Text, "render writes")?;
             write(
-                &read_grid(&input, "render reads", config)?.to_song()?,
+                &read_grid(&input, None, "render reads", config)?.to_song()?,
                 &output,
                 to,
                 config.end,
@@ -171,7 +196,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
         } => {
             refuse_overwrite(&input, &output, "read")?;
             let from = song_format(&input, from, Format::Midi, "read reads")?;
-            grid_path(&output, "read writes", true)?;
+            let form = grid_form(&output, "read writes")?;
             let options = ReadOptions {
                 grid,
                 track,
@@ -179,16 +204,16 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
                 snap_levels,
             };
             let drums = grid_of_song(&read(&input, from, "read reads")?, &options, config)?;
-            write_grid(&drums, &output, "read writes")
+            write_grid(&drums, &output, Some(form), "read writes")
         }
         DrumsCommand::Snap { input, output } => {
             refuse_overwrite(&input, &output, "snap")?;
-            grid_path(&output, "snap writes", true)?;
-            let grid = read_grid(&input, "snap reads", config)?;
+            let form = grid_form(&output, "snap writes")?;
+            let grid = read_grid(&input, None, "snap reads", config)?;
             let snapped = grid.snapped_to_levels();
             let moved = moved_velocities(&grid, &snapped);
             eprintln!("duet: snapped {moved} velocities to the levels");
-            write_grid(&snapped, &output, "snap writes")
+            write_grid(&snapped, &output, Some(form), "snap writes")
         }
         DrumsCommand::Lanes => {
             let map = &config.lanes;
@@ -216,10 +241,10 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
 
 /// How many velocities differ between a grid and its snapped copy.
 pub fn moved_velocities(a: &DrumGrid, b: &DrumGrid) -> usize {
-    a.bars
+    a.vel
+        .data()
         .iter()
-        .zip(&b.bars)
-        .flat_map(|(x, y)| x.vel.iter().flatten().zip(y.vel.iter().flatten()))
+        .zip(b.vel.data())
         .filter(|(x, y)| x != y)
         .count()
 }

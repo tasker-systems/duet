@@ -1,0 +1,275 @@
+{
+  "$defs": {
+    "DrumGrid": {
+      "additionalProperties": false,
+      "description": "A drum part as a matrix: [`DrumGrid::vel`] is one lanes × steps tensor for the whole\ngrid, whose row for a lane is every step of every bar in order, and 0 means no hit.\n[`DrumGrid::bar_steps`] gives each bar's step count, from bar 1, so bar lines are read\nfrom it.\n\nThe conductor (resolution, tempo, meter, key and their changes) means exactly what\nthe same fields of a [`Song`] mean. Every bar must be a whole number of steps of\n[`DrumGrid::grid`], so each column is one step wide.",
+      "properties": {
+        "bar_steps": {
+          "description": "How many steps each bar holds, from bar 1, with none left out. Bars differ when the\nmeter changes. The sum is the number of columns of [`DrumGrid::vel`].",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "channel": {
+          "default": 10,
+          "description": "The MIDI channel the lanes play on, 1 to 16; 10 is General MIDI's drum channel.",
+          "format": "uint8",
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "end": {
+          "$ref": "#/$defs/Position",
+          "description": "Where the grid stops: a position on a step of its last bar, with no hit at or\nafter it, or the bar line that ends that bar. `None` means that bar line, and is\nthe form an end on it takes once [normalized](DrumGrid::normalize) or read; the\ntext form always states the end either way."
+        },
+        "grid": {
+          "$ref": "#/$defs/Grid",
+          "description": "One step, such as `1/16`."
+        },
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "key_changes": {
+          "items": {
+            "$ref": "#/$defs/KeyChange"
+          },
+          "type": "array"
+        },
+        "lanes": {
+          "description": "The rows, top to bottom.",
+          "items": {
+            "$ref": "#/$defs/Lane"
+          },
+          "type": "array"
+        },
+        "levels": {
+          "$ref": "#/$defs/Levels",
+          "description": "The velocities the text form's cells stand for."
+        },
+        "tempo_bpm": {
+          "format": "double",
+          "type": "number"
+        },
+        "tempo_changes": {
+          "items": {
+            "$ref": "#/$defs/TempoChange"
+          },
+          "type": "array"
+        },
+        "ticks_per_quarter": {
+          "format": "uint16",
+          "maximum": 32767,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "time_changes": {
+          "items": {
+            "$ref": "#/$defs/TimeChange"
+          },
+          "type": "array"
+        },
+        "time_sig": {
+          "$ref": "#/$defs/TimeSig"
+        },
+        "title": {
+          "type": "string"
+        },
+        "vel": {
+          "additionalProperties": false,
+          "description": "The velocities: lanes × steps, row-major, so lane `l` at step `s` of the whole grid is\n`data[l * steps + s]`. 0 is no hit.",
+          "properties": {
+            "data": {
+              "items": {
+                "maximum": 127,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "dtype": {
+              "const": "u8"
+            },
+            "shape": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "shape",
+            "dtype",
+            "data"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "ticks_per_quarter",
+        "tempo_bpm",
+        "time_sig",
+        "grid",
+        "lanes",
+        "bar_steps",
+        "vel"
+      ],
+      "type": "object"
+    },
+    "Grid": {
+      "description": "A quantize grid such as 1/16, or 1/8t for triplet eighths.",
+      "pattern": "^\\s*1/0*[1-9][0-9]*t?\\s*$",
+      "type": "string"
+    },
+    "Key": {
+      "description": "A key such as D minor, Bb major or D dorian, with at most 7 sharps or flats.",
+      "pattern": "^\\s*[A-Ga-g][#b]*(\\s*([Mm]|([Mm][Aa][Jj]|[Ii][Oo][Nn]|[Mm][Ii][Nn]|[Aa][Ee][Oo]|[Dd][Oo][Rr]|[Pp][Hh][Rr]|[Ll][Yy][Dd]|[Mm][Ii][Xx]|[Ll][Oo][Cc]).*))?\\s*$",
+      "type": "string"
+    },
+    "KeyChange": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "key": {
+          "$ref": "#/$defs/Key"
+        }
+      },
+      "required": [
+        "at",
+        "key"
+      ],
+      "type": "object"
+    },
+    "Lane": {
+      "additionalProperties": false,
+      "description": "One row of the grid.",
+      "properties": {
+        "key": {
+          "description": "The MIDI key it plays.",
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "Lowercase letters, digits and hyphens.",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "key"
+      ],
+      "type": "object"
+    },
+    "Levels": {
+      "additionalProperties": false,
+      "description": "The velocities of the text form's three hit cells: `g` ghost, `x` hit and `X` accent.",
+      "properties": {
+        "accent": {
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "ghost": {
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "hit": {
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ghost",
+        "hit",
+        "accent"
+      ],
+      "type": "object"
+    },
+    "Position": {
+      "description": "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the song's ticks. bar.beat alone is tick 0.",
+      "pattern": "^0*[1-9][0-9]*\\.0*[1-9][0-9]*(\\.[0-9]+)?$",
+      "type": "string"
+    },
+    "TempoChange": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "bpm": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "bpm"
+      ],
+      "type": "object"
+    },
+    "TimeChange": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "time_sig": {
+          "$ref": "#/$defs/TimeSig"
+        }
+      },
+      "required": [
+        "at",
+        "time_sig"
+      ],
+      "type": "object"
+    },
+    "TimeSig": {
+      "description": "A time signature such as 4/4 or 6/8: the denominator is 1, 2, 4, 8, 16, 32 or 64.",
+      "pattern": "^\\s*0*[1-9][0-9]*\\s*/\\s*0*(1|2|4|8|16|32|64)\\s*$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/drum-grid/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A .duet document of kind drum-grid, at schema version 1.0.",
+  "properties": {
+    "$schema": {
+      "const": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/drum-grid/1.0.json"
+    },
+    "body": {
+      "$ref": "#/$defs/DrumGrid"
+    },
+    "duet": {
+      "$ref": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",
+      "properties": {
+        "kind": {
+          "const": "drum-grid"
+        },
+        "version": {
+          "const": "1.0"
+        }
+      }
+    }
+  },
+  "required": [
+    "duet",
+    "body"
+  ],
+  "title": "duet drum-grid 1.0",
+  "type": "object"
+}

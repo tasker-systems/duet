@@ -214,3 +214,156 @@ fn a_named_step_re_steps_a_grid_and_track_or_bars_need_one() {
     }
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+/// A drum-grid document is the exact form: copied to a document it is unchanged, whatever its
+/// velocities; to text it is the text `drums snap` writes when its velocities are levels, and
+/// refused when they are not, until `--snap-levels` snaps them as `drums snap` does.
+#[test]
+fn a_grid_document_copies_exactly_and_snaps_only_when_asked() {
+    let dir = scratch("copy-documents");
+    let keeps = dir.join("keeps.drums");
+    std::fs::write(&keeps, KEEPS).expect("write");
+    let copy = |from: &Path, to: &Path, extra: &[&str]| {
+        let mut args = vec!["convert", s(from), s(to)];
+        args.extend(extra);
+        duet(&dir, &args)
+    };
+
+    // Text to a document and back: what `drums snap` writes, the empty lane and levels kept.
+    let doc = dir.join("keeps.duet");
+    ok(
+        &copy(&keeps, &doc, &["--from", "drums"]),
+        "text to a document",
+    );
+    let snapped = dir.join("snapped.duet");
+    ok(
+        &duet(&dir, &["drums", "snap", s(&keeps), s(&snapped)]),
+        "drums snap",
+    );
+    assert!(read(&doc) == read(&snapped), "convert and drums snap agree");
+    let back = dir.join("back.drums");
+    ok(&copy(&doc, &back, &["--to", "drums"]), "a document to text");
+    let canon = dir.join("canon.drums");
+    ok(
+        &duet(&dir, &["drums", "snap", s(&keeps), s(&canon)]),
+        "canon",
+    );
+    assert!(read(&back) == read(&canon), "through a document");
+
+    // Velocities off the levels: drums read keeps them in a document, which copies unchanged.
+    let take = dir.join("take.notes");
+    std::fs::write(
+        &take,
+        "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n",
+    )
+    .expect("write");
+    let exact = dir.join("take.duet");
+    ok(
+        &duet(
+            &dir,
+            &[
+                "drums",
+                "read",
+                s(&take),
+                s(&exact),
+                "--grid",
+                "1/16",
+                "--from",
+                "text",
+            ],
+        ),
+        "drums read to a document",
+    );
+    let held = String::from_utf8(read(&exact)).expect("utf-8");
+    assert!(
+        held.contains("100") && held.contains("64"),
+        "kept exactly: {held}"
+    );
+    let again = dir.join("again.duet");
+    let o = copy(&exact, &again, &[]);
+    ok(&o, "a document to a document");
+    assert!(o.stderr.is_empty(), "a copy says nothing");
+    assert!(read(&again) == read(&exact), "a document copies unchanged");
+
+    let text = dir.join("take.drums");
+    let o = copy(&exact, &text, &["--to", "drums"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !o.status.success() && err.contains("is not one of the drum grid text's levels"),
+        "{err}"
+    );
+    assert!(
+        err.contains("--snap-levels") && err.contains(".duet"),
+        "{err}"
+    );
+    assert!(!text.exists(), "nothing written");
+    ok(
+        &copy(&exact, &text, &["--to", "drums", "--snap-levels"]),
+        "snapped",
+    );
+    let by_snap = dir.join("by-snap.drums");
+    ok(
+        &duet(&dir, &["drums", "snap", s(&exact), s(&by_snap)]),
+        "drums snap",
+    );
+    assert!(
+        read(&text) == read(&by_snap),
+        "--snap-levels snaps as drums snap does"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// An off-level velocity survives grid → .duet → MIDI → grid exactly, by the drum commands.
+#[test]
+fn an_off_level_velocity_survives_a_document_and_midi_exactly() {
+    let dir = scratch("copy-midi");
+    let take = dir.join("take.notes");
+    std::fs::write(
+        &take,
+        "[track \"Kit\" ch10]\n1.1.0 C2 0.25 101\n1.2.0 D2 0.25 7\n1.3.0 F#2 0.25 127\n",
+    )
+    .expect("write");
+    let doc = dir.join("take.duet");
+    ok(
+        &duet(
+            &dir,
+            &[
+                "drums",
+                "read",
+                s(&take),
+                s(&doc),
+                "--grid",
+                "1/16",
+                "--from",
+                "text",
+            ],
+        ),
+        "a document",
+    );
+    let mid = dir.join("take.mid");
+    ok(
+        &duet(&dir, &["drums", "render", s(&doc), s(&mid)]),
+        "to MIDI",
+    );
+    let back = dir.join("back.duet");
+    ok(
+        &duet(
+            &dir,
+            &["drums", "read", s(&mid), s(&back), "--grid", "1/16"],
+        ),
+        "back",
+    );
+    assert!(
+        read(&back) == read(&doc),
+        "the same document, every velocity exact"
+    );
+    let body: serde_json::Value = serde_json::from_slice(&read(&back)).expect("json");
+    let data = body["body"]["vel"]["data"].as_array().expect("data");
+    for v in [101, 7, 127] {
+        assert!(
+            data.contains(&serde_json::Value::from(v)),
+            "{v} kept: {body}"
+        );
+    }
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
