@@ -16,6 +16,9 @@
 //!    gives the measured beat period notes are placed by. Its phase is the one, among grids
 //!    anchored on each of the [`ANCHOR_CANDIDATES`] strongest onsets, that puts the most onset
 //!    strength on the grid, so a loud stray or syncopated onset cannot pull it off the beat.
+//!    With a tempo given, the pulse does not set the step: the grid's step is the given beat,
+//!    or its half, quarter or double, whichever is nearest the pulse ([`GIVEN_LEVELS`]), and
+//!    only its phase is fitted.
 //! 3. **The meter.** Each meter is an accent template on that grid: the downbeat 1, a middle
 //!    beat 0.5, other beats 0.25, subdivisions 0. A hypothesis is a meter, a number of grid
 //!    steps to its felt beat (1, 2 or 4 in a simple meter; 3 or 6 in a compound one, whose
@@ -26,7 +29,8 @@
 //!    favours, stated with its own, weak, fit.
 //! 4. **The downbeat** is the first grid step the winning rotation puts on beat 1, or, when the
 //!    meter evidence is weak, the first on-grid onset at least [`STRONG_ONSET`] of the loudest
-//!    on-grid onset.
+//!    on-grid onset. A reading that would put the downbeat after the last onset is no reading
+//!    of the take, and is passed over.
 //!
 //! Confidence is in 0..=1, and below [`WEAK_CONFIDENCE`] an estimate is weak. A tempo's is the
 //! strength-weighted share of onsets on its grid. A meter's is its accent fit, and a downbeat's
@@ -58,6 +62,10 @@ const PULSE_PEAK_SHARE: f64 = 0.5;
 /// beat makes a poor anchor, so the anchor kept is the one whose grid holds the most onset
 /// strength; this many loud off-beat onsets would be needed to crowd out every on-beat one.
 const ANCHOR_CANDIDATES: usize = 16;
+/// The grid steps a given tempo's grid may take, as shares of its beat: the beat itself, its
+/// half and quarter, and its double. The one nearest the onsets' pulse is taken, so a take in
+/// eighths is read on an eighth grid, but the tempo, not the pulse, sets the step.
+const GIVEN_LEVELS: [f64; 4] = [0.25, 0.5, 1.0, 2.0];
 /// How far from a grid step, as a share of the step, an onset may sit and be on it.
 /// Task 9 tunes it.
 const GRID_TOLERANCE: f64 = 0.2;
@@ -219,7 +227,10 @@ pub fn estimate(onsets: &[Event], rate: u32, given: &Given) -> Result<Timing> {
     let onsets = relative(onsets);
     let rate = f64::from(rate);
     let grid = if onsets.len() >= MIN_ONSETS {
-        pulse(&onsets, rate).map(|period| fit_grid(&onsets, period))
+        pulse(&onsets, rate).map(|pulse| match given.tempo_bpm {
+            Some(bpm) => given_grid(&onsets, 60.0 * rate / bpm, pulse),
+            None => fit_grid(&onsets, pulse),
+        })
     } else {
         None
     };
@@ -286,14 +297,19 @@ fn read_meter(onsets: &[Onset], grid: &Grid, rate: f64, given: &Given) -> (Hypot
         })
         .map(|(meter, steps)| hypothesis(meter, steps, &accents, grid, rate, given.tempo_bpm))
         .collect();
+    let last = onsets.last().map_or(0.0, |o| o.frame);
     let strong = hypotheses
         .iter()
         .filter(|h| h.fit >= f64::from(WEAK_CONFIDENCE))
-        .max_by(|a, b| (a.fit * a.prior).total_cmp(&(b.fit * b.prior)));
-    if let Some(h) = strong {
-        // Accent `rotation` is the take's first step on beat 1.
-        let step = first + h.rotation as i64;
-        let downbeat = onset_at(onsets, grid, step).unwrap_or_else(|| grid.frame(step));
+        .filter_map(|h| {
+            // Accent `rotation` is the take's first step on beat 1.
+            let step = first + h.rotation as i64;
+            let downbeat = onset_at(onsets, grid, step).unwrap_or_else(|| grid.frame(step));
+            // A bar 1 after every note is no reading of the take's accents.
+            (downbeat <= last).then_some((h, downbeat))
+        })
+        .max_by(|a, b| (a.0.fit * a.0.prior).total_cmp(&(b.0.fit * b.0.prior)));
+    if let Some((h, downbeat)) = strong {
         return (*h, downbeat);
     }
     let fallback = given.meter.unwrap_or_default();
@@ -401,6 +417,49 @@ fn pulse(onsets: &[Onset], rate: f64) -> Option<f64> {
         c >= PULSE_PEAK_SHARE * highest && c >= correlation[i - 1] && c > correlation[i + 1]
     })?;
     Some((MIN_PULSE_SECS + peak as f64 * LAG_STEP_SECS) * rate)
+}
+
+/// The grid at a given tempo, whose beat is `beat` frames: a step of that beat, or of its half,
+/// quarter or double, whichever is nearest `pulse` ([`GIVEN_LEVELS`]). Only its phase is fitted:
+/// of the grids anchored on each of the [`ANCHOR_CANDIDATES`] strongest onsets, the one with the
+/// most onset strength on it, moved to the mean phase of the onsets on it.
+fn given_grid(onsets: &[Onset], beat: f64, pulse: f64) -> Grid {
+    let off = |period: f64| (period / pulse).log2().abs();
+    let period = GIVEN_LEVELS
+        .iter()
+        .map(|level| beat * level)
+        .fold(beat, |best, p| if off(p) < off(best) { p } else { best });
+    let mut by_strength: Vec<usize> = (0..onsets.len()).collect();
+    by_strength.sort_by(|&a, &b| onsets[b].strength.total_cmp(&onsets[a].strength));
+    let anchored = |&anchor: &usize| {
+        let rough = Grid {
+            origin: onsets[anchor].frame,
+            period,
+        };
+        let phases: Vec<f64> = onsets
+            .iter()
+            .filter_map(|o| {
+                let (step, off) = rough.step(o.frame);
+                (off <= GRID_TOLERANCE).then_some(o.frame - step as f64 * period)
+            })
+            .collect();
+        Grid {
+            origin: phases.iter().sum::<f64>() / phases.len() as f64,
+            period,
+        }
+    };
+    by_strength
+        .iter()
+        .take(ANCHOR_CANDIDATES)
+        .map(anchored)
+        .fold(None, |best: Option<Grid>, grid| match best {
+            Some(b) if on_grid_share(onsets, &b) >= on_grid_share(onsets, &grid) => Some(b),
+            _ => Some(grid),
+        })
+        .unwrap_or(Grid {
+            origin: onsets.first().map_or(0.0, |o| o.frame),
+            period,
+        })
 }
 
 /// The grid through the onsets at about `period` frames a step: of the grids anchored on each
@@ -1273,6 +1332,72 @@ mod tests {
             assert_eq!(pair[1].beat, pair[0].beat + 1);
             assert!((pair[1].secs - pair[0].secs - 0.5).abs() < 0.01, "{pair:?}");
         }
+    }
+
+    /// A phrase at 120 a minute from [`LEAD`], with the run of the take that showed the fault:
+    /// C D E F as quarters, a run of four 80 ms notes (G F E D), then C E G C, C D, and E held,
+    /// each note attacked as the last ends, so the run moves every later note off the first
+    /// notes' beat by 0.32 s.
+    fn a_run_inside_a_phrase() -> Vec<f32> {
+        let midis_and_lengths = [
+            (60, 0.5),
+            (62, 0.5),
+            (64, 0.5),
+            (65, 0.5),
+            (67, 0.08),
+            (65, 0.08),
+            (64, 0.08),
+            (62, 0.08),
+            (60, 0.5),
+            (64, 0.5),
+            (67, 0.5),
+            (72, 0.5),
+            (60, 0.5),
+            (62, 0.5),
+            (64, 1.0),
+        ];
+        let notes: Vec<(f64, f64)> = midis_and_lengths
+            .iter()
+            .map(|&(midi, secs)| (440.0 * ((f64::from(midi) - 69.0) / 12.0).exp2(), secs))
+            .collect();
+        let mut signal = synth::silence(RATE, LEAD);
+        signal.extend(synth::note_sequence(RATE, &notes, 4, 0.5));
+        signal.extend(synth::silence(RATE, 1.0));
+        signal
+    }
+
+    /// Whether the timing's downbeat lies between the first and last of `onsets`.
+    fn downbeat_within(timing: &Timing, onsets: &[Event]) -> bool {
+        let frames = frames(onsets);
+        let downbeat = *timing.downbeat_frame.value();
+        frames.first().is_some_and(|&f| downbeat >= f)
+            && frames.last().is_some_and(|&l| downbeat <= l)
+    }
+
+    #[test]
+    fn a_given_tempo_puts_the_downbeat_among_a_runs_onsets() {
+        let onsets = onsets_of(&a_run_inside_a_phrase());
+        let given = Given {
+            tempo_bpm: Some(120.0),
+            ..Given::default()
+        };
+        let timing = estimate(&onsets, RATE, &given).unwrap();
+        assert!(
+            downbeat_within(&timing, &onsets),
+            "{timing:?} {:?}",
+            frames(&onsets)
+        );
+    }
+
+    #[test]
+    fn an_estimated_tempo_puts_the_downbeat_among_a_runs_onsets() {
+        let onsets = onsets_of(&a_run_inside_a_phrase());
+        let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
+        assert!(
+            downbeat_within(&timing, &onsets),
+            "{timing:?} {:?}",
+            frames(&onsets)
+        );
     }
 
     #[test]
