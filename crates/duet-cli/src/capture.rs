@@ -20,12 +20,13 @@ use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
     A440_CENTS, ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono,
-    Performance, PerformanceFrames, PerformanceHead, Prepare, Quantized, ReadNote, Source, Stage,
-    a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart, quantize_offsets, read,
+    NoteModel, Performance, PerformanceFrames, PerformanceHead, Prepare, Quantized, ReadNote,
+    Source, Stage, a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart,
+    quantize_offsets, read,
 };
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 use duet_schemas::{Document, Stream};
@@ -70,6 +71,11 @@ pub struct TakeArgs {
     /// exactly. Without it, the tuning is estimated from the take and stated.
     #[arg(long, allow_hyphen_values = true)]
     tuning: Option<TuningArg>,
+    /// What chooses a melody's notes from its performance: `rules`, the segmentation rules
+    /// (the default), or `hmm`, the note HMM, with its cost per note stated. The reader is
+    /// written in STEM.capture.duet either way.
+    #[arg(long, value_enum)]
+    reader: Option<ReaderArg>,
     /// The step the score is quantized to, such as 1/16 (the default) or 1/8t. Where two
     /// notes, or two hits on one lane, would share a step, the step is halved, down to 1/64,
     /// and what still shares one is merged; each is stated. The .duet is never quantized.
@@ -82,6 +88,13 @@ pub struct TakeArgs {
     /// Without it, the input's name without its extension, beside it.
     #[arg(short, long, value_name = "STEM")]
     output: Option<PathBuf>,
+}
+
+/// A melody's reader, as `--reader` names it.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ReaderArg {
+    Rules,
+    Hmm,
 }
 
 /// Which kind of take is captured.
@@ -115,7 +128,10 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     let (performance, reading) = match kept {
         Some((file, frames)) => {
             let given = args.tuning.map(|t| t.a4_cents);
-            let reading = frames.map(|frames| read(&frames, &events, given));
+            let reading = frames.map(|frames| match args.reader.unwrap_or(ReaderArg::Rules) {
+                ReaderArg::Rules => read(&frames, &events, given),
+                ReaderArg::Hmm => NoteModel::default().read(&frames, &events, given),
+            });
             if let Some(reading) = &reading {
                 events.extend(reading.notes.iter().map(ReadNote::event));
                 events.sort_by_key(event_frame);
@@ -168,6 +184,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     let mut said = statement::timing(&timing, ANALYSIS_RATE);
     if let Some(reading) = &reading {
         said.extend(statement::tuning(&reading.tuning));
+        said.extend(statement::reader(reading));
         said.push(statement::notes_read(reading));
     }
     said.extend(statement::key(captured.analysis.key.as_ref()));
@@ -353,6 +370,9 @@ fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
             }
             if args.tuning.is_some() {
                 bail!("--tuning is for a melody take; a rhythm take's hits have no pitch");
+            }
+            if args.reader.is_some() {
+                bail!("--reader is for a melody take; a rhythm take's hits are not read as notes");
             }
         }
     }

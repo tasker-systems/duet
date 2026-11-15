@@ -56,6 +56,7 @@
 mod error;
 mod event;
 mod hits;
+mod hmm;
 mod key;
 mod notes;
 mod onset;
@@ -72,6 +73,9 @@ mod timing;
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
 pub use hits::{Hits, LaneMode};
+pub use hmm::{
+    ATTACK_COST, DROPOUT, LAG_SECS, NoteModel, ONSET_LEAVE, STABLE_SIGMA_SEMITONES, VOICING_FLOOR,
+};
 pub use key::{KeyEstimate, estimate_key};
 pub use notes::Melody;
 pub use onset::Onsets;
@@ -81,12 +85,12 @@ pub use performance::{
 pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use reading::{
-    A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reading, Tuning, a4_cents_of_hz,
-    estimate_tuning, read,
+    A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reader, ReaderName, Reading,
+    Tuning, a4_cents_of_hz, estimate_tuning, read,
 };
 pub use residual::{
-    CentreHistogram, Drift, LOSS_SIGMA_CENTS, LOSS_UNREAD, Loss, Modulation, NoteResidual,
-    TakeResidual, Transition, residual,
+    CentreHistogram, Drift, LOSS_SIGMA_CENTS, LOSS_UNREAD, Loss, Modulation, NOTE_COST,
+    NoteResidual, TakeResidual, Transition, residual, residual_with_cost,
 };
 pub use stage::{Chunk, Mono, Stage};
 pub use timing::{

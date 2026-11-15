@@ -7,7 +7,7 @@ use crate::pitch::PitchFrame;
 use crate::stage::{Mono, Stage};
 
 /// The shortest note: a voiced run shorter than this is dropped as a fragment.
-const SHORTEST_NOTE_SECS: f64 = 0.05;
+pub(crate) const SHORTEST_NOTE_SECS: f64 = 0.05;
 /// How far, in semitones, the pitch must move from where a note is held to count as leaving it.
 /// Above vibrato's usual swing of up to half a semitone, below a semitone step.
 const CHANGE_SEMITONES: f32 = 0.7;
@@ -33,13 +33,13 @@ const HELD_SECS: f64 = 0.2;
 /// is `d` deep has a voicing probability of the Beta(2, 18) prior's mass above `d`: 0.15 is a
 /// trough about 0.17 deep. Breathy or reverberant voice, with troughs of 0.10 to 0.15, reads
 /// about 0.43 to 0.21 and is kept. Task 9 retunes this on real takes.
-const LEAST_CONFIDENCE: f32 = 0.15;
+pub(crate) const LEAST_CONFIDENCE: f32 = 0.15;
 /// How soon after an onset voicing must begin for the note to start at the onset.
-const ONSET_GRACE_SECS: f64 = 0.05;
+pub(crate) const ONSET_GRACE_SECS: f64 = 0.05;
 /// How long before voicing begins an onset may be and still give the note its strength: an "s",
 /// "sh" or "f" that opens a word, or a pick's noise, comes before the vowel or the pitch. The
 /// note still starts at the voicing, unless the onset is within [`ONSET_GRACE_SECS`].
-const STRENGTH_WINDOW_SECS: f64 = 0.2;
+pub(crate) const STRENGTH_WINDOW_SECS: f64 = 0.2;
 /// Strength per square root of a note's level, for a note no onset gives a strength to.
 ///
 /// Fitted to the onset strength a four-partial tone has when it is attacked from silence: it
@@ -322,7 +322,7 @@ fn spread(pitches: &[f32]) -> f32 {
     high - low
 }
 
-fn median(pitches: &[f32]) -> f32 {
+pub(crate) fn median(pitches: &[f32]) -> f32 {
     let mut sorted = pitches.to_vec();
     sorted.sort_by(f32::total_cmp);
     let mid = sorted.len() / 2;
@@ -335,7 +335,7 @@ fn median(pitches: &[f32]) -> f32 {
 
 /// A note's strength from its mean level (root mean square), on the scale of onset strength
 /// ([`STRENGTH_PER_ROOT_LEVEL`]), clamped to `0..=1` and never 0. Louder is stronger.
-fn level_strength(level: f32) -> f32 {
+pub(crate) fn level_strength(level: f32) -> f32 {
     (STRENGTH_PER_ROOT_LEVEL * level.sqrt()).clamp(f32::MIN_POSITIVE, 1.0)
 }
 

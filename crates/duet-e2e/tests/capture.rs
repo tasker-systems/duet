@@ -351,6 +351,69 @@ fn a_bad_tuning_is_refused_before_anything_is_written() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
+/// `--reader hmm` chooses a melody's notes by the note HMM: the same keys as the rules on an
+/// attacked scale, the reader and its cost per note stated and written in the analysis. The
+/// rules stay the default, unstated, and written as the reader too. A rhythm refuses it.
+#[test]
+fn the_reader_is_chosen_stated_and_written() {
+    let dir = scratch("capture-reader");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    let rules = capture(&dir, &["melody", s(&wav), "-o", s(&dir.join("rules"))]);
+    ok(&rules, "capture");
+    assert!(!stderr(&rules).contains("reader:"), "{}", stderr(&rules));
+    let hmm = capture(
+        &dir,
+        &[
+            "melody",
+            s(&wav),
+            "--reader",
+            "hmm",
+            "-o",
+            s(&dir.join("hmm")),
+        ],
+    );
+    ok(&hmm, "capture --reader hmm");
+    let line = "reader: the note HMM, cost per note 4";
+    assert!(stderr(&hmm).lines().any(|l| l == line), "{}", stderr(&hmm));
+    assert!(
+        document_of(&dir.join("hmm.duet"))
+            .statements
+            .iter()
+            .any(|l| l == line)
+    );
+    assert_eq!(
+        keys(&song_of(&dir.join("hmm.duet"))),
+        keys(&song_of(&dir.join("rules.duet")))
+    );
+    for (stem, reader) in [
+        (
+            "rules",
+            serde_json::json!({ "name": "rules", "note_cost": 4.0 }),
+        ),
+        (
+            "hmm",
+            serde_json::json!({ "name": "hmm", "note_cost": 4.0 }),
+        ),
+    ] {
+        let reading = &analysis_of(&dir.join(format!("{stem}.capture.duet")))["reading"];
+        assert_eq!(reading["reader"], reader, "{stem}");
+        assert_eq!(reading["residual"]["loss"]["notes"].as_f64(), {
+            let n = reading["notes"].as_array().expect("notes").len();
+            Some(4.0 * n as f64)
+        });
+    }
+    let out = capture(&dir, &["rhythm", s(&wav), "--reader", "hmm"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("--reader is for a melody take"),
+        "{}",
+        stderr(&out)
+    );
+    let out = capture(&dir, &["melody", s(&wav), "--reader", "pyin"]);
+    assert!(!out.status.success());
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
 /// Every file a melody capture writes is refused, rather than overwritten, when it exists.
 #[test]
 fn melody_refuses_to_overwrite_each_of_its_outputs() {

@@ -22,8 +22,16 @@ use crate::reading::{PerformanceFrames, ReadNote, Tuning};
 pub const LOSS_SIGMA_CENTS: f64 = 50.0;
 /// The cost of one voiced frame no note covers, `w`.
 pub const LOSS_UNREAD: f64 = 1.0;
-/// The shortest note, in seconds, which the cost of a note is counted in: as in `notes.rs`.
-const SHORTEST_NOTE_SECS: f64 = 0.05;
+/// The cost of a note, `c`: the shortest note's frames (0.05 s, as in `notes.rs`, is 4 frames at
+/// the analysis rate's 86 a second) times `w`, so a note must account for at least that much
+/// singing that would otherwise be unread.
+///
+/// It is also the note HMM's cost per note ([`NoteModel`](crate::NoteModel)): the negative log
+/// probability, in nats, of leaving a held note. pYIN's note HMM leaves its stable state with
+/// probability 0.01, a cost of 4.6. Raising it merges notes; lowering it splits them. It is set
+/// on the corpus and the synthetic witnesses of the three rulings, never by the residual alone,
+/// since one note per frame has the least residual of all.
+pub const NOTE_COST: f64 = 4.0;
 /// The slowest and fastest vibrato looked for, in cycles a second.
 const VIBRATO_HZ: (f64, f64) = (3.0, 9.0);
 /// The least normalized autocorrelation at a vibrato's period for it to be one: a held note's
@@ -112,8 +120,8 @@ pub struct Loss {
     pub pitch: f64,
     /// `w` for every voiced frame no note covers, with `w` [`LOSS_UNREAD`].
     pub unread: f64,
-    /// `c` for every note: the shortest note's frames times `w`, so a note must account for at
-    /// least that much singing that would otherwise be unread.
+    /// `c` for every note: [`NOTE_COST`] unless the reader was given another, the reading's
+    /// `reader.note_cost`.
     pub notes: f64,
 }
 
@@ -411,12 +419,25 @@ fn parts(held: &[(f64, f64)], fps: f64) -> NoteResidual {
     out
 }
 
-/// Each note's residual and the take's, for `notes` read on `tuning` from `frames`.
+/// Each note's residual and the take's, for `notes` read on `tuning` from `frames`, with the
+/// loss counting [`NOTE_COST`] per note.
 #[must_use]
 pub fn residual(
     frames: &PerformanceFrames,
     tuning: &Tuning,
     notes: &[ReadNote],
+) -> (Vec<NoteResidual>, TakeResidual) {
+    residual_with_cost(frames, tuning, notes, NOTE_COST)
+}
+
+/// [`residual`], with the loss counting `note_cost` per note: the cost the reader read the notes
+/// with.
+#[must_use]
+pub fn residual_with_cost(
+    frames: &PerformanceFrames,
+    tuning: &Tuning,
+    notes: &[ReadNote],
+    note_cost: f64,
 ) -> (Vec<NoteResidual>, TakeResidual) {
     let fps = f64::from(frames.rate) / f64::from(frames.hop);
     let rate = f64::from(frames.rate);
@@ -441,11 +462,10 @@ pub fn residual(
     let voiced = frames.cents.iter().filter(|c| !c.is_nan()).count();
     let read = covered.iter().filter(|&&c| c).count();
     let unread = voiced - read;
-    let shortest = (SHORTEST_NOTE_SECS * fps).round();
     let loss = Loss {
         pitch,
         unread: unread as f64 * LOSS_UNREAD,
-        notes: notes.len() as f64 * shortest * LOSS_UNREAD,
+        notes: notes.len() as f64 * note_cost,
     };
     let bins = (100.0 / CENTRE_BIN_CENTS) as usize;
     let mut counts = vec![0u32; bins];
@@ -508,6 +528,12 @@ mod tests {
         out.push(&FrameBlock::new(0, column, vec![0.9; n], vec![0.1; n]).unwrap())
             .unwrap();
         out
+    }
+
+    #[test]
+    fn the_cost_per_note_is_the_shortest_notes_frames_at_the_analysis_rate() {
+        let fps = f64::from(crate::ANALYSIS_RATE) / f64::from(HOP);
+        assert_eq!(NOTE_COST, (0.05 * fps).round() * LOSS_UNREAD);
     }
 
     fn note(start: f64, held_from: f64, end: f64) -> ReadNote {

@@ -27,7 +27,7 @@ use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::notes::{Segment, Segmenter};
 use crate::performance::{FrameBlock, PerformanceHead, absolute_cents};
-use crate::residual::{NoteResidual, TakeResidual, residual};
+use crate::residual::{NOTE_COST, NoteResidual, TakeResidual, residual};
 use crate::timing::Origin;
 
 /// A4 at 440 Hz, in absolute cents.
@@ -309,12 +309,61 @@ impl ReadNote {
     }
 }
 
+/// Which reader chose a reading's notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ReaderName {
+    /// [`Melody`](crate::Melody)'s segmentation rules, over the performance ([`read`]): the
+    /// baseline.
+    #[default]
+    Rules,
+    /// The note HMM ([`NoteModel`](crate::NoteModel)).
+    Hmm,
+}
+
+/// The reader that chose a reading's notes, and the cost per note it chose them with.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Reader {
+    pub name: ReaderName,
+    /// The cost of a note, `c`, which the loss's `notes` term counts per note. For the note HMM
+    /// it is also the cost, in nats, of leaving a held note: the negative log of the
+    /// probability of leaving its stable state. The rules have no cost of their own, so theirs
+    /// is the loss's [`NOTE_COST`].
+    pub note_cost: f64,
+}
+
+impl Reader {
+    /// The rules, with the loss's cost per note.
+    #[must_use]
+    pub const fn rules() -> Reader {
+        Reader {
+            name: ReaderName::Rules,
+            note_cost: NOTE_COST,
+        }
+    }
+
+    /// The note HMM, with `note_cost` per note.
+    #[must_use]
+    pub const fn hmm(note_cost: f64) -> Reader {
+        Reader {
+            name: ReaderName::Hmm,
+            note_cost,
+        }
+    }
+}
+
 /// A take's notes, read on its tuning.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Reading {
     pub tuning: Tuning,
+    /// Which reader chose the notes, and its cost per note. Added in `capture-analysis` 1.3;
+    /// absent before, when the rules were the only reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reader: Option<Reader>,
     pub notes: Vec<ReadNote>,
     /// What the notes leave of the take as a whole, with the loss as its three terms. Added in
     /// `capture-analysis` 1.2; absent before.
@@ -338,7 +387,7 @@ impl Reading {
 /// pitch track, so a boundary or a median can differ from its by a frame or a few cents.
 #[must_use]
 pub fn read(frames: &PerformanceFrames, onsets: &[Event], given: Option<f64>) -> Reading {
-    let tuning = given.map_or_else(|| estimate_tuning(frames), Tuning::given);
+    let tuning = tuning_of(frames, given);
     let offset = tuning.offset_cents();
     let mut segmenter = Segmenter::new(frames.rate, u64::from(frames.hop));
     for event in onsets {
@@ -359,31 +408,70 @@ pub fn read(frames: &PerformanceFrames, onsets: &[Event], given: Option<f64>) ->
         );
     }
     segmenter.finish_segments(&mut segments);
-    let mut notes: Vec<ReadNote> = segments.iter().map(read_note).collect();
+    let notes: Vec<ReadNote> = segments.iter().map(read_note).collect();
     let (parts, take) = residual(frames, &tuning, &notes);
-    for (note, part) in notes.iter_mut().zip(parts) {
-        note.residual = Some(part);
-    }
-    Reading {
-        tuning,
-        notes,
-        residual: Some(take),
+    Reading::of(tuning, Reader::rules(), notes, parts, take)
+}
+
+impl Reading {
+    /// A reading of `notes` on `tuning` by `reader`, each note given its part of the residual.
+    pub(crate) fn of(
+        tuning: Tuning,
+        reader: Reader,
+        mut notes: Vec<ReadNote>,
+        parts: Vec<NoteResidual>,
+        take: TakeResidual,
+    ) -> Reading {
+        for (note, part) in notes.iter_mut().zip(parts) {
+            note.residual = Some(part);
+        }
+        Reading {
+            tuning,
+            reader: Some(reader),
+            notes,
+            residual: Some(take),
+        }
     }
 }
 
+/// The tuning a reading is read on: `given`, A4 in absolute cents, or estimated from `frames`.
+pub(crate) fn tuning_of(frames: &PerformanceFrames, given: Option<f64>) -> Tuning {
+    given.map_or_else(|| estimate_tuning(frames), Tuning::given)
+}
+
 fn read_note(segment: &Segment) -> ReadNote {
-    let key = segment.median.round().clamp(0.0, 127.0);
-    let centre = (segment.median - key) * 100.0;
-    ReadNote {
-        start: segment.start,
-        end: segment.end,
-        held_from: segment.held_from,
-        key: key as u8,
-        centre,
-        between_keys: centre.abs() > BETWEEN_KEYS_CENTS,
-        confidence: segment.confidence,
-        strength: segment.strength,
-        residual: None,
+    ReadNote::held_at(
+        segment.median,
+        segment.start,
+        segment.end,
+        segment.held_from,
+    )
+    .with(segment.confidence, segment.strength)
+}
+
+impl ReadNote {
+    /// A note from `start` to `end`, held from `held_from` at `held`, its held pitch in
+    /// fractional key numbers on the take's tuning: its key the nearest, its centre the rest.
+    pub(crate) fn held_at(held: f32, start: u64, end: u64, held_from: u64) -> ReadNote {
+        let key = held.round().clamp(0.0, 127.0);
+        let centre = (held - key) * 100.0;
+        ReadNote {
+            start,
+            end,
+            held_from,
+            key: key as u8,
+            centre,
+            between_keys: centre.abs() > BETWEEN_KEYS_CENTS,
+            confidence: 0.0,
+            strength: 0.0,
+            residual: None,
+        }
+    }
+
+    pub(crate) fn with(mut self, confidence: f32, strength: f32) -> ReadNote {
+        self.confidence = confidence;
+        self.strength = strength;
+        self
     }
 }
 

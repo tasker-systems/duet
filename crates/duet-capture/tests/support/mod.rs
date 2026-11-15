@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use duet_capture::{
-    ANALYSIS_RATE, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono, Performance,
-    PerformanceFrames, Prepare, Source, Stage, assemble, estimate,
+    ANALYSIS_RATE, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono, NoteModel,
+    Performance, PerformanceFrames, Prepare, ReaderName, Source, Stage, assemble, estimate,
 };
 use duet_core::{Grid, Song, TimeSig};
 use duet_drums::LaneMap;
@@ -126,12 +126,21 @@ pub struct Reading {
 
 /// Runs a take through the library pipeline and reads its `expected` file.
 pub fn read(take: &Take) -> Result<Reading, String> {
+    read_by(take, ReaderName::Rules).map(|(reading, _)| reading)
+}
+
+/// [`read`], with a melody's notes chosen by `reader`; with the melody's reading too.
+pub fn read_by(
+    take: &Take,
+    reader: ReaderName,
+) -> Result<(Reading, Option<duet_capture::Reading>), String> {
     let dir = corpus_dir();
     let grid: Grid = take
         .grid
         .parse()
         .map_err(|e| format!("grid {}: {e}", take.grid))?;
-    let found = capture(take, &dir.join(&take.file))?
+    let (found, read) = capture(take, &dir.join(&take.file), reader)?;
+    let found = found
         .quantized(grid)
         .map_err(|e| format!("quantizing the capture: {e}"))?;
     let path = dir.join(&take.expected);
@@ -140,22 +149,29 @@ pub fn read(take: &Take) -> Result<Reading, String> {
         .map_err(|e| format!("{}: {e}", path.display()))?
         .quantized(grid)
         .map_err(|e| format!("quantizing {}: {e}", take.expected))?;
-    Ok(Reading {
-        grid,
-        ticks_per_quarter: found.ticks_per_quarter,
-        found,
-        expected,
-    })
+    Ok((
+        Reading {
+            grid,
+            ticks_per_quarter: found.ticks_per_quarter,
+            found,
+            expected,
+        },
+        read,
+    ))
 }
 
-fn capture(take: &Take, path: &Path) -> Result<Song, String> {
+fn capture(
+    take: &Take,
+    path: &Path,
+    reader: ReaderName,
+) -> Result<(Song, Option<duet_capture::Reading>), String> {
     let melody = take.kind == TakeKind::Melody;
     let mode = if take.kind == TakeKind::Tapped {
         LaneMode::Asked
     } else {
         LaneMode::Beatbox
     };
-    let events = analyse(path, melody, mode)?;
+    let (events, read) = analyse(path, melody, mode, reader)?;
     let given = Given {
         tempo_bpm: take.tempo,
         meter: take
@@ -182,14 +198,19 @@ fn capture(take: &Take, path: &Path) -> Result<Song, String> {
         }
     };
     assemble(&events, ANALYSIS_RATE, &timing, key, &kind)
-        .map(|captured| captured.song)
+        .map(|captured| (captured.song, read))
         .map_err(|e| e.to_string())
 }
 
 /// The take's events, as `duet capture` finds them: a rhythm's from [`Hits`]; a melody's onsets
 /// from its [`Performance`], and its notes read from the performance on its own estimated
-/// tuning ([`duet_capture::read`]).
-fn analyse(path: &Path, melody: bool, mode: LaneMode) -> Result<Vec<Event>, String> {
+/// tuning by `reader` ([`duet_capture::read`] or [`NoteModel`]), with that reading.
+fn analyse(
+    path: &Path,
+    melody: bool,
+    mode: LaneMode,
+    reader: ReaderName,
+) -> Result<(Vec<Event>, Option<duet_capture::Reading>), String> {
     // The source's errors are duet-capture's, the stages' duet-dsp's: both become their message.
     let fail = |e: duet_capture::Error| e.to_string();
     let mut source = FileSource::open(path).map_err(fail)?;
@@ -216,7 +237,7 @@ fn analyse(path: &Path, melody: bool, mode: LaneMode) -> Result<Vec<Event>, Stri
     }
     if !melody {
         hits.finish(&mut events).map_err(|e| fail(e.into()))?;
-        return Ok(events);
+        return Ok((events, None));
     }
     performance
         .finish(&mut layers)
@@ -235,14 +256,17 @@ fn analyse(path: &Path, melody: bool, mode: LaneMode) -> Result<Vec<Event>, Stri
         }
     }
     let frames = frames.ok_or("the take has no frames")?;
-    let reading = duet_capture::read(&frames, &events, None);
+    let reading = match reader {
+        ReaderName::Rules => duet_capture::read(&frames, &events, None),
+        ReaderName::Hmm => NoteModel::default().read(&frames, &events, None),
+    };
     events.extend(reading.notes.iter().map(|n| n.event()));
     events.sort_by_key(|e| match *e {
         Event::Onset { frame, .. } | Event::Hit { frame, .. } => frame,
         Event::Note { start, .. } => start,
         _ => u64::MAX,
     });
-    Ok(events)
+    Ok((events, Some(reading)))
 }
 
 /// A note or hit of a quantized song, where the comparison sees it.

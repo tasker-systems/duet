@@ -101,6 +101,24 @@ pub fn scoop(
     })
 }
 
+/// A tone around `freq` Hz whose pitch at `t` seconds is `cents(t)` from it, with its phase
+/// unbroken, so a change of pitch is never attacked afresh, and `harmonics` partials and peak at
+/// most `amplitude` as in [`tone`]. It rises over its first 5 ms and falls over its last 20 ms.
+pub fn contour(
+    rate: u32,
+    freq: f64,
+    secs: f64,
+    cents: impl Fn(f64) -> f64,
+    harmonics: u32,
+    amplitude: f32,
+) -> Vec<f32> {
+    let mut out = swept(rate, secs, harmonics, amplitude, |t| {
+        freq * (cents(t) / 1200.0).exp2()
+    });
+    envelope(rate, &mut out);
+    out
+}
+
 /// Raises `signal` from silence in a straight line over its first `secs`: a soft entry, with no
 /// attack for an onset to find.
 pub fn fade_in(rate: u32, signal: &mut [f32], secs: f64) {

@@ -239,6 +239,17 @@ ReadNote {
 - **Witness:** a synthetic 2-second note with ±50 cents of vibrato at 5.5 Hz and 15 cents/s of drift reads as **one** note. It also reads as one note with `c` halved. The same signal with its pitch stepped a semitone halfway, held 0.5 s each side, reads as two.
 - **A second witness:** for any reading the decoder returns, splitting one of its held notes in two raises `L`. So `c` is never zero in effect.
 
+> **Built (2026-11-15, build task 6):** `duet_dsp::NoteModel`, chosen by `duet capture melody --reader hmm`; the rules stay the default. The reading records its reader and cost per note as `capture-analysis` 1.3's optional `reading.reader` (additive). Mauch et al. 2015 could not be fetched from this build's network, so the model is built from pYIN's source as described above. Where it departs from the above:
+> - **The attack is pitch-agnostic, at a flat 0.5 nats a frame beyond a frame held on its key (`ATTACK_COST`), and its transitions are free.** pYIN's Normal(σ = 5 semitones) attack, which stays with probability 0.9, costs about 2.3 nats a frame more than holding. That made a 20-semitones-a-second scoop or glide read as a short note on each key it passed.
+> - **Stable is a chain of 5 frames (0.05 s, the shortest note) before it may be left,** so no note is shorter than the rules allow.
+> - **Leaving stable costs `c` whatever it leads to:** silence, or the attack or the stable state of any key, the same key included. pYIN weights the next note by its interval. So `c` is exactly what a note costs, and the model is a cost model whose rows need not sum to one. A note that starts on its pitch, after silence or legato, may enter stable directly with no attack.
+> - **One silent state,** not one per pitch, since nothing here weights the interval.
+> - **Onsets:** at the frame an onset falls in, leaving stable has probability 0.9 (`ONSET_LEAVE`) instead of `e^−c`. So an onset splits a held pitch as the rules do, whatever `c` is.
+> - **Observations:** a voiced frame scores `ln v` plus its pitch's Normal density (σ = 0.5 semitones, `STABLE_SIGMA_SEMITONES`) in stable, and `ln(1 − v)` in silence, with `v` floored at 0.01 either way. A frame the pitch track decoded unvoiced scores `ln 0.05` (`DROPOUT`) in a note, so one lost frame stays inside its note and two end it.
+> - **States cover all 128 keys,** so nothing about the take is needed in advance; the lag is 1 s (`LAG_SECS`), and on the witnesses the lagged decode equals the whole take's.
+> - **`c` = 4 nats (`NOTE_COST`), shared with the loss's notes term.** It is the loss's own derivation (the shortest note's 4 frames times `w`) and close to pYIN's 4.6. It was set by sweeping `c` from 1 to 12 over the witnesses and the synthetic takes, never by the residual. Every take reads its expected number of notes for `c` from 2 to 8. Below 2, staying in a note costs `ln(1 − e^−c)` a frame (0.46 nats at `c` = 1), and every take shatters. At 12, the semitone step and a legato tune merge. **The owner's takes were not available to this build:** `c` has yet to be checked on them.
+> - **Where it is worse than the rules:** it leaves the last, weakly voiced frame of a decaying note unread (one unread frame a note, or two between attacked notes). A glide slower than about 8 semitones a second (15 at `c/2`) reads as a note on every key it passes, where the rules read a few fewer.
+
 ## 5. Transformations
 
 **Proposed.** A transformation maps a `Reading` (with its residual) to a `Reading`. It never touches the performance file.

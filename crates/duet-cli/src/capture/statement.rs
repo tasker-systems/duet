@@ -4,7 +4,7 @@
 //! A given value is used exactly and is not stated: only an estimate is reported as one.
 
 use duet_capture::{
-    KeyEstimate, LeadIn, Merge, Origin, Reading, TempoAlternatives, Timing, Tuning,
+    KeyEstimate, LeadIn, Merge, Origin, ReaderName, Reading, TempoAlternatives, Timing, Tuning,
     WEAK_CONFIDENCE, felt_quarters, is_compound,
 };
 use duet_core::{Grid, TimeSig};
@@ -73,6 +73,14 @@ fn cents(n: String) -> String {
     } else {
         format!("{n} cents")
     }
+}
+
+/// The reader, stated only when it is not the rules (the default): the note HMM, with its
+/// cost per note.
+pub fn reader(reading: &Reading) -> Option<String> {
+    let reader = reading.reader?;
+    (reader.name == ReaderName::Hmm)
+        .then(|| format!("reader: the note HMM, cost per note {}", reader.note_cost))
 }
 
 /// How many notes were read, and how many of them are between keys on the take's tuning.

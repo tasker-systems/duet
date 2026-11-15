@@ -448,10 +448,10 @@ fn example(name: &str) -> AnyDocument {
         return AnyDocument::DrumGrid(Document::new(Tool::new("duet", "0.2.0"), example_grid()));
     }
     if name == "capture-analysis" {
-        return AnyDocument::CaptureAnalysis(Document::new(
+        return AnyDocument::CaptureAnalysis(Box::new(Document::new(
             Tool::new("duet", "0.2.0"),
             example_analysis(),
-        ));
+        )));
     }
     assert_eq!(name, "song", "no example is defined for {name}");
     let mut doc = Document::new(Tool::new("duet", "0.2.0"), example_song());
@@ -529,6 +529,7 @@ pub fn example_analysis() -> Analysis {
                 "a4": { "estimated": { "value": 6913.4, "confidence": 0.81 } },
                 "spread_cents": 9.25
             },
+            "reader": { "name": "hmm", "note_cost": 4.0 },
             "notes": [
                 { "start": 11100, "end": 21600, "held_from": 11356, "key": 63, "centre": -2.5,
                   "between_keys": false, "confidence": 0.93, "strength": 0.8125,
