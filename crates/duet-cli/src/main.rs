@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod abc;
+mod capture;
 mod config;
 mod drums;
 mod io;
@@ -20,6 +21,7 @@ use clap::{Parser, Subcommand};
 use duet_core::Grid;
 
 use crate::abc::AbcCommand;
+use crate::capture::CaptureCommand;
 use crate::config::{Config, Dirs};
 use crate::drums::{DrumsCommand, ReadOptions};
 use crate::io::{AnyFormat, Format, read, write};
@@ -76,6 +78,11 @@ enum Command {
     /// or write a song as ABC.
     #[command(subcommand)]
     Abc(AbcCommand),
+    /// Capture a recorded take: the exact performance as .notes, a quantized score (.abc
+    /// or .drums) and the analysis as .capture.json. What is not given is estimated, and
+    /// stated on standard error and in the files.
+    #[command(subcommand)]
+    Capture(CaptureCommand),
     /// Play a song: through the built-in synth with a General MIDI SoundFont, or to a
     /// MIDI port with --port.
     Play(play::PlayArgs),
@@ -123,6 +130,7 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
         Command::Song(command) => song::run(command, &Config::load(dirs)?),
         Command::Drums(command) => drums::run(command, &Config::load(dirs)?),
         Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
+        Command::Capture(command) => capture::run(command, &Config::load(dirs)?),
         Command::Play(args) => play::run(args, &Config::load(dirs)?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),

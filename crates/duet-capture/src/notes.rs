@@ -1,0 +1,760 @@
+use std::collections::VecDeque;
+
+use crate::error::Result;
+use crate::event::Event;
+use crate::onset::Onsets;
+use crate::pitch::{PitchFrame, PitchTrack};
+use crate::stage::{Mono, Stage};
+
+/// The shortest note: a voiced run shorter than this is dropped as a fragment.
+const SHORTEST_NOTE_SECS: f64 = 0.05;
+/// How far, in semitones, the pitch must move from a note's median to count as a change.
+/// Above vibrato's usual swing of up to half a semitone, below a semitone step.
+const CHANGE_SEMITONES: f32 = 0.7;
+/// How long a changed pitch must hold to start a new note without an onset.
+const CHANGE_HOLD_SECS: f64 = 0.05;
+/// The least mean voicing probability of a note's frames.
+///
+/// Noise is often decoded voiced, as in the reference pYIN, since an unvoiced frame's likelihood
+/// is spread across every pitch bin while a voiced one's sits in a few. Its voicing probability
+/// stays near the tracker's 0.01 for a frame with no clear trough. A frame whose one clear trough
+/// is `d` deep has a voicing probability of the Beta(2, 18) prior's mass above `d`: 0.15 is a
+/// trough about 0.17 deep. Breathy or reverberant voice, with troughs of 0.10 to 0.15, reads
+/// about 0.43 to 0.21 and is kept. Task 9 retunes this on real takes.
+const LEAST_CONFIDENCE: f32 = 0.15;
+/// How soon after an onset voicing must begin for the note to start at the onset.
+const ONSET_GRACE_SECS: f64 = 0.05;
+/// How long before voicing begins an onset may be and still give the note its strength: an "s",
+/// "sh" or "f" that opens a word, or a pick's noise, comes before the vowel or the pitch. The
+/// note still starts at the voicing, unless the onset is within [`ONSET_GRACE_SECS`].
+const STRENGTH_WINDOW_SECS: f64 = 0.2;
+/// Strength per square root of a note's level, for a note no onset gives a strength to.
+///
+/// Fitted to the onset strength a four-partial tone has when it is attacked from silence: it
+/// grows as about the square root of the level, and `0.06 * sqrt(rms)` is within 10% of it from
+/// peak 0.05 to 0.5. A sine's attack reads about half this, and an eight-partial tone's about
+/// half again more, since onset strength also counts how many bins rise. Task 9 retunes it on
+/// real takes.
+const STRENGTH_PER_ROOT_LEVEL: f32 = 0.06;
+
+/// Notes from a take: pitch tracking and onset detection, segmented into notes.
+///
+/// It runs [`PitchTrack`] and [`Onsets`] over the same input and emits both every
+/// [`Event::Onset`], as it settles, and every [`Event::Note`]. A note is a run of voiced frames,
+/// split at onsets and at pitch changes held for 50 ms (`CHANGE_HOLD_SECS`). Its `midi` is the
+/// median of its frames' pitch, rounded to the nearest semitone, which is the declared reading of
+/// vibrato and slides. Its `confidence` is its frames' mean voicing probability, and its
+/// `strength` the strength of the latest onset since the previous note ended, within 0.2 s
+/// (`STRENGTH_WINDOW_SECS`) before its voicing begins. A note split off by a pitch change keeps
+/// the strength of the note it came from. A note with no such onset takes its strength from its
+/// own level, so a note's strength is never 0.
+///
+/// Every frame is on the input [`Mono`] timeline. A pitch frame is segmented only once every
+/// onset up to it has settled, and a note is emitted once it has ended, which
+/// [`latency_frames`](Stage::latency_frames) bounds. The onsets and the notes do not depend on how
+/// the stream is cut into chunks, but how they interleave in `out` does.
+pub struct Melody {
+    pitch: PitchTrack,
+    onsets: Onsets,
+    segmenter: Segmenter,
+    /// The stream's first frame and the frames received since, for the onset horizon.
+    origin: Option<u64>,
+    received: u64,
+    /// Pitch frames settled but not yet segmented, waiting for the onsets up to them.
+    waiting: VecDeque<PitchFrame>,
+}
+
+impl std::fmt::Debug for Melody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Melody")
+            .field("pitch", &self.pitch)
+            .field("onsets", &self.onsets)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Melody {
+    /// A stage for mono input at `rate`.
+    pub fn new(rate: u32) -> Melody {
+        let pitch = PitchTrack::new(rate);
+        let segmenter = Segmenter::new(rate, pitch.hop());
+        Melody {
+            pitch,
+            onsets: Onsets::new(rate),
+            segmenter,
+            origin: None,
+            received: 0,
+            waiting: VecDeque::new(),
+        }
+    }
+
+    /// Passes every onset on to `out` and to the segmenter.
+    fn take_onsets(&mut self, events: Vec<Event>, out: &mut Vec<Event>) {
+        for event in events {
+            if let Event::Onset { frame, strength } = event {
+                self.segmenter.onset(frame, strength);
+            }
+            out.push(event);
+        }
+    }
+}
+
+impl Stage for Melody {
+    type In = Mono;
+    type Out = Event;
+
+    fn push(&mut self, input: Mono, out: &mut Vec<Event>) -> Result<()> {
+        let mut onsets = Vec::new();
+        self.onsets.push(input.clone(), &mut onsets)?;
+        let origin = *self.origin.get_or_insert(input.start_frame);
+        self.received += input.samples.len() as u64;
+        let mut frames = Vec::new();
+        self.pitch.push(input, &mut frames)?;
+        self.take_onsets(onsets, out);
+        self.waiting.extend(frames);
+        // Every onset at or before this frame has been emitted.
+        let horizon = (origin + self.received).saturating_sub(self.onsets.latency_frames());
+        while let Some(frame) = self.waiting.pop_front_if(|p| p.frame <= horizon) {
+            self.segmenter.pitch(frame, out);
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self, out: &mut Vec<Event>) -> Result<()> {
+        let mut onsets = Vec::new();
+        self.onsets.finish(&mut onsets)?;
+        self.take_onsets(onsets, out);
+        let mut frames = Vec::new();
+        self.pitch.finish(&mut frames)?;
+        self.waiting.extend(frames);
+        for frame in self.waiting.drain(..) {
+            self.segmenter.pitch(frame, out);
+        }
+        self.segmenter.finish(out);
+        Ok(())
+    }
+
+    fn latency_frames(&self) -> u64 {
+        self.pitch
+            .latency_frames()
+            .max(self.onsets.latency_frames())
+            + self.segmenter.latency()
+    }
+}
+
+/// A note being built: where it starts, and its voiced frames so far.
+struct Run {
+    start: u64,
+    /// The onset it was attributed to, kept so that a run dropped as a fragment hands it on.
+    onset: Option<(u64, f32)>,
+    /// Its strength, when it has one from an onset or from the note it was split from; otherwise
+    /// it is taken from its level.
+    strength: Option<f32>,
+    /// The last voiced frame taken into the run.
+    last: u64,
+    /// Each frame's pitch, in fractional MIDI key numbers.
+    pitches: Vec<f32>,
+    /// The median of the first `2^k` pitches, recomputed each time the run's length reaches a
+    /// power of two, so a long drone costs `O(n log n)` in all, not a sort per frame.
+    reference: f32,
+    voicing: f32,
+    level: f32,
+}
+
+impl Run {
+    fn new(start: u64, onset: Option<(u64, f32)>, strength: Option<f32>) -> Run {
+        Run {
+            start,
+            onset,
+            strength,
+            last: start,
+            pitches: Vec::new(),
+            reference: 0.0,
+            voicing: 0.0,
+            level: 0.0,
+        }
+    }
+
+    fn take(&mut self, frame: u64, pitch: f32, voiced: f32, level: f32) {
+        self.last = frame;
+        self.pitches.push(pitch);
+        self.voicing += voiced;
+        self.level += level;
+        if self.pitches.len().is_power_of_two() {
+            self.reference = self.median();
+        }
+    }
+
+    fn median(&self) -> f32 {
+        let mut sorted = self.pitches.clone();
+        sorted.sort_by(f32::total_cmp);
+        let mid = sorted.len() / 2;
+        if sorted.len() % 2 == 1 {
+            sorted[mid]
+        } else {
+            (sorted[mid - 1] + sorted[mid]) / 2.0
+        }
+    }
+
+    fn strength(&self) -> f32 {
+        self.strength
+            .unwrap_or_else(|| level_strength(self.level / self.pitches.len().max(1) as f32))
+    }
+}
+
+/// A note's strength from its mean level (root mean square), on the scale of onset strength
+/// ([`STRENGTH_PER_ROOT_LEVEL`]), clamped to `0..=1` and never 0. Louder is stronger.
+fn level_strength(level: f32) -> f32 {
+    (STRENGTH_PER_ROOT_LEVEL * level.sqrt()).clamp(f32::MIN_POSITIVE, 1.0)
+}
+
+/// A frame of a run: `(frame, pitch, voicing, level)`.
+type Taken = (u64, f32, f32, f32);
+
+/// Splits settled pitch frames into notes, at onsets and at held pitch changes.
+///
+/// It must be given every onset up to a pitch frame before that frame.
+struct Segmenter {
+    hop: u64,
+    shortest: u64,
+    hold: usize,
+    grace: u64,
+    window: u64,
+    /// Onsets not yet reached by the pitch frames: `(frame, strength)`.
+    onsets: VecDeque<(u64, f32)>,
+    /// The latest onset since the previous note ended, not yet given to a note.
+    pending: Option<(u64, f32)>,
+    run: Option<Run>,
+    /// Frames of the run that have moved off its pitch.
+    departed: Vec<Taken>,
+}
+
+impl Segmenter {
+    fn new(rate: u32, hop: u64) -> Segmenter {
+        let frames = |secs: f64| (secs * f64::from(rate)).round() as u64;
+        Segmenter {
+            hop,
+            shortest: frames(SHORTEST_NOTE_SECS),
+            hold: (frames(CHANGE_HOLD_SECS) as f64 / hop as f64).ceil() as usize,
+            grace: frames(ONSET_GRACE_SECS),
+            window: frames(STRENGTH_WINDOW_SECS),
+            onsets: VecDeque::new(),
+            pending: None,
+            run: None,
+            departed: Vec::new(),
+        }
+    }
+
+    /// The most frames after a note's end before it is emitted, once its pitch frames arrive: a
+    /// held change is confirmed `hold` frames after the note ends, and an end at an onset or at
+    /// unvoicing is seen within a frame of it.
+    fn latency(&self) -> u64 {
+        (self.hold as u64 + 1) * self.hop
+    }
+
+    fn onset(&mut self, frame: u64, strength: f32) {
+        self.onsets.push_back((frame, strength));
+    }
+
+    fn pitch(&mut self, p: PitchFrame, out: &mut Vec<Event>) {
+        while let Some(onset) = self.onsets.pop_front_if(|o| o.0 <= p.frame) {
+            self.departed.clear();
+            if let Some(run) = self.run.take() {
+                self.emit(run, onset.0, out);
+            }
+            self.pending = Some(onset);
+        }
+        let Some(hz) = p.hz else {
+            self.close(out);
+            return;
+        };
+        let taken = (
+            p.frame,
+            69.0 + 12.0 * (hz / 440.0).log2(),
+            p.voiced,
+            p.level,
+        );
+        let Some(run) = &mut self.run else {
+            let onset = self.pending.take();
+            let since = |at: u64| p.frame - at;
+            let start = match onset {
+                Some((at, _)) if since(at) <= self.grace => at,
+                _ => p.frame.saturating_sub(self.hop / 2),
+            };
+            let onset = onset.filter(|&(at, _)| since(at) <= self.window);
+            let mut run = Run::new(start, onset, onset.map(|o| o.1));
+            take(&mut run, taken);
+            self.run = Some(run);
+            return;
+        };
+        if (taken.1 - run.reference).abs() <= CHANGE_SEMITONES {
+            // Back on pitch: a short excursion belongs to the note.
+            for frame in self.departed.drain(..) {
+                take(run, frame);
+            }
+            take(run, taken);
+            return;
+        }
+        self.departed.push(taken);
+        if self.departed.len() >= self.hold {
+            let at = self.departed[0].0.saturating_sub(self.hop / 2);
+            let departed = std::mem::take(&mut self.departed);
+            let Some(run) = self.run.take() else {
+                return;
+            };
+            let (strength, inherited) = (run.strength(), run.strength);
+            let emitted = self.emit(run, at, out);
+            // A note split off by a pitch change keeps the strength of the note before it; one
+            // split off a dropped fragment is as if the fragment had not been.
+            let mut next = Run::new(at, None, if emitted { Some(strength) } else { inherited });
+            for frame in departed {
+                take(&mut next, frame);
+            }
+            self.run = Some(next);
+        }
+    }
+
+    /// Ends the sounding note after its last voiced frame.
+    fn close(&mut self, out: &mut Vec<Event>) {
+        if let Some(mut run) = self.run.take() {
+            for frame in self.departed.drain(..) {
+                take(&mut run, frame);
+            }
+            let end = run.last + self.hop / 2;
+            let onset = run.onset;
+            // A dropped run was not a note, so its onset is handed on to the next.
+            if !self.emit(run, end, out) && self.pending.is_none() {
+                self.pending = onset;
+            }
+        }
+    }
+
+    fn finish(&mut self, out: &mut Vec<Event>) {
+        self.close(out);
+    }
+
+    /// Emits `run` as a note ending at `end`, unless it is shorter than the shortest note or too
+    /// weakly voiced to be one. Returns whether it was emitted.
+    fn emit(&self, run: Run, end: u64, out: &mut Vec<Event>) -> bool {
+        let confidence = run.voicing / run.pitches.len().max(1) as f32;
+        if run.pitches.is_empty()
+            || end < run.start + self.shortest
+            || confidence < LEAST_CONFIDENCE
+        {
+            return false;
+        }
+        out.push(Event::Note {
+            start: run.start,
+            end,
+            midi: run.median().round().clamp(0.0, 127.0) as u8,
+            confidence,
+            strength: run.strength(),
+        });
+        true
+    }
+}
+
+fn take(run: &mut Run, (frame, pitch, voiced, level): Taken) {
+    run.take(frame, pitch, voiced, level);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synth;
+
+    const RATE: u32 = 22_050;
+
+    fn run(signal: &[f32], chunk: usize) -> Vec<Event> {
+        let mut stage = Melody::new(RATE);
+        let mut out = Vec::new();
+        for (i, piece) in signal.chunks(chunk).enumerate() {
+            let mono = Mono {
+                rate: RATE,
+                start_frame: (i * chunk) as u64,
+                samples: piece.to_vec(),
+            };
+            stage.push(mono, &mut out).unwrap();
+        }
+        stage.finish(&mut out).unwrap();
+        out
+    }
+
+    /// `(start, end, midi)` of each note, in seconds.
+    fn notes(events: &[Event]) -> Vec<(f64, f64, u8)> {
+        let secs = |frame: u64| frame as f64 / f64::from(RATE);
+        events
+            .iter()
+            .filter_map(|e| match *e {
+                Event::Note {
+                    start, end, midi, ..
+                } => Some((secs(start), secs(end), midi)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn padded(signal: Vec<f32>) -> Vec<f32> {
+        let mut out = synth::silence(RATE, 0.2);
+        out.extend(signal);
+        out.extend(synth::silence(RATE, 0.3));
+        out
+    }
+
+    const SCALE: [f64; 5] = [261.63, 293.66, 329.63, 349.23, 392.0];
+
+    fn scale() -> Vec<f32> {
+        let notes: Vec<(f64, f64)> = SCALE.iter().map(|&f| (f, 0.25)).collect();
+        padded(synth::note_sequence(RATE, &notes, 4, 0.5))
+    }
+
+    #[test]
+    fn a_held_tone_is_one_note_at_its_pitch() {
+        let found = notes(&run(&padded(synth::tone(RATE, 261.63, 0.5, 4, 0.5)), 1000));
+        assert_eq!(found.len(), 1, "{found:?}");
+        let (start, end, midi) = found[0];
+        assert_eq!(midi, 60);
+        assert!((start - 0.2).abs() <= 0.02, "{found:?}");
+        assert!((end - 0.7).abs() <= 0.03, "{found:?}");
+    }
+
+    #[test]
+    fn a_scale_gives_its_notes_in_order() {
+        let found = notes(&run(&scale(), 1000));
+        let midis: Vec<u8> = found.iter().map(|n| n.2).collect();
+        assert_eq!(midis, vec![60, 62, 64, 65, 67], "{found:?}");
+        for (i, &(start, _, _)) in found.iter().enumerate() {
+            let wanted = 0.2 + 0.25 * i as f64;
+            assert!((start - wanted).abs() <= 0.02, "note {i}: {found:?}");
+        }
+    }
+
+    #[test]
+    fn vibrato_reads_as_its_median() {
+        let signal = padded(synth::vibrato(RATE, 220.0, 1.0, 40.0, 6.0, 4, 0.5));
+        let found = notes(&run(&signal, 1000));
+        let midis: Vec<u8> = found.iter().map(|n| n.2).collect();
+        assert_eq!(midis, vec![57], "{found:?}");
+    }
+
+    #[test]
+    fn a_repeated_pitch_splits_at_its_onsets() {
+        let signal = padded(synth::note_sequence(RATE, &[(220.0, 0.3); 3], 4, 0.5));
+        let found = notes(&run(&signal, 1000));
+        let midis: Vec<u8> = found.iter().map(|n| n.2).collect();
+        assert_eq!(midis, vec![57, 57, 57], "{found:?}");
+        for (i, &(start, _, _)) in found.iter().enumerate() {
+            let wanted = 0.2 + 0.3 * i as f64;
+            assert!((start - wanted).abs() <= 0.02, "note {i}: {found:?}");
+        }
+    }
+
+    #[test]
+    fn unvoiced_noise_gives_no_notes() {
+        let signal = synth::noise_bursts(RATE, 2.0, &[(0.2, 1.5)], 100.0, 8000.0, 0.5);
+        let events = run(&signal, 1000);
+        assert_eq!(notes(&events), vec![], "{events:?}");
+        // The burst was heard, as an onset, and still made no note.
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Onset { .. })),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn onsets_pass_through() {
+        let events = run(&scale(), 1000);
+        let onsets = events
+            .iter()
+            .filter(|e| matches!(e, Event::Onset { .. }))
+            .count();
+        assert!(onsets >= SCALE.len(), "{events:?}");
+    }
+
+    #[test]
+    fn notes_settle_within_the_reported_latency() {
+        // Notes that end at onsets, and notes that end at held pitch changes.
+        for signal in [scale(), legato_scale()] {
+            assert_settles_within_latency(signal);
+        }
+    }
+
+    fn assert_settles_within_latency(mut signal: Vec<f32>) {
+        signal.extend(synth::silence(RATE, 1.0));
+        let mut stage = Melody::new(RATE);
+        let mut out = Vec::new();
+        let mut fed = 0u64;
+        let chunk = 64;
+        for piece in signal.chunks(chunk) {
+            let mono = Mono {
+                rate: RATE,
+                start_frame: fed,
+                samples: piece.to_vec(),
+            };
+            fed += piece.len() as u64;
+            let before = out.len();
+            stage.push(mono, &mut out).unwrap();
+            for event in &out[before..] {
+                if let Event::Note { end, .. } = *event {
+                    assert!(
+                        fed <= end + stage.latency_frames() + chunk as u64,
+                        "a note ending at {end} settled at {fed}"
+                    );
+                }
+            }
+        }
+        // A second of silence follows, so every note settles before the stream ends.
+        assert_eq!(notes(&out).len(), SCALE.len(), "{out:?}");
+    }
+
+    /// The scale played legato: each note slides into the next over its last 30 ms, unbroken.
+    fn legato_scale() -> Vec<f32> {
+        let notes: Vec<(f64, f64)> = SCALE.iter().map(|&f| (f, 0.25)).collect();
+        padded(synth::legato(RATE, &notes, 0.03, 4, 0.5))
+    }
+
+    fn strengths(events: &[Event]) -> Vec<f32> {
+        events
+            .iter()
+            .filter_map(|e| match *e {
+                Event::Note { strength, .. } => Some(strength),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn onsets(events: &[Event]) -> Vec<(u64, f32)> {
+        events
+            .iter()
+            .filter_map(|e| match *e {
+                Event::Onset { frame, strength } => Some((frame, strength)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_legato_scale_splits_at_each_held_change_and_keeps_its_strength() {
+        let events = run(&legato_scale(), 1000);
+        let found = notes(&events);
+        assert_eq!(
+            found.iter().map(|n| n.2).collect::<Vec<_>>(),
+            vec![60, 62, 64, 65, 67],
+            "{events:?}"
+        );
+        // Only the entry is an onset, so every later split is a held pitch change.
+        let heard = onsets(&events);
+        assert_eq!(heard.len(), 1, "{events:?}");
+        for (i, &(start, _, _)) in found.iter().enumerate().skip(1) {
+            // Each note starts where the slide into it does, 30 ms before its boundary.
+            let boundary = 0.2 + 0.25 * i as f64;
+            assert!(
+                (boundary - 0.04..=boundary).contains(&start),
+                "note {i}: {found:?}"
+            );
+        }
+        assert!(
+            strengths(&events).iter().all(|&s| s == heard[0].1),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn a_scoop_reads_as_the_pitch_it_holds() {
+        // Held 45 cents above 56: the note is 57. Scooping up from 80 cents flat over its first
+        // 15% pulls the mean of its frames below 56.5, so only the median reads 57.
+        let held = 440.0 * ((56.55 - 69.0) / 12.0_f64).exp2();
+        let signal = padded(synth::scoop(RATE, held, 0.6, 80.0, 0.15, 4, 0.4));
+        let found = notes(&run(&signal, 1000));
+        assert_eq!(
+            found.iter().map(|n| n.2).collect::<Vec<_>>(),
+            vec![57],
+            "{found:?}"
+        );
+
+        let mut track = PitchTrack::new(RATE);
+        let mut frames = Vec::new();
+        track
+            .push(
+                Mono {
+                    rate: RATE,
+                    start_frame: 0,
+                    samples: signal,
+                },
+                &mut frames,
+            )
+            .unwrap();
+        track.finish(&mut frames).unwrap();
+        let pitches: Vec<f32> = frames
+            .iter()
+            .filter_map(|p| p.hz)
+            .map(|hz| 69.0 + 12.0 * (hz / 440.0).log2())
+            .collect();
+        let mean = pitches.iter().sum::<f32>() / pitches.len() as f32;
+        assert_eq!(mean.round(), 56.0, "the mean would read {mean}");
+    }
+
+    #[test]
+    fn a_noisy_but_pitched_note_is_kept() {
+        let mut signal = padded(synth::tone(RATE, 220.0, 0.6, 4, 0.4));
+        let noise = synth::noise_bursts(RATE, 1.1, &[(0.2, 0.6)], 100.0, 8000.0, 0.09);
+        synth::add(&mut signal, &noise);
+        let events = run(&signal, 1000);
+        let found: Vec<(u8, f32)> = events
+            .iter()
+            .filter_map(|e| match *e {
+                Event::Note {
+                    midi, confidence, ..
+                } => Some((midi, confidence)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(found.len(), 1, "{events:?}");
+        assert_eq!(found[0].0, 57);
+        // A mean voicing of 0.30 to 0.45 is a YIN trough about 0.10 to 0.12 deep: breathy.
+        assert!((0.30..=0.45).contains(&found[0].1), "{events:?}");
+    }
+
+    #[test]
+    fn a_consonant_before_the_vowel_gives_the_note_its_strength() {
+        // 120 ms of hiss, then the vowel, which swells in with no attack of its own.
+        let mut signal = synth::silence(RATE, 0.2);
+        signal.extend(synth::noise_bursts(
+            RATE,
+            0.12,
+            &[(0.0, 0.12)],
+            2000.0,
+            8000.0,
+            0.3,
+        ));
+        let mut vowel = synth::tone(RATE, 220.0, 0.5, 4, 0.4);
+        synth::fade_in(RATE, &mut vowel, 0.06);
+        signal.extend(vowel);
+        signal.extend(synth::silence(RATE, 0.3));
+        let events = run(&signal, 1000);
+        let hiss = onsets(&events)[0];
+        assert!(
+            (hiss.0 as f64 / f64::from(RATE) - 0.2).abs() <= 0.02,
+            "{events:?}"
+        );
+        let found = notes(&events);
+        assert_eq!(found.len(), 1, "{events:?}");
+        // The note starts at the vowel, and its strength is the hiss's.
+        assert!(found[0].0 >= 0.3, "{events:?}");
+        assert_eq!(strengths(&events), vec![hiss.1], "{events:?}");
+    }
+
+    #[test]
+    fn a_soft_entry_takes_its_strength_from_its_level() {
+        let entry = |amplitude| {
+            let mut tone = synth::tone(RATE, 220.0, 0.6, 4, amplitude);
+            synth::fade_in(RATE, &mut tone, 0.15);
+            let events = run(&padded(tone), 1000);
+            // Nothing before the note is an onset: only the tone's hard end is.
+            let late = u64::from(RATE) * 7 / 10;
+            assert!(onsets(&events).iter().all(|o| o.0 > late), "{events:?}");
+            match strengths(&events)[..] {
+                [strength] => strength,
+                _ => panic!("wanted one note: {events:?}"),
+            }
+        };
+        let (soft, loud) = (entry(0.1), entry(0.4));
+        assert!(soft > 0.0, "{soft}");
+        assert!(loud > soft, "{soft} then {loud}");
+    }
+
+    #[test]
+    fn notes_and_onsets_are_the_same_whatever_the_chunking() {
+        let mut signal = scale();
+        signal.extend(legato_scale());
+        let reference = run(&signal, 1000);
+        assert!(!notes(&reference).is_empty());
+        for chunk in [1, 777, 4096] {
+            let events = run(&signal, chunk);
+            assert_eq!(notes(&events), notes(&reference), "chunk of {chunk}");
+            assert_eq!(onsets(&events), onsets(&reference), "chunk of {chunk}");
+        }
+    }
+
+    /// Feeds the segmenter frames one hop apart from frame 0, each `(midi, frames)` a stretch at
+    /// that pitch, fully voiced; `None` is unvoiced.
+    fn segment(stretches: &[(Option<f32>, usize)]) -> Vec<(u64, u64, u8)> {
+        let hop = 256;
+        let mut segmenter = Segmenter::new(RATE, hop);
+        let mut out = Vec::new();
+        let mut frame = 0;
+        for &(midi, count) in stretches {
+            for _ in 0..count {
+                let hz = midi.map(|m| 440.0 * ((m - 69.0) / 12.0).exp2());
+                let voiced = if hz.is_some() { 1.0 } else { 0.0 };
+                let level = 0.1;
+                segmenter.pitch(
+                    PitchFrame {
+                        frame,
+                        hz,
+                        voiced,
+                        level,
+                    },
+                    &mut out,
+                );
+                frame += hop;
+            }
+        }
+        segmenter.finish(&mut out);
+        out.iter()
+            .filter_map(|e| match *e {
+                Event::Note {
+                    start, end, midi, ..
+                } => Some((start, end, midi)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_held_pitch_change_splits_without_an_onset() {
+        let found = segment(&[(Some(60.0), 30), (Some(62.0), 30), (None, 5)]);
+        let midis: Vec<u8> = found.iter().map(|n| n.2).collect();
+        assert_eq!(midis, vec![60, 62], "{found:?}");
+        // The second note starts where its pitch did, half a hop before its first frame.
+        assert_eq!(found[1].0, 30 * 256 - 128);
+        assert_eq!(found[0].1, found[1].0);
+    }
+
+    #[test]
+    fn a_note_split_by_a_held_change_inherits_its_strength() {
+        let mut segmenter = Segmenter::new(RATE, 256);
+        segmenter.onset(0, 0.7);
+        let mut out = Vec::new();
+        for (k, midi) in [60.0f32; 30].into_iter().chain([62.0; 30]).enumerate() {
+            let hz = Some(440.0 * ((midi - 69.0) / 12.0).exp2());
+            let frame = 128 + 256 * k as u64;
+            let p = PitchFrame {
+                frame,
+                hz,
+                voiced: 1.0,
+                level: 0.1,
+            };
+            segmenter.pitch(p, &mut out);
+        }
+        segmenter.finish(&mut out);
+        assert_eq!(strengths(&out), vec![0.7, 0.7], "{out:?}");
+    }
+
+    #[test]
+    fn a_brief_excursion_stays_in_the_note() {
+        let found = segment(&[
+            (Some(60.0), 20),
+            (Some(62.0), 3),
+            (Some(60.0), 20),
+            (None, 5),
+        ]);
+        assert_eq!(found.iter().map(|n| n.2).collect::<Vec<_>>(), vec![60]);
+    }
+
+    #[test]
+    fn a_run_shorter_than_the_shortest_note_is_dropped() {
+        let found = segment(&[(None, 5), (Some(60.0), 3), (None, 5)]);
+        assert_eq!(found, vec![]);
+    }
+}

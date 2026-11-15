@@ -415,6 +415,22 @@ impl TrackWriter<'_> {
     }
 }
 
+/// Whether a velocity is one of the dynamics' levels, which ABC writes as it is.
+fn is_level(vel: u8) -> bool {
+    DYNAMICS.iter().any(|(_, v)| *v == vel)
+}
+
+/// How many of the song's notes have a velocity that is not a dynamic's level: the notes
+/// [`write()`] snaps under [`Dynamics::Nearest`], and refuses otherwise. 0 means writing the
+/// song changes no velocity.
+pub fn off_level_velocities(song: &Song) -> usize {
+    song.tracks
+        .iter()
+        .flat_map(|t| &t.notes)
+        .filter(|n| !is_level(n.vel))
+        .count()
+}
+
 /// Writes a song as one ABC tune, `X:1`.
 ///
 /// Refused, naming what and where ([`Error::Unwritable`]): a note off the 1/64-note grid
@@ -642,7 +658,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
         let mut groups: Vec<Group> = Vec::new();
         for (start, end, i) in timed {
             let note = &track.notes[i];
-            let vel = if DYNAMICS.iter().any(|(_, v)| *v == note.vel) {
+            let vel = if is_level(note.vel) {
                 note.vel
             } else if options.dynamics == Dynamics::Nearest {
                 snapped = true;
@@ -832,6 +848,8 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pickup_meter_for;
+    use duet_core::{Note, TimeChange, TimeMap};
 
     #[test]
     fn lengths_are_written_as_multiples_of_the_unit() {
@@ -863,5 +881,73 @@ mod tests {
         assert_eq!(note_name(59, 6, 0), "B,");
         assert_eq!(note_name(47, 6, 0), "B,,");
         assert_eq!(note_name(60, 6, 1), "B,", "B#3 is MIDI 60");
+    }
+
+    /// A song whose first bar is `first`, then `meter` from the change at `change_tick`, with
+    /// one quarter note at the start of bar 2.
+    fn first_bar_song(first: TimeSig, meter: TimeSig, change_tick: u64) -> Song {
+        let mut song = Song::default();
+        song.time_sig = first;
+        let mut map = TimeMap::new(song.ticks_per_quarter, first).unwrap();
+        let at = map.change_at_tick(change_tick, meter).unwrap();
+        song.time_changes.push(TimeChange {
+            at,
+            time_sig: meter,
+        });
+        let mut track = Track::new("melody", 1);
+        track.notes.push(Note::new(
+            Position::bar(2),
+            duet_core::Pitch::new(60).unwrap(),
+            1.0,
+            80,
+        ));
+        song.tracks.push(track);
+        song
+    }
+
+    #[test]
+    fn off_level_velocities_are_the_ones_nearest_snaps() {
+        let mut song = first_bar_song(
+            TimeSig::new(4, 4).unwrap(),
+            TimeSig::new(4, 4).unwrap(),
+            1920,
+        );
+        assert_eq!(off_level_velocities(&song), 0, "80 is mf's level");
+        let note = song.tracks[0].notes[0].clone();
+        song.tracks[0].notes[0].vel = 81;
+        assert_eq!(off_level_velocities(&song), 1);
+        let nearest = WriteOptions::default().with_dynamics(Dynamics::Nearest);
+        assert!(write(&song, &nearest).unwrap().contains("snapped"));
+        song.tracks[0].notes[0] = note;
+        assert!(!write(&song, &nearest).unwrap().contains("snapped"));
+    }
+
+    #[test]
+    fn pickup_meter_for_agrees_with_the_writer() {
+        let sig = |s: &str| s.parse::<TimeSig>().unwrap();
+        let wrote_a_pickup = |song: &Song| {
+            let abc = write(song, &WriteOptions::default()).unwrap();
+            // A pickup is written under the second bar's meter, with no meter of its own.
+            abc.contains("M:4/4") && !abc.contains("M:1/4") && !abc.contains("[M:")
+        };
+
+        // A one-beat first bar before 4/4 is written as a pickup, and the rule says so.
+        let pickup = first_bar_song(sig("1/4"), sig("4/4"), 480);
+        assert!(
+            wrote_a_pickup(&pickup),
+            "{}",
+            write(&pickup, &WriteOptions::default()).unwrap()
+        );
+        assert_eq!(pickup_meter_for(480, 480, sig("4/4")), Some(sig("1/4")));
+
+        // A first bar of a 128th, cut short by the change, is no time signature: the writer
+        // writes no pickup (it refuses the cut bar), and the rule refuses it too.
+        let cut = first_bar_song(sig("4/4"), sig("3/4"), 15);
+        let written = write(&cut, &WriteOptions::default());
+        assert!(
+            matches!(&written, Err(Error::Unwritable { why, .. }) if why.contains("cut short")),
+            "{written:?}"
+        );
+        assert_eq!(pickup_meter_for(15, 480, sig("3/4")), None);
     }
 }

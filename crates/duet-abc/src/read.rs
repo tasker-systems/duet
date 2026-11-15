@@ -1281,6 +1281,53 @@ pub(crate) fn pickup_meter(len: Ratio, meter: TimeSig) -> Option<TimeSig> {
         .flatten()
 }
 
+/// The time signature a pickup `len_ticks` long gets before a first full bar of `meter`, at
+/// `ticks_per_quarter`: its length over the meter's denominator, or over a finer one when it
+/// needs it, so a quarter before 4/4 is 1/4 and a quarter before 6/8 is 2/8.
+///
+/// `None` when the length is no time signature: a length of zero, one that is not a whole
+/// number of 64ths, or one that would need more than 255 beats.
+///
+/// This is the rule the writer applies: a song whose first bar has this signature, followed
+/// by a change to `meter` at bar 2, is written as a pickup before the first bar line. Anything
+/// that builds a song with a pickup uses it, so the two cannot drift apart.
+pub fn pickup_meter_for(len_ticks: u64, ticks_per_quarter: u16, meter: TimeSig) -> Option<TimeSig> {
+    pickup_meter(
+        Ratio::new(len_ticks, 4 * u64::from(ticks_per_quarter)),
+        meter,
+    )
+}
+
+/// The key an ABC key name gives, read exactly as the value of a `K:` field is: `Eb`, `Bm`,
+/// `F#m`, `D dorian`. Anything that names a key from outside, such as a command line, reads it
+/// here, so it means what `K:` means in a tune.
+///
+/// Fails, as `K:` does, on a name that is no key (`K:none`, a clef alone), and on anything
+/// after the key, such as a clef or a property: a name is only a key.
+pub fn key_from_name(name: &str) -> Result<Key> {
+    let mut reader = Reader::new();
+    let at = Span { line: 1, col: 1 };
+    let key = reader.parse_key(at, name).map_err(without_position)?;
+    if let Some(notice) = reader.notices.first() {
+        return Err(Error::invalid(format!(
+            "'{name}' holds '{}' after the key; a key name is only a key",
+            notice.found
+        )));
+    }
+    Ok(key)
+}
+
+/// An error about a name given on its own, without the line and column that only mean
+/// something in a file. The text is the error's own, so it says what the error says.
+fn without_position(e: Error) -> Error {
+    let (Error::Parse { line, col, .. } | Error::Unsupported { line, col, .. }) = e else {
+        return e;
+    };
+    let text = e.to_string();
+    let at = format!("line {line}, col {col}: ");
+    Error::Invalid(text.strip_prefix(&at).unwrap_or(&text).to_owned())
+}
+
 impl Tune {
     /// Reads the tune as a song, with the notation-only constructs it held.
     ///
@@ -1530,5 +1577,44 @@ impl Reader {
             song,
             notices: self.notices,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_name_reads_as_k_reads_it() {
+        for (name, want) in [
+            ("Eb", "Eb major"),
+            ("Bm", "B minor"),
+            ("F#m", "F# minor"),
+            ("D dorian", "D dorian"),
+            ("Amin", "A minor"),
+        ] {
+            assert_eq!(key_from_name(name).unwrap().to_string(), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_name_that_is_no_key_is_refused_without_a_position() {
+        for name in ["none", "bass", "", "Eb clef=bass", "Eb middle=c", "Hx"] {
+            let err = key_from_name(name).unwrap_err().to_string();
+            assert!(!err.contains("line 1"), "{name}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_refused_key_says_what_the_refusal_says() {
+        let in_a_tune = crate::Book::parse("X:1\nM:4/4\nK:none\nC|\n")
+            .unwrap()
+            .tunes()[0]
+            .to_song(&ReadOptions::default())
+            .unwrap_err()
+            .to_string();
+        let alone = key_from_name("none").unwrap_err().to_string();
+        assert!(in_a_tune.ends_with(&alone), "{in_a_tune} / {alone}");
+        assert!(alone.starts_with("K:none is refused"), "{alone}");
     }
 }
