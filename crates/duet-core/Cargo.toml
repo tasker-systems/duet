@@ -14,5 +14,7 @@ categories = ["multimedia::audio", "parser-implementations"]
 workspace = true
 
 [dependencies]
+# The derives live with the types: duet-schemas generates each kind's committed schema from them.
+schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

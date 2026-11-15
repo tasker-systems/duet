@@ -1,6 +1,7 @@
 //! The envelope and the version policy, witnessed with kinds defined here: no real type
 //! implements `Kind` yet.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -10,7 +11,7 @@ use crate::{
 };
 
 /// A document kind at 1.2, whose `key` was added at 1.1.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Tune {
     title: String,
@@ -25,13 +26,13 @@ impl Kind for Tune {
 }
 
 /// A stream kind: a head, then blocks of frames.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Frames {
     rate: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Block {
     start: u64,
@@ -433,7 +434,7 @@ fn an_older_minor_reads_and_writes_back_at_the_current_version() {
 }
 
 /// A kind whose 1.0 named a field differently, read by its own `read_minor`.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Renamed {
     bpm: f64,
@@ -479,7 +480,7 @@ impl Rng {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Numbers {
     wide: Vec<f64>,

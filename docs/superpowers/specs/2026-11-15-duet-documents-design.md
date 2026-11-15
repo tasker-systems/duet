@@ -313,6 +313,11 @@ The performance design's question 1 defines what it holds. It is born in this en
   absent.
 - **Unknown fields are refused** (`deny_unknown_fields`) at every version, so a body that claims 1.0
   but holds a 1.1 field is refused naming the field.
+- **A change to the envelope's shape is a new major version of every kind.** **Ruled (owner,
+  2026-11-15).** The envelope has its own committed schema, `envelope/<major>.<minor>.json`, which
+  every kind's schema references for its `duet` part, but no version of its own in a file. A reader
+  refuses a field it does not know, so a field added to the envelope is one every older reader
+  refuses.
 
 **The rule for classifying a change.** The gate decides that a change happened; this rule decides
 which number it moves. A pull request that bumps a version states which rule it applies.

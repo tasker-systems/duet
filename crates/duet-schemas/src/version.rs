@@ -1,8 +1,10 @@
 //! A kind's schema version: `<major>.<minor>`, with no patch level.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Error;
@@ -71,6 +73,27 @@ impl<'de> Deserialize<'de> for Version {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// The pattern of a version's text form.
+pub(crate) const PATTERN: &str = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$";
+
+impl JsonSchema for Version {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("Version")
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        Cow::Borrowed("duet_schemas::Version")
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "string",
+            "pattern": PATTERN,
+            "description": "A kind's schema version, <major>.<minor>, such as 1.0.",
+        })
     }
 }
 

@@ -1,0 +1,121 @@
+{
+  "$defs": {
+    "From": {
+      "additionalProperties": false,
+      "description": "Where a body came from, when it was imported from an outside format (ABC, MIDI).\n\nIt is a fact about this file, not about the music, so it lives in the envelope: two\ndocuments with the same body are the same song.",
+      "properties": {
+        "format": {
+          "description": "The outside format: `abc` or `midi`.",
+          "type": "string"
+        },
+        "notices": {
+          "description": "What the outside format's reader read but did not carry into the body.",
+          "items": {
+            "$ref": "#/$defs/Notice"
+          },
+          "type": "array"
+        },
+        "tune": {
+          "description": "Which tune of an ABC book, by its `X:` number.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format"
+      ],
+      "type": "object"
+    },
+    "Notice": {
+      "additionalProperties": false,
+      "description": "A construct an outside format's reader read but did not carry, such as an ABC slur.",
+      "properties": {
+        "col": {
+          "description": "1-based.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "construct": {
+          "description": "The kind of construct, such as `slur` or `annotation`.",
+          "type": "string"
+        },
+        "found": {
+          "description": "The text that was found.",
+          "type": "string"
+        },
+        "line": {
+          "description": "1-based.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "line",
+        "col",
+        "construct",
+        "found"
+      ],
+      "type": "object"
+    },
+    "Tool": {
+      "additionalProperties": false,
+      "description": "The name and version of what wrote a file. Information only: no reader checks it or\nbranches on it.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "Version": {
+      "description": "A kind's schema version, <major>.<minor>, such as 1.0.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The `duet` object of a `.duet` file, or of a `.duet.jsonl` stream's first line.\n\nIt is read before the body, so a reader can tell what a file is before it parses the rest\n([`read_envelope`](crate::read_envelope)). A [`Document`](crate::Document) or\n[`Stream`](crate::Stream) builds it on write from its kind, so a writer always writes the\nversion it speaks.",
+  "properties": {
+    "from": {
+      "$ref": "#/$defs/From",
+      "description": "Where the body came from, if it was imported."
+    },
+    "kind": {
+      "description": "The kind's name, lowercase with hyphens: `song`, `drum-grid`.",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "type": "string"
+    },
+    "statements": {
+      "description": "What the tool that wrote the body inferred or changed and must say, one sentence each:\n\"tempo 92, estimated (confidence 0.81)\". Every view shows them as comments.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tool": {
+      "$ref": "#/$defs/Tool",
+      "description": "What wrote the file."
+    },
+    "version": {
+      "$ref": "#/$defs/Version",
+      "description": "The kind's schema version the body is written at."
+    }
+  },
+  "required": [
+    "kind",
+    "version",
+    "tool"
+  ],
+  "title": "duet envelope 1.0",
+  "type": "object"
+}

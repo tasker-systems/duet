@@ -5,6 +5,7 @@ use std::collections::{HashMap, VecDeque};
 
 use duet_core::{Grid, Position, Song};
 use duet_midi::Midi;
+use duet_schemas::{AnyDocument, Document, Tool};
 use midly::num::{u4, u7, u15, u24, u28};
 use midly::{
     Format, Header, MetaMessage, MidiMessage, PitchBend, Smf, Timing, TrackEvent, TrackEventKind,
@@ -368,6 +369,36 @@ fn stated(song: &Song) -> Song {
     song
 }
 
+/// The song through a `song` document and back, exactly: the body reads back equal, the text
+/// writes back identical, and the body is byte for byte what the `.json` writer wrote before
+/// documents (`serde_json::to_string_pretty`), one level in.
+fn check_document(song: &Song) {
+    let text = Document::new(Tool::new("duet", "test"), song.clone())
+        .write()
+        .unwrap();
+    let back = Document::<Song>::read(&text).unwrap();
+    assert_eq!(
+        &back.body, song,
+        "song document round-trip; it was:\n{text}"
+    );
+    assert_eq!(
+        back.write().unwrap(),
+        text,
+        "the document writes back identical"
+    );
+    let AnyDocument::Song(any) = AnyDocument::read(&text).unwrap() else {
+        panic!("not read as a song");
+    };
+    assert_eq!(&any.body, song, "read by its envelope");
+
+    let json = serde_json::to_string_pretty(song).unwrap();
+    let body = format!("  \"body\": {}\n}}\n", json.replace('\n', "\n  "));
+    assert!(
+        text.ends_with(&body),
+        "the body is not the .json writer's bytes:\n{text}\nwanted it to end:\n{body}"
+    );
+}
+
 fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
     let original = events(bytes);
     assert_eq!(
@@ -398,6 +429,8 @@ fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
         song,
         "TOML round-trip"
     );
+    check_document(&song);
+    check_document(&read);
 
     // Writing MIDI keeps every note, control and meta event to the tick.
     let written = from_text.to_midi().unwrap();
@@ -539,6 +572,7 @@ fn sample_sketch_round_trips() {
     assert_eq!(back, song);
     assert_eq!(back.to_text(), text, "the sample is in canonical form");
     assert!(text.contains("\nend 5.1.0\n"), "the sample states its end");
+    check_document(&song);
 }
 
 #[test]
@@ -853,6 +887,13 @@ fn no_read_write_or_conversion_quantizes_unasked() {
     let through_all: Song =
         serde_json::from_str(&serde_json::to_string(&through_all).unwrap()).unwrap();
     let through_all: Song = toml::from_str(&toml::to_string(&through_all).unwrap()).unwrap();
+    let through_all = Document::<Song>::read(
+        &Document::new(Tool::new("duet", "test"), through_all)
+            .write()
+            .unwrap(),
+    )
+    .unwrap()
+    .body;
     assert_eq!(events(&through_all.to_midi().unwrap()).notes, expected);
 }
 
@@ -929,6 +970,7 @@ fn a_midi_files_end_of_track_survives() {
         assert_eq!(json, song, "JSON");
         let toml_song: Song = toml::from_str(&toml::to_string(&song).unwrap()).unwrap();
         assert_eq!(toml_song, song, "TOML");
+        check_document(&song);
 
         let written = from_text.to_midi().unwrap();
         assert_eq!(

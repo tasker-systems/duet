@@ -53,6 +53,10 @@ pub enum Error {
         expected: String,
     },
 
+    /// A kind this build does not know.
+    #[error("this is a {found} document, and this duet knows no kind {found}: it knows {known}")]
+    UnknownKind { found: String, known: String },
+
     /// The document is of another kind than the one asked for.
     #[error("this is a {found} document, not a {expected} one")]
     WrongKind {

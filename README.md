@@ -670,6 +670,17 @@ per quarter, and check every kept event survives MIDI to text to MIDI unchanged.
 `crates/duet-drums/tests` generate drum grids in several meters (with a change of meter),
 grids and resolutions, with any velocity, ending in empty bars or inside a bar, and check
 grid → song → grid, through MIDI, JSON and TOML, and the text form all round-trip unchanged.
+`crates/duet-schemas/tests/schemas.rs` is the schema gate. Each kind's JSON Schema, and the
+envelope's, is generated from the Rust types and committed under `crates/duet-schemas/schemas/`,
+with an example document beside it. The gate fails when a committed schema's shape differs from
+the code at the same version (bump the kind's version), and asks only to regenerate when its
+descriptions alone changed. Every committed example must still read, and validate against its
+schema. To write a new or regenerated schema:
+
+```sh
+DUET_BLESS_SCHEMAS=1 cargo test -p duet-schemas
+```
+
 `crates/duet-dsp` is the analysis behind `duet capture`, tested on synthesized signals and on
 a committed pYIN reading. `crates/duet-capture` decodes and assembles around it; its tests
 decode a one-second tone in every format it reads and run the reference corpus through the

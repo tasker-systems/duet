@@ -1,6 +1,7 @@
 //! The song model. These types serialize to JSON and TOML with serde, and to the
 //! one-note-per-line text format in [`crate::text`].
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
@@ -11,7 +12,8 @@ use crate::time::{
 };
 
 /// A whole song: its tempo, meter and key, and its tracks.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Song {
     /// The song's name: the MIDI sequence name, from the first track of a format 1 file
@@ -19,6 +21,7 @@ pub struct Song {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// The file's resolution. Tick offsets in positions are counted in these ticks.
+    #[schemars(range(min = 1, max = 32767))]
     pub ticks_per_quarter: u16,
     /// The tempo at the start, in quarter notes per minute.
     pub tempo_bpm: f64,
@@ -65,19 +68,22 @@ impl Default for Song {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TempoChange {
     pub at: Position,
     pub bpm: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TimeChange {
     pub at: Position,
     pub time_sig: TimeSig,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct KeyChange {
     pub at: Position,
     pub key: Key,
@@ -98,14 +104,17 @@ pub enum EndRule {
 }
 
 /// One instrument part on one MIDI channel.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Track {
     pub name: String,
     /// The MIDI channel, 1 to 16 as DAWs number them.
+    #[schemars(range(min = 1, max = 16))]
     pub channel: u8,
     /// The General MIDI program (0 to 127) set at the start, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = 127))]
     pub program: Option<u8>,
     pub notes: Vec<Note>,
     /// Controllers, pitch bends and later program changes, in the order they happen.
@@ -126,7 +135,8 @@ impl Track {
 }
 
 /// One note.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Note {
     /// Where the note starts, as bar.beat.tick.
@@ -135,6 +145,7 @@ pub struct Note {
     /// The length in quarter notes, whatever the time signature.
     pub beats: f64,
     /// Velocity, 1 to 127.
+    #[schemars(range(min = 1, max = 127))]
     pub vel: u8,
 }
 
@@ -150,20 +161,30 @@ impl Note {
 }
 
 /// A channel event other than a note.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Control {
     /// A control change, such as 64 for the sustain pedal or 1 for the mod wheel.
     Cc {
         at: Position,
+        #[schemars(range(max = 127))]
         controller: u8,
+        #[schemars(range(max = 127))]
         value: u8,
     },
     /// Pitch bend, from -8192 to 8191, with 0 as no bend.
-    Bend { at: Position, value: i16 },
+    Bend {
+        at: Position,
+        #[schemars(range(min = -8192, max = 8191))]
+        value: i16,
+    },
     /// A program change after the start of the track.
-    Program { at: Position, program: u8 },
+    Program {
+        at: Position,
+        #[schemars(range(max = 127))]
+        program: u8,
+    },
 }
 
 impl Control {
