@@ -3,7 +3,7 @@
 
 use std::f64::consts::TAU;
 
-use duet_capture::Reading;
+use duet_capture::{ReadNote, Reading};
 
 /// How loud the reading's sine is: below a full-scale take, so the two sit together.
 const SINE_LEVEL: f64 = 0.3;
@@ -22,16 +22,27 @@ pub fn hz(cents: f64) -> f64 {
     440.0 * ((cents - 6900.0) / 1200.0).exp2()
 }
 
-/// The pitch the reading's sine is at on sample frame `at`, in absolute cents, or `None` before
-/// its first note and after its last.
+/// Where a note's slide in ends, as a frame at `rate`: its scoop's end when its residual
+/// measured one (capture-analysis 1.2), which is where the pitch first reaches the note, or
+/// else where its held pitch begins (`held_from`). Never past the note's end.
+pub fn slide_end(note: &ReadNote, rate: u32) -> u64 {
+    note.residual
+        .and_then(|r| r.scoop)
+        .map_or(note.held_from, |scoop| {
+            note.start + (f64::from(scoop.ms) / 1000.0 * f64::from(rate)).round() as u64
+        })
+        .min(note.end)
+}
+
+/// The pitch the reading's sine is at on sample frame `at` (at `rate`), in absolute cents, or
+/// `None` before its first note and after its last.
 ///
 /// The sine is legato: one continuous tone from the first note's start to the last note's end.
-/// It holds each note's key, on the take's tuning, from where its held pitch begins
-/// (`held_from`) until the next note starts, through any gap between them, and glides in a
-/// straight line in cents only through a note's slide in (`start..held_from`), from the note
-/// before to this one. The first note has nothing to glide from, and holds its key from its
-/// start.
-pub fn sine_cents(reading: &Reading, at: u64) -> Option<f64> {
+/// It holds each note's key, on the take's tuning, from where its slide in ends ([`slide_end`])
+/// until the next note starts, through any gap between them, and glides in a straight line in
+/// cents only through a note's slide in, from the note before to this one. The first note has
+/// nothing to glide from, and holds its key from its start.
+pub fn sine_cents(reading: &Reading, rate: u32, at: u64) -> Option<f64> {
     let notes = &reading.notes;
     let first = notes.first()?;
     let last = notes.last()?;
@@ -42,11 +53,12 @@ pub fn sine_cents(reading: &Reading, at: u64) -> Option<f64> {
     let i = notes.partition_point(|n| n.start <= at).saturating_sub(1);
     let note = &notes[i];
     let here = key_cents(reading, note.key);
-    if i == 0 || at >= note.held_from || note.held_from <= note.start {
+    let slid = slide_end(note, rate);
+    if i == 0 || at >= slid || slid <= note.start {
         return Some(here);
     }
     let before = key_cents(reading, notes[i - 1].key);
-    let along = (at - note.start) as f64 / (note.held_from - note.start) as f64;
+    let along = (at - note.start) as f64 / (slid - note.start) as f64;
     Some(before + (here - before) * along)
 }
 
@@ -59,7 +71,7 @@ pub fn sine(reading: &Reading, rate: u32, from: u64, to: u64) -> Vec<f32> {
     let mut phase = 0.0_f64;
     (from..to)
         .map(|at| {
-            let Some(cents) = sine_cents(reading, at) else {
+            let Some(cents) = sine_cents(reading, rate, at) else {
                 return 0.0;
             };
             let envelope = ((at - first.start) as f64 / fade)

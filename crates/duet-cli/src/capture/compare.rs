@@ -6,7 +6,7 @@
 //!
 //! - **`STEM.performance.duet.jsonl`:** the performance, every pitch frame;
 //! - **`STEM.capture.duet`:** the analysis, whose `reading` (capture-analysis 1.1) holds the
-//!   tuning and the notes, and whose events hold the onsets. `--reading` names another
+//!   tuning and the notes, with each note's residual and the take's loss since 1.2, and whose events hold the onsets. `--reading` names another
 //!   analysis of the same take, whose reading is compared instead; the stem's own is drawn
 //!   beside it.
 //!
@@ -20,15 +20,17 @@
 //! - **the audio** ([`wav`]): the take on the left, as the analysis heard it (one channel, at
 //!   the analysis rate, so it lines up with the frames sample for sample), and the reading on
 //!   the right as one legato sine at the take's own tuning, gliding only through each note's
-//!   slide in;
+//!   slide in: its scoop where the residual measured one, else up to where its held pitch
+//!   begins;
 //! - **on standard output:** one line per note (its time, key, centre and whether it is between
-//!   keys).
+//!   keys), with its residual's parts (held centre, drift, vibrato, scoop, fall and rest) when
+//!   the reading has them, then the take's loss as its three terms. A 1.1 reading has neither,
+//!   and the output says so.
 //!
 //! `--from` and `--to` window all three to a stretch of the take, in seconds.
 //!
 //! **What it cannot check:** nothing in either file names the audio it was read from, so the
-//! take is checked only by its length against the performance's. A reading's residual and loss
-//! (capture-analysis 1.2) are not shown yet: this build reads 1.1, which holds neither.
+//! take is checked only by its length against the performance's.
 
 mod svg;
 mod wav;
@@ -209,26 +211,63 @@ pub fn run(args: &CompareArgs) -> Result<()> {
     Ok(())
 }
 
-/// The lines on standard output: the title, then one line per note shown.
+/// The lines on standard output: the title, then one line per note shown, with its residual's
+/// parts when the reading measured them (capture-analysis 1.2), then the take's loss as its
+/// three terms.
 fn notes_table(title: &str, reading: &Reading, from: u64, to: u64, rate: f64) -> String {
-    let mut out = format!("# {title}\n#     time  key    centre\n");
-    for note in reading.notes.iter().filter(|n| svg::shown(n, from, to)) {
+    let parts = reading.residual.is_some();
+    let mut out = format!("# {title}\n#     time  key    centre");
+    if parts {
         out.push_str(&format!(
-            "{:>10}  {:<5} {:>+6.1}c{}\n",
+            "  {:>7}  {:>8}   {:<13}  {:<13}  {:<13}  {:>6}",
+            "held", "drift/s", "vibrato", "scoop", "fall", "rest"
+        ));
+    }
+    out.push('\n');
+    for note in reading.notes.iter().filter(|n| svg::shown(n, from, to)) {
+        let mut line = format!(
+            "{:>10}  {:<5} {:>+6.1}c",
             format!("{:.3} s", note.start as f64 / rate),
             svg::key_name(note.key),
             note.centre,
-            if note.between_keys {
-                "  between keys"
-            } else {
-                ""
-            }
-        ));
+        );
+        if let Some(r) = &note.residual {
+            let transition = |t: Option<(f32, f32)>| {
+                t.map_or_else(|| "-".to_owned(), |(c, ms)| format!("{c:+.0}c {ms:.0} ms"))
+            };
+            line.push_str(&format!(
+                "  {:>+6.1}c  {:>+8.1}   {:<13}  {:<13}  {:<13}  {:>5.1}c",
+                r.centre,
+                r.drift.cents_per_sec,
+                r.modulation.map_or_else(
+                    || "-".to_owned(),
+                    |m| format!("{:.1} Hz ±{:.0}c", m.rate_hz, m.depth_cents)
+                ),
+                transition(r.scoop.map(|t| (t.cents, t.ms))),
+                transition(r.fall.map(|t| (t.cents, t.ms))),
+                r.rest_cents,
+            ));
+        }
+        if note.between_keys {
+            line.push_str("  between keys");
+        }
+        out.push_str(line.trim_end());
+        out.push('\n');
     }
-    out.push_str(
-        "# no residual or loss: this reading holds neither (capture-analysis 1.1 has no \
-         residual)\n",
-    );
+    match &reading.residual {
+        Some(take) => out.push_str(&format!(
+            "# loss: pitch {:.1}, unread {:.1}, notes {:.1} ({} frames read, {} unread)\n",
+            take.loss.pitch,
+            take.loss.unread,
+            take.loss.notes,
+            take.read_frames,
+            take.unread_frames
+        )),
+        None => out.push_str(
+            "# no residual or loss: this reading holds neither (it was written before \
+             capture-analysis 1.2)\n",
+        ),
+    }
     out
 }
 
