@@ -442,6 +442,110 @@ duet play take.notes --port "IAC Driver"   # to a MIDI port: Logic, a synth, a D
   last of them ends: each note sounds at least to its own end. The synth renders in blocks of
   64 samples, so an event sounds within 1.5 ms of its time.
 
+## Capturing an idea
+
+```sh
+duet capture melody idea.m4a                    # idea.notes, idea.abc, idea.capture.json
+duet capture rhythm tap.wav --lane hh           # a tapped take: every hit in one lane
+duet capture rhythm beatbox.flac --tempo 96     # a beatboxed take: kick, snare and hat
+duet capture melody idea.m4a --key Eb --downbeat 0.4 -o scratch/idea
+```
+
+A recording of a sung, hummed or single-note played melody, or of a tapped or beatboxed
+rhythm, becomes the text the rest of duet reads. Both commands take one recording and these
+options; everything about the timing that is left out is estimated and stated.
+
+- **`--tempo <bpm>`** is in quarter notes per minute, used exactly. A melody's must be a whole
+  number, because its ABC states the tempo as `Q:1/4=<n>`; a fractional one is refused before
+  analysis starts. A rhythm accepts any tempo.
+- **`--meter <m>`** is the meter, such as `4/4` or `6/8`, used exactly.
+- **`--downbeat <seconds>`** is where bar 1 starts, in seconds from the start of the recording.
+- **`--key <key>`** is a melody's key as ABC's `K:` names it (`Eb`, `Bm`, `F#m`), used exactly.
+  A rhythm take has no key, and `--key` is refused for one.
+- **`--grid <step>`** is the step the score is quantized to, such as `1/16` (the default) or
+  `1/8t`. The `.notes` is never quantized.
+- **`--lane <name>`** (rhythm) puts every hit in that lane, such as `hh` or `kick`. It is how a
+  tapped take is read; without it a rhythm take is read as beatboxed. Lane names resolve
+  through the configured lane map, so aliases from `duet.toml` apply.
+- **`-o`, `--output <stem>`** is the output files' stem. Without it, the input's name without
+  its extension, beside the input.
+
+**Files written.** Three, all beside each other, and none ever overwrites a file that exists
+(the whole capture is refused before anything is written):
+
+- `STEM.notes`: the exact performance, unquantized, at the detected times. Quantizing never
+  replaces it.
+- `STEM.abc` for a melody, or `STEM.drums` for a rhythm: the score, the `.notes` quantized to
+  `--grid`.
+- `STEM.capture.json`: the analysis. Every onset, note and hit, in sample frames at the
+  stated rate (22 050 Hz; divide by it for seconds); the timing (tempo, its half and double,
+  the measured beat period, meter, downbeat, each marked given or estimated, with a
+  confidence); a melody's key, with its pitch-class histogram and every key's score; the tempo
+  from each beat to the next, so drift is a series and not a feeling; and how far quantizing
+  moved each note, in milliseconds and in grid steps.
+
+**Formats.** WAV, FLAC, MP3, Ogg Vorbis and AAC in M4A are read, a packet at a time, so a long
+take is never held in memory whole. A file that is not audio, or uses a codec duet cannot
+decode, is refused naming the file and the codec. HE-AAC is refused by name when the file's
+header declares it. Known limit: HE-AAC signalled only inside the audio data, with a plain
+AAC-LC header, decodes as AAC-LC at half bandwidth without a refusal. Catching it would mean
+comparing the declared and decoded sample rates, which capture does not do.
+
+**What is estimated, and how it is said.** The tempo, the meter, the downbeat and a melody's
+key are each given or estimated. A given value is used exactly and never reported as an
+estimate. An estimate is applied and stated, on standard error and as comment lines in the
+`.notes` and the score (`#` in `.notes` and `.drums`, `%` in ABC), with what you would
+reach for if it is wrong: the half and double tempo, the relative major or minor, and in a
+compound meter the felt beat. A weak estimate is marked `weak`; a meter that cannot be told
+apart is applied as 4/4 and says so. For the synthetic melody in the reference corpus:
+
+```
+$ duet capture melody synthetic-melody.flac
+tempo: estimated 121 bpm (half 60.5, double 242), confidence 1.00
+meter: estimated 4/4, confidence 0.14, weak
+downbeat: estimated at 0.255 s, confidence 0.14, weak
+key: estimated C major (relative A minor), confidence 0.88
+lead-in: none
+velocities: 8 snapped to the nearest dynamic's level in the .abc; the .notes keeps them exact
+```
+
+The tempo is in quarter notes per minute always. The estimate is rounded to a whole bpm for
+the score, but **notes are placed by the beat period actually measured**, not by the rounded
+tempo, so none drifts off its beat over a long take; playback runs a fraction of a percent off
+the recording's real time. A given tempo is used exactly for both. The key changes how notes
+are spelled and the signature, never a pitch.
+
+**Rhythm.** Without `--lane`, each hit is sorted by sound into `kick`, `snare` or `hh` (a closed
+hat). With `--lane`, every hit goes to that lane. Known limit: a hit has one lane. A kick and a
+hat sounded together, or within about 50 ms of each other, are heard as one hit and get one
+lane. Takes of different lanes are meant to be put together later; for that, give each the same
+`--tempo`, `--meter` and `--downbeat` so they line up.
+
+**Before the downbeat.** A take rarely starts on its first bar line, and no note is dropped
+from the score for coming before it. Notes before the downbeat that fit a short bar become a
+pickup bar, followed by a change of meter at bar 2. Otherwise bar 1 (or more) is whole bars of
+rests holding them. A drum grid always gets the rest bars, because grids number bars from 1
+with no gaps. When quantizing leaves nothing in that lead-in, it is removed from the score and
+the score says so. Each case is stated (`lead-in: none`, `a pickup of 1/4`,
+`1 bar of rests`, `removed from the score`). The `.notes` always keeps the true time.
+
+**Velocity.** A hit's or note's velocity is its strength relative to the take's strongest
+(20 to 127). The score writers refuse a velocity that is not one of their levels, so asking for
+a score asks for the snap: ABC dynamics are snapped to the nearest, a drum grid's to its
+levels, and the count snapped is stated. The `.notes` keeps the raw values.
+
+**Correcting a capture.** Edit the `.drums` or ABC text, which is what they are for. To fix an
+estimate, run again with `--tempo`, `--meter`, `--downbeat` or `--key` (add `-o` to keep the
+first). Do not fix a wrong key by editing `K:` in the ABC: that changes every pitch written, not
+only the spelling. Re-run with `--key`, which changes spelling alone.
+
+**Not in this version.** Chords and polyphony, live input, telling tap timbres apart, and a
+tempo that changes within a take (drift is reported in the analysis, not corrected).
+
+**The reference corpus.** `crates/duet-capture/corpus` holds the recordings the capture
+tests are measured against, each with a hand-checked transcription. Its
+[README](crates/duet-capture/corpus/README.md) says how to add a take.
+
 ## Configuration
 
 `duet` reads `duet.toml` and `duet.local.toml` from two places, each file over the ones
@@ -513,6 +617,7 @@ scripts/dev-setup.sh                 # brew bundle, then fetch the pinned SoundF
 scripts/fetch-soundfont.sh           # just the SoundFont, to duet's data directory
 scripts/port-check.sh                # duet play --port to FluidSynth, then check what arrived
 scripts/port-check.sh --interrupt 4  # the same, with Ctrl-C after 4 seconds
+scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's audio (macOS)
 ```
 
 - **The SoundFont** is the one duet's installer will fetch, pinned in `scripts/soundfont.env`
@@ -525,6 +630,12 @@ scripts/port-check.sh --interrupt 4  # the same, with Ctrl-C after 4 seconds
   passes when duet says it stopped, its last messages reset every channel it used (sustain
   off, all notes off), and no key is left on. This is the only check of `--port` against a
   real port; CI can't open one.
+- **`capture-fixtures.sh`** regenerates the generated audio duet-capture's tests use: `fixtures`
+  is the decode tests' one-second tones in each format, `corpus` the reference corpus's
+  synthetic takes (the default), `all` both. Its encoders (`lame`, `flac`, `vorbis-tools`) are
+  in the `Brewfile`; the AAC and HE-AAC files use macOS's own `afconvert`. CI uses the committed
+  files, so run it only to change them.
+- **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.
 
@@ -540,6 +651,8 @@ per quarter, and check every kept event survives MIDI to text to MIDI unchanged.
 `crates/duet-drums/tests` generate drum grids in several meters (with a change of meter),
 grids and resolutions, with any velocity, ending in empty bars or inside a bar, and check
 grid → song → grid, through MIDI, JSON and TOML, and the text form all round-trip unchanged.
+`crates/duet-capture` is the audio-to-events library behind `duet capture`; its tests decode
+a one-second tone in every format it reads and run the reference corpus through the pipeline.
 `crates/duet-abc/corpus` holds our own ABC tunes, MIT, one per construct the subset reads
 plus six whole tunes, each with committed recordings of abc2midi's reading of it and of the
 ABC our writer makes from it. CI compares our reading with those recordings

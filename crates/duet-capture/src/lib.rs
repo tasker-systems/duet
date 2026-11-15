@@ -1,19 +1,55 @@
-//! duet capture: audio in, analysis events out.
+//! duet capture: audio in, analysis events out, and a `Song` assembled from them.
 //!
-//! Capture is a chain of stages over a stream: a [`Source`] yields [`Chunk`]s, and each
-//! [`Stage`] takes input a piece at a time, holds it back only until its output is settled,
-//! and reports how long that takes ([`Stage::latency_frames`]). The vocabulary the stages
-//! speak is [`Event`]. Times inside the chain are sample frames at the analysis rate, not
-//! musical positions: musical time does not exist until a tempo does. Once [`estimate`] has
-//! one, [`assemble`] places the settled events as a `Song`.
+//! # The pipeline
 //!
-//! Known boundary: [`FileSource`] refuses HE-AAC by name when the file's header declares it.
-//! HE-AAC signalled only inside the audio data decodes as AAC-LC at half bandwidth, without
-//! a refusal; catching it would mean comparing declared and decoded sample rates.
+//! ```text
+//! FileSource --Chunk--> Prepare --Mono--> Melody | Hits --Event--> estimate --Timing--> assemble --> Captured
+//! ```
+//!
+//! - [`Source`] yields [`Chunk`]s of interleaved samples. [`FileSource`] reads WAV, FLAC, MP3,
+//!   Ogg Vorbis and AAC-LC in M4A through Symphonia, a packet at a time.
+//! - [`Prepare`] downmixes to one channel and resamples to [`ANALYSIS_RATE`], so every stage
+//!   after it can assume both. Its output is [`Mono`].
+//! - [`Melody`] (pitch tracking by [`PitchTrack`], onsets by [`Onsets`], segmented into notes)
+//!   and [`Hits`] (onsets, each given a lane by [`LaneMode`]) turn mono audio into [`Event`]s:
+//!   [`Event::Note`], [`Event::Hit`] and [`Event::Onset`], with [`HitLane`] naming a hit's lane.
+//! - [`estimate`] reads the settled onsets and fills in whatever [`Given`] leaves out, as a
+//!   [`Timing`]: tempo, meter and downbeat, each an [`Origin`] (given, or estimated with a
+//!   confidence). [`beat_series`] gives the tempo from each beat to the next.
+//! - [`estimate_key`] gives a melody's [`KeyEstimate`].
+//! - [`assemble`] places the events as a `Song` by the timing, and returns a [`Captured`]: the
+//!   song, what was done before the downbeat ([`LeadIn`]), and the [`Analysis`] behind it.
+//!   [`quantize_offsets`] fills in how far quantizing moved each note ([`QuantizeOffset`]).
+//!
+//! Times inside the chain are sample frames at the analysis rate, not musical positions:
+//! musical time does not exist until a tempo does. [`Timing`] carries the beat period actually
+//! measured, and [`assemble`] converts frames to beats with it; the song states the whole bpm.
+//!
+//! # The stream rule
 //!
 //! The stream rule, from the design's anti-goals: "A stage that buffers the entire take to
 //! do its work, other than the final assembly into a `Song`, is a design failure."
-//! Live input would otherwise be a rewrite.
+//! Live input would otherwise be a rewrite. A [`Stage`] takes input a piece at a time, holds it
+//! back only until its output is settled, and reports how long that takes
+//! ([`Stage::latency_frames`]). [`estimate`] and [`assemble`] are functions over the settled
+//! events, not stages: they are the one place the whole take is kept, and only as events.
+//!
+//! # Where a model fits later
+//!
+//! This version has no model, no model runtime and no model download. A model such as
+//! basic-pitch (Apache-2.0, with an ONNX export, run through `ort`) would be one more
+//! implementation of [`Stage`] with `In = Mono` and `Out = Event`: it owns whatever buffering
+//! the model's window needs, reports it as its `latency_frames`, and emits [`Event::Note`]s as
+//! they settle. It would replace [`Melody`] for polyphonic takes, and [`estimate`] and
+//! [`assemble`] would not change. [`Event`] is `#[non_exhaustive]` so a model stage or a
+//! streaming consumer can add to it. ONNX is the starting point; if a model ships only
+//! PyTorch weights, burn and candle come before a Python sidecar.
+//!
+//! # Known boundary
+//!
+//! [`FileSource`] refuses HE-AAC by name when the file's header declares it. HE-AAC signalled
+//! only inside the audio data decodes as AAC-LC at half bandwidth, without a refusal; catching
+//! it would mean comparing declared and decoded sample rates.
 
 #![forbid(unsafe_code)]
 
