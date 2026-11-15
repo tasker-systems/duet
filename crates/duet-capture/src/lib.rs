@@ -70,8 +70,8 @@ pub use assemble::{Analysis, Captured, Kind, LeadIn, QuantizeOffset, assemble, q
 pub use duet_dsp::{
     ANALYSIS_RATE, BeatTempo, Chunk, Event, FrameBlock, Given, HitLane, Hits, KeyEstimate,
     LaneMode, Layer1, MAX_GAP_SECS, Melody, Mono, Onsets, Origin, Performance, PerformanceHead,
-    PitchFrame, PitchTrack, PitchUnit, Prepare, Stage, Timing, WEAK_CONFIDENCE, absolute_cents,
-    beat_series, estimate, estimate_key, felt_quarters, is_compound,
+    PitchFrame, PitchTrack, PitchUnit, Prepare, Stage, TempoAlternatives, Timing, WEAK_CONFIDENCE,
+    absolute_cents, beat_series, estimate, estimate_key, felt_quarters, is_compound,
 };
 pub use error::{Error, Result};
 pub use score::{Merge, Quantized, merge_collisions, quantize_apart};

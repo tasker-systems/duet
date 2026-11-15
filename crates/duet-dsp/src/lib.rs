@@ -80,6 +80,6 @@ pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use stage::{Chunk, Mono, Stage};
 pub use timing::{
-    BeatTempo, Given, Origin, Timing, WEAK_CONFIDENCE, beat_series, estimate, felt_quarters,
-    is_compound,
+    BeatTempo, Given, Origin, TempoAlternatives, Timing, WEAK_CONFIDENCE, beat_series, estimate,
+    felt_quarters, is_compound,
 };

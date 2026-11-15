@@ -4,7 +4,8 @@
 //! A quick run or a flam can put two notes on one step once quantized, which neither score
 //! writer can hold. So the grid is refined first, halving its step down to a 64th
 //! ([`quantize_apart`]), and only what that finest grid still cannot part is merged into one
-//! note ([`merge_collisions`]). The `.notes` is never quantized and keeps every note.
+//! note ([`merge_collisions`]). The performance (`.duet`) is never quantized and keeps every
+//! note.
 
 use duet_core::{Grid, Note, Position, Song};
 

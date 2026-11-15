@@ -472,6 +472,7 @@ dependencies = [
  "duet-drums",
  "duet-dsp",
  "rustfft",
+ "schemars",
  "serde",
  "serde_json",
  "symphonia",
@@ -544,6 +545,7 @@ version = "0.0.0"
 dependencies = [
  "duet-core",
  "duet-drums",
+ "duet-schemas",
  "midly",
  "serde_json",
  "toml",
@@ -575,6 +577,7 @@ dependencies = [
 name = "duet-schemas"
 version = "0.2.0"
 dependencies = [
+ "duet-capture",
  "duet-core",
  "duet-drums",
  "duet-dsp",
