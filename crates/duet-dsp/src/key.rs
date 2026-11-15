@@ -9,7 +9,8 @@
 //! The key changes a song's spelling and signature, never a note's MIDI number.
 
 use duet_core::{Key, Mode};
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::event::Event;
 use crate::timing::Origin;
@@ -25,7 +26,8 @@ const MINOR_PROFILE: [f64; 12] = [
 ];
 
 /// A take's key, given or estimated, with the evidence the estimate was read from.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct KeyEstimate {
     /// The key: the one given, or the best-scoring of the 24, with its confidence.

@@ -20,6 +20,8 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # The capture tests read back the .notes and .drums duet writes, with the readers duet uses.
 duet-core = { path = "../duet-core", version = "0.2.0" }
 duet-drums = { path = "../duet-drums", version = "0.2.0" }
+# The capture tests read back the documents duet writes, with the reader duet uses.
+duet-schemas = { path = "../duet-schemas", version = "0.2.0" }
 # The tests compare written MIDI event by event, and JSON and TOML as values.
 midly = "0.5.3"
 toml = "1"

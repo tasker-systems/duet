@@ -1,14 +1,17 @@
-//! `duet capture`: a recorded take in; the exact performance (`.notes`), a quantized score
-//! (`.abc` for a melody, `.drums` for a rhythm) and the analysis (`.capture.json`) out.
+//! `duet capture`: a recorded take in; the exact performance (`.duet`, a song document), a
+//! quantized score (`.abc` for a melody, `.drums` for a rhythm) and the analysis
+//! (`.capture.duet`, a `capture-analysis` document) out. Both documents are written through
+//! duet-schemas.
 //!
-//! Every estimate is stated on standard error and as a comment in the `.notes` and the score
+//! Every estimate is stated on standard error, in the song document's envelope `statements`,
+//! and as a comment in the score
 //! ([`statement`]). Every refusal comes before anything is written, and nothing is
-//! overwritten. Once the take is analysed, the performance (`.notes` and `.capture.json`) is
+//! overwritten. Once the take is analysed, the performance (`.duet` and `.capture.duet`) is
 //! written whatever becomes of the score, which is written, or reported as failed, after it.
 //!
 //! A melody take also writes its every pitch frame, as a `performance` stream,
 //! `STEM.performance.duet.jsonl`, through duet-schemas ([`PerformanceFile`]). Its lines are
-//! written as the frames settle; it is kept once the `.notes` and `.capture.json` are written,
+//! written as the frames settle; it is kept once the `.duet` and `.capture.duet` are written,
 //! and removed again when the capture fails before then.
 
 mod statement;
@@ -26,19 +29,19 @@ use duet_capture::{
     quantize_apart, quantize_offsets,
 };
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
-use duet_schemas::{Stream, Tool};
+use duet_schemas::{Document, Stream};
 
 use crate::config::Config;
 use crate::drums::{ReadOptions, grid_of_song, moved_velocities, refuse_overwrite};
-use crate::io::with_end;
+use crate::io::{tool, with_end};
 
 #[derive(Subcommand)]
 pub enum CaptureCommand {
     /// Capture a sung or played melody: notes, their pitches and the key, written as
-    /// STEM.notes (exactly as played) and STEM.abc (quantized to --grid), with every pitch
+    /// STEM.duet (exactly as played) and STEM.abc (quantized to --grid), with every pitch
     /// frame in STEM.performance.duet.jsonl.
     Melody(TakeArgs),
-    /// Capture a tapped or beatboxed rhythm: hits in lanes, written as STEM.notes (exactly
+    /// Capture a tapped or beatboxed rhythm: hits in lanes, written as STEM.duet (exactly
     /// as played) and STEM.drums (quantized to --grid). Without --lane, each hit is told
     /// apart by sound as a kick, snare or closed hat.
     Rhythm(TakeArgs),
@@ -66,13 +69,13 @@ pub struct TakeArgs {
     downbeat: Option<f64>,
     /// The step the score is quantized to, such as 1/16 (the default) or 1/8t. Where two
     /// notes, or two hits on one lane, would share a step, the step is halved, down to 1/64,
-    /// and what still shares one is merged; each is stated. The .notes is never quantized.
+    /// and what still shares one is merged; each is stated. The .duet is never quantized.
     #[arg(long)]
     grid: Option<Grid>,
     /// A rhythm's lane, such as hh or kick: every hit goes to it (a tapped take).
     #[arg(long)]
     lane: Option<String>,
-    /// The output files' stem: STEM.notes, STEM.abc or STEM.drums, and STEM.capture.json.
+    /// The output files' stem: STEM.duet, STEM.abc or STEM.drums, and STEM.capture.duet.
     /// Without it, the input's name without its extension, beside it.
     #[arg(short, long, value_name = "STEM")]
     output: Option<PathBuf>,
@@ -154,20 +157,17 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         meter,
         captured.song.ticks_per_quarter,
     );
-    let notes_said = [said.clone(), vec![lead_in.clone()]].concat();
-    let notes = commented(
-        &with_end(&captured.song, config.end)?.to_text(),
-        "#",
-        &notes_said,
-    );
-    let mut analysis = serde_json::to_string_pretty(&captured.analysis)?;
-    analysis.push('\n');
+    let song_said = [said.clone(), vec![lead_in.clone()]].concat();
+    let mut song = Document::new(tool(), with_end(&captured.song, config.end)?);
+    song.statements.clone_from(&song_said);
+    let song = song.write()?;
+    let analysis = Document::new(tool(), captured.analysis).write()?;
 
     // The performance is written whatever becomes of the score.
-    for line in &notes_said {
+    for line in &song_said {
         eprintln!("{line}");
     }
-    write_all(&[(&outputs.notes, &notes), (&outputs.analysis, &analysis)])?;
+    write_all(&[(&outputs.song, &song), (&outputs.analysis, &analysis)])?;
     if let Some(performance) = performance {
         performance.keep();
     }
@@ -177,7 +177,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
             "{}: {} not written; {} and {} hold the performance",
             named(),
             outputs.score.display(),
-            outputs.notes.display(),
+            outputs.song.display(),
             outputs.analysis.display()
         )
     };
@@ -344,7 +344,8 @@ fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
 
 /// The files a capture writes, each checked before any is written.
 struct Outputs {
-    notes: PathBuf,
+    /// The performance as a song document.
+    song: PathBuf,
     score: PathBuf,
     analysis: PathBuf,
     /// A melody's performance stream.
@@ -362,15 +363,15 @@ impl Outputs {
             PathBuf::from(path)
         };
         let outputs = Outputs {
-            notes: named(".notes"),
+            song: named(".duet"),
             score: named(match take {
                 Take::Melody => ".abc",
                 Take::Rhythm => ".drums",
             }),
-            analysis: named(".capture.json"),
+            analysis: named(".capture.duet"),
             performance: (take == Take::Melody).then(|| named(".performance.duet.jsonl")),
         };
-        let all: Vec<&PathBuf> = [&outputs.notes, &outputs.score, &outputs.analysis]
+        let all: Vec<&PathBuf> = [&outputs.song, &outputs.score, &outputs.analysis]
             .into_iter()
             .chain(&outputs.performance)
             .collect();
@@ -500,8 +501,7 @@ impl PerformanceFile {
             let line = match layer {
                 Layer1::Head(head) if !self.headed => {
                     self.headed = true;
-                    let tool = Tool::new("duet", env!("CARGO_PKG_VERSION"));
-                    Stream::<PerformanceHead>::new(tool, head).head_line()?
+                    Stream::<PerformanceHead>::new(tool(), head).head_line()?
                 }
                 Layer1::Frames(block) if self.headed => {
                     Stream::<PerformanceHead>::record_line(&block)?

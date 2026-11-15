@@ -81,8 +81,8 @@ enum Command {
     /// or write a song as ABC.
     #[command(subcommand)]
     Abc(AbcCommand),
-    /// Capture a recorded take: the exact performance as .notes, a quantized score (.abc
-    /// or .drums) and the analysis as .capture.json. What is not given is estimated, and
+    /// Capture a recorded take: the exact performance as a .duet song document, a quantized
+    /// score (.abc or .drums) and the analysis as a .capture.duet document. What is not given is estimated, and
     /// stated on standard error and in the files.
     #[command(subcommand)]
     Capture(CaptureCommand),

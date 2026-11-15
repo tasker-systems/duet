@@ -41,6 +41,7 @@
 //! is the fit of the meter that placed it.
 
 use duet_core::TimeSig;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
@@ -151,11 +152,16 @@ pub struct Given {
 /// estimate is (0..=1; below [`WEAK_CONFIDENCE`] it is weak).
 ///
 /// Deliberately exhaustive: a value is given or it is estimated.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
+#[schemars(rename = "Origin_of_{T}")]
 pub enum Origin<T> {
     Given(T),
-    Estimated { value: T, confidence: f32 },
+    Estimated {
+        value: T,
+        #[schemars(range(min = 0.0, max = 1.0))]
+        confidence: f32,
+    },
 }
 
 impl<T> Origin<T> {
@@ -167,8 +173,31 @@ impl<T> Origin<T> {
     }
 }
 
+/// Half and double an estimated tempo: the likeliest other readings of it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct TempoAlternatives {
+    /// Half the tempo, in quarter notes per minute.
+    pub half: f64,
+    /// Double the tempo, in quarter notes per minute.
+    pub double: f64,
+}
+
+impl TempoAlternatives {
+    /// Half and double `bpm`.
+    #[must_use]
+    pub fn of(bpm: f64) -> TempoAlternatives {
+        TempoAlternatives {
+            half: bpm / 2.0,
+            double: bpm * 2.0,
+        }
+    }
+}
+
 /// A take's tempo, meter and downbeat, each marked given or estimated.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Timing {
     /// Quarter notes per minute. An estimate is a whole number.
@@ -177,7 +206,7 @@ pub struct Timing {
     /// given tempo, which is not reported as an estimate, so neither are its half and double,
     /// and the analysis leaves them out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tempo_alternatives: Option<(f64, f64)>,
+    pub tempo_alternatives: Option<TempoAlternatives>,
     /// Frames per quarter note, the period notes are placed by. For an estimated tempo it is the
     /// period measured on the grid, not the rounded `tempo_bpm` (92.4 a minute is stated as 92
     /// but placed at 92.4); for a given tempo it is exactly `60 * rate / tempo_bpm`.
@@ -188,7 +217,8 @@ pub struct Timing {
 }
 
 /// The local tempo from one beat to the next.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct BeatTempo {
     /// The beat the interval starts on, counted from 0 at the downbeat.
@@ -408,8 +438,8 @@ fn without_pulse(onsets: &[Onset], rate: f64, bpm: f64, given: &Given) -> Timing
     }
 }
 
-fn alternatives(bpm: f64) -> (f64, f64) {
-    (bpm / 2.0, bpm * 2.0)
+fn alternatives(bpm: f64) -> TempoAlternatives {
+    TempoAlternatives::of(bpm)
 }
 
 fn downbeat_origin(given: &Given, rate: f64, estimate: f64, confidence: f32) -> Origin<u64> {
@@ -1184,7 +1214,10 @@ mod tests {
         let (bpm, confidence) = estimated(&timing.tempo_bpm);
         assert_eq!(bpm, 120.0);
         assert!(confidence >= WEAK_CONFIDENCE, "confidence {confidence}");
-        assert_eq!(timing.tempo_alternatives, Some((60.0, 240.0)));
+        assert_eq!(
+            timing.tempo_alternatives,
+            Some(TempoAlternatives::of(120.0))
+        );
     }
 
     #[test]
@@ -1192,7 +1225,7 @@ mod tests {
         let onsets = onsets_of(&pattern(92.4, LEAD, 20.0, &[0.5]));
         let timing = estimate(&onsets, RATE, &Given::default()).unwrap();
         assert_eq!(estimated(&timing.tempo_bpm).0, 92.0);
-        assert_eq!(timing.tempo_alternatives, Some((46.0, 184.0)));
+        assert_eq!(timing.tempo_alternatives, Some(TempoAlternatives::of(92.0)));
     }
 
     #[test]
@@ -2133,7 +2166,7 @@ mod tests {
                 value: 135.0,
                 confidence: 0.75,
             },
-            tempo_alternatives: Some((67.5, 270.0)),
+            tempo_alternatives: Some(TempoAlternatives::of(135.0)),
             beat_period_frames: 9_800.25,
             meter: Origin::Given(meter("6/8")),
             downbeat_frame: Origin::Estimated {
@@ -2146,7 +2179,7 @@ mod tests {
         assert_eq!(back, timing);
         assert!(json.contains(r#""meter":{"given":"6/8"}"#), "{json}");
         assert!(
-            json.contains(r#""tempo_alternatives":[67.5,270.0]"#),
+            json.contains(r#""tempo_alternatives":{"half":67.5,"double":270.0}"#),
             "{json}"
         );
         // A given tempo has no alternatives to give, and the analysis leaves them out.

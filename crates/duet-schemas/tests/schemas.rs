@@ -17,6 +17,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use duet_capture::Analysis;
 use duet_core::{
     Control, Key, Note, Pitch, Position, Song, TempoChange, TimeChange, TimeSig, Track,
 };
@@ -446,6 +447,12 @@ fn example(name: &str) -> AnyDocument {
     if name == "drum-grid" {
         return AnyDocument::DrumGrid(Document::new(Tool::new("duet", "0.2.0"), example_grid()));
     }
+    if name == "capture-analysis" {
+        return AnyDocument::CaptureAnalysis(Document::new(
+            Tool::new("duet", "0.2.0"),
+            example_analysis(),
+        ));
+    }
     assert_eq!(name, "song", "no example is defined for {name}");
     let mut doc = Document::new(Tool::new("duet", "0.2.0"), example_song());
     let mut from = From::new("abc");
@@ -478,6 +485,47 @@ fn example_grid() -> duet_drums::DrumGrid {
     grid.set_matrix(bar_steps, rows).expect("a whole matrix");
     grid.check().expect("the example is a valid grid");
     grid
+}
+
+/// A melody take's analysis that uses every field: each kind of event, an estimated tempo with
+/// its half and double, a given meter, an estimated downbeat, a key with its evidence, the tempo
+/// beat by beat, the grid and the quantize offsets.
+pub fn example_analysis() -> Analysis {
+    serde_json::from_value(json!({
+        "rate": 22050,
+        "events": [
+            { "type": "onset", "frame": 11025, "strength": 0.8125 },
+            { "type": "note", "start": 11100, "end": 21600, "midi": 63, "confidence": 0.93,
+              "strength": 0.8125 },
+            { "type": "onset", "frame": 22050, "strength": 0.5 },
+            { "type": "note", "start": 22100, "end": 32600, "midi": 67, "confidence": 0.875,
+              "strength": 0.5 },
+            { "type": "hit", "frame": 33075, "lane": "asked", "strength": 0.25 }
+        ],
+        "timing": {
+            "tempo_bpm": { "estimated": { "value": 120.0, "confidence": 0.84 } },
+            "tempo_alternatives": { "half": 60.0, "double": 240.0 },
+            "beat_period_frames": 11025.0,
+            "meter": { "given": "4/4" },
+            "downbeat_frame": { "estimated": { "value": 11025, "confidence": 0.62 } }
+        },
+        "key": {
+            "key": { "estimated": { "value": "Eb major", "confidence": 0.71 } },
+            "alternative": "C minor",
+            "histogram": [0.0, 0.0, 0.125, 0.25, 0.0, 0.0, 0.0, 0.375, 0.125, 0.0, 0.125, 0.0],
+            "scores": [["Eb major", 0.71], ["C minor", 0.64], ["Bb major", 0.52]]
+        },
+        "beats": [
+            { "beat": 0, "secs": 0.5, "bpm": 119.5 },
+            { "beat": 1, "secs": 1.002, "bpm": 120.25 }
+        ],
+        "grid": "1/16",
+        "offsets": [
+            { "note": 0, "moved_ms": -3.4, "moved_steps": -0.027 },
+            { "note": 1, "moved_ms": 2.25, "moved_steps": 0.018 }
+        ]
+    }))
+    .expect("the example analysis reads")
 }
 
 fn pos(s: &str) -> Position {

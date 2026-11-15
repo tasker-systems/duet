@@ -1,5 +1,5 @@
-//! `duet capture melody|rhythm`: a take in, the exact `.notes`, a quantized score (`.abc` or
-//! `.drums`) and the analysis (`.capture.json`) out, with every estimate stated on standard
+//! `duet capture melody|rhythm`: a take in, the exact performance (`.duet`, a song document), a
+//! quantized score (`.abc` or `.drums`) and the analysis (`.capture.duet`) out, with every estimate stated on standard
 //! error and in the files, and every refusal made before anything is written.
 //!
 //! The takes are generated here (see `capture/audio.rs`) and written to scratch directories.
@@ -13,6 +13,7 @@ use std::process::Output;
 use duet_core::Song;
 use duet_drums::DrumGrid;
 use duet_e2e::{duet, duet_with, ok, root, s, scratch};
+use duet_schemas::{AnyDocument, Document};
 
 /// A melody in E-flat major at 120 a minute, from half a second in: the tonic triad and
 /// scale, with the tonic and dominant held longest.
@@ -104,6 +105,27 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
+/// The song in a song document, as duet-schemas reads it.
+fn song_of(path: &Path) -> Song {
+    document_of(path).body
+}
+
+/// A song document, as duet-schemas reads it.
+fn document_of(path: &Path) -> Document<Song> {
+    Document::read(&read(path)).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// The body of a capture-analysis document, read as one by duet-schemas, as JSON.
+fn analysis_of(path: &Path) -> serde_json::Value {
+    let text = read(path);
+    match AnyDocument::read(&text) {
+        Ok(doc) => assert_eq!(doc.kind(), "capture-analysis", "{}", path.display()),
+        Err(e) => panic!("{}: {e}", path.display()),
+    }
+    let json: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    json["body"].clone()
+}
+
 /// The comment lines of a file: those starting with `prefix`.
 fn comments(text: &str, prefix: &str) -> Vec<String> {
     text.lines()
@@ -144,7 +166,7 @@ fn melody_writes_notes_and_abc_beside_the_input() {
     let wav = take(&dir, "tune.wav", &eb_major());
     let out = capture(&dir, &["melody", s(&wav)]);
     ok(&out, "capture melody");
-    let song = Song::from_text(&read(&dir.join("tune.notes"))).expect(".notes parses again");
+    let song = song_of(&dir.join("tune.duet"));
     assert!(song.tracks[0].notes.len() >= 20, "{song:?}");
     // Onset strengths give velocities off the dynamics' levels, so the ABC snaps them.
     let err = stderr(&out);
@@ -155,7 +177,52 @@ fn melody_writes_notes_and_abc_beside_the_input() {
     );
     let check = duet(&dir, &["abc", "check", s(&dir.join("tune.abc"))]);
     ok(&check, "abc check");
-    assert!(dir.join("tune.capture.json").is_file());
+    analysis_of(&dir.join("tune.capture.duet"));
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// Capture's song document is a document like any other: `duet song show` reads it by its
+/// envelope, with no `--from`, and prints the performance capture wrote.
+#[test]
+fn song_show_reads_captures_song_document_directly() {
+    let dir = scratch("capture-show");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    ok(&capture(&dir, &["melody", s(&wav)]), "capture melody");
+    let path = dir.join("tune.duet");
+    let doc = document_of(&path);
+    assert_eq!(doc.envelope().kind, "song");
+    assert_eq!(doc.tool.name, "duet");
+    let out = duet(&dir, &["song", "show", s(&path)]);
+    ok(&out, "song show tune.duet");
+    let shown = Song::from_text(&String::from_utf8_lossy(&out.stdout)).expect("notefmt");
+    assert_eq!(shown, doc.body);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// Every file a melody capture writes is refused, rather than overwritten, when it exists.
+#[test]
+fn melody_refuses_to_overwrite_each_of_its_outputs() {
+    let dir = scratch("capture-refuse-each");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    for name in [
+        "tune.duet",
+        "tune.abc",
+        "tune.capture.duet",
+        "tune.performance.duet.jsonl",
+    ] {
+        let path = dir.join(name);
+        std::fs::write(&path, "keep me\n").expect("write");
+        let out = capture(&dir, &["melody", s(&wav)]);
+        assert!(!out.status.success(), "{name} was overwritten");
+        let err = stderr(&out);
+        assert!(
+            err.contains(&format!("{name} exists")) && err.contains("never overwrites"),
+            "{name}: {err}"
+        );
+        assert_eq!(read(&path), "keep me\n");
+        assert_eq!(files(&dir), [name, "tune.wav"], "nothing else is written");
+        std::fs::remove_file(&path).expect("remove");
+    }
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -168,8 +235,8 @@ fn melody_writes_its_performance_beside_its_other_outputs_and_never_overwrites_i
         files(&dir),
         [
             "tune.abc",
-            "tune.capture.json",
-            "tune.notes",
+            "tune.capture.duet",
+            "tune.duet",
             "tune.performance.duet.jsonl",
             "tune.wav"
         ]
@@ -207,7 +274,7 @@ fn melody_writes_its_performance_beside_its_other_outputs_and_never_overwrites_i
     assert!(held.iter().all(|p| (p - 6300.0).abs() < 20.0), "{held:?}");
 
     // Run again with the other outputs gone: the performance alone is refused, and kept.
-    for other in ["tune.abc", "tune.capture.json", "tune.notes"] {
+    for other in ["tune.abc", "tune.capture.duet", "tune.duet"] {
         std::fs::remove_file(dir.join(other)).expect("remove");
     }
     let out = capture(&dir, &["melody", s(&wav)]);
@@ -228,9 +295,9 @@ fn rhythm_writes_notes_and_drums() {
     let wav = take(&dir, "beat.wav", &kick_and_hat());
     let out = capture(&dir, &["rhythm", s(&wav), "-o", s(&dir.join("out"))]);
     ok(&out, "capture rhythm");
-    Song::from_text(&read(&dir.join("out.notes"))).expect(".notes parses again");
+    song_of(&dir.join("out.duet"));
     DrumGrid::from_text(&read(&dir.join("out.drums"))).expect(".drums parses again");
-    assert!(dir.join("out.capture.json").is_file());
+    analysis_of(&dir.join("out.capture.duet"));
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -245,9 +312,10 @@ fn estimates_are_stated_on_stderr_and_in_both_files() {
         .lines()
         .find(|l| l.starts_with("tempo: estimated "))
         .unwrap_or_else(|| panic!("no tempo statement: {err}"));
-    let notes = comments(&read(&dir.join("tune.notes")), "#");
+    // In the song document's envelope, and as a comment in the ABC.
+    let stated = document_of(&dir.join("tune.duet")).statements;
     let abc = comments(&read(&dir.join("tune.abc")), "%");
-    assert!(notes.contains(&format!("# {line}")), "{notes:?}");
+    assert!(stated.iter().any(|l| l == line), "{stated:?}");
     assert!(abc.contains(&format!("% {line}")), "{abc:?}");
     assert!(
         err.lines().any(|l| l.starts_with("meter: estimated ")),
@@ -269,13 +337,16 @@ fn a_given_tempo_is_not_reported_as_an_estimate() {
     let err = stderr(&out);
     assert!(!err.contains("tempo: estimated"), "{err}");
     assert!(!err.contains("half"), "{err}");
-    let notes = read(&dir.join("tune.notes"));
-    assert!(!notes.contains("tempo: estimated"), "{notes}");
-    assert_eq!(Song::from_text(&notes).expect("parses").tempo_bpm, 120.0);
+    let doc = document_of(&dir.join("tune.duet"));
+    assert!(
+        doc.statements.iter().all(|l| !l.starts_with("tempo:")),
+        "{:?}",
+        doc.statements
+    );
+    assert_eq!(doc.body.tempo_bpm, 120.0);
     assert!(read(&dir.join("tune.abc")).contains("Q:1/4=120"));
     // Nor are its half and double, in the analysis.
-    let json: serde_json::Value =
-        serde_json::from_str(&read(&dir.join("tune.capture.json"))).expect("JSON");
+    let json: serde_json::Value = analysis_of(&dir.join("tune.capture.duet"));
     assert!(json["timing"].get("tempo_alternatives").is_none(), "{json}");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
@@ -290,12 +361,11 @@ fn a_given_downbeat_is_not_reported_as_an_estimate() {
     assert!(!err.contains("downbeat:"), "{err}");
     // The tempo is still estimated and stated: only the downbeat was given.
     assert!(err.contains("tempo: estimated"), "{err}");
-    for file in ["tune.notes", "tune.abc"] {
+    for file in ["tune.duet", "tune.abc"] {
         let text = read(&dir.join(file));
         assert!(!text.contains("downbeat: estimated"), "{file}: {text}");
     }
-    let json: serde_json::Value =
-        serde_json::from_str(&read(&dir.join("tune.capture.json"))).expect("JSON");
+    let json: serde_json::Value = analysis_of(&dir.join("tune.capture.duet"));
     assert!(
         json["timing"]["downbeat_frame"]["given"].is_number(),
         "{json}"
@@ -318,7 +388,12 @@ fn the_key_is_stated_when_estimated() {
         line.starts_with("key: estimated Eb major (relative C minor)"),
         "{line}"
     );
-    assert!(comments(&read(&dir.join("tune.notes")), "#").contains(&format!("# {line}")));
+    assert!(
+        document_of(&dir.join("tune.duet"))
+            .statements
+            .iter()
+            .any(|l| l == line)
+    );
     assert!(comments(&read(&dir.join("tune.abc")), "%").contains(&format!("% {line}")));
 
     let out = capture(
@@ -491,7 +566,7 @@ fn a_fractional_tempo_on_a_rhythm_is_kept() {
     let wav = take(&dir, "beat.wav", &kick_and_hat());
     let out = capture(&dir, &["rhythm", s(&wav), "--tempo", "119.5"]);
     ok(&out, "capture rhythm --tempo 119.5");
-    let notes = Song::from_text(&read(&dir.join("beat.notes"))).expect("parses");
+    let notes = song_of(&dir.join("beat.duet"));
     assert_eq!(notes.tempo_bpm, 119.5);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
@@ -527,7 +602,7 @@ fn the_notes_file_is_not_quantized() {
     );
     let out = capture(&dir, &["rhythm", s(&wav), "--lane", "hh", "--tempo", "120"]);
     ok(&out, "capture rhythm");
-    let notes = Song::from_text(&read(&dir.join("loose.notes"))).expect("parses");
+    let notes = song_of(&dir.join("loose.duet"));
     let off = ticks(&notes).into_iter().filter(|t| t % 120 != 0).count();
     assert!(off > 0, "every onset is on the 1/16 grid: {notes:?}");
     std::fs::remove_dir_all(&dir).expect("clean up");
@@ -553,12 +628,12 @@ fn an_existing_output_is_refused() {
 #[test]
 fn the_input_is_refused_as_an_output() {
     let dir = scratch("capture-input");
-    // A take whose name is what its .notes would be.
-    let input = take(&dir, "tune.notes", &eb_major());
+    // A take whose name is what its song document would be.
+    let input = take(&dir, "tune.duet", &eb_major());
     let out = capture(&dir, &["melody", s(&input)]);
     assert!(!out.status.success());
     assert!(stderr(&out).contains("is the input"), "{}", stderr(&out));
-    assert_eq!(files(&dir), ["tune.notes"]);
+    assert_eq!(files(&dir), ["tune.duet"]);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -572,8 +647,7 @@ fn the_analysis_file_is_written_and_reads_back() {
     );
     let out = capture(&dir, &["rhythm", s(&wav), "--lane", "hh"]);
     ok(&out, "capture rhythm");
-    let json: serde_json::Value =
-        serde_json::from_str(&read(&dir.join("beat.capture.json"))).expect("JSON");
+    let json: serde_json::Value = analysis_of(&dir.join("beat.capture.duet"));
     for field in ["events", "beats", "offsets"] {
         let list = json[field]
             .as_array()
@@ -595,8 +669,7 @@ fn a_drifting_take_shows_its_slide_in_the_analysis() {
     let wav = take(&dir, "drift.wav", &sliding_clicks(100.0, 106.0, 20.0));
     let out = capture(&dir, &["rhythm", s(&wav), "--lane", "hh"]);
     ok(&out, "capture rhythm");
-    let json: serde_json::Value =
-        serde_json::from_str(&read(&dir.join("drift.capture.json"))).expect("JSON");
+    let json: serde_json::Value = analysis_of(&dir.join("drift.capture.duet"));
     let bpms: Vec<f64> = json["beats"]
         .as_array()
         .expect("beats")
@@ -646,7 +719,7 @@ fn too_few_onsets_ask_for_a_tempo() {
 }
 
 /// A note a tick before a given downbeat makes a pickup that quantizing leaves empty: the
-/// score drops it and says so, and the `.notes` keeps it, at the note's true time.
+/// score drops it and says so, and the `.duet` keeps it, at the note's true time.
 #[test]
 fn an_empty_lead_in_is_removed_from_the_score_only() {
     let dir = scratch("capture-lead-in");
@@ -656,8 +729,7 @@ fn an_empty_lead_in_is_removed_from_the_score_only() {
     let mut args = vec!["melody", s(&wav), "-o", s(&first)];
     args.extend(given);
     ok(&capture(&dir, &args), "first capture");
-    let json: serde_json::Value =
-        serde_json::from_str(&read(&dir.join("first.capture.json"))).expect("JSON");
+    let json: serde_json::Value = analysis_of(&dir.join("first.capture.duet"));
     let start = json["events"]
         .as_array()
         .expect("events")
@@ -680,8 +752,8 @@ fn an_empty_lead_in_is_removed_from_the_score_only() {
         "{err}"
     );
 
-    let notes_text = read(&dir.join("tune.notes"));
-    let notes = Song::from_text(&notes_text).expect("parses");
+    let notes_text = read(&dir.join("tune.duet"));
+    let notes = song_of(&dir.join("tune.duet"));
     assert_eq!(notes.time_sig.to_string(), "1/4", "{notes_text}");
     assert_eq!(notes.time_changes.len(), 1, "{notes_text}");
     assert_eq!(ticks(&notes)[0], 479, "{notes_text}");
@@ -732,7 +804,7 @@ fn a_given_tempo_and_meter_override_the_estimate() {
     let abc = read(&dir.join("tune.abc"));
     assert!(abc.lines().any(|l| l == "M:3/4"), "{abc}");
     assert!(abc.lines().any(|l| l == "Q:1/4=97"), "{abc}");
-    let notes = Song::from_text(&read(&dir.join("tune.notes"))).expect("parses");
+    let notes = song_of(&dir.join("tune.duet"));
     assert_eq!(notes.tempo_bpm, 97.0);
     let meters: Vec<String> = std::iter::once(notes.time_sig)
         .chain(notes.time_changes.iter().map(|c| c.time_sig))
@@ -785,8 +857,8 @@ fn undecodable_audio_is_refused_by_name() {
 fn all_written(dir: &Path, input: &str, stem: &str, score: &str) {
     let mut want = vec![
         input.to_owned(),
-        format!("{stem}.capture.json"),
-        format!("{stem}.notes"),
+        format!("{stem}.capture.duet"),
+        format!("{stem}.duet"),
         format!("{stem}{score}"),
     ];
     // A melody's performance; a rhythm take has none.
@@ -836,10 +908,9 @@ fn midis(song: &Song) -> Vec<u8> {
         .collect()
 }
 
-/// The events of one type (`note` or `hit`) in a `.capture.json`.
-fn analysed(json_path: &Path, kind: &str) -> Vec<serde_json::Value> {
-    let json: serde_json::Value = serde_json::from_str(&read(json_path)).expect("JSON");
-    json["events"]
+/// The events of one type (`note` or `hit`) in a `.capture.duet`.
+fn analysed(path: &Path, kind: &str) -> Vec<serde_json::Value> {
+    analysis_of(path)["events"]
         .as_array()
         .expect("events")
         .iter()
@@ -849,7 +920,7 @@ fn analysed(json_path: &Path, kind: &str) -> Vec<serde_json::Value> {
 }
 
 /// A run quicker than the grid writes all three files: the score's grid is refined until no
-/// two notes share a step, the refinement is stated, and the `.notes` keeps every note.
+/// two notes share a step, the refinement is stated, and the `.duet` keeps every note.
 #[test]
 fn a_quick_run_refines_the_grid_and_writes_everything() {
     let dir = scratch("capture-run");
@@ -867,12 +938,12 @@ fn a_quick_run_refines_the_grid_and_writes_everything() {
         comments(&read(&dir.join("run.abc")), "%").contains(&format!("% {line}")),
         "the score does not state its grid"
     );
-    let notes = Song::from_text(&read(&dir.join("run.notes"))).expect("parses");
-    let found: Vec<u8> = analysed(&dir.join("run.capture.json"), "note")
+    let notes = song_of(&dir.join("run.duet"));
+    let found: Vec<u8> = analysed(&dir.join("run.capture.duet"), "note")
         .iter()
         .map(|e| e["midi"].as_u64().expect("midi") as u8)
         .collect();
-    assert_eq!(midis(&notes), found, "the .notes lost a note");
+    assert_eq!(midis(&notes), found, "the .duet lost a note");
     let run = &played[4..8];
     assert!(
         found.windows(4).any(|w| w == run),
@@ -928,23 +999,23 @@ fn a_flam_refines_the_grid_and_writes_everything() {
         comments(&read(&dir.join("flam.drums")), "#").contains(&format!("# {line}")),
         "the score does not state its grid"
     );
-    let notes = Song::from_text(&read(&dir.join("flam.notes"))).expect("parses");
+    let notes = song_of(&dir.join("flam.duet"));
     assert_eq!(
-        analysed(&dir.join("flam.capture.json"), "hit").len(),
+        analysed(&dir.join("flam.capture.duet"), "hit").len(),
         times.len(),
         "a hit was not heard"
     );
     assert_eq!(
         notes.tracks[0].notes.len(),
         times.len(),
-        "the .notes lost a hit"
+        "the .duet lost a hit"
     );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
 /// Two hits closer together than a 1/64 step, at 20 a minute, where a 1/64 is 187.5 ms: no
 /// grid parts them, so they are merged into one in the score, the merge is stated, and the
-/// `.notes` keeps both.
+/// `.duet` keeps both.
 #[test]
 fn hits_no_grid_parts_are_merged_and_stated() {
     let dir = scratch("capture-merge");
@@ -984,7 +1055,7 @@ fn hits_no_grid_parts_are_merged_and_stated() {
     let grid = DrumGrid::from_text(&drums).expect(".drums parses");
     let hits = grid.vel.data().iter().filter(|v| **v > 0).count();
     assert_eq!(hits, 2, "{drums}");
-    let notes = Song::from_text(&read(&dir.join("flam.notes"))).expect("parses");
-    assert_eq!(notes.tracks[0].notes.len(), 3, "the .notes lost a hit");
+    let notes = song_of(&dir.join("flam.duet"));
+    assert_eq!(notes.tracks[0].notes.len(), 3, "the .duet lost a hit");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }

@@ -11,7 +11,8 @@ use duet_core::time::beats_from_ticks;
 use duet_core::{Grid, Key, Note, Pitch, Position, Song, TimeChange, TimeSig, Track};
 use duet_drums::LaneMap;
 use duet_dsp::{BeatTempo, Event, HitLane, KeyEstimate, Timing, beat_series, estimate_key};
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
@@ -79,21 +80,26 @@ pub struct Captured {
     pub analysis: Analysis,
 }
 
-/// Everything the analysis found, as `<stem>.capture.json` holds it.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// Everything the analysis found: the body of `<stem>.capture.duet`, a `capture-analysis`
+/// document. A value that is absent is left out, never written `null`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Analysis {
     /// The rate the events' frames count at.
     pub rate: u32,
     pub events: Vec<Event>,
     pub timing: Timing,
-    /// The melody's key, given or estimated; `None` for a rhythm take.
+    /// The melody's key, given or estimated; absent for a rhythm take.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyEstimate>,
     /// The tempo from each beat to the next.
     pub beats: Vec<BeatTempo>,
     /// The grid the score was quantized to, which `offsets` count steps of: the one asked for,
     /// or the finer one it was refined to ([`quantize_apart`](crate::quantize_apart)).
-    /// Assembly leaves it `None`, since the grid is chosen later.
+    /// Assembly leaves it absent, since the grid is chosen later, and it stays absent when the
+    /// score could not be quantized.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid: Option<Grid>,
     /// How far quantizing moved each note. Assembly leaves it empty: the grid is chosen
     /// later, and [`quantize_offsets`] fills it once the song is quantized.
@@ -101,7 +107,8 @@ pub struct Analysis {
 }
 
 /// How far quantizing moved one note.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct QuantizeOffset {
     /// The note's index, counting through the tracks in order.
