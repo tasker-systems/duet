@@ -7,6 +7,8 @@
 //! 2. **The notes** are segmented by [`Melody`](crate::Melody)'s rules, over the performance's
 //!    pitch in cents and its onsets, and each is given the key nearest its held pitch on that
 //!    tuning, with its `centre`: how far, in cents, its held pitch sits from that key.
+//! 3. **The residual** of each note, and of the take, with the loss, is measured against
+//!    those keys on that tuning ([`residual`](crate::residual)).
 //!
 //! A reading is a function over the settled performance, as `estimate` and `assemble` are over
 //! settled events: the whole take is kept as frames (about 86 a second), never as samples.
@@ -25,6 +27,7 @@ use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::notes::{Segment, Segmenter};
 use crate::performance::{FrameBlock, PerformanceHead, absolute_cents};
+use crate::residual::{NoteResidual, TakeResidual, residual};
 use crate::timing::Origin;
 
 /// A4 at 440 Hz, in absolute cents.
@@ -286,6 +289,10 @@ pub struct ReadNote {
     pub confidence: f32,
     /// As [`Event::Note`]'s.
     pub strength: f32,
+    /// What the note leaves of the performance: centre, drift, vibrato, slide, fall and rest.
+    /// Added in `capture-analysis` 1.2; absent before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual: Option<NoteResidual>,
 }
 
 impl ReadNote {
@@ -309,6 +316,10 @@ impl ReadNote {
 pub struct Reading {
     pub tuning: Tuning,
     pub notes: Vec<ReadNote>,
+    /// What the notes leave of the take as a whole, with the loss as its three terms. Added in
+    /// `capture-analysis` 1.2; absent before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual: Option<TakeResidual>,
 }
 
 impl Reading {
@@ -348,9 +359,15 @@ pub fn read(frames: &PerformanceFrames, onsets: &[Event], given: Option<f64>) ->
         );
     }
     segmenter.finish_segments(&mut segments);
+    let mut notes: Vec<ReadNote> = segments.iter().map(read_note).collect();
+    let (parts, take) = residual(frames, &tuning, &notes);
+    for (note, part) in notes.iter_mut().zip(parts) {
+        note.residual = Some(part);
+    }
     Reading {
         tuning,
-        notes: segments.iter().map(read_note).collect(),
+        notes,
+        residual: Some(take),
     }
 }
 
@@ -366,6 +383,7 @@ fn read_note(segment: &Segment) -> ReadNote {
         between_keys: centre.abs() > BETWEEN_KEYS_CENTS,
         confidence: segment.confidence,
         strength: segment.strength,
+        residual: None,
     }
 }
 

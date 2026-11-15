@@ -180,6 +180,14 @@ ReadNote {
   - `c` is the **cost per note**: question 4 sets it and states it.
   - The loss is reported as its three terms, never as one number alone, so a reading that wins by adding notes shows it.
 
+> **Built (2026-11-15, build task 4):** `duet_dsp::residual`, filled by `read`: each `ReadNote`'s optional `residual` and the `Reading`'s, `capture-analysis` 1.2 (additive). Where it departs from the above:
+> - **The held span is found again from the residual,** not taken from segmentation: the slide in is the frames until the pitch first reaches the note's median, when the first frame is further from it than the vibrato's depth and 30 cents; a fall off is the same from the end. Segmentation's `held_from` is where it arrived *and held for 50 ms*, which a vibrato pushes late by up to a quarter of its cycle.
+> - **The drift line and the vibrato are fitted together** (least squares on 1, t, sin, cos at the rate the autocorrelation finds): a line alone is pulled by a vibrato over a span of no whole number of its cycles, by about 12A/(T²ω): 5.7 cents a second for the witness's.
+> - **The rate is the shortest lag that peaks above 0.5,** not the highest peak: a vibrato correlates as well at two periods as at one. A fitted depth under 5 cents is no vibrato.
+> - **The loss's first term covers every voiced frame a note covers,** its slide and fall included, as `pitch`: a reading cannot hide frames from it by calling them slide. `σ` is 50 cents (half a key, so a frame that far costs one unread frame), `w` is 1, and `c` is the shortest note's frames (0.05 s, 4 frames) times `w`, so a note must account for at least that much singing that would otherwise be unread. Each is a named constant in `residual.rs`; the note HMM sets them on real takes.
+> - **The tuning's spread is the reading's `tuning.spread_cents`,** not repeated in the take's residual.
+> - **No ndarray yet:** one 4×4 solve and an autocorrelation over a few dozen lags per note.
+
 **Witnesses:**
 - A held note with a 6 Hz vibrato of ±40 cents, a 10 cents/s drift and a 300 ms scoop from 300 cents below is measured within 10 % on each part.
 - A note with no vibrato reports none.
