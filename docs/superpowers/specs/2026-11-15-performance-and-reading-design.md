@@ -245,6 +245,8 @@ ReadNote {
   - Bends are emitted where the residual moves more than 2 cents, at most one per frame (86 a second).
   - Bend is channel-wide, which is right for a monophonic melody.
   - **Not known yet:** whether Logic's instruments and `duet play`'s built-in synth honour RPN 0. That is a build-time check by ear. If one doesn't, it is a stated limit, not a silent wrong pitch.
+> **File names (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** capture's `.notes` output becomes a song document, `<stem>.duet`, and its text is the `notes` view; `.capture.json` becomes `<stem>.capture.duet`.
+
 - **The default `.notes`** stays the reading's keys, unquantized, as today, with the tuning as a comment. The performance render is asked for (`--render performance`).
   - The anti-goal "losing the performance" is met by `.performance.jsonl` itself, not by bends in `.notes`.
   - **Proposed; not yet ruled.**

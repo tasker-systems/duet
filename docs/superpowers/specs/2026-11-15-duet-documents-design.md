@@ -5,6 +5,10 @@ structures](#the-decision-this-builds) is built. That decision is settled and is
 It answers the eight questions of the design task, names the build tasks in order, and holds the
 performance layer's file until its envelope exists.
 
+It takes in the two amendments the owner made to the decision on 2026-11-15, while this design was
+being written: `.notes` and `.drums` are no longer file extensions, and a view reads back into a
+document as a working surface. Questions 5 and 7 answer to them.
+
 Every answer below is **Proposed**. Each open question is marked **For the owner to rule**, with a
 recommendation. All of them are gathered in [For the owner to rule](#for-the-owner-to-rule).
 
@@ -15,9 +19,12 @@ Temper decision `01a1df20-1918-7130-b2d6-90ab20979553`, made by the owner on 202
 - Each data structure is a **kind** with a JSON Schema and an explicit version. The document is the
   canonical form.
 - One **envelope** gives the kind and the schema version. The file says what it is, not its name.
-- `.duet` is a JSON document. `.duet.jsonl` is a stream whose first line is the envelope.
-- `.notes` and `.drums` text are **notations**: views rendered from a document and read back, each
-  declared lossless or naming what it drops.
+- `.duet` is a JSON document. `.duet.jsonl` is a stream whose first line is the envelope. These are
+  the only two extensions.
+- The one-note-per-line text and the drum grid text are **views the CLI produces** from a document.
+  They are not file extensions. **A view reads back into a document**, as a working surface: a person
+  or an agent edits it until it plays as intended, then reads it in. Each view is declared lossless
+  or names what it drops, and reading it back over its source keeps what it does not show.
 - ABC and MIDI are **outside formats**. ABC gets no JSON Schema of ours.
 - **Tensors** are a declared shape and number type over a flat array.
 - Schemas are generated from the Rust types with `schemars` and committed. A CI check fails when a
@@ -109,6 +116,12 @@ Read from the code at `main` (4bd50df), and checked by generating `Song`'s schem
   a reader never branches on it.
 - **`duet.from`, optional:** where the body came from, when it was imported from an outside format
   ([question 6](#6-outside-formats)).
+- **`duet.statements`, optional:** what the tool that wrote the body inferred or changed and must say,
+  one sentence each: "tempo 92, estimated (confidence 0.81)", "velocities snapped to the grid's
+  levels". Today capture writes these as `#` comments in `.notes` and `.drums`, so the files say so
+  themselves (the `an-inferred-tempo-or-meter-is-stated` goal). JSON has no comments, so they move
+  here, and every view renders them as comment lines under its header
+  ([question 5](#5-views-rendered-and-read-back)).
 - **`$schema`:** the URL of the whole file's schema. Editors that read `$schema` (VS Code, IntelliJ)
   then validate a `.duet` file as it is typed. The reader checks that it agrees with `kind` and
   `version`, and refuses a file where they disagree.
@@ -214,7 +227,8 @@ Today: `bars: [{ "bar": 1, "steps": 16, "vel": [[…per step…], …per lane…
   - (c) keep today's nested arrays, and call a rectangular nested array a tensor.
 - **Recommendation: (a).** It is what the decision describes: a drum grid is a lanes × steps
   matrix. It is one shape check rather than one per bar, and a transformation over the whole grid
-  (shift, mask, density) is one array operation. The legible view is `.drums`, which is unchanged.
+  (shift, mask, density) is one array operation. The legible form is the `grid` view, which is
+  unchanged.
   (c) costs nothing to convert but breaks the decision's "declared shape over a flat array" for the
   first matrix it names.
 
@@ -340,7 +354,7 @@ which number it moves. A pull request that bumps a version states which rule it 
   - **A committed file that differs only in descriptions:** it fails, and says to regenerate. No bump
     is needed.
   - **Every older committed version** must have its example document, which must still read
-    ([question 5's witnesses](#witnesses)). An older schema file is never regenerated, since the code
+    ([the gate's witnesses](#witnesses)). An older schema file is never regenerated, since the code
     no longer produces it. It is frozen by review, and its example proves the reader still honours it.
 - **Where the registry lives:** a new library crate, `duet-documents`. It depends on duet-core,
   duet-drums, duet-dsp and duet-capture, lists every kind, and reads any `.duet` into an `AnyDocument`
@@ -366,45 +380,151 @@ committed schemas, crates/duet-documents/tests/schemas.rs)`. No new rule is need
   a dev-dependency it ships in nothing. `cargo deny` checks it like any other dependency when it is
   added.
 
-## 5. Notations as views
+## 5. Views, rendered and read back
 
-**Proposed: each notation states the notation version and the kind version it renders, on its first
-line, and the reader checks it.**
+The owner ruled (2026-11-15) that the text forms are **views the CLI produces**, not file
+extensions, and that **a view reads back into a document**. This answers how.
 
-- **`.notes`:**
-  - Today: `# notefmt v1: positions are bar.beat.tick, lengths are quarter notes`, which nothing reads.
-  - v1: `# notefmt v1 (song 1.0): positions are bar.beat.tick, lengths are quarter notes`.
-- **`.drums`:**
-  - Today: `# notefmt drums v1: one row per lane, one column per step, | at bar lines`.
-  - v1: `# notefmt drums v1 (drum-grid 1.0): one row per lane, one column per step, | at bar lines`.
-- **What the reader checks.** The line stays a comment to any other tool, and its form is fixed:
-  - **The parenthesis names a newer version of the kind than this duet reads:** refused by name, under
-    [the version policy](#3-the-version-policy).
-  - **It names a newer notation version:** refused by name.
-  - **The old line without the parenthesis** reads as the 1.0 of the kind. Every file written before
-    this design keeps its meaning.
-  - **No such line at all** reads as the current version. Hand-written text is read leniently, as it is
-    today (`hand_written_text_is_read_leniently` in both round-trip files).
-- **Notation versions and kind versions move separately.** A minor of the kind that the notation can
-  render without a change of syntax changes only the parenthesis. A change of syntax bumps the
-  notation's version.
+### The views
 
-**The declarations.** Stated in each notation's module docs and in README, and proven by
-[the witnesses](#witnesses):
+| View | Of kind | Renders | Lossless? |
+|---|---|---|---|
+| `notes` | `song` | today's notefmt text: the header, then one note or control per line, by track | **Lossless** against song 1.0 |
+| `grid` | `drum-grid` | today's `.drums` text: the header, then one row per lane and one column per step | **Lossless** against drum-grid 1.0, and refuses what it cannot show |
+| `grid` | `song`, one drum track | the same grid text, from one track of a song at a step | **Lossy**: shows one track's starts and velocities only |
 
-- **`.notes` is lossless against song 1.0.**
-  - It holds every field of a song document's body: the conductor, the end, every track, note and
-    control, and each pitch's spelling.
-  - It holds the **normalized** body. A loose position (`1.1.960` in 4/4) or a length off the ticks is
-    written in its normalized form. Every reader normalizes, so a document never holds the loose form.
-  - It always states the end, so a body with no `end` reads back with its default end stated. Every
-    writer states it anyway, so no document duet writes lacks one.
-  - **It drops the envelope's `tool` and `from`.** They are about the file, not the song.
-- **`.drums` is lossless against drum-grid 1.0, and refuses what it cannot hold.**
-  - It holds the conductor, the end, the step, the channel, the levels, the lanes and every cell.
-  - **It refuses**, naming the lane, bar and step, a velocity that is not 0 or one of the three
-    levels. It never drops or snaps one unasked (`off_level_velocities_are_refused_as_text_and_snapped_only_when_asked`).
-  - **It drops the envelope's `tool` and `from`.**
+The `grid` view of a song is the owner's case: "dump a rhythm section as a grid view". It is the
+view `duet drums read` makes today, without writing a grid document.
+
+### The commands
+
+**Proposed:** two top-level commands beside `convert`. Views span kinds, as `convert` does, so
+neither belongs in one domain group.
+
+- **`duet view <document> [--as notes|grid] [-o <file>]`** renders a view, to standard output unless
+  `-o` names a file.
+  - `--as` defaults to the kind's own view: `notes` for a song, `grid` for a drum grid.
+  - `--as grid` of a song takes the flags `duet drums read` takes today: `--grid <step>` (required),
+    `--track <name>`, `--bars <n>` and `--snap-levels`.
+- **`duet apply <view> --onto <document>`** reads an edited view back over the document it was
+  rendered from, keeping what the view does not show, and writes the document in place.
+- **`duet apply <view> -o <new.duet>`** reads a view into a new document. Only a lossless view can do
+  this, since a lossy one has nothing to keep the rest from. A lossy view with `-o` is refused,
+  naming `--onto`.
+- **Both read standard input for `-`.**
+- **`convert` keeps** moving documents to and from the outside formats (MIDI, ABC) and between kinds
+  (a song ↔ a drum grid). A view is not a format, so `convert` does not render one.
+- **The domain groups keep their verbs over documents:** `duet drums read` makes a drum-grid document
+  from a song, `duet drums render` makes a song document from a grid, `duet drums snap` snaps a grid
+  document. `duet song show` becomes `duet view` of a song, and is kept as an alias for one minor
+  release.
+
+**For the owner to rule: the command names.**
+
+- **Options:**
+  - (a) `duet view` and `duet apply`;
+  - (b) `duet view` and `duet view --read`;
+  - (c) `duet export --as notes` and `duet import`.
+- **Recommendation: (a).** Two verbs for two directions, and `apply … --onto` says that the document
+  keeps what the view does not touch. (c) collides with what `convert` already means for MIDI and ABC.
+
+### The header line
+
+A saved view has no extension of its own, so its first line names it:
+
+```text
+# duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41
+# duet grid v1 of drum-grid 1.0 from 9c04e1b2a7d35f60
+# duet grid v1 of song 1.0 track "Drums" step 1/16 from 0b7e33c19a5d2f84
+```
+
+- **`notes v1`, `grid v1`:** the view and its syntax version. A change of syntax bumps it.
+- **`of song 1.0`:** the kind and the schema version the view renders.
+- **`track "Drums" step 1/16`:** for a partial view, which part of the document it shows.
+- **`from <digest>`:** 16 hex digits of a 64-bit FNV-1a digest of the source document's body, as
+  written. `apply --onto` checks it, and refuses when the document has changed since the view was
+  rendered, naming both digests: an edit placed over a document it was not made from can land in the
+  wrong place. `--force` applies it anyway, and says it did. FNV is ten lines of code, so it adds no
+  dependency. It guards against mistakes, and is not a security check.
+- **Then the statements,** one `# ` comment line each, from the envelope's `statements`.
+- **It is a comment to every other tool.** Its grammar is fixed, and the reader parses it.
+
+**What the reader does with it:**
+
+- **It names a newer view version, or a newer schema version than this duet reads:** refused by name,
+  under [the version policy](#3-the-version-policy).
+- **It is today's line,** `# notefmt v1: …` or `# notefmt drums v1: …`: read as `notes v1 of song 1.0`
+  or `grid v1 of drum-grid 1.0`, with no digest. Every file written before this design still applies.
+- **It is missing:** `apply` asks for `--as notes|grid`, and reads the text at the current versions with
+  no digest check. A view written from scratch by hand or by an agent has no header, and is read as
+  leniently as today (`hand_written_text_is_read_leniently` in both round-trip files). A partial grid
+  view with no header also needs `--track` and `--grid` to be placed.
+
+### What each view drops
+
+- **`notes` of a song: nothing in the body.**
+  - It shows every field of song 1.0: the conductor, the end, every track with its channel and
+    program, every note with its pitch's spelling, every control.
+  - It shows the **normalized** body. A loose position (`1.1.960` in 4/4) or a length off the ticks is
+    shown normalized. Every reader normalizes, so no document holds the loose form.
+  - It always states the end, so a body with no `end` comes back with its default stated. Every writer
+    states it anyway, so no document duet writes lacks one.
+- **`grid` of a drum grid: nothing in the body.**
+  - It shows the conductor, the end, the step, the channel, the levels, the lanes and every cell.
+  - It **refuses**, naming the lane, bar and step, a velocity that is not 0 or one of the three levels.
+    `--snap-levels` renders it snapped instead, and says so in a statement. It never snaps unasked
+    (`off_level_velocities_are_refused_as_text_and_snapped_only_when_asked`).
+- **`grid` of a song's drum track: everything but that track's starts and velocities.** Exactly:
+  - every other track;
+  - the drum track's note lengths, its controls and its program;
+  - velocities off the levels, which it refuses unless `--snap-levels`.
+  - It refuses, as `duet drums read` does today, a note off the step, a key no lane maps, two notes on
+    one lane and step, or a note past `--bars`.
+- **Every view drops the envelope's `tool` and `from`,** and shows the `statements` read-only.
+- **Comments added to a view are not read back.** Only the header line is parsed. A note an agent
+  leaves in a comment is lost on `apply`. This is said in each view's module docs.
+
+### Reading back over the source
+
+**Proposed: merge cell by cell, against the source document, with no ids.**
+
+- **A lossless view onto its source** replaces the body with what the view reads, and keeps the
+  source's envelope (`from` and `statements`).
+- **A grid view onto a song** changes only the drum track it names, inside the bars it shows:
+  - **A cell whose symbol is unchanged keeps the source note exactly,** with its length and its
+    velocity. That includes a velocity off the levels shown snapped.
+  - **A changed symbol** sets that note's velocity to the symbol's level, and keeps its length.
+  - **A new hit** becomes a note one step long at that level, as `duet drums render` makes one today.
+  - **An emptied cell** removes the note.
+  - **Every other track, and the drum track's controls and program, are untouched.**
+- **What cannot be placed is refused, naming it:**
+  - a conductor line (tempo, time, key, end, `tpq`) that differs from the source's. In a partial view
+    the conductor is shown read-only: changing the meter there would move every other track. Change
+    it with the `notes` view, which shows the whole song.
+  - a lane or bar added or removed in a partial view;
+  - a source whose digest differs from the header's, unless `--force`.
+- **Why cells and not ids:** a grid cell is already an address (a lane's key at a step), so a cell
+  compared with the source's cell at the same address places every edit. Ids would put numbers into
+  the view that a person must not touch, which is what the view exists to avoid.
+
+### Witnesses for the views
+
+These replace or extend the `.drums` and notefmt round trips in
+`crates/duet-drums/tests/roundtrip.rs` and `crates/duet-midi/tests/roundtrip.rs`:
+
+- **Lossless is the identity.** document → view → document is equal, for the `notes` view over every
+  song the MIDI round-trip file builds, and for the `grid` view over the random grids of
+  `the_drum_grid_round_trips_under_its_map`. view → document → view is byte-identical.
+- **Silent means unchanged.** A song with three tracks, controls on its drum track, note lengths other
+  than one step and a velocity off the levels: render the `grid` view of its drum track, apply it back
+  unedited, and the document is equal to the source.
+- **An edited cell lands where it was edited.** Edit one cell of that view (a `.` to an `x`, an `x` to
+  a `.`, an `x` to an `X`), apply it, and exactly one note differs from the source, at that lane's key
+  and that step, with the expected velocity. Each of the three edits is a case.
+- **What cannot be placed is refused.** A changed tempo line, an added lane, and a source changed since
+  rendering are each refused by name, and the document is unchanged.
+- **The header is checked.** A view naming a newer view or schema version is refused by name; today's
+  `# notefmt` lines and a missing header both still apply.
 
 ## 6. Outside formats
 
@@ -432,48 +552,54 @@ line, and the reader checks it.**
 - **Why the envelope, not the body:** where a song came from is a fact about this file, not about the
   music. Two documents with the same body are the same song. It is defined in the envelope now, so
   adding it costs no kind a version.
-- **`from` is kept on write-back** of a `.duet` that has it, and dropped by every notation (question 5).
+- **`from` is kept on write-back** of a `.duet` that has it, and dropped by every view (question 5).
 
 ## 7. Today's names and readers
 
-**Proposed:**
+The owner ruled (2026-11-15) that `.duet` and `.duet.jsonl` are the only extensions. **Proposed:**
 
-| Today | Becomes | Reading the old name |
-|---|---|---|
-| `<x>.json`, `<x>.toml` (a song) | `<x>.duet` (`song` 1.0) | A bare song body. See the ruling below. |
-| `<x>.drums.json`, `<x>.drums.toml` | `<x>.duet` (`drum-grid` 1.0) | The old shape, converted on read. See the ruling below. |
-| `<stem>.capture.json` | `<stem>.capture.duet` (`capture-analysis` 1.0) | Not read. It never had a reader. |
-| `<stem>.performance.jsonl` (designed, not yet written) | `<stem>.performance.duet.jsonl` (`performance` 1.0) | Born in the envelope. |
-| `.notes`, `.drums`, `.mid`, `.abc` | unchanged | Unchanged. |
+| Today | Becomes |
+|---|---|
+| `<x>.notes` (and `.txt`, read as notefmt) | a song document, `<x>.duet`. Its text is the `notes` view. |
+| `<x>.drums` | a drum-grid document, `<x>.duet`. Its text is the `grid` view. |
+| `<x>.json`, `<x>.toml` (a song) | a song document, `<x>.duet` |
+| `<x>.drums.json`, `<x>.drums.toml` | a drum-grid document, `<x>.duet` |
+| capture's `<stem>.notes` (the unquantized performance) | `<stem>.duet`, a song document |
+| capture's `<stem>.drums` (a rhythm take's score) | `<stem>.grid.duet`, a drum-grid document |
+| capture's `<stem>.abc` (a melody take's score) | unchanged: ABC is an outside format |
+| `<stem>.capture.json` | `<stem>.capture.duet`, a `capture-analysis` document |
+| `<stem>.performance.jsonl` (designed, not yet written) | `<stem>.performance.duet.jsonl`, a `performance` stream |
+| `.mid`, `.abc` | unchanged |
 
 - **The dispatch in `duet-cli/src/io.rs`:**
   - **`.duet` and `.duet.jsonl` are read by their envelope.** The kind decides what the file is, so a
-    song command given a drum-grid document refuses it naming the kind: "beat.duet is a drum-grid; duet
-    play reads a song; duet convert goes between a grid and a song".
-  - **Notations and outside formats keep their names** (`.notes`, `.drums`, `.mid`, `.abc`). They have
-    no envelope. A name is now a convenience for them, and the deciding fact for nothing else.
+    song command given a drum-grid document refuses it, naming the kind: "beat.duet is a drum-grid;
+    duet play reads a song; duet drums render makes one".
+  - **`.mid`, `.midi`, `.smf` and `.abc` keep their names.** They are outside formats with no envelope.
+  - **A view is never read by its name.** Only `duet apply` reads one, by its header line.
   - **Standard input (`-`):** a first non-blank byte of `{` is a document, read by its envelope.
-    Anything else is the command's default format, as today.
-  - **Names are conventions:** `<x>.duet` for a song or a grid, `<stem>.capture.duet` and
-    `<stem>.performance.duet.jsonl` for capture's outputs. The reader never relies on them.
+    Anything else is the command's default outside format, as today.
+  - **Names are conventions.** `<stem>.grid.duet` is a reminder to people, and the reader never
+    relies on it.
 - **The rule this replaces:** "a file name means the same to every command" becomes "a file's
-  envelope means the same to every command". The Temper decision on `.drums`, `.drums.json` and
-  `.drums.toml` names is superseded in this part, as the settling decision says.
+  envelope means the same to every command".
+- **Retiring the old names:**
+  - **`.notes` and `.drums` files need no converter.** They are views, so `duet apply old.notes -o
+    new.duet` reads one, by its `# notefmt` line or by `--as`. That is what `apply` does anyway.
+  - **`.json` and `.toml` song files** already hold a song 1.0 body, and `.drums.json` and
+    `.drums.toml` the old grid shape. These are the only names that need a reader of their own.
 
 **For the owner to rule: the old JSON and TOML files.**
 
 - **Options:**
-  - (a) keep **reading** `.json`, `.toml`, `.drums.json` and `.drums.toml` as legacy inputs, with a
-    note on stderr naming `duet convert <file> <x>.duet`; stop **writing** them; remove the readers
-    at the next minor release of duet after this ships;
-  - (b) cut them now, readers and writers both;
-  - (c) keep reading and writing them indefinitely as bare bodies.
-- **Recommendation: (a).** A bare song `.json` already is a `song` 1.0 body, so reading it costs one
-  branch. The old grid shape needs one conversion, which drum-grid 1.0's `read_minor` would hold anyway
-  if (a) of the drum ruling is taken. `duet convert` is the converter, so there is no new tool. (c)
-  keeps two forms of every kind, which is what this decision ends.
+  - (a) `duet convert` keeps **reading** `.json`, `.toml`, `.drums.json` and `.drums.toml` as legacy
+    inputs for one minor release, with a stderr note naming `duet convert <file> <x>.duet`. Nothing
+    writes them. The readers are removed after that release;
+  - (b) cut them now, readers and writers both.
+- **Recommendation: (a)**, or (b) if no such file on the owner's machine matters. A bare song `.json`
+  already is a song 1.0 body, so reading it costs one branch. The old grid shape needs one conversion.
 - **The question only the owner can answer:** are there `.json`, `.toml` or `.drums.*` files on the
-  owner's machine that matter? If none, (b) is as good as (a) and simpler.
+  owner's machine that matter?
 
 ## 8. TOML
 
@@ -504,12 +630,11 @@ keeps passing unchanged. These are the new ones, each named for the task that ad
 - **song 1.0** (in `crates/duet-midi/tests/roundtrip.rs`, as CLAUDE.md requires):
   - every song the file already builds round-trips through a song document exactly;
   - a song document's body is byte-identical to what `.json` wrote before this change;
-  - `.notes` → document → `.notes` is byte-identical, and document → `.notes` → document is equal, over
-    the same songs.
+  - the `notes` view witnesses of [question 5](#witnesses-for-the-views).
 - **drum-grid 1.0** (in `crates/duet-drums/tests/roundtrip.rs`):
   - the random grids of `the_drum_grid_round_trips_under_its_map` round-trip through a document
     exactly;
-  - `.drums` → document → `.drums` is byte-identical;
+  - the `grid` view witnesses of [question 5](#witnesses-for-the-views), including the partial view over a song;
   - a grid in today's `.drums.json` shape reads to the same grid as its document (if the legacy reader
     is kept).
 - **The gate** (`crates/duet-documents/tests/schemas.rs`):
@@ -518,13 +643,17 @@ keeps passing unchanged. These are the new ones, each named for the task that ad
   - given a description-only change, it asks to regenerate and asks for no bump;
   - every committed example document (`schemas/<kind>/examples/<version>.duet`) reads with the current
     reader, and validates against its version's schema (if the validator is ruled in).
-- **Notations:** a `.notes` or `.drums` header naming a newer kind version is refused by name; the old
-  header and no header both still read.
 - **Outside formats:** an ABC tune with a slur converts to a `.duet` whose `from` lists that notice at
   its line and column; converting that `.duet` back to `.abc` and in again gives the same body.
-- **The CLI** (in `crates/duet-e2e`): `duet convert x.notes x.duet` then `x.duet y.notes` gives
-  `y.notes` identical to `x.notes`; a drum-grid `.duet` given to `duet play` is refused naming its
-  kind; a document on standard input is read by its envelope.
+- **The CLI** (in `crates/duet-e2e`):
+  - `duet apply old.notes -o x.duet`, then `duet view x.duet`, gives text identical to `old.notes`
+    under a new header line;
+  - `duet view` of a song `--as grid`, edited by one cell, then `duet apply --onto`, changes that one
+    note in the file;
+  - `apply --onto` a document changed since the view was rendered is refused, and the file is
+    untouched;
+  - a drum-grid `.duet` given to `duet play` is refused naming its kind;
+  - a document on standard input is read by its envelope.
 
 ## Build tasks this design names
 
@@ -540,31 +669,39 @@ predecessor unless it says so.
    committed; the gate test; CI-3's status updated. Witnesses: the gate, and song 1.0 in
    `crates/duet-midi/tests/roundtrip.rs`.
 3. **The CLI reads and writes documents.** `io.rs` dispatches `.duet` by envelope, refuses a wrong
-   kind by name, sniffs standard input, and writes `.duet`. The old JSON and TOML names as ruled.
-   Witnesses: the CLI tests in `crates/duet-e2e`.
+   kind by name, sniffs standard input, and writes `.duet`. Nothing reads or writes `.notes` or
+   `.drums` by name any more. The old JSON and TOML names as ruled. Witnesses: the kind, standard
+   input and `duet play` tests in `crates/duet-e2e`.
 4. **drum-grid 1.0.** The tensor, `bar_steps`, `Bar.bar` gone, `schemas/drum-grid/1.0.json`, and the
    legacy grid reader if ruled. Witnesses: drum-grid 1.0 in `crates/duet-drums/tests/roundtrip.rs`.
-5. **Notations declare what they render.** The checked header line in `.notes` and `.drums`, and the
-   lossless declarations in module docs and README. Witnesses: the notation tests, and the `.notes`
-   and `.drums` byte-identity tests above.
+5. **Views, rendered and read back.** `duet view` and `duet apply` (or the names ruled), the header
+   line with its digest, the cell-by-cell merge onto a source, the envelope's `statements` rendered
+   as comments, and what each view drops stated in module docs and README. Needs 4 for the grid view of
+   a grid. Witnesses: [question 5's](#witnesses-for-the-views), and the `view` and `apply` tests in
+   `crates/duet-e2e`.
 6. **Outside formats record where a song came from.** `from` filled by ABC and MIDI import, kept on
    write-back. Witness: the ABC slur test.
-7. **capture-analysis 1.0.** `Deserialize` on the analysis types, absent values omitted,
-   `tempo_alternatives` named, `<stem>.capture.duet` written, and its schema committed. Witnesses: an
-   analysis document round-trips exactly through its reader and validates against its schema.
+7. **capture's outputs become documents.** `capture-analysis` 1.0: `Deserialize` on the analysis
+   types, absent values omitted, `tempo_alternatives` named, and its schema committed. Capture writes
+   `<stem>.duet`, `<stem>.grid.duet` or `<stem>.abc`, and `<stem>.capture.duet`. What it inferred
+   moves from `#` comments into `statements`. Witnesses: an analysis document round-trips exactly
+   through its reader and validates against its schema; a capture with an estimated tempo has that
+   statement in its song document, and `duet view` shows it as a comment.
 8. **performance 1.0.** The performance design's task 2, written as `<stem>.performance.duet.jsonl`.
    Witnesses: that design's question 1, plus: the first line is the envelope, and every later line
    validates against the record schema on its own.
 
-Tasks 4 to 7 need 3 and can be built in any order. Task 8 needs only 1 and 2, so the held performance
+Tasks 4, 6 and 7 need 3 and can be built in any order. Task 5 needs 3 and 4. Task 8 needs only 1 and 2, so the held performance
 task can start before the CLI work lands.
 
 ## Amendments to the other designs
 
 Each gets a pointer where its file names change, and nothing else:
 
-- **[The capture design](2026-11-14-capture-design.md):** `<stem>.capture.json` becomes
-  `<stem>.capture.duet`, a `capture-analysis` document.
+- **[The capture design](2026-11-14-capture-design.md):** `<stem>.notes` becomes `<stem>.duet`, a
+  song document. `<stem>.drums` becomes `<stem>.grid.duet`, a drum-grid document. `<stem>.capture.json`
+  becomes `<stem>.capture.duet`, a `capture-analysis` document. The `#` comment statements move to the
+  envelope's `statements`, and every view shows them.
 - **[The performance and reading design](2026-11-15-performance-and-reading-design.md):**
   `<stem>.performance.jsonl` becomes `<stem>.performance.duet.jsonl`, a `performance` stream. Its
   header is the envelope's `head`, and its lines are records.
@@ -580,17 +717,22 @@ Each gets a pointer where its file names change, and nothing else:
 3. **How the drum matrix is held.** (a) one lanes × steps tensor for the whole grid with each bar's step
    count, (b) a tensor per bar, or (c) today's nested arrays. **Recommended: (a)**, the decision's
    shape; (c) is free but is not a declared tensor.
-4. **The old `.json`, `.toml`, `.drums.json` and `.drums.toml` files.** (a) read them as legacy inputs
-   for one minor release, write only `.duet`; (b) cut them now; (c) keep them indefinitely.
-   **Recommended: (a)**, or (b) if no such file on the owner's machine matters. Are there any?
-5. **TOML.** Config only, or also a document container. **Recommended: config only**, since it has no
+4. **The old `.json`, `.toml`, `.drums.json` and `.drums.toml` files.** (a) `duet convert` reads them
+   as legacy inputs for one minor release, and nothing writes them; (b) cut them now.
+   **Recommended: (a)**, or (b) if no such file on the owner's machine matters. Are there any? Old
+   `.notes` and `.drums` files need no converter: `duet apply` reads them as views.
+5. **The view commands' names.** (a) `duet view` and `duet apply --onto | -o`; (b) `duet view` and
+   `duet view --read`; (c) `duet export --as` and `duet import`. **Recommended: (a)**: two verbs for
+   two directions, and (c) collides with what `convert` means for MIDI and ABC.
+6. **TOML.** Config only, or also a document container. **Recommended: config only**, since it has no
    `null` and the envelope, not the container, says what a file is.
-6. **A JSON Schema validator as a dev-dependency** (`jsonschema`, MIT, default features off) to prove
+7. **A JSON Schema validator as a dev-dependency** (`jsonschema`, MIT, default features off) to prove
    documents match their committed schemas. **Recommended: yes**, since the five hand-serialized types
    are exactly where a derived schema would lie.
 
 Also proposed, and not a ruling unless the owner wants one: a new `duet-documents` crate for the kind
-registry and the gate; `capture-analysis` omitting absent values rather than writing `null`; and
+registry and the gate; the view header's source digest, which makes `apply --onto` refuse a source
+changed since rendering; merging a view onto its source cell by cell rather than by ids; `capture-analysis` omitting absent values rather than writing `null`; and
 `tempo_alternatives` named `{half, double}`.
 
 ## Not decided here, and why
