@@ -184,6 +184,15 @@ fn check_document(grid: &DrumGrid) {
         panic!("not read as a drum grid");
     };
     assert_eq!(&any.body, grid);
+    // The grid view of the body reads back to it, levels snapped as the view shows them: the
+    // lossless view is the identity for a grid whose velocities are on its levels.
+    let shown = back.body.snapped_to_levels();
+    let view = shown.to_text().expect("the grid view");
+    assert_eq!(
+        DrumGrid::from_text_in(&view, &LaneMap::gm()).expect("read back"),
+        shown,
+        "the grid view"
+    );
 }
 
 /// Witness for `the-drum-grid-round-trips-under-its-map`: for grids of many shapes under

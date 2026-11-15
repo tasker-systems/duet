@@ -129,6 +129,52 @@ read and written again keeps its `from` unchanged, and so does `song quantize`. 
 ABC or MIDI and in again replaces it, since that import is the song's new provenance. A song
 read from notefmt text has none.
 
+### Views: `duet view` and `duet apply`
+
+The text forms are **views** of a document, not files of their own. `duet view` renders one,
+and `duet apply` reads an edited one back: a working surface a person or an agent edits until
+it plays as intended.
+
+```sh
+duet view take.duet > take.notes                          # a song's notes view
+duet view beat.duet -o beat.drums                         # a drum grid's grid view
+duet view take.duet --as grid --grid 1/16 > kit.drums     # one drum track of a song, as a grid
+duet apply take.notes --onto take.duet                    # read the edited view back
+duet apply kit.drums --onto take.duet                     # only the drum track changes
+duet apply old.notes -o old.duet                          # a lossless view into a new document
+```
+
+| View | Of | Drops |
+|---|---|---|
+| `notes` | a song | nothing: every field of song 1.0, normalized, with its end stated |
+| `grid` | a drum grid | nothing, while every velocity is 0 or one of its three levels |
+| `grid` | one drum track of a song, at a step | everything but that track's starts and velocities |
+
+Every view drops the envelope's `tool` and `from`, and shows its `statements` as `# ` comments
+under the header. Comments added to a view are not read back. A velocity off the levels is
+refused, naming its lane, bar and step, unless `--snap-levels` shows it snapped.
+
+**The header line** names the view and the document it came from, so a view reads back without
+a file name: `# duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41`, or `# duet grid v1 of song 1.0
+track "Drums" step 1/16 from …` for a partial view. The digest is a 64-bit FNV-1a of the source
+document's body: `apply --onto` refuses a document changed since the view was rendered, naming
+both digests, unless `--force`. A newer view version or a schema version this duet does not read
+is refused by name. Today's `# notefmt v1` and `# notefmt drums v1` lines read as `notes v1 of
+song 1.0` and `grid v1 of drum-grid 1.0`, so every `.notes` and `.drums` file applies. A view
+with no header needs `--as notes` or `--as grid`.
+
+**Applying onto the source** goes cell by cell, with no ids. A lossless view replaces the body
+and keeps the source's envelope (`from` and `statements`). A grid view of a song changes only the
+drum track it names: an unchanged cell keeps its note exactly, its length and velocity (a
+velocity shown snapped included); a changed level sets that note's velocity; a new hit is a note
+one step long; an emptied cell removes the note. A conductor line (tempo, meter, key, end), the
+step or the channel changed in a partial view, and a lane or bar added or removed there, are
+refused by name: change the conductor in the notes view, which shows the whole song. A lossy view
+makes no document of its own: `-o` refuses it, naming `--onto`.
+
+`--from text`, `--to text`, `--from drums` and `--to drums` stay beside the views, for piping a
+view's text straight through `convert` and the song and drum commands.
+
 ### The text format
 
 **Header**, before the first track. Every line is optional; the defaults are 480 ticks

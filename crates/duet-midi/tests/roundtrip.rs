@@ -391,6 +391,23 @@ fn check_document(song: &Song) {
     };
     assert_eq!(&any.body, song, "read by its envelope");
 
+    // The notes view of the document's body reads back to the body: the lossless view is the
+    // identity.
+    // The view always states the end, as every writer does.
+    let view = back.body.to_text();
+    let mut want = song.clone();
+    want.end = Some(want.stated_end().unwrap());
+    assert_eq!(
+        Song::from_text(&view).unwrap(),
+        want,
+        "the notes view; it was:\n{view}"
+    );
+    assert_eq!(
+        Song::from_text(&view).unwrap().to_text(),
+        view,
+        "the view is stable"
+    );
+
     let json = serde_json::to_string_pretty(song).unwrap();
     let body = format!("  \"body\": {}\n}}\n", json.replace('\n', "\n  "));
     assert!(

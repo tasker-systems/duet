@@ -59,7 +59,11 @@ fn a_name_duet_no_longer_reads_is_refused_saying_so() {
     }
     // A view's old name is refused, and --from text reads it.
     let notes = root().join("samples/sketch.notes");
-    let want = ["sketch.notes", "notefmt text is a view", "--from text"];
+    let want = [
+        "sketch.notes",
+        "Its text is a view: read it into a document with `duet apply",
+        "--from text",
+    ];
     refused(
         &dir,
         &["convert", s(&notes), s(&p("x.mid"))],
