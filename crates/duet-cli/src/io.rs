@@ -14,7 +14,7 @@ use clap::builder::PossibleValue;
 use duet_core::{EndRule, Song};
 use duet_drums::DrumGrid;
 use duet_midi::Midi;
-use duet_schemas::{AnyDocument, Document, Tool};
+use duet_schemas::{AnyDocument, Document, From, Tool};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Format {
@@ -222,9 +222,10 @@ fn is_document(bytes: &[u8]) -> bool {
     bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{')
 }
 
-/// What `convert` read: a song, or a drum grid from a drum-grid document.
+/// What `convert` read: a song with where it came from, or a drum grid from a drum-grid
+/// document.
 pub enum Loaded {
-    Song(Song),
+    Song(Song, Option<From>),
     Grid(DrumGrid),
 }
 
@@ -232,8 +233,20 @@ pub enum Loaded {
 /// document of another kind. Standard input is read as a document when its first non-blank
 /// byte is `{`, and as `format` otherwise.
 pub fn read(path: &Path, format: Format, what: &str) -> Result<Song> {
+    read_with_from(path, format, what).map(|(song, _)| song)
+}
+
+/// Reads a song and where it came from, the provenance a `.duet` written from it records:
+///
+/// - **a `.duet`**: its own `from`, kept as it is, or none;
+/// - **MIDI**: `{"format": "midi"}`, since MIDI drops nothing duet's model holds that a
+///   notice would name;
+/// - **ABC**: `{"format": "abc"}`, the tune's `X:` number, and every notation-only construct
+///   the reader read but did not carry, each at its line and column;
+/// - **notefmt text**: none. Text is a view of a song, not where one comes from.
+pub fn read_with_from(path: &Path, format: Format, what: &str) -> Result<(Song, Option<From>)> {
     match read_any(path, format, what)? {
-        Loaded::Song(song) => Ok(song),
+        Loaded::Song(song, from) => Ok((song, from)),
         Loaded::Grid(_) => bail!(
             "{} is a drum-grid document, and {what} a song; duet drums render makes a song of \
              one",
@@ -253,11 +266,11 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
     let text = || String::from_utf8(bytes.clone()).context("input is not UTF-8 text");
     // MIDI, ABC and text come back normalized. A hand-edited document may hold lengths or
     // positions in a loose form, so it is normalized here.
-    let song = match format {
+    let (song, from) = match format {
         Format::Duet => {
             let doc = AnyDocument::read(&text()?).with_context(|| path.display().to_string())?;
             match doc {
-                AnyDocument::Song(doc) => normalized(doc.body)?,
+                AnyDocument::Song(doc) => (normalized(doc.body)?, doc.from),
                 AnyDocument::DrumGrid(doc) => {
                     let mut grid = doc.body;
                     grid.normalize()?;
@@ -270,8 +283,8 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
                 ),
             }
         }
-        Format::Midi => Song::from_midi(&bytes)?,
-        Format::Text => Song::from_text(&text()?)?,
+        Format::Midi => (Song::from_midi(&bytes)?, Some(From::new("midi"))),
+        Format::Text => (Song::from_text(&text()?)?, None),
         Format::Abc => {
             let book = duet_abc::Book::parse(&text()?)?;
             if book.tunes().len() > 1 {
@@ -281,10 +294,11 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
                     book.tunes().len()
                 );
             }
-            crate::abc::reading(&book.tunes()[0])?
+            let (song, from) = crate::abc::reading(&book.tunes()[0])?;
+            (song, Some(from))
         }
     };
-    Ok(Loaded::Song(song))
+    Ok(Loaded::Song(song, from))
 }
 
 fn normalized(mut song: Song) -> duet_core::Result<Song> {
@@ -306,13 +320,36 @@ pub fn tool() -> Tool {
     Tool::new("duet", env!("CARGO_PKG_VERSION"))
 }
 
+/// Writes the song in a format, recording no provenance. See [`write_from`].
+pub fn write(song: &Song, path: &Path, format: Format, end: EndRule) -> Result<()> {
+    write_from(song, path, format, end, None)
+}
+
 /// Writes the song in a format. Every file written says where the song ends, whatever
 /// default computed it: text and MIDI state it themselves, and a document carries it as its
-/// body's `end`.
-pub fn write(song: &Song, path: &Path, format: Format, end: EndRule) -> Result<()> {
+/// body's `end`. A document also records `from`, where the song came from
+/// ([`read_with_from`]); the other formats have nowhere to keep it.
+///
+/// **The rule for `from`:** it follows the song. A command that reads a song and writes a
+/// document of it (`convert`, `song quantize`, `song show --to duet`, `abc render`) records
+/// what it read: a `.duet`'s own `from`, unchanged, or a new one for an import from ABC or
+/// MIDI. Going out to ABC or MIDI and in again replaces it, since that import is the song's new
+/// provenance. Quantizing keeps it: the notices still name what the import did not carry.
+/// Text carries none, so a song read from text has none. A drum grid carries none yet.
+pub fn write_from(
+    song: &Song,
+    path: &Path,
+    format: Format,
+    end: EndRule,
+    from: Option<&From>,
+) -> Result<()> {
     let song = with_end(song, end)?;
     let bytes = match format {
-        Format::Duet => Document::new(tool(), song).write()?.into_bytes(),
+        Format::Duet => {
+            let mut doc = Document::new(tool(), song);
+            doc.from = from.cloned();
+            doc.write()?.into_bytes()
+        }
         Format::Midi => song.to_midi()?,
         Format::Text => song.to_text().into_bytes(),
         Format::Abc => duet_abc::write(&song, &duet_abc::WriteOptions::default())?.into_bytes(),

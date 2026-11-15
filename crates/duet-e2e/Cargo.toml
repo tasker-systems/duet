@@ -25,3 +25,6 @@ duet-schemas = { path = "../duet-schemas", version = "0.2.0" }
 # The tests compare written MIDI event by event, and JSON and TOML as values.
 midly = "0.5.3"
 toml = "1"
+# Validates the documents duet writes against their committed schemas, envelope included. No
+# default features: no HTTP or file resolver.
+jsonschema = { version = "0.60.2", default-features = false }
