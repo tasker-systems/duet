@@ -75,12 +75,10 @@ fn cents(n: String) -> String {
     }
 }
 
-/// The reader, stated only when it is not the rules (the default): the note HMM, with its
-/// cost per note.
+/// The reader, stated only when it is not the note HMM (the default): the segmentation rules.
 pub fn reader(reading: &Reading) -> Option<String> {
     let reader = reading.reader?;
-    (reader.name == ReaderName::Hmm)
-        .then(|| format!("reader: the note HMM, cost per note {}", reader.note_cost))
+    (reader.name == ReaderName::Rules).then(|| "reader: the segmentation rules".to_owned())
 }
 
 /// How many notes were read, and how many of them are between keys on the take's tuning.

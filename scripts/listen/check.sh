@@ -18,7 +18,7 @@ duet="${DUET_BIN:-$root/target/release/duet}"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/duet-listen-check.XXXXXX")
 trap 'rm -rf "$work"' EXIT
-"$duet" capture melody "$take" --tempo 120 -o "$work/rules" >/dev/null 2>&1
+"$duet" capture melody "$take" --tempo 120 --reader rules -o "$work/rules" >/dev/null 2>&1
 "$duet" capture melody "$take" --tempo 120 --reader hmm -o "$work/hmm" >/dev/null 2>&1
 if ! DUET_BIN="$duet" "$root/scripts/duet-listen.sh" "$take" --stem "$work/rules" \
   --reading "hmm=$work/hmm.capture.duet" --moments "$moments" --out "$work/clips" --no-play \

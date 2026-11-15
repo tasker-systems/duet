@@ -81,9 +81,9 @@ pub struct TakeArgs {
     /// exactly. Without it, the tuning is estimated from the take and stated.
     #[arg(long, allow_hyphen_values = true)]
     tuning: Option<TuningArg>,
-    /// What chooses a melody's notes from its performance: `rules`, the segmentation rules
-    /// (the default), or `hmm`, the note HMM, with its cost per note stated. The reader is
-    /// written in STEM.capture.duet either way.
+    /// What chooses a melody's notes from its performance: `hmm`, the note HMM (the default),
+    /// or `rules`, the segmentation rules, stated when chosen. The reader is written in
+    /// STEM.capture.duet either way.
     #[arg(long, value_enum)]
     reader: Option<ReaderArg>,
     /// The step the score is quantized to, such as 1/16 (the default) or 1/8t. Where two
@@ -139,7 +139,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     let (performance, reading) = match kept {
         Some((file, frames)) => {
             let given = args.tuning.map(|t| t.a4_cents);
-            let reading = frames.map(|frames| match args.reader.unwrap_or(ReaderArg::Rules) {
+            let reading = frames.map(|frames| match args.reader.unwrap_or(ReaderArg::Hmm) {
                 ReaderArg::Rules => read(&frames, &events, given),
                 ReaderArg::Hmm => NoteModel::default().read(&frames, &events, given),
             });
