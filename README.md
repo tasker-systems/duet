@@ -504,13 +504,17 @@ apart is applied as 4/4 and says so. For the synthetic melody in the reference c
 
 ```
 $ duet capture melody synthetic-melody.flac
-tempo: estimated 121 bpm (half 60.5, double 242), confidence 1.00
+tempo: estimated 121 bpm (half 60.5, double 242), confidence 0.53
 meter: estimated 4/4, confidence 0.14, weak
 downbeat: estimated at 0.255 s, confidence 0.14, weak
 key: estimated C major (relative A minor), confidence 0.88
 lead-in: none
 velocities: 8 snapped to the nearest dynamic's level in the .abc; the .notes keeps them exact
 ```
+
+The take was made at 120 bpm, so this estimate is a beat a minute fast. A tempo's
+confidence is the lesser of how many onsets sit on its beat and how clearly it beat its half
+and double, so a take that could as well be read at half the tempo is marked weak.
 
 The tempo is in quarter notes per minute always. The estimate is rounded to a whole bpm for
 the score, but **notes are placed by the beat period actually measured**, not by the rounded

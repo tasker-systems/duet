@@ -33,7 +33,11 @@
 //!    of the take, and is passed over.
 //!
 //! Confidence is in 0..=1, and below [`WEAK_CONFIDENCE`] an estimate is weak. A tempo's is the
-//! strength-weighted share of onsets on its grid. A meter's is its accent fit, and a downbeat's
+//! lesser of the strength-weighted share of onsets on its grid and the margin of its beat level:
+//! how clearly the chosen reading beat the readings of its meter at half and double its tempo,
+//! by the measure it was chosen by (fit times prior, or the prior alone when no reading fit), as
+//! the base-2 log of the ratio, so twice the score is a margin of 1 and an equal score 0. A
+//! grid every onset is on still says nothing about whether its beat is the quarter or the half. A meter's is its accent fit, and a downbeat's
 //! is the fit of the meter that placed it.
 
 use duet_core::TimeSig;
@@ -248,14 +252,14 @@ pub fn estimate(onsets: &[Event], rate: u32, given: &Given) -> Result<Timing> {
         };
     };
 
-    let (chosen, downbeat) = read_meter(&onsets, &grid, rate, given);
+    let (chosen, downbeat, margin) = read_meter(&onsets, &grid, rate, given);
     let confidence = chosen.fit as f32;
     let beat_period_frames = 60.0 * rate / given.tempo_bpm.unwrap_or(chosen.quarter_bpm);
     let tempo_bpm = match given.tempo_bpm {
         Some(bpm) => Origin::Given(bpm),
         None => Origin::Estimated {
             value: chosen.quarter_bpm.round(),
-            confidence: on_grid_share(&onsets, &grid) as f32,
+            confidence: on_grid_share(&onsets, &grid).min(margin) as f32,
         },
     };
     Ok(Timing {
@@ -273,13 +277,14 @@ pub fn estimate(onsets: &[Event], rate: u32, given: &Given) -> Result<Timing> {
     })
 }
 
-/// The reading of the accents that the estimate applies, and where it puts bar 1.
+/// The reading of the accents that the estimate applies, where it puts bar 1, and how clearly
+/// it beat its octave alternatives ([`octave_margin`]).
 ///
 /// Only a given meter is read, if there is one. Among readings that fit at least
 /// [`WEAK_CONFIDENCE`], the best fit times tempo prior wins, and bar 1 is its first downbeat.
 /// With none, the given meter or 4/4 is read at the beat level the prior favours, and bar 1 is
 /// the first strong onset.
-fn read_meter(onsets: &[Onset], grid: &Grid, rate: f64, given: &Given) -> (Hypothesis, f64) {
+fn read_meter(onsets: &[Onset], grid: &Grid, rate: f64, given: &Given) -> (Hypothesis, f64, f64) {
     let (first, accents) = accents(onsets, grid);
     let meters: Vec<TimeSig> = match given.meter {
         Some(meter) => vec![meter],
@@ -310,7 +315,8 @@ fn read_meter(onsets: &[Onset], grid: &Grid, rate: f64, given: &Given) -> (Hypot
         })
         .max_by(|a, b| (a.0.fit * a.0.prior).total_cmp(&(b.0.fit * b.0.prior)));
     if let Some((h, downbeat)) = strong {
-        return (*h, downbeat);
+        let margin = octave_margin(h, &hypotheses, |h| h.fit * h.prior);
+        return (*h, downbeat, margin);
     }
     let fallback = given.meter.unwrap_or_default();
     let h = hypotheses
@@ -318,7 +324,31 @@ fn read_meter(onsets: &[Onset], grid: &Grid, rate: f64, given: &Given) -> (Hypot
         .filter(|h| h.meter == fallback)
         .max_by(|a, b| a.prior.total_cmp(&b.prior).then(a.fit.total_cmp(&b.fit)))
         .expect("every meter has a hypothesis per step count");
-    (*h, first_strong(onsets, Some(grid)))
+    let margin = octave_margin(h, &hypotheses, |h| h.prior);
+    (*h, first_strong(onsets, Some(grid)), margin)
+}
+
+/// How clearly `chosen` beat its octave alternatives, the hypotheses of its meter at half or
+/// double its tempo, by `score`, the measure it was chosen by: the base-2 log of its score over
+/// the best of theirs, in 0..=1. It is 1 when it scores twice theirs or more, or has none, and
+/// 0 when one of them scores as well or better, as one that fit too weakly to be chosen can.
+fn octave_margin(
+    chosen: &Hypothesis,
+    hypotheses: &[Hypothesis],
+    score: impl Fn(&Hypothesis) -> f64,
+) -> f64 {
+    let rival = hypotheses
+        .iter()
+        .filter(|h| {
+            h.meter == chosen.meter
+                && ((h.quarter_bpm / chosen.quarter_bpm).log2().abs() - 1.0).abs() < 0.01
+        })
+        .map(&score)
+        .fold(0.0, f64::max);
+    if rival <= 0.0 {
+        return 1.0;
+    }
+    (score(chosen) / rival).log2().clamp(0.0, 1.0)
 }
 
 /// The timing when a tempo is given but the onsets are too few, or too scattered, to show a
@@ -1398,6 +1428,61 @@ mod tests {
             "{timing:?} {:?}",
             frames(&onsets)
         );
+    }
+
+    /// The take that showed the fault: C D E F G A B C twice, as quarters of 0.6 s (100 a
+    /// minute) from 0.3 s in, each with a 200-frame rise and a 400-frame fall, recorded at
+    /// `rate`: as a melody's events, through `Prepare` and `Melody`.
+    fn scale_at_100(rate: u32) -> Vec<Event> {
+        use crate::notes::Melody;
+        use crate::prepare::Prepare;
+        use crate::stage::Chunk;
+        let mut samples = vec![0.0f32; (0.3 * f64::from(rate)) as usize];
+        let mut phase = 0.0f64;
+        for midi in [60, 62, 64, 65, 67, 69, 71, 72].repeat(2) {
+            let hz = 440.0 * ((f64::from(midi) - 69.0) / 12.0).exp2();
+            let n = (0.6 * f64::from(rate)) as usize;
+            for i in 0..n {
+                let envelope = (i as f64 / 200.0).min(1.0) * ((n - i) as f64 / 400.0).min(1.0);
+                phase += std::f64::consts::TAU * hz / f64::from(rate);
+                let tone = phase.sin() + 0.5 * (2.0 * phase).sin() + 0.25 * (3.0 * phase).sin();
+                samples.push((0.3 * envelope * tone) as f32);
+            }
+        }
+        samples.extend(vec![0.0; (0.3 * f64::from(rate)) as usize]);
+        let (mut prepare, mut melody) = (Prepare::new(RATE), Melody::new(RATE));
+        let (mut mono, mut events) = (Vec::new(), Vec::new());
+        prepare
+            .push(
+                Chunk {
+                    rate,
+                    channels: 1,
+                    start_frame: 0,
+                    samples,
+                },
+                &mut mono,
+            )
+            .unwrap();
+        prepare.finish(&mut mono).unwrap();
+        for m in mono {
+            melody.push(m, &mut events).unwrap();
+        }
+        melody.finish(&mut events).unwrap();
+        events
+    }
+
+    /// A take whose beat level is a close call is not stated as a sure tempo: at one rate it
+    /// reads 100, at another 50, and wherever the reading is not 100 it is weak.
+    #[test]
+    fn a_close_call_between_a_tempo_and_its_half_is_weak() {
+        for rate in [22_050, 48_000] {
+            let timing = estimate(&scale_at_100(rate), RATE, &Given::default()).unwrap();
+            let (bpm, confidence) = estimated(&timing.tempo_bpm);
+            assert!(
+                bpm == 100.0 || confidence < WEAK_CONFIDENCE,
+                "{rate} Hz: {bpm} bpm at confidence {confidence}"
+            );
+        }
     }
 
     #[test]
