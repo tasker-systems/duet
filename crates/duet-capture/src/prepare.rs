@@ -10,6 +10,13 @@ use crate::stage::{Chunk, Mono, Stage};
 /// the body of a hat's noise, at half the cost of 44 100 Hz in every stage after this one.
 pub const ANALYSIS_RATE: u32 = 22_050;
 
+/// The longest gap between chunks that is filled with silence, in seconds.
+///
+/// A damaged packet leaves a gap of milliseconds. A timestamp jump of more than this is a broken
+/// or hostile file, and filling it would allocate every frame it claims (hours of audio claim
+/// gigabytes), so it is refused before anything is allocated.
+pub const MAX_GAP_SECS: u32 = 5;
+
 /// Input frames the resampler takes per step.
 const RESAMPLE_CHUNK: usize = 1024;
 
@@ -17,8 +24,8 @@ const RESAMPLE_CHUNK: usize = 1024;
 ///
 /// Its output is one unbroken stream from the first chunk's start frame. A gap between input
 /// chunks, where a [`Source`](crate::Source) left out a damaged packet, is filled with
-/// silence of the gap's length, so everything after it keeps its true time; a chunk that starts
-/// before the end of the last one is refused.
+/// silence of the gap's length, so everything after it keeps its true time. A gap longer than
+/// [`MAX_GAP_SECS`] is refused, and so is a chunk that starts before the end of the last one.
 ///
 /// The input rate is the first chunk's, and a later chunk at another rate is refused.
 /// Resampling holds back its filter delay and up to one step of input, which
@@ -70,12 +77,18 @@ impl Stage for Prepare {
         let start_frame = match self.next_input {
             None => input.start_frame,
             Some(next) if input.start_frame >= next => {
-                let gap = usize::try_from(input.start_frame - next).map_err(|_| {
+                let skipped = input.start_frame - next;
+                let too_long = || {
                     Error::Invalid(format!(
-                        "the audio skips {} s, too long a gap to fill",
-                        seconds(input.start_frame - next, input.rate)
+                        "the audio skips {} s; a gap longer than {MAX_GAP_SECS} s is a broken \
+                         file, not a damaged packet, so it is not filled",
+                        seconds(skipped, input.rate)
                     ))
-                })?;
+                };
+                if skipped > u64::from(MAX_GAP_SECS) * u64::from(input.rate) {
+                    return Err(too_long());
+                }
+                let gap = usize::try_from(skipped).map_err(|_| too_long())?;
                 mono.splice(0..0, std::iter::repeat_n(0.0, gap));
                 next
             }
@@ -408,6 +421,39 @@ mod tests {
         );
         let samples: Vec<f32> = out.iter().flat_map(|m| m.samples.clone()).collect();
         assert_eq!(samples, [0.5, 0.5, 0.5, 0.0, 0.0, 0.5, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn a_gap_longer_than_the_limit_is_refused_before_anything_is_allocated() {
+        // A timestamp jump of hours, as a damaged or hostile container could claim. It must be
+        // refused, not filled: filling it would allocate every frame of the claimed gap.
+        let mut prepare = Prepare::new(22_050);
+        prepare
+            .push(chunk(48_000, 1, 0, vec![0.0; 100]), &mut Vec::new())
+            .unwrap();
+        let jump = 48_000 * 60 * 60 * 6;
+        let err = prepare
+            .push(chunk(48_000, 1, jump, vec![0.0; 100]), &mut Vec::new())
+            .unwrap_err();
+        let Error::Invalid(message) = err else {
+            panic!("expected Invalid, got {err:?}");
+        };
+        assert!(
+            message.contains("21599.998 s") && message.contains("5 s"),
+            "{message}"
+        );
+        // Just inside the limit is still filled.
+        let mut prepare = Prepare::new(22_050);
+        let inside = u64::from(MAX_GAP_SECS) * 22_050 - 1;
+        let out = run(
+            &mut prepare,
+            vec![
+                chunk(22_050, 1, 0, vec![0.5; 10]),
+                chunk(22_050, 1, 10 + inside, vec![0.5; 10]),
+            ],
+        );
+        let total: usize = out.iter().map(|m| m.samples.len()).sum();
+        assert_eq!(total as u64, 20 + inside);
     }
 
     #[test]

@@ -79,7 +79,7 @@ pub use key::{KeyEstimate, estimate_key};
 pub use notes::Melody;
 pub use onset::Onsets;
 pub use pitch::{PitchFrame, PitchTrack};
-pub use prepare::{ANALYSIS_RATE, Prepare};
+pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
 pub use source::FileSource;
 pub use stage::{Chunk, Mono, Source, Stage};
