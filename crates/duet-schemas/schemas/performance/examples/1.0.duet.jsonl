@@ -1,0 +1,3 @@
+{"$schema":"https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/performance/1.0.json","duet":{"kind":"performance","version":"1.0","tool":{"name":"duet","version":"0.2.0"}},"head":{"rate":22050,"hop":256,"first_frame":512,"unit":"absolute-cents"}}
+{"start":512,"pitch":[null,6907.9,6908.3,6907.1],"voicing":[0.01,0.9123457,0.9571,0.8806],"level":[0.00012,0.2137,0.24105,0.2389]}
+{"start":1536,"pitch":[6913.0,null],"voicing":[0.7942,0.0103],"level":[0.1988,0.0021]}
