@@ -44,6 +44,7 @@ These make capture a failure even if it runs:
 - **Losing the performance.** The unquantized `.notes` file is always written, and quantizing never replaces it (`no-quantizing-happens-unasked`).
 - **Overriding a given tempo or meter** (`no-provided-tempo-or-meter-is-overridden`).
 - **A core that only works on a whole file.** A stage that buffers the entire take to do its work, other than the final assembly into a `Song`, is a design failure. Live input would then be a rewrite.
+  - *Amended (2026-11-15):* reading the notes from the kept performance joins assembly as a function over settled output. It keeps frames, never samples ([the performance and its reading](2026-11-15-performance-and-reading-design.md), question 2).
 - **A model runtime, a model download, or Python** in v1.
 - **Dropping an undecodable file quietly.** HE-AAC, which Symphonia cannot decode, and any unknown codec are refused by name (the goal's refusal face).
   - **Declared HE-AAC** (object type 5 or 29 in the header) is refused by name.
@@ -127,10 +128,12 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
   - The median is the declared reading for vibrato and slides, which the goal lists as unexamined.
   - **Amended (owner, 2026-11-14): a note is held pitch, and a moving pitch is not a note yet.** Pitch that leaves where a note is held and has not yet arrived anywhere and stayed is a slide. A slide is never a note of its own. It belongs, for timing, to the note it arrives at, and is dropped if it ends in silence or at an onset before arriving. A note's pitch is the median of its held frames only, never its slide's. A dip that leaves a pitch and comes back to it, such as a voiced consonant between two syllables, is two notes. A drift of up to about half a semitone stays one note.
   - The builder sets the thresholds: the shortest note, and how long a pitch must hold to start a new note.
+  - **Amended (2026-11-15, [the performance and its reading](2026-11-15-performance-and-reading-design.md)):** a note's key is the nearest key **on the take's tuning**, given or estimated like tempo, not on A440. Its held pitch is kept in cents as the note's `centre`. The pitch time series is kept and written as `<stem>.performance.jsonl`. Notes are read from it, and the reading keeps its residual against it.
 - **Key (owner, 2026-11-14), handled like tempo:**
   - **Given** with `--key`, it is used exactly.
   - **Left out,** it is estimated from the settled notes, applied, and stated with its confidence. The method correlates a pitch-class histogram, weighted by each note's length, against major and minor key profiles (Krumhansl–Schmuckler style). The stated estimate gives the relative major or minor as its alternative, since the two share a signature.
   - **The key changes spelling and signature only, never a MIDI note.** It is applied at assembly as `Song.key`. Notes are then spelled by the key in force, as the readers already do.
+    - *Kept (2026-11-15) for the reading.* Moving notes into the key is an asked transformation, **snap to key**, which states each move ([the performance and its reading](2026-11-15-performance-and-reading-design.md), question 5).
   - **v1 covers major and minor.** Modes (`Key::with_mode`) come later.
   - The analysis file carries the pitch-class histogram and every key's score.
   - Editing `K:` in written ABC changes its pitches, so a wrong key is fixed by re-running with `--key`, not by editing the text.
