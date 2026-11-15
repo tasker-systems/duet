@@ -9,8 +9,9 @@ It takes in the two amendments the owner made to the decision on 2026-11-15, whi
 being written: `.notes` and `.drums` are no longer file extensions, and a view reads back into a
 document as a working surface. Questions 5 and 7 answer to them.
 
-Every answer below is **Proposed**. Each open question is marked **For the owner to rule**, with a
-recommendation. All of them are gathered in [For the owner to rule](#for-the-owner-to-rule).
+The owner ruled the seven open questions on 2026-11-15, each as recommended except the old JSON and
+TOML files, which are cut now. Each is marked **Ruled (owner, 2026-11-15)** where it is answered, and
+all seven are listed in [The owner's rulings](#the-owners-rulings). Everything else is **Proposed**.
 
 ## The decision this builds
 
@@ -137,13 +138,13 @@ Read from the code at `main` (4bd50df), and checked by generating `Song`'s schem
   parses `body` as that kind's type. serde writes struct fields in order, so `duet` is always before
   `body` in a file duet wrote.
 
-**Where the `$id`s live. For the owner to rule.**
+**Where the `$id`s live.** **Ruled (owner, 2026-11-15).** Option (a), a raw GitHub URL in this repository.
 
 - **Options:**
   - (a) a URL in this repository: `https://raw.githubusercontent.com/tasker-systems/duet/main/schemas/<kind>/<major>.<minor>.json`;
   - (b) a URL on a domain the owner holds;
   - (c) a repository path with no URL, such as `duet:schemas/song/1.0.json`.
-- **Recommendation: (a).** It resolves today with nothing to host, and editors can fetch it. A
+- **Why (a):** it resolves today with nothing to host, and editors can fetch it. A
   committed schema file is never edited once its version ships ([question 4](#4-the-schema-gate)),
   so the `main` URL is stable. Moving to (b) later is a change to the `$schema` value only, which a
   reader can accept both ways.
@@ -204,7 +205,7 @@ pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
 
 Today: `bars: [{ "bar": 1, "steps": 16, "vel": [[…per step…], …per lane…] }, …]`.
 
-**Proposed v1:**
+**v1.** **Ruled (owner, 2026-11-15).** Option (a) below: one tensor for the whole grid, with `bar_steps`.
 
 ```json
 "bar_steps": [16, 16, 12],
@@ -219,13 +220,13 @@ Today: `bars: [{ "bar": 1, "steps": 16, "vel": [[…per step…], …per lane…
   stored copy can only disagree with it.
 - **The rest of `DrumGrid` is unchanged:** the conductor, `grid`, `channel`, `levels` and `lanes`.
 
-**For the owner to rule: how the drum matrix is held.**
+**How the drum matrix is held.** **Ruled (owner, 2026-11-15).** Option (a).
 
 - **Options:**
   - (a) one lanes × steps tensor for the grid, with `bar_steps`;
   - (b) one lanes × steps tensor per bar;
   - (c) keep today's nested arrays, and call a rectangular nested array a tensor.
-- **Recommendation: (a).** It is what the decision describes: a drum grid is a lanes × steps
+- **Why (a):** it is what the decision describes: a drum grid is a lanes × steps
   matrix. It is one shape check rather than one per bar, and a transformation over the whole grid
   (shift, mask, density) is one array operation. The legible form is the `grid` view, which is
   unchanged.
@@ -297,7 +298,7 @@ The performance design's question 1 defines what it holds. It is born in this en
 
 ## 3. The version policy
 
-**Proposed: adopt the decision's proposal.**
+**Ruled (owner, 2026-11-15).** Adopted as proposed.
 
 - **A reader accepts its own version and every older minor of the same major.** It parses an older
   body with the kind's `read_minor`, which is the current parser while every minor is additive.
@@ -367,7 +368,7 @@ which number it moves. A pull request that bumps a version states which rule it 
 `gated: .github/workflows/ci.yml#gate (the projected skill) and .github/workflows/ci.yml#check (the
 committed schemas, crates/duet-documents/tests/schemas.rs)`. No new rule is needed.
 
-**Validation against the schema. For the owner to rule.**
+**Validation against the schema.** **Ruled (owner, 2026-11-15).** Option (a): `jsonschema` as a dev-dependency.
 
 - A derived schema can describe a shape the code never sends. The five hand-serialized string types
   are where that happens here.
@@ -376,7 +377,7 @@ committed schemas, crates/duet-documents/tests/schemas.rs)`. No new rule is need
     (no HTTP resolver, no TLS), and validate every example and every round-trip document against the
     committed schema;
   - (b) no validator: trust the derive and the hand impls, judged in review.
-- **Recommendation: (a).** It is the test API-JSON-2 asks for in an API, applied to a file format. As
+- **Why (a):** it is the test API-JSON-2 asks for in an API, applied to a file format. As
   a dev-dependency it ships in nothing. `cargo deny` checks it like any other dependency when it is
   added.
 
@@ -398,7 +399,7 @@ view `duet drums read` makes today, without writing a grid document.
 
 ### The commands
 
-**Proposed:** two top-level commands beside `convert`. Views span kinds, as `convert` does, so
+**Proposed, with the names ruled below:** two top-level commands beside `convert`. Views span kinds, as `convert` does, so
 neither belongs in one domain group.
 
 - **`duet view <document> [--as notes|grid] [-o <file>]`** renders a view, to standard output unless
@@ -419,13 +420,13 @@ neither belongs in one domain group.
   document. `duet song show` becomes `duet view` of a song, and is kept as an alias for one minor
   release.
 
-**For the owner to rule: the command names.**
+**The command names.** **Ruled (owner, 2026-11-15).** Option (a): `duet view` and `duet apply --onto`.
 
 - **Options:**
   - (a) `duet view` and `duet apply`;
   - (b) `duet view` and `duet view --read`;
   - (c) `duet export --as notes` and `duet import`.
-- **Recommendation: (a).** Two verbs for two directions, and `apply … --onto` says that the document
+- **Why (a):** two verbs for two directions, and `apply … --onto` says that the document
   keeps what the view does not touch. (c) collides with what `convert` already means for MIDI and ABC.
 
 ### The header line
@@ -586,31 +587,27 @@ The owner ruled (2026-11-15) that `.duet` and `.duet.jsonl` are the only extensi
 - **Retiring the old names:**
   - **`.notes` and `.drums` files need no converter.** They are views, so `duet apply old.notes -o
     new.duet` reads one, by its `# notefmt` line or by `--as`. That is what `apply` does anyway.
-  - **`.json` and `.toml` song files** already hold a song 1.0 body, and `.drums.json` and
-    `.drums.toml` the old grid shape. These are the only names that need a reader of their own.
-
-**For the owner to rule: the old JSON and TOML files.**
-
-- **Options:**
-  - (a) `duet convert` keeps **reading** `.json`, `.toml`, `.drums.json` and `.drums.toml` as legacy
-    inputs for one minor release, with a stderr note naming `duet convert <file> <x>.duet`. Nothing
-    writes them. The readers are removed after that release;
-  - (b) cut them now, readers and writers both.
-- **Recommendation: (a)**, or (b) if no such file on the owner's machine matters. A bare song `.json`
-  already is a song 1.0 body, so reading it costs one branch. The old grid shape needs one conversion.
-- **The question only the owner can answer:** are there `.json`, `.toml` or `.drums.*` files on the
-  owner's machine that matter?
+  - **`.json`, `.toml`, `.drums.json` and `.drums.toml` are cut now.** **Ruled (owner, 2026-11-15).** No such file on
+    the owner's machine matters, so there is no legacy reader and no converter. Nothing reads or
+    writes these names, and the dispatch drops them with `.notes` and `.drums`. A file with one of these
+    names is refused, saying it is not a duet document.
+  - **What the cut touches in the tests.** The CLI tests in `crates/duet-e2e` that use these names
+    (`names.rs`, `convert_drums.rs`, `cli.rs`, `grid_copy.rs`, `play.rs`) move to `.duet` and views.
+    The JSON and TOML legs of the round-trip tests in `crates/duet-midi/tests/roundtrip.rs` and
+    `crates/duet-drums/tests/roundtrip.rs` round-trip the types, not a file: the JSON legs become the
+    document round trips, and the TOML legs go, since no document is TOML. Each change is a test of
+    the round-trip constraint changing by this ruling, named in its pull request.
 
 ## 8. TOML
 
-**Proposed: TOML for config only.**
+**Ruled (owner, 2026-11-15).** TOML for config only.
 
 - **`duet.toml`, `duet.local.toml` and lane-map tables stay TOML.** They are written by hand, and
   TOML is good at that.
 - **No document is TOML.** TOML has no `null`, and the performance's pitch column needs one for an
   unvoiced frame. A container that holds some kinds and not others would make the kind decide the
   container, which is what the envelope is for.
-- **A song or grid in TOML** is reachable only as a legacy input ([question 7](#7-todays-names-and-readers)).
+- **A song or grid in TOML** is no longer read at all ([question 7](#7-todays-names-and-readers)).
 
 ## Witnesses
 
@@ -635,14 +632,12 @@ keeps passing unchanged. These are the new ones, each named for the task that ad
   - the random grids of `the_drum_grid_round_trips_under_its_map` round-trip through a document
     exactly;
   - the `grid` view witnesses of [question 5](#witnesses-for-the-views), including the partial view over a song;
-  - a grid in today's `.drums.json` shape reads to the same grid as its document (if the legacy reader
-    is kept).
 - **The gate** (`crates/duet-documents/tests/schemas.rs`):
   - its compare function, given a schema with a field added and the same version, fails and names
     the kind;
   - given a description-only change, it asks to regenerate and asks for no bump;
   - every committed example document (`schemas/<kind>/examples/<version>.duet`) reads with the current
-    reader, and validates against its version's schema (if the validator is ruled in).
+    reader, and validates against its version's schema with `jsonschema`.
 - **Outside formats:** an ABC tune with a slur converts to a `.duet` whose `from` lists that notice at
   its line and column; converting that `.duet` back to `.abc` and in again gives the same body.
 - **The CLI** (in `crates/duet-e2e`):
@@ -657,7 +652,7 @@ keeps passing unchanged. These are the new ones, each named for the task that ad
 
 ## Build tasks this design names
 
-Each is filed once the owner has ruled. Each names its witness, and none is built before its
+The owner has ruled, so each can be filed. Each names its witness, and none is built before its
 predecessor unless it says so.
 
 1. **The document core.** `duet_core::doc`: `Envelope`, `Version`, `Tool`, `From`, `Tensor<T>`, the
@@ -670,11 +665,12 @@ predecessor unless it says so.
    `crates/duet-midi/tests/roundtrip.rs`.
 3. **The CLI reads and writes documents.** `io.rs` dispatches `.duet` by envelope, refuses a wrong
    kind by name, sniffs standard input, and writes `.duet`. Nothing reads or writes `.notes` or
-   `.drums` by name any more. The old JSON and TOML names as ruled. Witnesses: the kind, standard
+   `.drums` by name any more, and the `.json`, `.toml`, `.drums.json` and `.drums.toml` readers and
+   writers are removed, with the e2e tests and the round-trip TOML legs that use them. Witnesses: the kind, standard
    input and `duet play` tests in `crates/duet-e2e`.
 4. **drum-grid 1.0.** The tensor, `bar_steps`, `Bar.bar` gone, `schemas/drum-grid/1.0.json`, and the
-   legacy grid reader if ruled. Witnesses: drum-grid 1.0 in `crates/duet-drums/tests/roundtrip.rs`.
-5. **Views, rendered and read back.** `duet view` and `duet apply` (or the names ruled), the header
+   Witnesses: drum-grid 1.0 in `crates/duet-drums/tests/roundtrip.rs`.
+5. **Views, rendered and read back.** `duet view` and `duet apply --onto | -o`, the header
    line with its digest, the cell-by-cell merge onto a source, the envelope's `statements` rendered
    as comments, and what each view drops stated in module docs and README. Needs 4 for the grid view of
    a grid. Witnesses: [question 5's](#witnesses-for-the-views), and the `view` and `apply` tests in
@@ -706,34 +702,29 @@ Each gets a pointer where its file names change, and nothing else:
   `<stem>.performance.jsonl` becomes `<stem>.performance.duet.jsonl`, a `performance` stream. Its
   header is the envelope's `head`, and its lines are records.
 
-## For the owner to rule
+## The owner's rulings
 
-1. **Where the schemas' `$id`s live.** (a) a raw GitHub URL in this repository, (b) a URL on a domain
-   the owner holds, or (c) a repository path with no URL. **Recommended: (a)**, since it resolves today
-   with nothing to host and editors can fetch it.
-2. **The version policy.** Readers accept older minors and refuse a newer minor or another major by
-   name; unknown fields are refused; writers write the version they speak. Or, readers ignore unknown
-   fields. **Recommended: refuse**, since ignoring them loses data on write-back.
-3. **How the drum matrix is held.** (a) one lanes × steps tensor for the whole grid with each bar's step
-   count, (b) a tensor per bar, or (c) today's nested arrays. **Recommended: (a)**, the decision's
-   shape; (c) is free but is not a declared tensor.
-4. **The old `.json`, `.toml`, `.drums.json` and `.drums.toml` files.** (a) `duet convert` reads them
-   as legacy inputs for one minor release, and nothing writes them; (b) cut them now.
-   **Recommended: (a)**, or (b) if no such file on the owner's machine matters. Are there any? Old
-   `.notes` and `.drums` files need no converter: `duet apply` reads them as views.
-5. **The view commands' names.** (a) `duet view` and `duet apply --onto | -o`; (b) `duet view` and
-   `duet view --read`; (c) `duet export --as` and `duet import`. **Recommended: (a)**: two verbs for
-   two directions, and (c) collides with what `convert` means for MIDI and ABC.
-6. **TOML.** Config only, or also a document container. **Recommended: config only**, since it has no
-   `null` and the envelope, not the container, says what a file is.
-7. **A JSON Schema validator as a dev-dependency** (`jsonschema`, MIT, default features off) to prove
-   documents match their committed schemas. **Recommended: yes**, since the five hand-serialized types
-   are exactly where a derived schema would lie.
+All seven are **Ruled (owner, 2026-11-15)**:
 
-Also proposed, and not a ruling unless the owner wants one: a new `duet-documents` crate for the kind
-registry and the gate; the view header's source digest, which makes `apply --onto` refuse a source
-changed since rendering; merging a view onto its source cell by cell rather than by ids; `capture-analysis` omitting absent values rather than writing `null`; and
-`tempo_alternatives` named `{half, double}`.
+1. **The schemas' `$id`s** are raw GitHub URLs in this repository:
+   `https://raw.githubusercontent.com/tasker-systems/duet/main/schemas/<kind>/<major>.<minor>.json`.
+2. **The version policy** is adopted as proposed. Readers accept older minors. They refuse a newer
+   minor, another major and unknown fields, each by name. Writers write the version they speak.
+3. **The drum grid** holds one lanes × steps tensor for the whole grid, with `bar_steps`.
+4. **Today's `.json`, `.toml`, `.drums.json` and `.drums.toml` are cut now,** with no legacy reader.
+   Old `.notes` and `.drums` text still reads through `duet apply`, as views named by their header
+   line.
+5. **The view commands** are `duet view` and `duet apply --onto` (and `-o` for a lossless view).
+6. **TOML** is for config only.
+7. **`jsonschema`** is a dev-dependency, used to validate documents against their committed schemas.
+
+Still **Proposed**:
+- the `duet-documents` crate for the kind registry and the gate;
+- the view header's FNV digest of its source, and `--force` to apply over a changed source;
+- merging a view onto its source cell by cell rather than by ids;
+- `capture-analysis` omitting absent values rather than writing `null`;
+- `tempo_alternatives` named `{half, double}`;
+- the envelope's `statements`.
 
 ## Not decided here, and why
 
@@ -743,4 +734,3 @@ changed since rendering; merging a view onto its source cell by cell rather than
 - **Seconds beside frames in capture events:** the capture design promised them, and the file has frames
   and the rate. Whether to add them is a minor of `capture-analysis`, decided when the comparison tool
   needs it.
-- **A domain for the schemas:** only if the owner rules (b) on question 1.
