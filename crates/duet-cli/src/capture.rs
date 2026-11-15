@@ -12,7 +12,11 @@
 //! `STEM.performance.duet.jsonl`, through duet-schemas ([`PerformanceFile`]). Its lines are
 //! written as the frames settle; it is kept once the `.duet` and `.capture.duet` are written,
 //! and removed again when the capture fails before then.
+//!
+//! `duet capture compare` ([`compare`]) reads a melody take's recording and those files back,
+//! and plots and plays its reading against its performance.
 
+mod compare;
 mod statement;
 
 use std::fs;
@@ -44,6 +48,12 @@ pub enum CaptureCommand {
     /// as played) and STEM.grid.duet (quantized to --grid). Without --lane, each hit is told
     /// apart by sound as a kick, snare or closed hat.
     Rhythm(TakeArgs),
+    /// Compare a melody take's reading against its performance: STEM.compare.svg plots the
+    /// performance's pitch with the reading's notes at their keys on the take's tuning, and the
+    /// residual between them; STEM.compare.wav holds the take on the left and the reading on the
+    /// right as a sine; standard output lists each note. Reads the take's recording and what
+    /// `duet capture melody` wrote at STEM; nothing is overwritten.
+    Compare(compare::CompareArgs),
 }
 
 /// What both kinds of take are captured with. Anything about the timing left out is
@@ -95,6 +105,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     let (take, args) = match command {
         CaptureCommand::Melody(args) => (Take::Melody, args),
         CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
+        CaptureCommand::Compare(args) => return compare::run(&args),
     };
     let key = flags(take, &args)?;
     let grid = match args.grid {
