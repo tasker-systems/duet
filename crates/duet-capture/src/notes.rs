@@ -8,11 +8,23 @@ use crate::stage::{Mono, Stage};
 
 /// The shortest note: a voiced run shorter than this is dropped as a fragment.
 const SHORTEST_NOTE_SECS: f64 = 0.05;
-/// How far, in semitones, the pitch must move from a note's median to count as a change.
+/// How far, in semitones, the pitch must move from where a note is held to count as leaving it.
 /// Above vibrato's usual swing of up to half a semitone, below a semitone step.
 const CHANGE_SEMITONES: f32 = 0.7;
-/// How long a changed pitch must hold to start a new note without an onset.
+/// How widely, in semitones, a slide's frames over [`CHANGE_HOLD_SECS`] may spread for its
+/// pitch to have arrived. A vibrato of 40 cents either side at 7 a second spreads about 0.2
+/// over that span at each turn of its swing; a glide of 7.5 semitones a second spreads this
+/// much, and the turn of a V-shaped dip of about 16 a second does, so anything moving faster is
+/// still on its way.
+const ARRIVED_SEMITONES: f32 = 0.35;
+/// How long the pitch must be away from a note to end it without an onset, and how long a new
+/// pitch must hold to start the next.
 const CHANGE_HOLD_SECS: f64 = 0.05;
+/// How far back where a note is held is measured: the mean of its latest frames over this span,
+/// so it follows a slow drift. A mean over a whole swing of a vibrato cancels it; over 0.2 s, a
+/// vibrato of 4.5 to 7 a second is cancelled to within about a quarter of its swing, where a
+/// median of the same frames reads it off centre by up to half its swing.
+const HELD_SECS: f64 = 0.2;
 /// The least mean voicing probability of a note's frames.
 ///
 /// Noise is often decoded voiced, as in the reference pYIN, since an unvoiced frame's likelihood
@@ -40,10 +52,11 @@ const STRENGTH_PER_ROOT_LEVEL: f32 = 0.06;
 /// Notes from a take: pitch tracking and onset detection, segmented into notes.
 ///
 /// It runs [`PitchTrack`] and [`Onsets`] over the same input and emits both every
-/// [`Event::Onset`], as it settles, and every [`Event::Note`]. A note is a run of voiced frames,
-/// split at onsets and at pitch changes held for 50 ms (`CHANGE_HOLD_SECS`). Its `midi` is the
-/// median of its frames' pitch, rounded to the nearest semitone, which is the declared reading of
-/// vibrato and slides. Its `confidence` is its frames' mean voicing probability, and its
+/// [`Event::Onset`], as it settles, and every [`Event::Note`]. A note is held pitch in a run of
+/// voiced frames, split at onsets and where the pitch moves away and holds somewhere new; pitch
+/// still moving between two notes is a slide, never a note of its own. Its `midi` is the median
+/// of its held frames' pitch, rounded to the nearest semitone, which is the declared reading of
+/// vibrato and drift. Its `confidence` is its frames' mean voicing probability, and its
 /// `strength` the strength of the latest onset since the previous note ended, within 0.2 s
 /// (`STRENGTH_WINDOW_SECS`) before its voicing begins. A note split off by a pitch change keeps
 /// the strength of the note it came from. A note with no such onset takes its strength from its
@@ -154,15 +167,31 @@ struct Run {
     last: u64,
     /// Each frame's pitch, in fractional MIDI key numbers.
     pitches: Vec<f32>,
-    /// The median of the first `2^k` pitches, recomputed each time the run's length reaches a
-    /// power of two, so a long drone costs `O(n log n)` in all, not a sort per frame.
+    /// Where the note is held: the mean of its latest `held` pitches.
     reference: f32,
+    /// Where the note was first held: the mean of its first `held` pitches, once it has
+    /// them. The reference follows a slow glide; this does not, so a glide far from it has
+    /// left the note.
+    anchor: Option<f32>,
+    held: usize,
+    /// Whether its pitch has ever held: stayed within [`CHANGE_SEMITONES`] for `hold` frames,
+    /// as vibrato and a tracker's jitter do. A run that leaves before it has held was a scoop,
+    /// not a note.
+    has_held: bool,
+    hold: usize,
+    /// Every frame taken, on pitch or off it: what its voicing and level are averaged over.
+    frames: usize,
     voicing: f32,
     level: f32,
 }
 
 impl Run {
-    fn new(start: u64, onset: Option<(u64, f32)>, strength: Option<f32>) -> Run {
+    fn new(
+        start: u64,
+        onset: Option<(u64, f32)>,
+        strength: Option<f32>,
+        (held, hold): (usize, usize),
+    ) -> Run {
         Run {
             start,
             onset,
@@ -170,35 +199,74 @@ impl Run {
             last: start,
             pitches: Vec::new(),
             reference: 0.0,
+            anchor: None,
+            held,
+            has_held: false,
+            hold,
+            frames: 0,
             voicing: 0.0,
             level: 0.0,
         }
     }
 
     fn take(&mut self, frame: u64, pitch: f32, voiced: f32, level: f32) {
-        self.last = frame;
+        self.take_off_pitch(frame, voiced, level);
         self.pitches.push(pitch);
-        self.voicing += voiced;
-        self.level += level;
-        if self.pitches.len().is_power_of_two() {
-            self.reference = self.median();
+        if !self.has_held && self.pitches.len() >= self.hold {
+            let recent = &self.pitches[self.pitches.len() - self.hold..];
+            self.has_held = spread(recent) <= CHANGE_SEMITONES;
+        }
+        let from = self.pitches.len().saturating_sub(self.held);
+        let recent = &self.pitches[from..];
+        self.reference = recent.iter().sum::<f32>() / recent.len() as f32;
+        if self.pitches.len() == self.held {
+            self.anchor = Some(self.reference);
         }
     }
 
+    /// Takes a frame that belongs to the note's time but not to its pitch: a short excursion
+    /// that came back, which must not move where the note is held.
+    fn take_off_pitch(&mut self, frame: u64, voiced: f32, level: f32) {
+        self.last = frame;
+        self.frames += 1;
+        self.voicing += voiced;
+        self.level += level;
+    }
+
+    /// Whether the pitch, following the note slowly, has moved far from where it was held.
+    fn drifted_away(&self) -> bool {
+        self.anchor
+            .is_some_and(|anchor| (self.reference - anchor).abs() > CHANGE_SEMITONES)
+    }
+
     fn median(&self) -> f32 {
-        let mut sorted = self.pitches.clone();
-        sorted.sort_by(f32::total_cmp);
-        let mid = sorted.len() / 2;
-        if sorted.len() % 2 == 1 {
-            sorted[mid]
-        } else {
-            (sorted[mid - 1] + sorted[mid]) / 2.0
-        }
+        median(&self.pitches)
     }
 
     fn strength(&self) -> f32 {
         self.strength
-            .unwrap_or_else(|| level_strength(self.level / self.pitches.len().max(1) as f32))
+            .unwrap_or_else(|| level_strength(self.level / self.frames.max(1) as f32))
+    }
+}
+
+/// How widely `pitches` spread, in semitones.
+fn spread(pitches: &[f32]) -> f32 {
+    let (low, high) = pitches
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(low, high), &p| {
+            (low.min(p), high.max(p))
+        });
+    high - low
+}
+
+fn median(pitches: &[f32]) -> f32 {
+    let mut sorted = pitches.to_vec();
+    sorted.sort_by(f32::total_cmp);
+    let mid = sorted.len() / 2;
+    if sorted.len() % 2 == 1 {
+        sorted[mid]
+    } else {
+        (sorted[mid - 1] + sorted[mid]) / 2.0
     }
 }
 
@@ -211,7 +279,49 @@ fn level_strength(level: f32) -> f32 {
 /// A frame of a run: `(frame, pitch, voicing, level)`.
 type Taken = (u64, f32, f32, f32);
 
+/// Pitch on its way from one note to the next: it has left where the note was held, and has
+/// not yet arrived anywhere and stayed.
+struct Slide {
+    /// Where the next note starts, if the slide arrives: where the slide began.
+    start: u64,
+    /// The strength the next note inherits from the one the slide left.
+    strength: Option<f32>,
+    /// The onset of a fragment the slide left, handed on if the slide never arrives.
+    onset: Option<(u64, f32)>,
+    frames: Vec<Taken>,
+}
+
 /// Splits settled pitch frames into notes, at onsets and at held pitch changes.
+///
+/// A note is held pitch. When the pitch leaves where a note is held, by more than
+/// [`CHANGE_SEMITONES`] for [`CHANGE_HOLD_SECS`], the note ends where it left, and the pitch is
+/// a slide until it holds again: until its frames over [`CHANGE_HOLD_SECS`] spread no wider
+/// than [`ARRIVED_SEMITONES`]. The next note then starts where the slide began, so a slide into
+/// a note is part of the note it arrives at, but only the held frames give the note its pitch.
+/// A slide is never a note of its own: one that ends at an onset or in silence before it holds
+/// is dropped. A voice that comes in moving, after silence or an onset, has not held either:
+/// until its frames over [`CHANGE_HOLD_SECS`] spread no wider than [`CHANGE_SEMITONES`], as a
+/// vibrato's or a tracker's jitter does, it is a scoop into the note it reaches, which starts
+/// where the voice came in. A pitch that dips
+/// away and comes back to where it was is a slide too, so it
+/// splits one pitch into two notes, as a voiced consonant between two syllables does.
+///
+/// Where a note is held is the mean of its latest [`HELD_SECS`], so vibrato and a slow drift
+/// stay in it. A glide slow enough to be followed that way has still left the note once that
+/// mean is more than [`CHANGE_SEMITONES`] from where the note was first held, so two notes a
+/// glide joins are never read as one between them.
+///
+/// Stated limits:
+/// - A glide slower than about 7.5 semitones a second spreads no wider than
+///   [`ARRIVED_SEMITONES`] over [`CHANGE_HOLD_SECS`], so it arrives on its way and can still
+///   give a note every semitone or two it passes, sometimes two at its last pitch.
+/// - The turn of a dip slower than about 16 semitones a second can arrive in the same way and
+///   be a note.
+/// - A vibrato of a full half semitone either side at 7 swings a second, on a note that also
+///   drifts half a semitone, can leave it at some phases of its swing and split it in two.
+/// - The bottom of a scoop that wobbles in place for [`CHANGE_HOLD_SECS`] or more, within
+///   [`CHANGE_SEMITONES`], has held, so it is a note of its own, as a short note is.
+/// - An onset ends whatever note is sounding, so a scoop an onset cuts can be a note.
 ///
 /// It must be given every onset up to a pitch frame before that frame.
 struct Segmenter {
@@ -227,6 +337,10 @@ struct Segmenter {
     run: Option<Run>,
     /// Frames of the run that have moved off its pitch.
     departed: Vec<Taken>,
+    /// The pitch between the note it left and the next, when it is moving.
+    slide: Option<Slide>,
+    /// How many of a note's latest frames say where it is held.
+    held: usize,
 }
 
 impl Segmenter {
@@ -242,6 +356,8 @@ impl Segmenter {
             pending: None,
             run: None,
             departed: Vec::new(),
+            slide: None,
+            held: (frames(HELD_SECS) as f64 / hop as f64).ceil() as usize,
         }
     }
 
@@ -259,6 +375,7 @@ impl Segmenter {
     fn pitch(&mut self, p: PitchFrame, out: &mut Vec<Event>) {
         while let Some(onset) = self.onsets.pop_front_if(|o| o.0 <= p.frame) {
             self.departed.clear();
+            self.slide = None;
             if let Some(run) = self.run.take() {
                 self.emit(run, onset.0, out);
             }
@@ -274,6 +391,10 @@ impl Segmenter {
             p.voiced,
             p.level,
         );
+        if self.slide.is_some() {
+            self.slide_on(taken);
+            return;
+        }
         let Some(run) = &mut self.run else {
             let onset = self.pending.take();
             let since = |at: u64| p.frame - at;
@@ -282,40 +403,92 @@ impl Segmenter {
                 _ => p.frame.saturating_sub(self.hop / 2),
             };
             let onset = onset.filter(|&(at, _)| since(at) <= self.window);
-            let mut run = Run::new(start, onset, onset.map(|o| o.1));
+            let mut run = Run::new(start, onset, onset.map(|o| o.1), (self.held, self.hold));
             take(&mut run, taken);
             self.run = Some(run);
             return;
         };
         if (taken.1 - run.reference).abs() <= CHANGE_SEMITONES {
-            // Back on pitch: a short excursion belongs to the note.
-            for frame in self.departed.drain(..) {
-                take(run, frame);
+            // Back on pitch: a short excursion belongs to the note's time, not its pitch.
+            for (frame, _, voiced, level) in self.departed.drain(..) {
+                run.take_off_pitch(frame, voiced, level);
             }
             take(run, taken);
+            if run.drifted_away() {
+                // A glide slow enough to follow has still arrived somewhere new.
+                self.leave(taken.0.saturating_sub(self.hop / 2), Vec::new(), out);
+            }
             return;
         }
         self.departed.push(taken);
         if self.departed.len() >= self.hold {
             let at = self.departed[0].0.saturating_sub(self.hop / 2);
             let departed = std::mem::take(&mut self.departed);
-            let Some(run) = self.run.take() else {
-                return;
-            };
-            let (strength, inherited) = (run.strength(), run.strength);
+            self.leave(at, departed, out);
+        }
+    }
+
+    /// Ends the sounding note at `at`, where the pitch left it, and starts a slide there with
+    /// the frames that have left it.
+    fn leave(&mut self, at: u64, departed: Vec<Taken>, out: &mut Vec<Event>) {
+        let Some(run) = self.run.take() else {
+            return;
+        };
+        if !run.has_held {
+            // It never held: a scoop into the note it reaches, which starts where it did.
+            self.slide = Some(Slide {
+                start: run.start,
+                strength: run.strength,
+                onset: run.onset,
+                frames: Vec::new(),
+            });
+        } else {
+            let (strength, inherited, onset) = (run.strength(), run.strength, run.onset);
             let emitted = self.emit(run, at, out);
             // A note split off by a pitch change keeps the strength of the note before it; one
             // split off a dropped fragment is as if the fragment had not been.
-            let mut next = Run::new(at, None, if emitted { Some(strength) } else { inherited });
-            for frame in departed {
+            self.slide = Some(Slide {
+                start: at,
+                strength: if emitted { Some(strength) } else { inherited },
+                onset: if emitted { None } else { onset },
+                frames: Vec::new(),
+            });
+        }
+        // A run can start only once `hold` frames have arrived, so at the last of these.
+        for frame in departed {
+            self.slide_on(frame);
+        }
+    }
+
+    /// Takes a frame into the slide, and starts the next note once the pitch holds.
+    fn slide_on(&mut self, taken: Taken) {
+        let Some(slide) = &mut self.slide else {
+            return;
+        };
+        slide.frames.push(taken);
+        let recent = &slide.frames[slide.frames.len().saturating_sub(self.hold)..];
+        let pitches: Vec<f32> = recent.iter().map(|f| f.1).collect();
+        if recent.len() == self.hold && spread(&pitches) <= ARRIVED_SEMITONES {
+            // Arrived and holding: the next note, from where the slide began, pitched only by
+            // the frames that hold.
+            let mut next = Run::new(slide.start, None, slide.strength, (self.held, self.hold));
+            for &frame in recent {
                 take(&mut next, frame);
             }
+            self.slide = None;
             self.run = Some(next);
         }
     }
 
-    /// Ends the sounding note after its last voiced frame.
+    /// Ends the sounding note after its last voiced frame. A slide that has not arrived is no
+    /// note.
     fn close(&mut self, out: &mut Vec<Event>) {
+        if let Some(slide) = self.slide.take()
+            && self.pending.is_none()
+        {
+            // The slide was no note, nor the fragment before it, so its onset is handed on.
+            self.pending = slide.onset;
+        }
         if let Some(mut run) = self.run.take() {
             for frame in self.departed.drain(..) {
                 take(&mut run, frame);
@@ -336,7 +509,7 @@ impl Segmenter {
     /// Emits `run` as a note ending at `end`, unless it is shorter than the shortest note or too
     /// weakly voiced to be one. Returns whether it was emitted.
     fn emit(&self, run: Run, end: u64, out: &mut Vec<Event>) -> bool {
-        let confidence = run.voicing / run.pitches.len().max(1) as f32;
+        let confidence = run.voicing / run.frames.max(1) as f32;
         if run.pitches.is_empty()
             || end < run.start + self.shortest
             || confidence < LEAST_CONFIDENCE
@@ -750,6 +923,297 @@ mod tests {
             (None, 5),
         ]);
         assert_eq!(found.iter().map(|n| n.2).collect::<Vec<_>>(), vec![60]);
+    }
+
+    /// Feeds the segmenter one fully voiced frame per pitch, one hop (11.6 ms) apart, then
+    /// silence; `None` is unvoiced.
+    fn segment_pitches(pitches: &[Option<f32>]) -> Vec<(u64, u64, u8)> {
+        let mut stretches: Vec<(Option<f32>, usize)> = pitches.iter().map(|&p| (p, 1)).collect();
+        stretches.push((None, 10));
+        segment(&stretches)
+    }
+
+    /// `frames` frames moving in a straight line from `from` to `to`, `to` included.
+    fn line(from: f32, to: f32, frames: usize) -> Vec<Option<f32>> {
+        (1..=frames)
+            .map(|k| Some(from + (to - from) * k as f32 / frames as f32))
+            .collect()
+    }
+
+    fn held(midi: f32, frames: usize) -> Vec<Option<f32>> {
+        vec![Some(midi); frames]
+    }
+
+    fn midis(found: &[(u64, u64, u8)]) -> Vec<u8> {
+        found.iter().map(|n| n.2).collect()
+    }
+
+    #[test]
+    fn a_sung_note_with_vibrato_and_a_slow_drift_is_one_note() {
+        // 1.5 s at 57, swinging 40 cents either side, and sagging half a semitone in a straight
+        // line over 0.6 s from 0.4 s in: it moves, but never arrives anywhere new and stays, so
+        // it is not two notes yet. Every rate a singer's vibrato is likely to have, and every
+        // phase it may start in, since a window over part of a swing reads it off centre.
+        let hop = 256.0 / f64::from(RATE);
+        for rate in [4.5, 5.0, 6.0, 7.0] {
+            for eighth in 0..8 {
+                let phase = f64::from(eighth) * std::f64::consts::TAU / 8.0;
+                let pitches: Vec<Option<f32>> = (0..129)
+                    .map(|k| {
+                        let t = k as f64 * hop;
+                        let vibrato = 0.4 * (std::f64::consts::TAU * rate * t + phase).sin();
+                        let sag = 0.5 * ((t - 0.4) / 0.6).clamp(0.0, 1.0);
+                        Some((57.0 + vibrato - sag) as f32)
+                    })
+                    .collect();
+                let found = segment_pitches(&pitches);
+                assert_eq!(
+                    found.len(),
+                    1,
+                    "{rate} Hz from {eighth}/8 of a swing: {found:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wide_slow_vibrato_with_a_drift_is_one_note() {
+        // Half a semitone either side, 4.5 to 5 swings a second, with the same half-semitone
+        // sag: measured against the whole note so far, the sag and the swing together leave it.
+        let hop = 256.0 / f64::from(RATE);
+        for rate in [4.5, 5.0] {
+            for eighth in 0..8 {
+                let phase = f64::from(eighth) * std::f64::consts::TAU / 8.0;
+                let pitches: Vec<Option<f32>> = (0..129)
+                    .map(|k| {
+                        let t = k as f64 * hop;
+                        let vibrato = 0.5 * (std::f64::consts::TAU * rate * t + phase).sin();
+                        let sag = 0.5 * ((t - 0.4) / 0.6).clamp(0.0, 1.0);
+                        Some((57.0 + vibrato - sag) as f32)
+                    })
+                    .collect();
+                let found = segment_pitches(&pitches);
+                assert_eq!(
+                    found.len(),
+                    1,
+                    "{rate} Hz from {eighth}/8 of a swing: {found:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_quick_semitone_step_that_holds_is_two_notes() {
+        let pitches = [held(60.0, 30), line(60.0, 61.0, 4), held(61.0, 30)].concat();
+        assert_eq!(midis(&segment_pitches(&pitches)), vec![60, 61]);
+    }
+
+    #[test]
+    fn a_dip_between_two_syllables_is_two_notes_and_the_dip_none() {
+        // A held note falls 8 semitones and comes straight back, within 0.2 s, with no onset
+        // and no silence: a voiced consonant between two syllables on one pitch.
+        let pitches = [
+            held(60.0, 25),
+            line(60.0, 52.0, 9),
+            line(52.0, 60.0, 8),
+            held(60.0, 25),
+        ]
+        .concat();
+        assert_eq!(midis(&segment_pitches(&pitches)), vec![60, 60]);
+    }
+
+    #[test]
+    fn a_slower_dip_is_still_no_note_at_its_bottom() {
+        // 3 semitones down and back over 0.23 s: slow enough that the frames at its turn sit
+        // within CHANGE_SEMITONES of one another, but never still.
+        let pitches = [
+            held(60.0, 25),
+            line(60.0, 57.0, 10),
+            line(57.0, 60.0, 10),
+            held(60.0, 25),
+        ]
+        .concat();
+        let found = segment_pitches(&pitches);
+        assert_eq!(midis(&found), vec![60, 60], "{found:?}");
+    }
+
+    #[test]
+    fn a_whole_tone_portamento_is_no_note_of_its_own() {
+        // A whole tone over 0.2 s, as a singer joins two notes: 10 semitones a second.
+        let pitches = [held(60.0, 25), line(60.0, 62.0, 17), held(62.0, 25)].concat();
+        let found = segment_pitches(&pitches);
+        assert_eq!(midis(&found), vec![60, 62], "{found:?}");
+    }
+
+    #[test]
+    fn a_slide_between_two_held_notes_is_no_note_of_its_own() {
+        // 5 semitones over 150 ms: the slide belongs to the note it arrives at.
+        let pitches = [held(60.0, 25), line(60.0, 65.0, 13), held(65.0, 25)].concat();
+        let found = segment_pitches(&pitches);
+        assert_eq!(midis(&found), vec![60, 65], "{found:?}");
+        // The second note starts where the slide does, within the two frames it takes to move
+        // further than CHANGE_SEMITONES, not where the pitch arrives 13 frames later.
+        let slide = 25 * 256 - 128;
+        assert!((slide..=slide + 2 * 256).contains(&found[1].0), "{found:?}");
+        assert_eq!(found[0].1, found[1].0, "{found:?}");
+    }
+
+    #[test]
+    fn a_slow_glide_to_a_new_note_never_merges_the_two() {
+        // A slow glide is followed frame by frame, so it is never a quick departure; it must
+        // still end the note it leaves once it is far from where that note was held, or both
+        // notes read as one at a pitch between them.
+        let hop = 256.0 / f64::from(RATE);
+        for (semitones, secs) in [(2.0f32, 1.0f64), (3.0, 0.5), (5.0, 1.0)] {
+            let frames = (secs / hop).round() as usize;
+            let pitches = [
+                held(60.0, 25),
+                line(60.0, 60.0 + semitones, frames),
+                held(60.0 + semitones, 25),
+            ]
+            .concat();
+            let found = midis(&segment_pitches(&pitches));
+            let case = format!("{semitones} st over {secs} s: {found:?}");
+            assert_eq!(found.first(), Some(&60), "{case}");
+            assert_eq!(found.last(), Some(&(60 + semitones as u8)), "{case}");
+            assert!(found.windows(2).all(|w| w[0] < w[1]), "{case}");
+        }
+    }
+
+    #[test]
+    fn a_note_after_a_long_slide_is_pitched_by_where_it_holds() {
+        // The slide's 13 frames outnumber the 8 that hold at 65: counted, they would pull the
+        // median down to 64.
+        let pitches = [held(60.0, 25), line(60.0, 65.0, 13), held(65.0, 8)].concat();
+        assert_eq!(midis(&segment_pitches(&pitches)), vec![60, 65]);
+    }
+
+    #[test]
+    fn a_fall_into_silence_is_no_note() {
+        // The end of a phrase: the held note falls away 10 semitones as the voice stops.
+        let pitches = [held(60.0, 25), line(60.0, 50.0, 10)].concat();
+        let found = segment_pitches(&pitches);
+        assert_eq!(midis(&found), vec![60], "{found:?}");
+    }
+
+    #[test]
+    fn an_onset_reaches_the_next_note_past_a_dropped_fragment_and_slide() {
+        // The onset's run is too short to be a note before the pitch slides away, and the slide
+        // ends in silence; the next note, 151 ms after the onset, is the latest note since it.
+        let mut segmenter = Segmenter::new(RATE, 256);
+        segmenter.onset(0, 0.9);
+        let mut out = Vec::new();
+        let pitches = [
+            held(60.0, 3),
+            line(60.0, 66.0, 8),
+            vec![None; 2],
+            held(62.0, 20),
+            vec![None; 10],
+        ]
+        .concat();
+        for (k, midi) in pitches.into_iter().enumerate() {
+            let hz = midi.map(|m| 440.0 * ((m - 69.0) / 12.0).exp2());
+            let p = PitchFrame {
+                frame: 256 * k as u64,
+                hz,
+                voiced: if hz.is_some() { 1.0 } else { 0.0 },
+                level: 0.1,
+            };
+            segmenter.pitch(p, &mut out);
+        }
+        segmenter.finish(&mut out);
+        assert_eq!(strengths(&out), vec![0.9], "{out:?}");
+    }
+
+    #[test]
+    fn a_short_excursion_early_or_through_vibrato_stays_in_the_note() {
+        // A tracker blip of 1 to 4 frames, 2 to 9 semitones away, at a consonant or a break in
+        // the voice: the pitch comes straight back, so it never left the note, and the blip
+        // must not move where the note is held.
+        let hop = 256.0 / f64::from(RATE);
+        let blips: [&[f32]; 5] = [&[3.0; 3], &[-3.0; 4], &[5.0, 9.0, 5.0], &[2.0; 4], &[5.0]];
+        for blip in blips {
+            for at in [8usize, 40] {
+                for eighth in [None, Some(0), Some(2), Some(4), Some(6)] {
+                    let pitches: Vec<Option<f32>> = (0..100usize)
+                        .map(|k| {
+                            let vibrato = eighth.map_or(0.0, |e: i32| {
+                                let phase = f64::from(e) * std::f64::consts::TAU / 8.0;
+                                0.4 * (std::f64::consts::TAU * 6.0 * k as f64 * hop + phase).sin()
+                            });
+                            let away = k.checked_sub(at).and_then(|i| blip.get(i)).copied();
+                            Some(60.0 + vibrato as f32 + away.unwrap_or(0.0))
+                        })
+                        .collect();
+                    let found = segment_pitches(&pitches);
+                    let case = format!("{blip:?} at frame {at}, vibrato {eighth:?}: {found:?}");
+                    assert_eq!(midis(&found), vec![60], "{case}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_scoop_at_a_notes_start_is_part_of_the_note_it_reaches() {
+        // The voice comes in 4 semitones low and scoops up over 255 ms: it moves 0.73 semitone
+        // over every 50 ms, so it never holds, and it is long enough before it leaves its start
+        // to be a note if it had. It is the start of the note it reaches.
+        let pitches = [vec![None; 5], line(50.0, 54.0, 22), held(54.0, 40)].concat();
+        let found = segment_pitches(&pitches);
+        assert_eq!(midis(&found), vec![54], "{found:?}");
+        // It starts where the voice does, half a hop before its first frame.
+        assert_eq!(found[0].0, 5 * 256 - 128, "{found:?}");
+    }
+
+    #[test]
+    fn a_short_note_with_vibrato_or_jitter_before_a_step_is_kept() {
+        // Held pitch with a swing or a tracker's jitter is still held: 70 to 93 ms of a 40-cent
+        // vibrato at 6 to 7 a second, in any phase, or 465 ms of jitter up to 0.4 either side.
+        let hop = 256.0 / f64::from(RATE);
+        let step = |note: Vec<Option<f32>>| {
+            let pitches = [vec![None; 5], note, line(60.0, 62.0, 2), held(62.0, 40)].concat();
+            midis(&segment_pitches(&pitches))
+        };
+        for rate in [6.0, 7.0] {
+            for frames in [6usize, 8] {
+                for eighth in 0..8 {
+                    let phase = f64::from(eighth) * std::f64::consts::TAU / 8.0;
+                    let note = (0..frames)
+                        .map(|k| {
+                            let t = k as f64 * hop;
+                            let swing = (std::f64::consts::TAU * rate * t + phase).sin();
+                            Some(60.0 + 0.4 * swing as f32)
+                        })
+                        .collect();
+                    let case = format!("{frames} frames at {rate} Hz from {eighth}/8");
+                    assert_eq!(step(note), vec![60, 62], "{case}");
+                }
+            }
+        }
+        for seed in [1u32, 2, 3, 4] {
+            let mut state = seed;
+            let note = (0..40)
+                .map(|_| {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    let unit = (state >> 8) as f32 / (1 << 24) as f32;
+                    Some(60.0 + 0.8 * (unit - 0.5))
+                })
+                .collect();
+            assert_eq!(step(note), vec![60, 62], "jitter, seed {seed}");
+        }
+    }
+
+    #[test]
+    fn a_short_note_that_holds_before_a_step_is_kept() {
+        // 70 ms held still, then a quick step: a note, however short.
+        let pitches = [
+            vec![None; 5],
+            held(50.0, 6),
+            line(50.0, 54.0, 3),
+            held(54.0, 40),
+        ]
+        .concat();
+        assert_eq!(midis(&segment_pitches(&pitches)), vec![50, 54]);
     }
 
     #[test]
