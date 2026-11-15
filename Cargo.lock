@@ -546,6 +546,7 @@ dependencies = [
  "duet-core",
  "duet-drums",
  "duet-schemas",
+ "jsonschema",
  "midly",
  "serde_json",
  "toml",

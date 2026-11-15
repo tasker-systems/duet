@@ -316,10 +316,15 @@ fn convert_goes_between_documents_midi_and_abc() {
         &duet(&dir, &["convert", s(&p("a.mid")), s(&p("b.duet"))]),
         ".mid to .duet",
     );
+    let json = |path: &Path| -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    };
+    let (a, b) = (json(&doc), json(&p("b.duet")));
+    assert_eq!(b["body"], a["body"], "MIDI keeps the song");
     assert_eq!(
-        std::fs::read(p("b.duet")).unwrap(),
-        std::fs::read(&doc).unwrap(),
-        "MIDI keeps the song"
+        b["duet"]["from"],
+        serde_json::json!({ "format": "midi" }),
+        "and says so"
     );
     assert_eq!(show(&p("b.duet")), notes);
 
