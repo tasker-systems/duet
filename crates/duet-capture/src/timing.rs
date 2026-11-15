@@ -98,11 +98,31 @@ const CANDIDATES: [(u8, u8); 3] = [(4, 4), (3, 4), (6, 8)];
 /// downbeat when the meter does not say where one is. Task 9 tunes it.
 const STRONG_ONSET: f64 = 0.5;
 
-/// How far from a predicted beat, as a share of the beat, an onset may be and be that beat.
+/// How sharply the beat tracker penalises an interval between beats that differs from the beat
+/// period: the cost is this times the squared log of their ratio, against a gain of each beat
+/// onset's relative strength (at most 1). At 30, an interval 15% off costs about 0.6, so a take
+/// played that far from its given or estimated tempo, or drifting that far, is still followed
+/// on its strong onsets; one a half beat off either way (a ratio of 1.5 or 0.75) costs 2.5 to
+/// 4.9, more than any onset gains, so no sequence slips onto the off-beats to collect them.
+const TIGHTNESS: f64 = 30.0;
+/// The most beats one interval of the tracked sequence may span by choice, the ones between left
+/// as rests: two bars of 4/4. An onset after a longer rest follows on from the last one before it.
+const MAX_SPAN_BEATS: f64 = 8.0;
+/// How far from the given or estimated beat period the period a take kept may be, as a ratio
+/// either way, and still be its tempo rather than another beat level: halfway, in log, to the
+/// nearest other level, four-thirds (a beat of an eighth and a half, which a tresillo's taps all
+/// fall on). It covers a take meant at 120 and played at 108.
+const KEPT_RANGE: f64 = 1.1547;
+/// The ratio between neighbouring periods tried for the period a take kept.
+const KEPT_STEP: f64 = 1.002;
+/// How far from a step of the beat's division, as a share of the step, an onset counts toward
+/// the period a take kept.
 const SNAP_TOLERANCE: f64 = 0.2;
-/// How much of the gap between a tracked beat's interval and the expected one moves the
-/// expected one: enough to follow a slowly changing tempo. Task 9 tunes it.
-const PERIOD_ADAPT: f64 = 0.25;
+/// How many chance spreads a period's fit must lead the given or estimated period's by to
+/// replace it. Three, not the two that one comparison would need: the search compares the hint
+/// with every period in its range, and the best of many chance differences crosses two spreads
+/// far more often than one does.
+const CLEAR_LEAD: f64 = 3.0;
 /// The beats around an interval that its local tempo is fitted over.
 const FIT_BEATS: usize = 8;
 
@@ -740,12 +760,17 @@ fn std_dev(values: &[f64]) -> f64 {
 /// The beats are the meter's felt beats (dotted quarters in 6/8), and their tempo is stated in
 /// quarter notes per minute.
 ///
-/// Beats are tracked from `timing`'s downbeat: each is expected one beat period after the last,
-/// and is the onset nearest that, if one is within `SNAP_TOLERANCE` of a beat; otherwise it
-/// is where it was expected. The period starts at `timing`'s measured beat period and moves
-/// `PERIOD_ADAPT` of the way to each snapped interval, so it follows a slowly changing tempo
-/// rather than holding the global one. Tracking stops when the next beat would fall past the
-/// last onset.
+/// Beats are tracked from `timing`'s downbeat as one sequence, chosen whole (a dynamic-programming
+/// beat tracker, after Ellis 2007), at the beat period the take kept: the period, near
+/// `timing`'s, whose beats the onsets fall nearest. `timing`'s period says what the beat is meant
+/// to be, given or estimated, not how fast it was played. The onsets the sequence puts beats on
+/// are those that maximise their summed relative strength less a cost for each interval that
+/// differs from that period, sharply enough that no sequence gains by slipping half a beat. An
+/// interval may span several beats, the beats inside it placed evenly, as rests.
+///
+/// A tracker that instead snaps each beat to the onset nearest where it expects it, and adapts
+/// to each, is carried onto the off-beats by a take's ordinary timing scatter and runs away; a
+/// whole sequence pays for every interval such a slip would bend.
 ///
 /// The onset stage places onsets on a grid of about 6 ms, which is a percent of a beat at 120,
 /// so an interval's tempo is not read from its two ends alone: it is the slope, at the
@@ -755,11 +780,16 @@ fn std_dev(values: &[f64]) -> f64 {
 pub fn beat_series(onsets: &[Event], rate: u32, timing: &Timing) -> Vec<BeatTempo> {
     let rate = f64::from(rate);
     let quarters = felt_quarters(*timing.meter.value());
-    let frames: Vec<f64> = relative(onsets).iter().map(|o| o.frame).collect();
+    let divisions: &[f64] = if is_compound(*timing.meter.value()) {
+        &[1.0, 3.0, 6.0]
+    } else {
+        &[1.0, 2.0, 4.0]
+    };
     let beats = track(
-        &frames,
+        &relative(onsets),
         *timing.downbeat_frame.value() as f64,
         timing.beat_period_frames * quarters,
+        divisions,
     );
     (0..beats.len().saturating_sub(1))
         .map(|i| BeatTempo {
@@ -777,42 +807,177 @@ struct Beat {
     snapped: bool,
 }
 
-/// The beats from `start`, at about `period` frames apart, snapped to `frames`.
-fn track(frames: &[f64], start: f64, mut period: f64) -> Vec<Beat> {
-    let Some(&end) = frames.last() else {
-        return Vec::new();
-    };
-    let mut beats = vec![Beat {
-        frame: start,
-        snapped: frames.iter().any(|f| (f - start).abs() < 1.0),
-    }];
-    loop {
-        let last = beats[beats.len() - 1].frame;
-        let expected = last + period;
-        let reach = SNAP_TOLERANCE * period;
-        if expected > end + reach {
-            break;
-        }
-        let snapped = frames
+/// The beats from `start`, put on `onsets` (sorted by frame) as the best-scoring sequence at the
+/// beat period the take kept, whose beat divides into each of `divisions`: see [`beat_series`].
+fn track(onsets: &[Onset], start: f64, hint: f64, divisions: &[f64]) -> Vec<Beat> {
+    sequence(onsets, start, kept_period(onsets, start, hint, divisions)).1
+}
+
+/// The beat period the take kept after `start`: among periods within [`KEPT_RANGE`] of `hint`,
+/// the one whose grid, counted from `start`, puts the most onset strength near it. The grid is
+/// the beat and its divisions (`divisions`: the beat, its eighths and its sixteenths), and an
+/// onset counts at whichever level it sits nearest, as a share of [`SNAP_TOLERANCE`] of that
+/// level's step, counting less the further it is. The hint is the given or estimated tempo,
+/// which says what the beat is meant to be, not how fast it was played; a sequence held to a
+/// period a tenth off is not the take's.
+///
+/// Every level counts because a line can put too few onsets on its beats, or even its eighths,
+/// for them alone to say its tempo: a sung line sits mostly off the beat, and a bass line can be
+/// syncopated in sixteenths, and a coarser grid then fits some other period as well by chance.
+/// The share of the take the grid reaches is the same at every period, so a quicker one gains
+/// nothing by having more steps; and a grid one percent off is a third of a beat out by beat
+/// thirty, so the fit is sharp over a take of any length.
+fn kept_period(onsets: &[Onset], start: f64, hint: f64, divisions: &[f64]) -> f64 {
+    let counted = |period: f64| {
+        onsets
             .iter()
-            .copied()
-            .filter(|f| (f - expected).abs() <= reach)
-            .min_by(|a, b| (a - expected).abs().total_cmp(&(b - expected).abs()));
-        match snapped {
-            Some(frame) => {
-                period += PERIOD_ADAPT * (frame - last - period);
-                beats.push(Beat {
-                    frame,
-                    snapped: true,
-                });
+            .filter(move |o| o.frame >= start - SNAP_TOLERANCE * period)
+    };
+    let score = |period: f64| -> f64 {
+        counted(period)
+            .map(|o| o.strength * nearness((o.frame - start) / period, divisions))
+            .sum()
+    };
+    let steps = (KEPT_RANGE.ln() / KEPT_STEP.ln()).ceil() as i32;
+    // Ties go to the period nearest the hint: the candidates run outward from it.
+    let (best_score, best) = (0..=steps)
+        .flat_map(|k| [k, -k])
+        .map(|k| hint * KEPT_STEP.powi(k))
+        .fold((f64::MIN, hint), |kept, period| {
+            let s = score(period);
+            if s > kept.0 { (s, period) } else { kept }
+        });
+    // How far apart two periods' scores fall by chance: each onset adds its strength times a
+    // nearness that, at a phase unrelated to the grid, varies by `nearness_spread`, so the
+    // difference of two scores varies by √2 times that, scaled by the root of the summed
+    // squared strengths. Sparse onsets give a wide chance spread, and only a period clearly
+    // ahead of the hint replaces it.
+    let strengths: f64 = counted(hint).map(|o| o.strength * o.strength).sum();
+    let chance = std::f64::consts::SQRT_2 * nearness_spread(divisions) * strengths.sqrt();
+    if best_score - score(hint) > CLEAR_LEAD * chance {
+        best
+    } else {
+        hint
+    }
+}
+
+/// How near `beats` (a position in beats from the downbeat) is to the grid of the beat divided
+/// into each of `divisions`: 1 on a step, falling to 0 at [`SNAP_TOLERANCE`] of a step away, at
+/// whichever level it is nearest.
+fn nearness(beats: f64, divisions: &[f64]) -> f64 {
+    divisions
+        .iter()
+        .map(|division| {
+            let steps = beats * division;
+            let off = (steps - steps.round()).abs() / SNAP_TOLERANCE;
+            if off < 1.0 { 1.0 - off * off } else { 0.0 }
+        })
+        .fold(0.0, f64::max)
+}
+
+/// The standard deviation of [`nearness`] over a beat, for a position unrelated to the grid.
+fn nearness_spread(divisions: &[f64]) -> f64 {
+    const SAMPLES: u32 = 4096;
+    let values: Vec<f64> = (0..SAMPLES)
+        .map(|i| nearness(f64::from(i) / f64::from(SAMPLES), divisions))
+        .collect();
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    (values.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / values.len() as f64).sqrt()
+}
+
+/// The best-scoring sequence of beats from `start` at `period`, and its score.
+fn sequence(onsets: &[Onset], start: f64, period: f64) -> (f64, Vec<Beat>) {
+    // The sequence's nodes: the downbeat, then every onset after it. The downbeat is an onset's
+    // own node when one is on it.
+    let on_start = onsets.iter().find(|o| (o.frame - start).abs() < 1.0);
+    let mut nodes = vec![Onset {
+        frame: start,
+        strength: on_start.map_or(0.0, |o| o.strength),
+    }];
+    nodes.extend(onsets.iter().filter(|o| o.frame >= start + 1.0).copied());
+    if onsets.is_empty() {
+        return (f64::MIN, Vec::new());
+    }
+    // best[j]: the score of the best sequence from the downbeat ending on node j, the node
+    // before it, and the beats its last interval spans. Only node 0 starts a sequence.
+    let mut best: Vec<Option<(f64, usize, u32)>> = vec![None; nodes.len()];
+    best[0] = Some((nodes[0].strength, 0, 0));
+    for j in 1..nodes.len() {
+        for i in (0..j).rev() {
+            let gap = nodes[j].frame - nodes[i].frame;
+            if gap > (MAX_SPAN_BEATS + 0.5) * period {
+                break;
             }
-            None => beats.push(Beat {
-                frame: expected,
-                snapped: false,
-            }),
+            let Some((before, _, _)) = best[i] else {
+                continue;
+            };
+            let beats = (gap / period).round().max(1.0);
+            if beats > MAX_SPAN_BEATS {
+                continue;
+            }
+            let bend = (gap / (beats * period)).ln();
+            let score = before + nodes[j].strength - TIGHTNESS * bend * bend;
+            if best[j].is_none_or(|(s, _, _)| score > s) {
+                best[j] = Some((score, i, beats as u32));
+            }
+        }
+        // After a rest longer than any interval spans, the beat carries on from the last node
+        // before it, the rest's beats placed evenly; its phase is less sure, but the beat goes on.
+        if best[j].is_none()
+            && let Some(i) = (0..j).rev().find(|&i| best[i].is_some())
+        {
+            let gap = nodes[j].frame - nodes[i].frame;
+            let beats = (gap / period).round().max(1.0);
+            let bend = (gap / (beats * period)).ln();
+            let before = best[i].map_or(0.0, |(s, _, _)| s);
+            let score = before + nodes[j].strength - TIGHTNESS * bend * bend;
+            best[j] = Some((score, i, beats as u32));
         }
     }
-    beats
+    // The sequence ends on the best-scoring node within a beat of the furthest any reaches, so
+    // it neither stops short of the take's end nor runs past it.
+    let furthest = (0..nodes.len())
+        .rev()
+        .find(|&j| best[j].is_some())
+        .unwrap_or(0);
+    let mut end = furthest;
+    for j in (0..=furthest).rev() {
+        if nodes[furthest].frame - nodes[j].frame > period {
+            break;
+        }
+        if let (Some((s, _, _)), Some((e, _, _))) = (best[j], best[end])
+            && s > e
+        {
+            end = j;
+        }
+    }
+    let mut chain = vec![end];
+    while let Some(&j) = chain.last() {
+        if j == 0 {
+            break;
+        }
+        chain.push(best[j].map_or(0, |(_, i, _)| i));
+    }
+    chain.reverse();
+    let mut beats = vec![Beat {
+        frame: start,
+        snapped: on_start.is_some(),
+    }];
+    for pair in chain.windows(2) {
+        let (from, to) = (nodes[pair[0]].frame, nodes[pair[1]].frame);
+        let spans = best[pair[1]].map_or(1, |(_, _, b)| b);
+        for k in 1..spans {
+            beats.push(Beat {
+                frame: from + (to - from) * f64::from(k) / f64::from(spans),
+                snapped: false,
+            });
+        }
+        beats.push(Beat {
+            frame: to,
+            snapped: true,
+        });
+    }
+    (best[end].map_or(f64::MIN, |(s, _, _)| s), beats)
 }
 
 /// The frames per beat at the middle of the interval from beat `i` to beat `i + 1`, fitted
@@ -1335,6 +1500,363 @@ mod tests {
         assert!(series.len() >= 38, "{} beats", series.len());
         for beat in &series {
             assert!((beat.bpm - 120.0).abs() <= 1.2, "{beat:?}");
+        }
+    }
+
+    /// A deterministic stand-in for a random source: a 64-bit LCG, mapped to -1..1.
+    struct Jitter(u64);
+
+    impl Jitter {
+        fn next(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (self.0 >> 11) as f64 / (1u64 << 52) as f64 - 1.0
+        }
+    }
+
+    /// A steady, dense, played take at `bpm`: every quarter, most eighths, some sixteenths and
+    /// ghost onsets anywhere, each up to 50 ms off where it was meant: about the scatter a
+    /// beatboxed take's onsets show around a steady grid. Onsets are given directly, so the test is of the tracker, not the onset stage.
+    fn dense_played_take(bpm: f64, seed: u64, secs: f64) -> Vec<Event> {
+        let mut rng = Jitter(seed);
+        let rate = f64::from(RATE);
+        let mut times: Vec<(f64, f32)> = Vec::new();
+        let sixteenth = 15.0 / bpm;
+        let mut step = 0u32;
+        loop {
+            let meant = LEAD + f64::from(step) * sixteenth;
+            if meant > secs {
+                break;
+            }
+            let chance = rng.next().abs();
+            let played = match step % 4 {
+                0 => Some(1.0),
+                2 if chance < 0.8 => Some(0.6),
+                1 | 3 if chance < 0.3 => Some(0.4),
+                _ => None,
+            };
+            if let Some(strength) = played {
+                times.push((meant + 0.050 * rng.next(), strength));
+            }
+            if rng.next().abs() < 0.1 {
+                times.push((meant + sixteenth * rng.next().abs(), 0.3));
+            }
+            step += 1;
+        }
+        times.sort_by(|a, b| a.0.total_cmp(&b.0));
+        times.dedup_by(|b, a| b.0 - a.0 < 0.05);
+        times
+            .into_iter()
+            .map(|(t, strength)| Event::Onset {
+                frame: (t * rate).round() as u64,
+                strength,
+            })
+            .collect()
+    }
+
+    /// The beat series of a steady dense take played at 108, tracked from a tempo of `from_bpm`,
+    /// with the downbeat on its first beat. The series is the tempo the take kept, so it should
+    /// settle on 108 whatever tempo it starts from.
+    fn series_of_a_take_at_108(seed: u64, from_bpm: f64) -> Vec<BeatTempo> {
+        let onsets = dense_played_take(108.0, seed, 30.0);
+        let given = Given {
+            tempo_bpm: Some(from_bpm),
+            meter: Some(meter("4/4")),
+            downbeat_secs: Some(LEAD),
+        };
+        let timing = estimate(&onsets, RATE, &given).unwrap();
+        beat_series(&onsets, RATE, &timing)
+    }
+
+    #[test]
+    fn a_steady_dense_take_keeps_its_tempo() {
+        // Started at the tempo played, and at 120 and 123, about what a take meant at 120 but
+        // played at 108 is given, or estimated, as.
+        for from_bpm in [108.0, 120.0, 123.0] {
+            for seed in 1..=8 {
+                let series = series_of_a_take_at_108(seed, from_bpm);
+                let context = format!("from {from_bpm}, seed {seed}");
+                assert!(series.len() >= 50, "{context}: {} beats", series.len());
+                // An 8-beat local fit through onsets this scattered reads a few bpm either way;
+                // a slip or a climb reads tens.
+                let mut bpms: Vec<f64> = series.iter().map(|b| b.bpm).collect();
+                bpms.sort_by(f64::total_cmp);
+                let median = bpms[bpms.len() / 2];
+                assert!((median - 108.0).abs() <= 1.5, "{context}: median {median}");
+                for (i, beat) in series.iter().enumerate() {
+                    // In the first and last bar the local fit is one-sided, and reads wider.
+                    let inner = i >= 4 && i + 4 < series.len();
+                    assert!(
+                        !inner || (beat.bpm - 108.0).abs() <= 8.0,
+                        "{context}: {beat:?}"
+                    );
+                    let beats = (beat.secs - LEAD) * 108.0 / 60.0;
+                    let off = (beats - beats.round()) * 60.0 / 108.0;
+                    // Well short of the 0.28 s of a slip onto the off-beat.
+                    assert!(
+                        off.abs() <= 0.1,
+                        "{context}: {beat:?} is {off} s off a beat"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Even taps on every eighth at `bpm`, of much the same strength, each up to 30 ms off: a
+    /// hand keeping time on a book. Every period near the beat finds a tap near each of its beats,
+    /// so a tracker that scores periods by what their beats collect favours the quickest.
+    fn even_taps(bpm: f64, seed: u64, secs: f64) -> Vec<Event> {
+        let mut rng = Jitter(seed);
+        let eighth = 30.0 / bpm;
+        (0..)
+            .map(|k| LEAD + f64::from(k) * eighth)
+            .take_while(|&t| t <= secs)
+            .map(|t| Event::Onset {
+                frame: ((t + 0.030 * rng.next()) * f64::from(RATE))
+                    .round()
+                    .max(0.0) as u64,
+                strength: (0.9 + 0.1 * rng.next()) as f32,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn even_taps_keep_the_tempo_they_were_tapped_at() {
+        for from_bpm in [113.0, 120.0, 100.0] {
+            for seed in 1..=8 {
+                let onsets = even_taps(113.0, seed, 20.0);
+                let given = Given {
+                    tempo_bpm: Some(from_bpm),
+                    meter: Some(meter("4/4")),
+                    downbeat_secs: Some(LEAD),
+                };
+                let timing = estimate(&onsets, RATE, &given).unwrap();
+                let series = beat_series(&onsets, RATE, &timing);
+                let mut bpms: Vec<f64> = series.iter().map(|b| b.bpm).collect();
+                bpms.sort_by(f64::total_cmp);
+                let median = bpms[bpms.len() / 2];
+                assert!(
+                    (median - 113.0).abs() <= 1.5,
+                    "from {from_bpm}, seed {seed}: median {median}"
+                );
+            }
+        }
+    }
+
+    /// A tresillo tapped at `bpm` in 4/4: strong taps on eighths 0, 3 and 6 of each bar, each up
+    /// to 20 ms off, with faint ghosts (a book's own rattle) scattered between.
+    fn tresillo_taps(bpm: f64, seed: u64, secs: f64) -> Vec<Event> {
+        let mut rng = Jitter(seed);
+        let eighth = 30.0 / bpm;
+        let mut taps = Vec::new();
+        for k in 0.. {
+            let meant = LEAD + f64::from(k) * eighth;
+            if meant > secs {
+                break;
+            }
+            if [0, 3, 6].contains(&(k % 8)) {
+                taps.push((meant + 0.020 * rng.next(), 1.0));
+            } else if rng.next().abs() < 0.6 {
+                taps.push((meant + eighth * 0.5 * rng.next(), 0.05));
+            }
+        }
+        taps.sort_by(|a: &(f64, f32), b| a.0.total_cmp(&b.0));
+        taps.into_iter()
+            .map(|(t, strength)| Event::Onset {
+                frame: (t * f64::from(RATE)).round().max(0.0) as u64,
+                strength,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tresillo_keeps_its_quarter_note_tempo() {
+        // Its taps fall every beat and a half, then every beat; a beat of an eighth and a half,
+        // four-thirds the tempo, lands on every tap, but it is another beat level, not the tempo
+        // given or estimated.
+        for from_bpm in [115.0, 120.0, 104.0] {
+            for seed in 1..=8 {
+                let onsets = tresillo_taps(115.0, seed, 20.0);
+                let given = Given {
+                    tempo_bpm: Some(from_bpm),
+                    meter: Some(meter("4/4")),
+                    downbeat_secs: Some(LEAD),
+                };
+                let timing = estimate(&onsets, RATE, &given).unwrap();
+                let series = beat_series(&onsets, RATE, &timing);
+                let mut bpms: Vec<f64> = series.iter().map(|b| b.bpm).collect();
+                bpms.sort_by(f64::total_cmp);
+                let median = bpms[bpms.len() / 2];
+                assert!(
+                    (median - 115.0).abs() <= 2.0,
+                    "from {from_bpm}, seed {seed}: median {median}"
+                );
+            }
+        }
+    }
+
+    /// A sparse sung line at `bpm`: about one onset in four eighths, two in three of them off
+    /// the beat, each up to 40 ms off and of much the same strength, one louder. Too few onsets
+    /// land on beats for the beats alone to say the tempo; the eighths they land on do.
+    fn sparse_syncopated_line(bpm: f64, seed: u64, secs: f64) -> Vec<Event> {
+        let mut rng = Jitter(seed);
+        let eighth = 30.0 / bpm;
+        let mut onsets = Vec::new();
+        for k in 0.. {
+            let meant = LEAD + f64::from(k) * eighth;
+            if meant > secs {
+                break;
+            }
+            let chance = rng.next().abs();
+            let sung = if k == 0 {
+                true
+            } else if k % 2 == 0 {
+                chance < 0.15
+            } else {
+                chance < 0.3
+            };
+            if sung {
+                let strength = if k == 16 { 1.0 } else { 0.3 + 0.1 * rng.next() };
+                onsets.push(Event::Onset {
+                    frame: ((meant + 0.040 * rng.next()) * f64::from(RATE))
+                        .round()
+                        .max(0.0) as u64,
+                    strength: strength as f32,
+                });
+            }
+        }
+        onsets
+    }
+
+    #[test]
+    fn a_sparse_syncopated_line_keeps_its_given_tempo() {
+        for seed in 1..=8 {
+            let onsets = sparse_syncopated_line(108.0, seed, 30.0);
+            let given = Given {
+                tempo_bpm: Some(108.0),
+                meter: Some(meter("4/4")),
+                downbeat_secs: Some(LEAD),
+            };
+            let timing = estimate(&onsets, RATE, &given).unwrap();
+            let series = beat_series(&onsets, RATE, &timing);
+            let mut bpms: Vec<f64> = series.iter().map(|b| b.bpm).collect();
+            bpms.sort_by(f64::total_cmp);
+            let median = bpms[bpms.len() / 2];
+            assert!(
+                (median - 108.0).abs() <= 2.0,
+                "seed {seed}: median {median} from {} onsets",
+                onsets.len()
+            );
+        }
+    }
+
+    /// A sequenced bass line at `bpm`, syncopated in sixteenths: in every bar, sixteenths 0, 2,
+    /// 5 and 11, each up to 3 ms off. Half its onsets are on neither a beat nor an eighth, so a
+    /// tempo read from beats and eighths alone can fit another period better than its own.
+    fn sixteenth_syncopation(bpm: f64, seed: u64, secs: f64) -> Vec<Event> {
+        let mut rng = Jitter(seed);
+        let sixteenth = 15.0 / bpm;
+        let pattern = [(0, 0.8), (2, 0.55), (5, 0.3), (11, 0.45)];
+        let mut onsets = Vec::new();
+        for bar in 0.. {
+            let bar_start = LEAD + f64::from(bar) * 16.0 * sixteenth;
+            if bar_start > secs {
+                break;
+            }
+            for (step, strength) in pattern {
+                let t = bar_start + f64::from(step) * sixteenth + 0.003 * rng.next();
+                onsets.push(Event::Onset {
+                    frame: (t * f64::from(RATE)).round().max(0.0) as u64,
+                    strength,
+                });
+            }
+        }
+        onsets
+    }
+
+    #[test]
+    fn a_line_syncopated_in_sixteenths_keeps_its_given_tempo() {
+        for seed in 1..=4 {
+            let onsets = sixteenth_syncopation(121.0, seed, 30.0);
+            let given = Given {
+                tempo_bpm: Some(121.0),
+                meter: Some(meter("4/4")),
+                downbeat_secs: Some(LEAD),
+            };
+            let timing = estimate(&onsets, RATE, &given).unwrap();
+            let series = beat_series(&onsets, RATE, &timing);
+            let mut bpms: Vec<f64> = series.iter().map(|b| b.bpm).collect();
+            bpms.sort_by(f64::total_cmp);
+            let median = bpms[bpms.len() / 2];
+            assert!(
+                (median - 121.0).abs() <= 1.0,
+                "seed {seed}: median {median}"
+            );
+        }
+    }
+
+    /// A sparse sung line at `bpm`, timed as a voice is: about one onset in four eighths, most
+    /// off the beat, each about 40 ms early with 50 ms of scatter, and one in five a further
+    /// 100 ms either way (a scoop, a late breath).
+    fn sung_line(bpm: f64, seed: u64, secs: f64) -> Vec<Event> {
+        let mut rng = Jitter(seed);
+        let eighth = 30.0 / bpm;
+        let mut onsets = Vec::new();
+        for k in 0.. {
+            let meant = LEAD + f64::from(k) * eighth;
+            if meant > secs {
+                break;
+            }
+            let chance = rng.next().abs();
+            let sung = k == 0
+                || if k % 2 == 0 {
+                    chance < 0.15
+                } else {
+                    chance < 0.3
+                };
+            if sung {
+                let mut off = -0.040 + 0.050 * rng.next();
+                if rng.next().abs() < 0.2 {
+                    off += 0.100 * rng.next();
+                }
+                onsets.push(Event::Onset {
+                    frame: ((meant + off).max(0.0) * f64::from(RATE)).round() as u64,
+                    strength: (0.35 + 0.15 * rng.next()) as f32,
+                });
+            }
+        }
+        onsets
+    }
+
+    #[test]
+    fn a_sung_line_keeps_a_given_tempo_its_onsets_do_not_contradict() {
+        // A line this sparse and this loosely timed fits some period within the search a little
+        // better than its own, by chance; the given tempo must not give way to it. (The local
+        // tempo each beat reports through sparse beats has its own, separate, scatter.)
+        let simple = [1.0, 2.0, 4.0];
+        for seed in 1..=16 {
+            let onsets = sung_line(108.0, seed, 30.0);
+            let given = Given {
+                tempo_bpm: Some(108.0),
+                meter: Some(meter("4/4")),
+                downbeat_secs: None,
+            };
+            let timing = estimate(&onsets, RATE, &given).unwrap();
+            let start = *timing.downbeat_frame.value() as f64;
+            let kept = kept_period(
+                &relative(&onsets),
+                start,
+                timing.beat_period_frames,
+                &simple,
+            );
+            let bpm = 60.0 * f64::from(RATE) / kept;
+            assert!(
+                (bpm - 108.0).abs() <= 0.5,
+                "seed {seed}: kept {bpm} from {} onsets",
+                onsets.len()
+            );
         }
     }
 
