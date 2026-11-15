@@ -686,6 +686,36 @@ analysis gives the grid used, which the quantize offsets are counted in.
 the nearest and states the count snapped. A rhythm's `.grid.duet` holds any velocity, so
 nothing is snapped. The `.duet` keeps the raw values.
 
+**Comparing a reading with the singing.** `duet capture compare` plots and plays a melody's
+reading against its performance, so you can see and hear where the notes read depart from what
+was sung. It reads the recording and what `duet capture melody` wrote at its stem:
+
+```sh
+duet capture compare idea.m4a                       # idea.compare.svg and idea.compare.wav
+duet capture compare idea.m4a --from 33 --to 38     # five seconds of it
+duet capture compare idea.m4a -o scratch/idea       # the stem it was captured to
+duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of the take
+```
+
+- `STEM.compare.svg`: the performance's pitch in cents over time; the reading's notes as bars
+  at their keys on the take's tuning (orange when between keys); the residual, the gap between
+  them, shaded; and the onsets as ticks under it.
+- `STEM.compare.wav`: the take in the left channel, as the analysis heard it (one channel at
+  22 050 Hz, so it lines up with the reading sample for sample), and the reading in the right as
+  one legato sine at the take's own tuning, gliding only through each note's slide in (its
+  scoop, where the residual measured one). 32-bit float.
+- On standard output, one line per note: when it starts, its key, its `centre` in cents, its
+  residual's parts (where it is held, its drift in cents a second, its vibrato, scoop and fall,
+  and the rest), and whether it is between keys; then the take's loss as its three terms (pitch,
+  unread and notes). A reading written before `capture-analysis` 1.2 has no residual, and the
+  output says so.
+
+`--from` and `--to` (seconds) window all three. `--reading` compares another analysis of the same
+take: its reading is the bars and the sine, the stem's own is drawn beside it dashed, and the
+outputs are named after it (`hmm.compare.svg`). Nothing is overwritten. Neither file the stem
+holds names the recording it was read from, so the recording is checked only by its length
+against the performance's.
+
 **Correcting a capture.** Edit the ABC text, which is what it is for, or a rhythm's grid with
 the `duet drums` commands, which read the `.grid.duet` by its envelope. To fix an
 estimate, run again with `--tempo`, `--meter`, `--downbeat` or `--key` (add `-o` to keep the
