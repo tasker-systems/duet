@@ -455,7 +455,7 @@ duet play take.notes --from text           # notefmt text, named as such
 ## Capturing an idea
 
 ```sh
-duet capture melody idea.m4a                    # idea.notes, idea.abc, idea.capture.json
+duet capture melody idea.m4a                    # idea.duet, idea.abc, idea.capture.duet
 duet capture rhythm tap.wav --lane hh           # a tapped take: every hit in one lane
 duet capture rhythm beatbox.flac --tempo 96     # a beatboxed take: kick, snare and hat
 duet capture melody idea.m4a --key Eb --downbeat 0.4 -o scratch/idea
@@ -473,7 +473,7 @@ options; everything about the timing that is left out is estimated and stated.
 - **`--key <key>`** is a melody's key as ABC's `K:` names it (`Eb`, `Bm`, `F#m`), used exactly.
   A rhythm take has no key, and `--key` is refused for one.
 - **`--grid <step>`** is the step the score is quantized to, such as `1/16` (the default) or
-  `1/8t`. The `.notes` is never quantized.
+  `1/8t`. The `.duet` is never quantized.
 - **`--lane <name>`** (rhythm) puts every hit in that lane, such as `hh` or `kick`. It is how a
   tapped take is read; without it a rhythm take is read as beatboxed. Lane names resolve
   through the configured lane map, so aliases from `duet.toml` apply. A melody's notes are
@@ -481,16 +481,18 @@ options; everything about the timing that is left out is estimated and stated.
 - **`-o`, `--output <stem>`** is the output files' stem. Without it, the input's name without
   its extension, beside the input.
 
-**Files written.** Three, and a melody's performance, all beside each other, and none ever overwrites a file that exists
-(the whole capture is refused before anything is written). Once the take is analysed, the
-`.notes` and the `.capture.json` are always written; if the score then cannot be, that is
-reported after them, and they stay:
+**Files written.** Three, and a melody's performance, all beside each other, and none ever
+overwrites a file that exists (the whole capture is refused before anything is written). Once
+the take is analysed, the `.duet` and the `.capture.duet` are always written; if the score then
+cannot be, that is reported after them, and they stay:
 
-- `STEM.notes`: the exact performance, unquantized, at the detected times. Quantizing never
-  replaces it.
-- `STEM.abc` for a melody, or `STEM.drums` for a rhythm: the score, the `.notes` quantized to
-  `--grid`.
-- `STEM.capture.json`: the analysis. Every onset, note and hit, in sample frames at the
+- `STEM.duet`: the exact performance, unquantized, at the detected times, as a song document.
+  Quantizing never replaces it. Every duet command reads it by its envelope: `duet song show
+  STEM.duet` prints it as notefmt text.
+- `STEM.abc` for a melody, or `STEM.drums` for a rhythm: the score, the `.duet` quantized to
+  `--grid`. A rhythm's score becomes a drum-grid document, `STEM.grid.duet`, once that kind
+  lands; until then it is `.drums` text.
+- `STEM.capture.duet`: the analysis, a `capture-analysis` document that reads back. Every onset, note and hit, in sample frames at the
   stated rate (22 050 Hz; divide by it for seconds); the timing (tempo, its half and double,
   the measured beat period, meter, downbeat, each marked given or estimated, with a
   confidence); a melody's key, with its pitch-class histogram and every key's score; the tempo
@@ -501,7 +503,7 @@ reported after them, and they stay:
   the first frame and the unit); each later line is about a second of frames as the columns
   `pitch` (absolute cents, `1200·log2(hz/440) + 6900`, so 6900.0 is A440, to 0.1 cent, `null`
   when unvoiced), `voicing` and `level`. It is written as the frames settle, and kept with the
-  `.notes` and `.capture.json`. A three-minute take's is about 370 KB.
+  `.duet` and `.capture.duet`. A three-minute take's is about 370 KB.
 
 **Formats.** WAV, FLAC, MP3, Ogg Vorbis and AAC in M4A are read, a packet at a time, so a long
 take is never held in memory whole. A damaged stretch that cannot be decoded is heard as silence
@@ -513,8 +515,8 @@ comparing the declared and decoded sample rates, which capture does not do.
 
 **What is estimated, and how it is said.** The tempo, the meter, the downbeat and a melody's
 key are each given or estimated. A given value is used exactly and never reported as an
-estimate. An estimate is applied and stated, on standard error and as comment lines in the
-`.notes` and the score (`#` in `.notes` and `.drums`, `%` in ABC), with what you would
+estimate. An estimate is applied and stated, on standard error, in the `.duet`'s envelope as
+its `statements`, and as comment lines in the score (`#` in `.drums`, `%` in ABC), with what you would
 reach for if it is wrong: the half and double tempo, the relative major or minor, and in a
 compound meter the felt beat. A weak estimate is marked `weak`; a meter that cannot be told
 apart is applied as 4/4 and says so. For the synthetic melody in the reference corpus:
@@ -526,7 +528,7 @@ meter: estimated 4/4, confidence 0.14, weak
 downbeat: estimated at 0.255 s, confidence 0.14, weak
 key: estimated C major (relative A minor), confidence 0.88
 lead-in: none
-velocities: 8 snapped to the nearest dynamic's level in the .abc; the .notes keeps them exact
+velocities: 8 snapped to the nearest dynamic's level in the .abc; the .duet keeps them exact
 ```
 
 The take was made at 120 bpm, so this estimate is a beat a minute fast. A tempo's
@@ -551,20 +553,20 @@ pickup bar, followed by a change of meter at bar 2. Otherwise bar 1 (or more) is
 rests holding them. A drum grid always gets the rest bars, because grids number bars from 1
 with no gaps. When quantizing leaves nothing in that lead-in, it is removed from the score and
 the score says so. Each case is stated (`lead-in: none`, `a pickup of 1/4`,
-`1 bar of rests`, `removed from the score`). The `.notes` always keeps the true time.
+`1 bar of rests`, `removed from the score`). The `.duet` always keeps the true time.
 
 **Notes that share a step.** A quick run or a flam can put two notes, or two hits on one lane,
 on the same step of the grid. The score cannot hold both, so the grid's step is halved (1/16,
 then 1/32, then 1/64) until none do, and the grid used is stated:
 `grid: 1/16 refined to 1/32, so no two notes share a step`. A `--grid` you give is refined the
 same way. What a 1/64 still cannot part is merged into one, each merge stated: a melody keeps
-the longest note's pitch, and a rhythm the strongest hit. The `.notes` keeps every note, and the
+the longest note's pitch, and a rhythm the strongest hit. The `.duet` keeps every note, and the
 analysis gives the grid used, which the quantize offsets are counted in.
 
 **Velocity.** A hit's or note's velocity is its strength relative to the take's strongest
 (20 to 127). The score writers refuse a velocity that is not one of their levels, so asking for
 a score asks for the snap: ABC dynamics are snapped to the nearest, a drum grid's to its
-levels, and the count snapped is stated. The `.notes` keeps the raw values.
+levels, and the count snapped is stated. The `.duet` keeps the raw values.
 
 **Correcting a capture.** Edit the `.drums` or ABC text, which is what they are for. To fix an
 estimate, run again with `--tempo`, `--meter`, `--downbeat` or `--key` (add `-o` to keep the

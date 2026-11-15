@@ -43,7 +43,8 @@
 //! without a version change, and asks only to regenerate when its descriptions alone change:
 //! `DUET_BLESS_SCHEMAS=1 cargo test -p duet-schemas` writes them.
 //!
-//! The kinds this build knows are [`KINDS`]: `song` 1.0, a document, and `performance` 1.0, a
+//! The kinds this build knows are [`KINDS`]: `song` 1.0 and `capture-analysis` 1.0
+//! (duet-capture's [`Analysis`](duet_capture::Analysis)), documents, and `performance` 1.0, a
 //! stream of duet-dsp's [`PerformanceHead`](duet_dsp::PerformanceHead) and
 //! [`FrameBlock`](duet_dsp::FrameBlock)s. [`AnyDocument`] reads a `.duet` of any document kind by
 //! its envelope.
@@ -63,6 +64,7 @@
 
 #![forbid(unsafe_code)]
 
+mod capture;
 mod envelope;
 mod error;
 mod frame;

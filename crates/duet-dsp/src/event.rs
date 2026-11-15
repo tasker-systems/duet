@@ -1,9 +1,10 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The lane of a drum [`Event::Hit`].
 ///
 /// `Asked` is the lane the user asked for, when the take is not told apart by sound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum HitLane {
@@ -15,9 +16,9 @@ pub enum HitLane {
 
 /// What the analysis stages say about a take. Times are sample frames at the analysis rate.
 ///
-/// This is the payload of `<stem>.capture.json`, and later of the MCP stream.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+/// This is the payload of `<stem>.capture.duet`'s `events`, and later of the MCP stream.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Event {
     /// Something started at `frame`, with the given strength.
@@ -26,7 +27,9 @@ pub enum Event {
     Note {
         start: u64,
         end: u64,
+        #[schemars(range(max = 127))]
         midi: u8,
+        #[schemars(range(min = 0.0, max = 1.0))]
         confidence: f32,
         strength: f32,
     },

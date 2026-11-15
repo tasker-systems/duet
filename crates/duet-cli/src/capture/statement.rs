@@ -4,21 +4,23 @@
 //! A given value is used exactly and is not stated: only an estimate is reported as one.
 
 use duet_capture::{
-    KeyEstimate, LeadIn, Merge, Origin, Timing, WEAK_CONFIDENCE, felt_quarters, is_compound,
+    KeyEstimate, LeadIn, Merge, Origin, TempoAlternatives, Timing, WEAK_CONFIDENCE, felt_quarters,
+    is_compound,
 };
 use duet_core::{Grid, TimeSig};
 
 /// The line the score states, in place of its lead-in, when it has had the lead-in removed.
 pub const LEAD_IN_REMOVED: &str = "lead-in: removed from the score, where no note starts \
-                                   before the downbeat once quantized; the .notes keeps it";
+                                   before the downbeat once quantized; the .duet keeps it";
 
 /// The tempo, meter and downbeat, each stated only when it was estimated.
 pub fn timing(timing: &Timing, rate: u32) -> Vec<String> {
     let mut out = Vec::new();
     if let Origin::Estimated { value, confidence } = timing.tempo_bpm {
-        let (half, double) = timing
+        let alternatives = timing
             .tempo_alternatives
-            .unwrap_or((value / 2.0, value * 2.0));
+            .unwrap_or_else(|| TempoAlternatives::of(value));
+        let (half, double) = (alternatives.half, alternatives.double);
         let felt = felt_beat(*timing.meter.value(), value)
             .map(|f| format!(" ({f})"))
             .unwrap_or_default();
@@ -86,7 +88,7 @@ pub fn refined(asked: Grid, given: bool, used: Grid, rhythm: bool) -> String {
         "no two notes"
     };
     format!(
-        "grid: {}{asked} refined to {used}, so {what} share a step; the .notes keeps them as played",
+        "grid: {}{asked} refined to {used}, so {what} share a step; the .duet keeps them as played",
         if given { "--grid " } else { "" }
     )
 }
@@ -94,7 +96,7 @@ pub fn refined(asked: Grid, given: bool, used: Grid, rhythm: bool) -> String {
 /// Notes on one step of the finest grid, merged into the longest of them.
 pub fn merged_notes(merge: &Merge) -> String {
     format!(
-        "merged: {} notes at {} into one, the longest ({}); the .notes keeps them all",
+        "merged: {} notes at {} into one, the longest ({}); the .duet keeps them all",
         merge.count, merge.at, merge.kept.pitch
     )
 }
@@ -102,14 +104,14 @@ pub fn merged_notes(merge: &Merge) -> String {
 /// Hits on one lane and one step of the finest grid, merged into the strongest of them.
 pub fn merged_hits(merge: &Merge, lane: &str) -> String {
     format!(
-        "merged: {} {lane} hits at {} into one, the strongest; the .notes keeps them all",
+        "merged: {} {lane} hits at {} into one, the strongest; the .duet keeps them all",
         merge.count, merge.at
     )
 }
 
 /// The snap, stated only when a velocity moved: how many, and to what.
 pub fn snapped(moved: usize, to: &str) -> String {
-    format!("velocities: {moved} snapped to {to}; the .notes keeps them exact")
+    format!("velocities: {moved} snapped to {to}; the .duet keeps them exact")
 }
 
 /// The felt beat of a compound meter at `quarter_bpm`, such as `dotted quarter = 90` in 6/8
@@ -159,7 +161,7 @@ mod tests {
     fn estimated_timing(bpm: f64, meter: &str) -> Timing {
         serde_json::from_value(serde_json::json!({
             "tempo_bpm": { "estimated": { "value": bpm, "confidence": 0.9 } },
-            "tempo_alternatives": [bpm / 2.0, bpm * 2.0],
+            "tempo_alternatives": { "half": bpm / 2.0, "double": bpm * 2.0 },
             "beat_period_frames": 22_050.0 * 60.0 / bpm,
             "meter": { "estimated": { "value": meter, "confidence": 0.3 } },
             "downbeat_frame": { "estimated": { "value": 11_025, "confidence": 0.75 } },

@@ -103,6 +103,8 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
   - It builds a `Song` at the default 480 ticks per quarter, with one track: `melody`, or the drum track on channel 10.
   - For files it converts at `finish`. For live input later, it converts provisionally under the tempo so far, which is what the MCP stream will send.
 > **File names (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.notes` becomes `<stem>.duet` (a song document) and `<stem>.drums` becomes `<stem>.grid.duet` (a drum-grid document); their text is the `notes` and `grid` views. The `#` comment statements move into the envelope's `statements`, which every view shows.
+>
+> **Built (2026-11-15, documents build task 7):** capture writes `<stem>.duet`, a song document through duet-schemas, with what it inferred (tempo, meter, downbeat, key, the lead-in) in the envelope's `statements` instead of `#` comments. The `.abc` keeps its `%` comments, and standard error is unchanged. A rhythm take's score is still `<stem>.drums` text with its `#` comments until drum-grid 1.0 lands; it then becomes `<stem>.grid.duet`. A melody take also writes `<stem>.performance.duet.jsonl` (documents build task 8).
 
 - **Output.** Capture writes `<stem>.notes` (the exact, unquantized performance) and either `<stem>.abc` or `<stem>.drums`. The score file is the `Song` quantized with `Song::quantized(grid)`.
   - `--grid` sets the grid; the default is a sixteenth.
@@ -173,7 +175,7 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
 
 ### The analysis is kept, not thrown away (owner, 2026-11-14)
 
-> **File name (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.capture.json` becomes `<stem>.capture.duet`, a `capture-analysis` document.
+> **File name (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.capture.json` becomes `<stem>.capture.duet`, a `capture-analysis` document. **Built (2026-11-15):** it is written through duet-schemas as `capture-analysis` 1.0, whose schema is committed under `crates/duet-schemas/schemas/capture-analysis/`. It reads back: absent values are left out, and `tempo_alternatives` is `{"half": …, "double": …}`.
 
 Every stage's settled output can be stored and read, so the owner and Claude can reason about a capture with numbers.
 - **The event vocabulary and `Timing` serialize** with serde. It's the same payload the MCP stream will send later.
