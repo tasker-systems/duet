@@ -19,6 +19,11 @@ use duet_schemas::{AnyDocument, Document};
 /// A melody in E-flat major at 120 a minute, from half a second in: the tonic triad and
 /// scale, with the tonic and dominant held longest.
 fn eb_major() -> Vec<f32> {
+    eb_major_off(0.0)
+}
+
+/// [`eb_major`], sung `cents` off A440 throughout.
+fn eb_major_off(cents: f64) -> Vec<f32> {
     let q = 0.5;
     let bars: [&[(u8, f64)]; 4] = [
         &[(63, 2.0 * q), (67, q), (70, q)],
@@ -32,7 +37,7 @@ fn eb_major() -> Vec<f32> {
         .take(8)
         .flat_map(|b| b.iter().copied())
         .collect();
-    audio::notes(0.5, &notes)
+    audio::notes_off(0.5, &notes, cents)
 }
 
 /// Clicks at `bpm` from `lead` for `beats` beats, with `amplitudes` cycling over them and the
@@ -207,6 +212,127 @@ fn song_show_reads_captures_song_document_directly() {
     ok(&out, "song show tune.duet");
     let shown = Song::from_text(&String::from_utf8_lossy(&out.stdout)).expect("notefmt");
     assert_eq!(shown, doc.body);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// The keys of a song's notes, in order.
+fn keys(song: &Song) -> Vec<u8> {
+    song.tracks[0]
+        .notes
+        .iter()
+        .map(|n| n.pitch.midi())
+        .collect()
+}
+
+/// A take sung 44 cents sharp is read on its own tuning: the same keys as in tune, the
+/// estimate stated on standard error and in the song document, and the reading in the
+/// analysis.
+#[test]
+fn a_take_sung_sharp_is_read_on_its_own_tuning_and_says_so() {
+    let dir = scratch("capture-tuning");
+    let in_tune = take(&dir, "tune.wav", &eb_major());
+    let sharp = take(&dir, "sharp.wav", &eb_major_off(44.0));
+    ok(&capture(&dir, &["melody", s(&in_tune)]), "capture in tune");
+    let out = capture(&dir, &["melody", s(&sharp)]);
+    ok(&out, "capture sharp");
+    assert_eq!(
+        keys(&song_of(&dir.join("sharp.duet"))),
+        keys(&song_of(&dir.join("tune.duet")))
+    );
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("tuning: estimated A4 = "))
+        .unwrap_or_else(|| panic!("no tuning statement: {err}"));
+    assert!(
+        line.contains("(+44 cents)") || line.contains("(+43 cents)"),
+        "{line}"
+    );
+    let notes = err
+        .lines()
+        .find(|l| l.starts_with("notes: "))
+        .unwrap_or_else(|| panic!("no notes statement: {err}"));
+    assert!(notes.ends_with(" read, 0 between keys"), "{notes}");
+    let stated = document_of(&dir.join("sharp.duet")).statements;
+    assert!(stated.iter().any(|l| l == line) && stated.iter().any(|l| l == notes));
+    let reading = &analysis_of(&dir.join("sharp.capture.duet"))["reading"];
+    let a4 = reading["tuning"]["a4"]["estimated"]["value"]
+        .as_f64()
+        .expect("estimated");
+    assert!((a4 - 6944.0).abs() <= 2.0, "{reading}");
+    let read_notes = reading["notes"].as_array().expect("notes");
+    assert_eq!(
+        read_notes.len(),
+        keys(&song_of(&dir.join("sharp.duet"))).len()
+    );
+    assert!(
+        read_notes.iter().all(|n| n["between_keys"] == false),
+        "{reading}"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A tuning given is used exactly, even where the estimate would differ, and is not stated.
+#[test]
+fn a_given_tuning_is_used_exactly_and_not_stated() {
+    let dir = scratch("capture-given-tuning");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    for (tuning, a4) in [("+20c", 6920.0), ("-12c", 6888.0), ("440", 6900.0)] {
+        let stem = dir.join(format!("given{a4}"));
+        let out = capture(
+            &dir,
+            &["melody", s(&wav), "--tuning", tuning, "-o", s(&stem)],
+        );
+        ok(&out, &format!("capture --tuning {tuning}"));
+        let err = stderr(&out);
+        assert!(!err.contains("tuning:"), "{tuning}: {err}");
+        let mut path = stem.into_os_string();
+        path.push(".capture.duet");
+        let reading = &analysis_of(Path::new(&path))["reading"];
+        assert_eq!(
+            reading["tuning"],
+            serde_json::json!({ "a4": { "given": a4 } }),
+            "{tuning}"
+        );
+    }
+    // 442 Hz is A4 about 7.85 cents sharp.
+    let out = capture(
+        &dir,
+        &[
+            "melody",
+            s(&wav),
+            "--tuning",
+            "442",
+            "-o",
+            s(&dir.join("hz")),
+        ],
+    );
+    ok(&out, "capture --tuning 442");
+    let a4 = analysis_of(&dir.join("hz.capture.duet"))["reading"]["tuning"]["a4"]["given"]
+        .as_f64()
+        .expect("given");
+    assert!((a4 - 6907.85).abs() < 0.01, "{a4}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A tuning that is not one, or is given to a rhythm, is refused before anything is read.
+#[test]
+fn a_bad_tuning_is_refused_before_anything_is_written() {
+    let dir = scratch("capture-bad-tuning");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    for (kind, tuning, says) in [
+        ("melody", "A=440", "a tuning is A4 in Hz"),
+        ("melody", "0", "a positive number"),
+        ("melody", "+150c", "at most 100 cents"),
+        ("melody", "523.25", "at most 100 cents"),
+        ("rhythm", "440", "--tuning is for a melody take"),
+    ] {
+        let out = capture(&dir, &[kind, s(&wav), "--tuning", tuning]);
+        assert!(!out.status.success(), "{kind} --tuning {tuning}");
+        let err = stderr(&out);
+        assert!(err.contains(says), "{kind} --tuning {tuning}: {err}");
+    }
+    assert_eq!(files(&dir), ["tune.wav"]);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -426,6 +552,8 @@ fn the_key_is_stated_when_estimated() {
             "4/4",
             "--downbeat",
             "0.5",
+            "--tuning",
+            "440",
         ],
     );
     ok(&out, "capture melody --key Eb");

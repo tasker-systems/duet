@@ -530,6 +530,9 @@ options; everything about the timing that is left out is estimated and stated.
   analysis starts. A rhythm accepts any tempo.
 - **`--meter <m>`** is the meter, such as `4/4` or `6/8`, used exactly.
 - **`--downbeat <seconds>`** is where bar 1 starts, in seconds from the start of the recording.
+- **`--tuning <a4>`** is a melody's tuning: A4 in Hz (`440`, `442`) or in cents from 440 Hz
+  (`+44c`, `-12c`), used exactly, up to a key either way. A rhythm take's hits have no pitch,
+  and `--tuning` is refused for one.
 - **`--key <key>`** is a melody's key as ABC's `K:` names it (`Eb`, `Bm`, `F#m`), used exactly.
   A rhythm take has no key, and `--key` is refused for one.
 - **`--grid <step>`** is the step the score is quantized to, such as `1/16` (the default) or
@@ -557,7 +560,9 @@ cannot be, that is reported after them, and they stay:
   the measured beat period, meter, downbeat, each marked given or estimated, with a
   confidence); a melody's key, with its pitch-class histogram and every key's score; the tempo
   from each beat to the next, so drift is a series and not a feeling; and how far quantizing
-  moved each note, in milliseconds and in grid steps.
+  moved each note, in milliseconds and in grid steps; and a melody's `reading` (since
+  `capture-analysis` 1.1): the tuning its notes were read on, and each note's key, `centre` and
+  whether it is between keys.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -574,7 +579,7 @@ AAC-LC header, decodes as AAC-LC at half bandwidth without a refusal. Catching i
 comparing the declared and decoded sample rates, which capture does not do.
 
 **What is estimated, and how it is said.** The tempo, the meter, the downbeat and a melody's
-key are each given or estimated. A given value is used exactly and never reported as an
+tuning and key are each given or estimated. A given value is used exactly and never reported as an
 estimate. An estimate is applied and stated, on standard error, in the `.duet`'s envelope as
 its `statements`, and in the score: in a `.grid.duet`'s envelope, or as `%` comment lines in
 ABC. Each says what you would reach for if it is wrong: the half and double tempo, the relative major or minor, and in a
@@ -586,6 +591,8 @@ $ duet capture melody synthetic-melody.flac
 tempo: estimated 121 bpm (half 60.5, double 242), confidence 0.53
 meter: estimated 4/4, confidence 0.14, weak
 downbeat: estimated at 0.255 s, confidence 0.14, weak
+tuning: estimated A4 = 440.2 Hz (+1 cent), spread 2 cents, confidence 1.00
+notes: 8 read, 0 between keys
 key: estimated C major (relative A minor), confidence 0.88
 lead-in: none
 velocities: 8 snapped to the nearest dynamic's level in the .abc; the .duet keeps them exact
@@ -600,6 +607,16 @@ the score, but **notes are placed by the beat period actually measured**, not by
 tempo, so none drifts off its beat over a long take; playback runs a fraction of a percent off
 the recording's real time. A given tempo is used exactly for both. The key changes how notes
 are spelled and the signature, never a pitch.
+
+**Tuning.** A melody's notes are read on its own tuning, not on A440, so a take sung 44 cents
+sharp reads the keys it would in tune. The tuning is estimated from the performance: every
+voiced frame whose pitch holds steady for 50 ms gives its distance from the nearest key, and the
+30-cent window where most of the singing sits (weighted by how voiced each frame is) is where
+A4 is. Its confidence is the share of the singing within 15 cents of it, and its spread how
+widely the take strays from it. Each note is the key nearest its held pitch on that tuning; one
+held more than 35 cents from its key is **between keys**, counted on the `notes:` line and
+marked in the analysis's `reading`, with every note's `centre`, its distance from its key in
+cents. The key is estimated after, from those notes, and never changes one.
 
 **Rhythm.** Without `--lane`, each hit is sorted by sound into `kick`, `snare` or `hh` (a closed
 hat). With `--lane`, every hit goes to that lane. Known limit: a hit has one lane. A kick and a

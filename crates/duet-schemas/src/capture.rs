@@ -9,7 +9,10 @@ use crate::{Kind, Version};
 /// every event, the timing with each value given or estimated, a melody's key with its evidence,
 /// the tempo beat by beat, the grid the score was quantized to, and how far quantizing moved each
 /// note. Absent values are left out, never written `null`.
+///
+/// **1.1** adds the optional `reading`: a melody's tuning and its notes as read on it. It is
+/// additive, so a 1.0 document reads as one with no reading.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 0);
+    const VERSION: Version = Version::new(1, 1);
 }

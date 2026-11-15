@@ -10,7 +10,9 @@ use duet_abc::pickup_meter_for;
 use duet_core::time::beats_from_ticks;
 use duet_core::{Grid, Key, Note, Pitch, Position, Song, TimeChange, TimeSig, Track};
 use duet_drums::LaneMap;
-use duet_dsp::{BeatTempo, Event, HitLane, KeyEstimate, Timing, beat_series, estimate_key};
+use duet_dsp::{
+    BeatTempo, Event, HitLane, KeyEstimate, Reading, Timing, beat_series, estimate_key,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -104,6 +106,12 @@ pub struct Analysis {
     /// How far quantizing moved each note. Assembly leaves it empty: the grid is chosen
     /// later, and [`quantize_offsets`] fills it once the song is quantized.
     pub offsets: Vec<QuantizeOffset>,
+    /// A melody's reading: the tuning its notes were read on, and each note's key, its held
+    /// pitch's distance from that key, and whether it is between keys. Added in
+    /// `capture-analysis` 1.1; absent for a rhythm take, and in a 1.0 document. Assembly
+    /// leaves it absent: the capture command fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading: Option<Reading>,
 }
 
 /// How far quantizing moved one note.
@@ -230,6 +238,7 @@ pub fn assemble(
         beats: beat_series(events, rate, timing),
         grid: None,
         offsets: Vec::new(),
+        reading: None,
     };
     Ok(Captured {
         song,

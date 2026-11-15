@@ -23,9 +23,9 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
-    ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Melody, Mono,
-    PerformanceHead, Prepare, Quantized, Source, Stage, assemble, estimate, merge_collisions,
-    quantize_apart, quantize_offsets,
+    A440_CENTS, ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono,
+    Performance, PerformanceFrames, PerformanceHead, Prepare, Quantized, ReadNote, Source, Stage,
+    a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart, quantize_offsets, read,
 };
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 use duet_schemas::{Document, Stream};
@@ -66,6 +66,10 @@ pub struct TakeArgs {
     /// Where bar 1 starts, in seconds from the start of the recording.
     #[arg(long)]
     downbeat: Option<f64>,
+    /// A melody's tuning: A4 in Hz (440, 442) or in cents from 440 Hz (+44c, -12c), used
+    /// exactly. Without it, the tuning is estimated from the take and stated.
+    #[arg(long, allow_hyphen_values = true)]
+    tuning: Option<TuningArg>,
     /// The step the score is quantized to, such as 1/16 (the default) or 1/8t. Where two
     /// notes, or two hits on one lane, would share a step, the step is halved, down to 1/64,
     /// and what still shares one is merged; each is stated. The .duet is never quantized.
@@ -106,7 +110,20 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     // Every failure from here on is the take's, so it names the take. FileSource's own errors
     // name it already.
     let named = || args.input.display().to_string();
-    let (events, performance) = analyse(&args.input, take, args.lane.is_some(), &outputs)?;
+    let (mut events, kept) = analyse(&args.input, take, args.lane.is_some(), &outputs)?;
+    // A melody's notes are read from its performance, on its own tuning.
+    let (performance, reading) = match kept {
+        Some((file, frames)) => {
+            let given = args.tuning.map(|t| t.a4_cents);
+            let reading = frames.map(|frames| read(&frames, &events, given));
+            if let Some(reading) = &reading {
+                events.extend(reading.notes.iter().map(ReadNote::event));
+                events.sort_by_key(event_frame);
+            }
+            (Some(file), reading)
+        }
+        None => (None, None),
+    };
     let what = match take {
         Take::Melody => "notes",
         Take::Rhythm => "hits",
@@ -149,7 +166,12 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
 
     let meter = *timing.meter.value();
     let mut said = statement::timing(&timing, ANALYSIS_RATE);
+    if let Some(reading) = &reading {
+        said.extend(statement::tuning(&reading.tuning));
+        said.push(statement::notes_read(reading));
+    }
     said.extend(statement::key(captured.analysis.key.as_ref()));
+    captured.analysis.reading = reading;
     let lead_in = statement::lead_in(
         captured.lead_in,
         captured.downbeat_tick,
@@ -329,6 +351,9 @@ fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
             if args.key.is_some() {
                 bail!("--key is for a melody take; a rhythm take has no key");
             }
+            if args.tuning.is_some() {
+                bail!("--tuning is for a melody take; a rhythm take's hits have no pitch");
+            }
         }
     }
     args.key
@@ -386,20 +411,77 @@ impl Outputs {
     }
 }
 
-/// The take's analysis stage: a melody's keeps its performance, written to the file as it
-/// settles.
+/// A melody's tuning as `--tuning` gives it: A4, in absolute cents.
+#[derive(Debug, Clone, Copy)]
+pub struct TuningArg {
+    a4_cents: f64,
+}
+
+/// The furthest, in cents, a given tuning may sit from 440 Hz: a key either way. Further is a
+/// take in another key, not another tuning.
+const MAX_TUNING_CENTS: f64 = 100.0;
+
+impl std::str::FromStr for TuningArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<TuningArg, String> {
+        let text = s.trim();
+        let offset = if let Some(cents) = text.strip_suffix('c') {
+            let cents: f64 = cents.parse().map_err(|_| {
+                format!("{s:?}: cents from 440 Hz are a signed number before c, such as +44c")
+            })?;
+            if !cents.is_finite() {
+                return Err(format!("{s:?}: cents must be a finite number"));
+            }
+            cents
+        } else {
+            let hz: f64 = text.parse().map_err(|_| {
+                format!("{s:?}: a tuning is A4 in Hz (440, 442) or cents from 440 Hz (+44c)")
+            })?;
+            if !(hz.is_finite() && hz > 0.0) {
+                return Err(format!("{s:?}: A4 in Hz must be a positive number"));
+            }
+            a4_cents_of_hz(hz) - A440_CENTS
+        };
+        if offset.abs() > MAX_TUNING_CENTS {
+            return Err(format!(
+                "{s:?} is {offset:+.0} cents from 440 Hz; a tuning is at most \
+                 {MAX_TUNING_CENTS} cents (a key) either way of it"
+            ));
+        }
+        Ok(TuningArg {
+            a4_cents: A440_CENTS + offset,
+        })
+    }
+}
+
+/// Where an event sits on the take's timeline, which events are kept in the order of.
+fn event_frame(event: &Event) -> u64 {
+    match *event {
+        Event::Onset { frame, .. } | Event::Hit { frame, .. } => frame,
+        Event::Note { start, .. } => start,
+        _ => u64::MAX,
+    }
+}
+
+/// The take's analysis stage. A melody's is its performance, written to the file as it
+/// settles and kept as frames for its reading; a rhythm's gives its hits.
 enum Analyser {
-    Melody(Box<Melody>, PerformanceFile),
+    Melody {
+        stage: Box<Performance>,
+        file: PerformanceFile,
+        frames: Option<PerformanceFrames>,
+    },
     Rhythm(Box<Hits>),
 }
 
 impl Analyser {
     fn push(&mut self, mono: Mono, events: &mut Vec<Event>) -> Result<()> {
         match self {
-            Self::Melody(melody, file) => {
+            Self::Melody { stage, .. } => {
                 let mut kept = Vec::new();
-                melody.push_keeping(mono, events, &mut kept)?;
-                file.write(kept)
+                stage.push(mono, &mut kept)?;
+                self.keep(kept, events)
             }
             Self::Rhythm(hits) => Ok(hits.push(mono, events)?),
         }
@@ -407,33 +489,59 @@ impl Analyser {
 
     fn finish(&mut self, events: &mut Vec<Event>) -> Result<()> {
         match self {
-            Self::Melody(melody, file) => {
+            Self::Melody { stage, .. } => {
                 let mut kept = Vec::new();
-                melody.finish_keeping(events, &mut kept)?;
-                file.write(kept)?;
-                file.flush()
+                stage.finish(&mut kept)?;
+                self.keep(kept, events)?;
+                match self {
+                    Self::Melody { file, .. } => file.flush(),
+                    Self::Rhythm(_) => Ok(()),
+                }
             }
             Self::Rhythm(hits) => Ok(hits.finish(events)?),
         }
     }
+
+    /// Writes what the performance settled to its file, keeps its frames, and passes its
+    /// onsets on as events.
+    fn keep(&mut self, kept: Vec<Layer1>, events: &mut Vec<Event>) -> Result<()> {
+        let Self::Melody { file, frames, .. } = self else {
+            return Ok(());
+        };
+        for layer in &kept {
+            match layer {
+                Layer1::Head(head) => *frames = Some(PerformanceFrames::new(head)),
+                Layer1::Frames(block) => frames
+                    .as_mut()
+                    .context("a performance's frames came before its head")?
+                    .push(block)?,
+                &Layer1::Onset { frame, strength } => {
+                    events.push(Event::Onset { frame, strength });
+                }
+                _ => {}
+            }
+        }
+        file.write(kept)
+    }
 }
 
 /// The take's settled events: the file through `Prepare` and the take's analysis stage, to
-/// the end of the stream. For a melody, also its performance file, written in full but not yet
-/// kept.
+/// the end of the stream. For a melody, the events are its onsets, and its performance file,
+/// written in full but not yet kept, and its frames come with them.
 fn analyse(
     input: &Path,
     take: Take,
     asked: bool,
     outputs: &Outputs,
-) -> Result<(Vec<Event>, Option<PerformanceFile>)> {
+) -> Result<(Vec<Event>, Option<Kept>)> {
     let mut source = FileSource::open(input)?;
     let mut prepare = Prepare::new(ANALYSIS_RATE);
     let mut stage = match (take, &outputs.performance) {
-        (Take::Melody, Some(path)) => Analyser::Melody(
-            Box::new(Melody::new(ANALYSIS_RATE)),
-            PerformanceFile::create(path)?,
-        ),
+        (Take::Melody, Some(path)) => Analyser::Melody {
+            stage: Box::new(Performance::new(ANALYSIS_RATE)),
+            file: PerformanceFile::create(path)?,
+            frames: None,
+        },
         (Take::Melody, None) => bail!("a melody take has a performance file"),
         (Take::Rhythm, _) => Analyser::Rhythm(Box::new(Hits::new(
             ANALYSIS_RATE,
@@ -458,12 +566,16 @@ fn analyse(
         stage.push(m, &mut events).with_context(named)?;
     }
     stage.finish(&mut events).with_context(named)?;
-    let performance = match stage {
-        Analyser::Melody(_, file) => Some(file),
+    let kept = match stage {
+        Analyser::Melody { file, frames, .. } => Some((file, frames)),
         Analyser::Rhythm(_) => None,
     };
-    Ok((events, performance))
+    Ok((events, kept))
 }
+
+/// A melody's performance file, written but not yet kept, and its frames: none when the take
+/// held no audio at all.
+type Kept = (PerformanceFile, Option<PerformanceFrames>);
 
 /// A melody's `performance` stream, written through duet-schemas a line at a time as its frames
 /// settle: the envelope and head first, then one block of frames a line. It is created new, and
