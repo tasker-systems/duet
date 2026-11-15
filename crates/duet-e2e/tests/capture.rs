@@ -813,6 +813,24 @@ fn a_quick_run_refines_the_grid_and_writes_everything() {
         &duet(&dir, &["abc", "check", s(&dir.join("run.abc"))]),
         "abc check",
     );
+    // A grid given is refined the same way, and the statement says it was the one given.
+    let given = dir.join("given");
+    let out = capture(
+        &dir,
+        &[
+            "melody",
+            s(&wav),
+            "--tempo",
+            "120",
+            "--grid",
+            "1/8",
+            "-o",
+            s(&given),
+        ],
+    );
+    ok(&out, "capture melody --grid 1/8");
+    let err = stderr(&out);
+    assert!(err.contains("grid: --grid 1/8 refined to "), "{err}");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
