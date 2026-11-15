@@ -4,7 +4,8 @@
 //! and their changes), a step such as `1/16`, a list of named lanes each playing one
 //! MIDI key, and, for every bar, a velocity per lane and step. It has two forms:
 //!
-//! - **Exact:** the matrix itself, through serde, as JSON or TOML.
+//! - **Exact:** the matrix itself, through serde: the body of a drum-grid document, which
+//!   duet-schemas reads and writes.
 //! - **Text:** one row per lane and one cell per step, for people and LLMs to read and
 //!   edit ([`DrumGrid::from_text`], [`DrumGrid::to_text`]). A cell is `.`, `g`, `x` or
 //!   `X`, so the text holds three velocity levels; writing other velocities as text is
@@ -42,6 +43,6 @@ mod song;
 mod text;
 
 pub use error::{Error, Result};
-pub use grid::{Bar, DrumGrid, Lane, Levels};
+pub use grid::{DrumGrid, Lane, Levels};
 pub use lanes::{LaneDef, LaneMap, LanePatch};
 pub use song::DRUM_TRACK;

@@ -1,24 +1,32 @@
-//! The drum grid: a conductor, a step, lanes, and a lanes × steps velocity matrix per bar.
-//! These types are the exact form, and serialize to JSON and TOML with serde.
+//! The drum grid: a conductor, a step, lanes, and one lanes × steps velocity matrix for the
+//! whole grid. These types are the exact form: they serialize with serde as a drum-grid
+//! document's body, and their `JsonSchema` is that body's schema.
 
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use duet_core::{Grid, Key, KeyChange, Position, Song, TempoChange, TimeChange, TimeMap, TimeSig};
+use duet_core::{
+    Grid, Key, KeyChange, Position, Song, TempoChange, Tensor, TimeChange, TimeMap, TimeSig,
+};
 
 use crate::error::{Error, Result};
 use crate::lanes::valid_lane_name;
 
-/// A drum part as a matrix: `bars[b].vel[lane][step]` is the velocity of the hit on that
-/// lane at that step of bar `b + 1`, and 0 means no hit.
+/// A drum part as a matrix: [`DrumGrid::vel`] is one lanes × steps tensor for the whole
+/// grid, whose row for a lane is every step of every bar in order, and 0 means no hit.
+/// [`DrumGrid::bar_steps`] gives each bar's step count, from bar 1, so bar lines are read
+/// from it.
 ///
 /// The conductor (resolution, tempo, meter, key and their changes) means exactly what
 /// the same fields of a [`Song`] mean. Every bar must be a whole number of steps of
 /// [`DrumGrid::grid`], so each column is one step wide.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DrumGrid {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[schemars(range(min = 1, max = 32767))]
     pub ticks_per_quarter: u16,
     pub tempo_bpm: f64,
     pub time_sig: TimeSig,
@@ -40,44 +48,71 @@ pub struct DrumGrid {
     pub grid: Grid,
     /// The MIDI channel the lanes play on, 1 to 16; 10 is General MIDI's drum channel.
     #[serde(default = "drum_channel")]
+    #[schemars(range(min = 1, max = 16))]
     pub channel: u8,
     /// The velocities the text form's cells stand for.
     #[serde(default, skip_serializing_if = "Levels::is_default")]
     pub levels: Levels,
     /// The rows, top to bottom.
     pub lanes: Vec<Lane>,
-    /// Every bar from bar 1, in order.
-    pub bars: Vec<Bar>,
+    /// How many steps each bar holds, from bar 1, with none left out. Bars differ when the
+    /// meter changes. The sum is the number of columns of [`DrumGrid::vel`].
+    pub bar_steps: Vec<u32>,
+    /// The velocities: lanes × steps, row-major, so lane `l` at step `s` of the whole grid is
+    /// `data[l * steps + s]`. 0 is no hit.
+    #[serde(deserialize_with = "vel_field")]
+    #[schemars(schema_with = "vel_schema")]
+    pub vel: Tensor<u8>,
 }
 
 fn drum_channel() -> u8 {
     10
 }
 
+/// Reads `vel`, naming it when the tensor is refused.
+fn vel_field<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Tensor<u8>, D::Error> {
+    Tensor::deserialize(deserializer).map_err(|e| serde::de::Error::custom(format!("vel: {e}")))
+}
+
+/// `vel`'s schema: a `u8` tensor whose velocities run 0 to 127.
+fn vel_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema = Tensor::<u8>::json_schema(generator);
+    if let Some(data) = schema
+        .get_mut("properties")
+        .and_then(|p| p.get_mut("data"))
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        data.insert(
+            "items".into(),
+            serde_json::json!({ "type": "integer", "minimum": 0, "maximum": 127 }),
+        );
+    }
+    schema
+}
+
 /// One row of the grid.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Lane {
+    /// Lowercase letters, digits and hyphens.
+    #[schemars(regex(pattern = r"^[a-z0-9]+(-[a-z0-9]+)*$"))]
     pub name: String,
     /// The MIDI key it plays.
+    #[schemars(range(max = 127))]
     pub key: u8,
 }
 
-/// One bar of the matrix.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Bar {
-    /// The bar number, from 1.
-    pub bar: u32,
-    /// How many steps the bar holds.
-    pub steps: u32,
-    /// One row per lane, in lane order, each `steps` long; 0 is no hit.
-    pub vel: Vec<Vec<u8>>,
-}
-
 /// The velocities of the text form's three hit cells: `g` ghost, `x` hit and `X` accent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Levels {
+    #[schemars(range(min = 1, max = 127))]
     pub ghost: u8,
+    #[schemars(range(min = 1, max = 127))]
     pub hit: u8,
+    #[schemars(range(min = 1, max = 127))]
     pub accent: u8,
 }
 
@@ -174,8 +209,74 @@ impl DrumGrid {
             channel: drum_channel(),
             levels: Levels::default(),
             lanes: Vec::new(),
-            bars: Vec::new(),
+            bar_steps: Vec::new(),
+            vel: Tensor::empty(),
         }
+    }
+
+    /// How many bars the grid holds.
+    #[must_use]
+    pub fn bar_count(&self) -> u32 {
+        self.bar_steps.len() as u32
+    }
+
+    /// How many steps the whole grid holds: the columns of [`DrumGrid::vel`].
+    #[must_use]
+    pub fn steps(&self) -> usize {
+        self.bar_steps.iter().map(|s| *s as usize).sum()
+    }
+
+    /// The column bar `bar` (from 1) starts at.
+    #[must_use]
+    pub fn bar_start(&self, bar: u32) -> usize {
+        self.bar_steps[..(bar as usize - 1).min(self.bar_steps.len())]
+            .iter()
+            .map(|s| *s as usize)
+            .sum()
+    }
+
+    /// Lane `lane`'s velocities over the whole grid.
+    #[must_use]
+    pub fn row(&self, lane: usize) -> &[u8] {
+        let steps = self.steps();
+        &self.vel.data()[lane * steps..(lane + 1) * steps]
+    }
+
+    /// Lane `lane`'s velocities in bar `bar` (from 1).
+    #[must_use]
+    pub fn bar_row(&self, lane: usize, bar: u32) -> &[u8] {
+        let start = self.bar_start(bar);
+        &self.row(lane)[start..start + self.bar_steps[bar as usize - 1] as usize]
+    }
+
+    /// Sets the matrix: `bar_steps` and one row per lane, in lane order, each the sum of
+    /// `bar_steps` long.
+    ///
+    /// # Errors
+    ///
+    /// When a row is not that long, or there is not one row per lane.
+    pub fn set_matrix(&mut self, bar_steps: Vec<u32>, rows: Vec<Vec<u8>>) -> Result<()> {
+        let steps: usize = bar_steps.iter().map(|s| *s as usize).sum();
+        if rows.len() != self.lanes.len() {
+            return Err(Error::invalid(format!(
+                "{} rows for {} lanes",
+                rows.len(),
+                self.lanes.len()
+            )));
+        }
+        if let Some((lane, row)) = self.lanes.iter().zip(&rows).find(|(_, r)| r.len() != steps) {
+            return Err(Error::invalid(format!(
+                "{} has {} steps; the bars hold {steps}",
+                lane.name,
+                row.len()
+            )));
+        }
+        self.vel = Tensor::new(
+            vec![rows.len() as u32, steps as u32],
+            rows.into_iter().flatten().collect(),
+        )?;
+        self.bar_steps = bar_steps;
+        Ok(())
     }
 
     /// The conductor, and the grid's end, as a song with no tracks.
@@ -259,45 +360,33 @@ impl DrumGrid {
                 )));
             }
         }
-        for (i, bar) in self.bars.iter().enumerate() {
+        let want = [self.lanes.len() as u32, self.steps() as u32];
+        if self.vel.shape() != &want[..] {
+            return Err(Error::invalid(format!(
+                "vel has shape {:?}; {} lanes over the bars' {} steps need {want:?}",
+                self.vel.shape(),
+                self.lanes.len(),
+                self.steps()
+            )));
+        }
+        for (i, steps) in self.bar_steps.iter().enumerate() {
             let number = i as u32 + 1;
-            if bar.bar != number {
-                return Err(Error::invalid(format!(
-                    "bar {} is listed where bar {number} belongs; bars run from 1 with none left out",
-                    bar.bar
-                )));
-            }
             let shape = self.bar_shape(&map, step, number)?;
-            if bar.steps != shape.steps {
+            if *steps != shape.steps {
                 return Err(Error::invalid(format!(
-                    "bar {number} says {} steps; {} at {} needs {}",
-                    bar.steps, shape.sig, self.grid, shape.steps
+                    "bar {number} says {steps} steps; {} at {} needs {}",
+                    shape.sig, self.grid, shape.steps
                 )));
             }
-            if bar.vel.len() != self.lanes.len() {
+        }
+        for (l, lane) in self.lanes.iter().enumerate() {
+            if let Some(s) = self.row(l).iter().position(|v| *v > 127) {
+                let (bar, at) = self.bar_and_step(s);
                 return Err(Error::invalid(format!(
-                    "bar {number} has {} rows for {} lanes",
-                    bar.vel.len(),
-                    self.lanes.len()
+                    "{}, bar {bar}, step {at}: velocity {} is not 0 to 127",
+                    lane.name,
+                    self.row(l)[s]
                 )));
-            }
-            for (lane, row) in self.lanes.iter().zip(&bar.vel) {
-                if row.len() != shape.steps as usize {
-                    return Err(Error::invalid(format!(
-                        "{}, bar {number} has {} steps; {} at {} needs {}",
-                        lane.name,
-                        row.len(),
-                        shape.sig,
-                        self.grid,
-                        shape.steps
-                    )));
-                }
-                if let Some(v) = row.iter().find(|v| **v > 127) {
-                    return Err(Error::invalid(format!(
-                        "{}, bar {number}: velocity {v} is not 0 to 127",
-                        lane.name
-                    )));
-                }
             }
         }
         self.check_end(&map, step)?;
@@ -316,18 +405,19 @@ impl DrumGrid {
         };
         let tick = map.tick(end)?;
         let end = map.position(tick);
-        let Some(last) = self.bars.last() else {
+        let last = self.bar_count();
+        if last == 0 {
             return Err(Error::invalid(format!(
                 "the grid ends at {end} but has no bars; a grid's end lies inside its last bar"
             )));
-        };
-        let shape = self.bar_shape(map, step, last.bar)?;
+        }
+        let shape = self.bar_shape(map, step, last)?;
         let bars_end = shape.start + u64::from(shape.steps) * step;
         if tick <= shape.start || tick > bars_end {
             return Err(Error::invalid(format!(
                 "the grid ends at {end}, but its last bar, bar {}, runs to {}; an end lies \
                  inside the last bar or on the bar line that ends it",
-                last.bar,
+                last,
                 map.position(bars_end)
             )));
         }
@@ -339,14 +429,15 @@ impl DrumGrid {
             )));
         }
         let first_past = (offset / step) as usize;
-        for (lane, row) in self.lanes.iter().zip(&last.vel) {
+        for (l, lane) in self.lanes.iter().enumerate() {
+            let row = self.bar_row(l, last);
             if let Some(s) = row[first_past..].iter().position(|v| *v > 0) {
                 let s = first_past + s;
                 return Err(Error::invalid(format!(
                     "{}, bar {}, step {}: the hit at {} lies at or past the grid's end at {end}; \
                      move the end, or the hit",
                     lane.name,
-                    last.bar,
+                    last,
                     s + 1,
                     map.position(shape.start + s as u64 * step)
                 )));
@@ -357,7 +448,7 @@ impl DrumGrid {
 
     /// Where the grid's bars end: the bar line after its last bar.
     pub(crate) fn bars_end(&self) -> Position {
-        Position::bar(self.bars.len() as u32 + 1)
+        Position::bar(self.bar_count() + 1)
     }
 
     /// Where the grid ends: its own end, or else the bar line after its last bar.
@@ -397,12 +488,8 @@ impl DrumGrid {
     /// nothing snaps velocities unless this is called.
     pub fn snapped_to_levels(&self) -> DrumGrid {
         let mut out = self.clone();
-        for bar in &mut out.bars {
-            for row in &mut bar.vel {
-                for v in row {
-                    *v = self.levels.nearest(*v);
-                }
-            }
+        for v in out.vel.data_mut() {
+            *v = self.levels.nearest(*v);
         }
         out
     }
@@ -410,14 +497,27 @@ impl DrumGrid {
     /// The first hit whose velocity is not one of the levels, as (lane, bar, step, vel),
     /// with bar and step counted from 1.
     pub fn first_off_level(&self) -> Option<(&str, u32, u32, u8)> {
-        for bar in &self.bars {
-            for (lane, row) in self.lanes.iter().zip(&bar.vel) {
-                if let Some(step) = row.iter().position(|v| self.levels.cell(*v).is_none()) {
-                    return Some((&lane.name, bar.bar, step as u32 + 1, row[step]));
-                }
+        let steps = self.steps();
+        (0..steps)
+            .flat_map(|s| (0..self.lanes.len()).map(move |l| (l, s)))
+            .find(|(l, s)| self.levels.cell(self.row(*l)[*s]).is_none())
+            .map(|(l, s)| {
+                let (bar, at) = self.bar_and_step(s);
+                (self.lanes[l].name.as_str(), bar, at, self.row(l)[s])
+            })
+    }
+
+    /// The bar (from 1) a column of the whole grid falls in, and its step in that bar (from 1).
+    fn bar_and_step(&self, column: usize) -> (u32, u32) {
+        let mut start = 0;
+        for (i, steps) in self.bar_steps.iter().enumerate() {
+            let steps = *steps as usize;
+            if column < start + steps {
+                return (i as u32 + 1, (column - start) as u32 + 1);
             }
+            start += steps;
         }
-        None
+        (self.bar_count(), 0)
     }
 }
 

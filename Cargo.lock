@@ -516,6 +516,8 @@ version = "0.2.0"
 dependencies = [
  "duet-core",
  "duet-midi",
+ "duet-schemas",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -573,6 +575,7 @@ name = "duet-schemas"
 version = "0.2.0"
 dependencies = [
  "duet-core",
+ "duet-drums",
  "jsonschema",
  "schemars",
  "serde",

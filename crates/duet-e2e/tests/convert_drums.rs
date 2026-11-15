@@ -23,7 +23,9 @@ fn convert_reads_every_grid_as_drums_render_does() {
     let mut compared = 0;
     for grid in grids() {
         let stem = grid.file_name().and_then(|n| n.to_str()).expect("a name");
-        for (ext, to) in [("mid", None), ("duet", None), ("notes", Some("text"))] {
+        // A .duet from convert keeps the grid (a drum-grid document); `drums render` makes a
+        // song, so the two are compared on MIDI and text only.
+        for (ext, to) in [("mid", None), ("notes", Some("text"))] {
             let a = dir.join(format!("{stem}.convert.{ext}"));
             let b = dir.join(format!("{stem}.render.{ext}"));
             let mut conv_args = vec!["convert", s(&grid), s(&a), "--from", "drums"];
@@ -44,7 +46,7 @@ fn convert_reads_every_grid_as_drums_render_does() {
             compared += 1;
         }
     }
-    assert_eq!(compared, 6);
+    assert_eq!(compared, 4);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -280,7 +282,7 @@ fn grid_flags_are_never_guessed_and_never_ignored() {
         &["--bars", "2"],
         &["--snap-levels"],
     ];
-    for out in ["g.mid", "g.duet", "g.abc"] {
+    for out in ["g.mid", "g.abc"] {
         for flag in flags {
             let path = dir.join(out);
             let mut args = vec!["convert", s(&groove), s(&path)];
@@ -361,7 +363,8 @@ fn a_grid_text_on_standard_input_and_output() {
         "the grid as a song"
     );
 
-    // A grid's text in, a song document out: the same document `drums render` writes.
+    // A grid's text in, a document out: the drum-grid document `drums snap` writes, since a
+    // .duet keeps the grid.
     let o = duet_with(
         &dir,
         &none,
@@ -369,15 +372,17 @@ fn a_grid_text_on_standard_input_and_output() {
         &text,
     );
     ok(&o, "drums to a document");
-    let rendered = dir.join("rendered.duet");
+    let copied = dir.join("copied.duet");
     ok(
         &duet(
             &dir,
-            &["drums", "render", s(&golden("groove.drums")), s(&rendered)],
+            &["drums", "snap", s(&golden("groove.drums")), s(&copied)],
         ),
-        "render to .duet",
+        "snap to .duet",
     );
-    assert!(o.stdout == std::fs::read(&rendered).expect("rendered"));
+    assert!(o.stdout == std::fs::read(&copied).expect("copied"));
+    let doc = String::from_utf8(o.stdout).expect("utf-8");
+    assert!(doc.contains("\"kind\": \"drum-grid\""), "{doc}");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -447,8 +452,8 @@ fn generated(rng: &mut Lcg) -> (String, &'static str) {
 }
 
 /// Round trips: grid → `convert` → .mid → `convert --grid` → grid gives the same grid, for
-/// the sample and the golden, and for generated grids. (The exact form's leg, with velocities
-/// off the text's levels, went with the exact form; drum-grid documents bring it back.)
+/// the sample and the golden, and for generated grids, as text and as drum-grid documents with
+/// velocities off the text's levels, which a document keeps exactly.
 #[test]
 fn a_grid_survives_midi_by_convert_alone() {
     let dir = scratch("roundtrip");
@@ -494,6 +499,43 @@ fn a_grid_survives_midi_by_convert_alone() {
             back == std::fs::read(&canon).expect("canon"),
             "generated grid {i} came back changed:\n{text}\n{}",
             String::from_utf8_lossy(&back)
+        );
+
+        // As a document, with velocities off the levels: grid → .duet → .mid → .duet.
+        let doc = dir.join(format!("gen-{i}.duet"));
+        ok(
+            &duet(&dir, &["convert", s(&made), s(&doc), "--from", "drums"]),
+            "to a document",
+        );
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&doc).expect("doc")).expect("json");
+        for v in json["body"]["vel"]["data"]
+            .as_array_mut()
+            .expect("vel data")
+        {
+            if v.as_u64() != Some(0) {
+                *v = serde_json::Value::from(1 + rng.next(127));
+            }
+        }
+        let mut bytes = serde_json::to_string_pretty(&json).expect("json");
+        bytes.push('\n');
+        std::fs::write(&doc, &bytes).expect("doc");
+        let mid = dir.join("through-doc.mid");
+        ok(
+            &duet(&dir, &["convert", s(&doc), s(&mid)]),
+            "a document to MIDI",
+        );
+        let back = dir.join(format!("gen-{i}-back.duet"));
+        ok(
+            &duet(&dir, &["convert", s(&mid), s(&back), "--grid", step]),
+            "MIDI to a document",
+        );
+        let back: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&back).expect("back")).expect("json back");
+        // `Value` keeps keys sorted, not in the writer's order, so compare as JSON.
+        assert_eq!(
+            back["body"], json["body"],
+            "generated grid {i}'s document came back changed"
         );
     }
     std::fs::remove_dir_all(&dir).expect("clean up");

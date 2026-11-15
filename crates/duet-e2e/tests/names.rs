@@ -2,8 +2,8 @@
 //! names: `.duet` is a document, read by its envelope, and `.mid` (`.midi`, `.smf`) and `.abc`
 //! are the outside formats. Every other name is refused rather than misread: `.json` and
 //! `.toml` are no longer read, and a view's text (`.notes`, `.drums`) is read only when
-//! `--from text` says so. A drum grid's side of a command is a grid's text whatever its name,
-//! until drum-grid documents exist. Standard input is a document when it starts with `{`.
+//! `--from text` says so. On a drum grid's side of a command, a `.duet` is a drum-grid document
+//! and any other name the grid's text. Standard input is a document when it starts with `{`.
 
 use std::path::{Path, PathBuf};
 
@@ -116,24 +116,38 @@ fn a_document_is_read_by_its_envelope_and_another_kind_is_refused_by_name() {
         "the same song"
     );
 
-    // A kind this duet does not know, and the drum grid (not a kind until drum-grid 1.0).
-    for kind in ["drum-grid", "lute-tab"] {
-        let doc = document(&dir, &format!("{kind}.duet"), kind, "1.0");
-        let want = [s(&doc), kind, "this duet knows no kind"];
-        refused(&dir, &["song", "show", s(&doc)], &p("never"), &want);
-        refused(
-            &dir,
-            &["convert", s(&doc), s(&p("out.mid"))],
-            &p("out.mid"),
-            &want,
-        );
-        refused(
-            &dir,
-            &["drums", "render", s(&doc), s(&p("out.mid"))],
-            &p("out.mid"),
-            &want,
-        );
-    }
+    // A kind this duet does not know.
+    let doc = document(&dir, "lute-tab.duet", "lute-tab", "1.0");
+    let want = [s(&doc), "lute-tab", "this duet knows no kind"];
+    refused(&dir, &["song", "show", s(&doc)], &p("never"), &want);
+    refused(
+        &dir,
+        &["convert", s(&doc), s(&p("out.mid"))],
+        &p("out.mid"),
+        &want,
+    );
+    refused(
+        &dir,
+        &["drums", "render", s(&doc), s(&p("out.mid"))],
+        &p("out.mid"),
+        &want,
+    );
+
+    // A drum-grid document where a song is read is refused, naming its kind and what makes a
+    // song of it.
+    let beat = root().join("samples/groove.drums");
+    let grid = p("beat.duet");
+    ok(
+        &duet(&dir, &["drums", "snap", s(&beat), s(&grid)]),
+        "a drum-grid document",
+    );
+    let want = [
+        "beat.duet is a drum-grid document",
+        "song show reads a song",
+        "duet drums render makes a song of one",
+    ];
+    refused(&dir, &["song", "show", s(&grid)], &p("never"), &want);
+
     // A song at another major points at duet convert.
     let doc = document(&dir, "future.duet", "song", "2.0");
     let want = ["song 2.0", "this duet reads song 1.x", "duet convert"];
@@ -145,7 +159,7 @@ fn a_document_is_read_by_its_envelope_and_another_kind_is_refused_by_name() {
     );
 
     // A song document where a grid's text is read is refused, naming its kind.
-    let want = ["is a song document", "render reads a drum grid's text"];
+    let want = ["is a song document", "render reads a drum grid"];
     refused(
         &dir,
         &["drums", "render", s(&song), s(&p("out.mid"))],
@@ -155,8 +169,8 @@ fn a_document_is_read_by_its_envelope_and_another_kind_is_refused_by_name() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// The grid side of a drum command is a grid's text, whatever its name, and refuses a name
-/// that is something else. The song side is a song's.
+/// The grid side of a drum command is a drum-grid document for a .duet and a grid's text for
+/// any other name, and refuses a name that is something else. The song side is a song's.
 #[test]
 fn the_drum_commands_read_a_grid_text_on_the_grid_side_and_refuse_other_names() {
     let dir = scratch("names-drums");
@@ -172,13 +186,16 @@ fn the_drum_commands_read_a_grid_text_on_the_grid_side_and_refuse_other_names() 
             &[out],
         );
     }
-    let want = ["this duet writes no drum-grid documents yet"];
-    refused(
-        &dir,
-        &["drums", "read", s(&take), s(&p("g.duet")), "--grid", "1/16"],
-        &p("g.duet"),
-        &want,
+    // A .duet on the grid side is a drum-grid document.
+    ok(
+        &duet(
+            &dir,
+            &["drums", "read", s(&take), s(&p("g.duet")), "--grid", "1/16"],
+        ),
+        "g.duet",
     );
+    let doc = std::fs::read_to_string(p("g.duet")).expect("written");
+    assert!(doc.contains("\"kind\": \"drum-grid\""), "{doc}");
     refused(
         &dir,
         &[
@@ -255,10 +272,19 @@ fn standard_input_is_sniffed_for_a_document() {
     assert_eq!(o.stdout, notes);
 
     // A document of another kind on standard input is refused by name.
-    let grid = std::fs::read(document(&dir, "g.duet", "drum-grid", "1.0")).expect("doc");
+    let beat = root().join("samples/groove.drums");
+    ok(
+        &duet(&dir, &["drums", "snap", s(&beat), s(&dir.join("g.duet"))]),
+        "a drum-grid document",
+    );
+    let grid = std::fs::read(dir.join("g.duet")).expect("doc");
     let o = duet_with(&dir, &none, &["song", "show", "-"], &grid);
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("drum-grid"));
+    // The grid side of drums render reads it as a grid.
+    let o = duet_with(&dir, &none, &["drums", "render", "-", "-"], &grid);
+    ok(&o, "drums render - - of a drum-grid document");
+    assert!(String::from_utf8_lossy(&o.stdout).contains("[track \"Drums\" ch10]"));
 
     // The grid side of drums render reads a grid's text from standard input.
     let beat = std::fs::read(root().join("samples/groove.drums")).expect("sample");

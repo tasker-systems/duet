@@ -1,6 +1,7 @@
 //! Every kind this build knows, and a document of any of them.
 
 use duet_core::Song;
+use duet_drums::DrumGrid;
 use serde_json::Value;
 
 use crate::schema::{document_schema, envelope_schema};
@@ -38,7 +39,7 @@ const fn document<K: Kind>() -> KindInfo {
 }
 
 /// Every kind this build reads and writes.
-pub const KINDS: &[KindInfo] = &[document::<Song>()];
+pub const KINDS: &[KindInfo] = &[document::<Song>(), document::<DrumGrid>()];
 
 /// The envelope's schema, as a [`KindInfo`] whose name is [`ENVELOPE`](crate::ENVELOPE). It is
 /// no kind, but the gate commits and checks it like one.
@@ -60,6 +61,7 @@ pub fn kind(name: &str) -> Option<&'static KindInfo> {
 #[non_exhaustive]
 pub enum AnyDocument {
     Song(Document<Song>),
+    DrumGrid(Document<DrumGrid>),
 }
 
 impl AnyDocument {
@@ -74,6 +76,7 @@ impl AnyDocument {
         let envelope = read_envelope(text)?;
         match kind(&envelope.kind) {
             Some(info) if info.name == Song::NAME => Document::read(text).map(Self::Song),
+            Some(info) if info.name == DrumGrid::NAME => Document::read(text).map(Self::DrumGrid),
             Some(info) if info.framing == Framing::Stream => Err(Error::Framing {
                 found: "document (.duet, with a `body`)",
                 expected: "stream (.duet.jsonl), as its kind is",
@@ -94,6 +97,7 @@ impl AnyDocument {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::Song(_) => Song::NAME,
+            Self::DrumGrid(_) => DrumGrid::NAME,
         }
     }
 
@@ -105,6 +109,7 @@ impl AnyDocument {
     pub fn write(&self) -> Result<String> {
         match self {
             Self::Song(doc) => doc.write(),
+            Self::DrumGrid(doc) => doc.write(),
         }
     }
 }

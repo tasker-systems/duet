@@ -62,7 +62,7 @@ flowchart LR
 |---|---|---|---|
 | What it is | a performance, exact | a drum part on a step grid | a melodic score |
 | Unit | ticks | steps | fractions of a note |
-| Velocity | any, 1 to 127 | three levels as text | eight dynamics |
+| Velocity | any, 1 to 127 | three levels as text (any in a drum-grid `.duet`) | eight dynamics |
 | Lossless with `Song` | yes | for what fits the grid | for the subset |
 | For | capture, DAWs, exact edits, diffs | discussing a groove | discussing and sharing a tune |
 
@@ -276,22 +276,24 @@ snare   | . . . . X . . . . . . g X . . . | . . . . X . . . . . . . X . g . |
 kick    | X . . . . . . X . . X . . . . . | X . . . . . . X . . X . . X . . |
 ```
 
-That is [samples/groove.drums](samples/groove.drums). A drum grid is a matrix: for each
-bar, one velocity per lane and step, 0 for no hit. That is its text form.
+That is [samples/groove.drums](samples/groove.drums). A drum grid is a matrix: one
+velocity per lane and step over the whole grid, 0 for no hit, with each bar's step count.
+That is its text form. Its document is a drum-grid `.duet`, which holds the matrix itself:
+`bar_steps` and one lanes × steps tensor, `vel`, so it keeps any velocity from 1 to 127.
 
 ```sh
-duet drums render groove.drums groove.mid        # to MIDI (or .duet, or text with --to text)
-duet drums read take.mid take.drums --grid 1/16  # a song's drum track to a grid
-duet drums snap take.drums snapped.drums         # velocities snapped to g, x and X
+duet drums render groove.drums groove.mid        # to MIDI (or a song .duet, or --to text)
+duet drums read take.mid take.duet --grid 1/16   # a song's drum track to a drum-grid document
+duet drums read take.mid take.drums --grid 1/16  # or to the grid's text
+duet drums snap take.duet take.drums             # velocities snapped to g, x and X
 duet drums lanes                                 # the lanes and their keys
 ```
 
 The grid side of each `duet drums` command (`render`'s input, `read`'s output, `snap`'s both)
-is a grid's text, whatever the file is named. A name that is something else is refused
-rather than misread: a song's (`.mid`, `.abc`), a stream (`.duet.jsonl`), or `.json` and
-`.toml`. Drum-grid documents do not exist yet: a `.duet` there is read by its envelope and
-refused, naming its kind, and none is written. The song side is a song's, as for every other
-command.
+is a drum grid: a `.duet` is a drum-grid document, read by its envelope, and any other name is
+the grid's text. A name that is something else is refused rather than misread: a song's
+(`.mid`, `.abc`), a stream (`.duet.jsonl`), or `.json` and `.toml`. A song document there is
+refused, naming its kind. The song side is a song's, as for every other command.
 
 `duet convert` goes between grids and every other format as well, by the same code:
 reading a grid it writes what `duet drums render` writes, and writing one from a song it
@@ -300,16 +302,21 @@ refuses what `duet drums read` does.
 
 ```sh
 duet convert groove.drums groove.mid --from drums              # the same as drums render
-duet convert take.mid take.drums --to drums --grid 1/16        # the same as drums read
-duet convert groove.drums copy.drums --from drums --to drums   # a straight copy
+duet convert take.mid take.duet --grid 1/16                    # the same as drums read
+duet convert groove.drums groove.duet --from drums             # text to a drum-grid document
+duet convert groove.duet copy.drums --to drums                 # and back to text
 duet convert groove.drums sixteenths.drums --from drums --to drums --grid 1/16  # re-stepped
 ```
+
+A `.duet` output keeps what was read: a grid read (a drum-grid document, or a grid's text with
+`--from drums`) is written as a drum-grid document, and so is a grid made from a song with
+`--grid`. A song is written as a song document; `duet drums render` makes a song of a grid.
 
 Writing a grid from a song without `--grid` is refused, naming it: the step is never
 guessed. From a grid to a grid, with no `--grid`, the grid is copied as it is, read and
 written as `drums snap` does but without snapping: a lane with no hits, the grid's own
-`vel` levels survive. A velocity off the levels is refused as text unless `--snap-levels` is
-given. With `--grid`, the grid goes through a
+`vel` levels and, in a document, any velocity survive. A velocity off the levels is refused as
+text unless `--snap-levels` is given. With `--grid`, the grid goes through a
 song at that step, as `drums render` then `drums read` would, so lanes with no hits are
 dropped. A grid flag that would do nothing (`--track` or `--bars` without `--grid` from a
 grid, or any grid flag for an output that is not a grid) is refused too, so no flag is
@@ -369,10 +376,9 @@ trailing empty bars and a mid-bar end included, when its lanes are in the map's 
 and each is played at least once, as the writer leaves them.
 
 **Velocities.** The text holds three levels. Writing a velocity that is not one of them as
-text is refused, naming the lane, bar and step; snap it to the nearest level with
-`--snap-levels` when reading (or `duet drums snap`), or keep the song, which holds any
-velocity. A velocity exactly
-halfway between two levels goes to the louder one. Nothing snaps unless you ask.
+text is refused, naming the lane, bar and step; keep it in a drum-grid `.duet`, or snap it
+to the nearest level with `--snap-levels` when reading (or `duet drums snap`). A velocity
+exactly halfway between two levels goes to the louder one. Nothing snaps unless you ask.
 
 ## ABC
 
@@ -676,7 +682,7 @@ overlapping notes, and a format 0 file with several channels, at 96, 384, 480 an
 per quarter, and check every kept event survives MIDI to text to MIDI unchanged. Those in
 `crates/duet-drums/tests` generate drum grids in several meters (with a change of meter),
 grids and resolutions, with any velocity, ending in empty bars or inside a bar, and check
-grid → song → grid, through MIDI and the grid's JSON, and the text form all round-trip
+grid → song → grid, through MIDI and drum-grid documents, and the text form all round-trip
 unchanged. Every song the MIDI tests build also round-trips through a song document.
 `crates/duet-schemas/tests/schemas.rs` is the schema gate. Each kind's JSON Schema, and the
 envelope's, is generated from the Rust types and committed under `crates/duet-schemas/schemas/`,

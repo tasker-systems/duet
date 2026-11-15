@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 duet-core = { path = "../duet-core", version = "0.2.0" }
+duet-drums = { path = "../duet-drums", version = "0.2.0" }
 schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: every float a document holds reads back to the same bits.

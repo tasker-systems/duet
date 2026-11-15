@@ -2,7 +2,31 @@
 //! grid's JSON, text → grid → text, and the refusals that keep every conversion exact.
 
 use duet_core::{Grid, Note, Position, Song, TimeChange, TimeSig, Track};
-use duet_drums::{Bar, DrumGrid, Lane, LaneMap, LanePatch, Levels};
+use duet_drums::{DrumGrid, Lane, LaneMap, LanePatch, Levels};
+use duet_schemas::{AnyDocument, Document, Tool};
+
+/// The grid's velocities by bar: `[bar][lane][step]`, from bar 1.
+fn bars_of(grid: &DrumGrid) -> Vec<Vec<Vec<u8>>> {
+    (1..=grid.bar_count())
+        .map(|bar| {
+            (0..grid.lanes.len())
+                .map(|lane| grid.bar_row(lane, bar).to_vec())
+                .collect()
+        })
+        .collect()
+}
+
+/// Sets the grid's velocities from `[bar][lane][step]`.
+fn set_bars(grid: &mut DrumGrid, bars: &[Vec<Vec<u8>>]) {
+    let bar_steps = bars
+        .iter()
+        .map(|b| b.first().map_or(0, |row| row.len() as u32))
+        .collect::<Vec<_>>();
+    let rows = (0..grid.lanes.len())
+        .map(|lane| bars.iter().flat_map(|b| b[lane].clone()).collect())
+        .collect();
+    grid.set_matrix(bar_steps, rows).expect("a whole matrix");
+}
 use duet_midi::Midi;
 
 /// A small deterministic generator, so every run tests the same grids.
@@ -76,17 +100,14 @@ fn random_grid(
     empty_song.tracks = vec![Track::new("Drums", 10)];
     let empty = DrumGrid::from_song(&empty_song, grid.grid, map, None, Some(bars))
         .expect("an empty drum track fits any whole-step grid");
-    grid.bars = empty
-        .bars
+    let mut matrix: Vec<Vec<Vec<u8>>> = empty
+        .bar_steps
         .iter()
-        .map(|b| Bar {
-            bar: b.bar,
-            steps: b.steps,
-            vel: grid
-                .lanes
+        .map(|steps| {
+            grid.lanes
                 .iter()
                 .map(|_| {
-                    (0..b.steps)
+                    (0..*steps)
                         .map(|_| {
                             if rng.below(3) == 0 {
                                 1 + rng.below(127) as u8
@@ -96,11 +117,11 @@ fn random_grid(
                         })
                         .collect()
                 })
-                .collect(),
+                .collect()
         })
         .collect();
     // Every lane is played at least once: its first step of bar 1.
-    for row in &mut grid.bars[0].vel {
+    for row in &mut matrix[0] {
         if row.iter().all(|v| *v == 0) {
             row[0] = 100;
         }
@@ -110,41 +131,66 @@ fn random_grid(
     match rng.below(3) {
         1 if bars > 1 => {
             let empty = 1 + rng.below(u64::from(bars) - 1) as usize;
-            let n = grid.bars.len();
-            for bar in &mut grid.bars[n - empty..] {
-                for row in &mut bar.vel {
+            let n = matrix.len();
+            for bar in &mut matrix[n - empty..] {
+                for row in bar {
                     row.fill(0);
                 }
             }
         }
         2 => {
-            let last = grid.bars.last_mut().expect("at least one bar");
-            let s = 1 + rng.below(u64::from(last.steps) - 1);
-            for row in &mut last.vel {
+            let number = matrix.len() as u32;
+            let last = matrix.last_mut().expect("at least one bar");
+            let s = 1 + rng.below(last[0].len() as u64 - 1);
+            for row in last {
                 row[s as usize..].fill(0);
             }
             let map = conductor.time_map().expect("time map");
-            let start = map.tick(Position::bar(last.bar)).expect("bar start");
+            let start = map.tick(Position::bar(number)).expect("bar start");
             let step = grid.grid.step_ticks(tpq).expect("whole-tick step");
             grid.end = Some(map.position(start + s * step));
         }
         _ => {}
     }
+    set_bars(&mut grid, &matrix);
     grid.check().expect("a generated grid is valid");
     grid
 }
 
 /// Whether a grid's last bar holds no hit.
 fn ends_in_rests(grid: &DrumGrid) -> bool {
-    grid.bars
+    bars_of(grid)
         .last()
-        .is_some_and(|b| b.vel.iter().flatten().all(|v| *v == 0))
+        .is_some_and(|b| b.iter().flatten().all(|v| *v == 0))
+}
+
+/// The grid through a `drum-grid` 1.0 document and back, exactly: the body reads back equal,
+/// the text writes back identical, and it reads back by its envelope.
+fn check_document(grid: &DrumGrid) {
+    let text = Document::new(Tool::new("duet", "test"), grid.clone())
+        .write()
+        .expect("written");
+    let back = Document::<DrumGrid>::read(&text).expect("read back");
+    assert_eq!(
+        &back.body, grid,
+        "drum-grid document round-trip; it was:\n{text}"
+    );
+    assert_eq!(
+        back.write().expect("again"),
+        text,
+        "the document writes back identical"
+    );
+    let AnyDocument::DrumGrid(any) = AnyDocument::read(&text).expect("read by envelope") else {
+        panic!("not read as a drum grid");
+    };
+    assert_eq!(&any.body, grid);
 }
 
 /// Witness for `the-drum-grid-round-trips-under-its-map`: for grids of many shapes under
 /// the gm map, and under gm with a grid's own lanes laid over it, grid → song → grid is
-/// the identity, directly and through a MIDI file, JSON and TOML; and every note plays
-/// its lane's key in the map, on channel 10.
+/// the identity, directly and through a MIDI file and a drum-grid document; and every note
+/// plays its lane's key in the map, on channel 10. The generated velocities are any from 1 to
+/// 127, so the document keeps velocities the text cannot.
 ///
 /// No bar count is passed: the song carries the grid's end, so grids that end in empty
 /// bars, or inside their last bar, come back whole. Passing the grid's own bar count
@@ -178,7 +224,7 @@ fn the_drum_grid_round_trips_under_its_map() {
                 let back =
                     DrumGrid::from_song(&song, grid.grid, map, None, bars).expect("from song");
                 assert_eq!(back, grid, "grid → song → grid, {shape:?}");
-                let own = Some(grid.bars.len() as u32);
+                let own = Some(grid.bar_count());
                 let back =
                     DrumGrid::from_song(&song, grid.grid, map, None, own).expect("from song");
                 assert_eq!(
@@ -192,10 +238,7 @@ fn the_drum_grid_round_trips_under_its_map() {
                     .expect("from the MIDI song");
                 assert_eq!(back, grid, "grid → song → MIDI → song → grid, {shape:?}");
 
-                let json: DrumGrid =
-                    serde_json::from_str(&serde_json::to_string(&grid).expect("json"))
-                        .expect("json back");
-                assert_eq!(json, grid, "JSON, {shape:?}");
+                check_document(&grid);
 
                 // On another channel, the drum track is found by name, and keeps it.
                 let mut moved = grid.clone();
@@ -223,12 +266,7 @@ fn the_drum_grid_round_trips_under_its_map() {
                 for note in &track.notes {
                     assert!(keys.contains(&note.pitch.midi()), "{note:?}");
                 }
-                let hits: usize = grid
-                    .bars
-                    .iter()
-                    .flat_map(|b| b.vel.iter().flatten())
-                    .filter(|v| **v > 0)
-                    .count();
+                let hits = grid.vel.data().iter().filter(|v| **v > 0).count();
                 assert_eq!(track.notes.len(), hits, "one note per hit");
                 grids += 1;
             }
@@ -319,7 +357,7 @@ fn reading_a_drum_track_refuses_what_does_not_fit_and_alters_nothing() {
 
     let kept = read(&drum_song(&[("1.1.0", 36, 101), ("1.2.120", 38, 7)])).expect("fits");
     assert_eq!(
-        kept.bars[0].vel,
+        bars_of(&kept)[0],
         vec![vec![0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], {
             let mut kick = vec![0; 16];
             kick[0] = 101;
@@ -402,12 +440,14 @@ fn off_level_velocities_are_refused_as_text_and_snapped_only_when_asked() {
 
     let snapped = grid.snapped_to_levels();
     assert_eq!(
-        grid.bars[0].vel[1][0], 101,
+        bars_of(&grid)[0][1][0],
+        101,
         "snapping never changes its input"
     );
-    assert_eq!(snapped.bars[0].vel[1][0], 90);
+    assert_eq!(bars_of(&snapped)[0][1][0], 90);
     assert_eq!(
-        snapped.bars[1].vel[0][4], 40,
+        bars_of(&snapped)[1][0][4],
+        40,
         "64 is nearer g (40) than x (90)"
     );
     assert!(snapped.to_text().is_ok());
@@ -486,7 +526,7 @@ fn hand_written_text_is_read_leniently_but_exactly() {
     let names: Vec<&str> = grid.lanes.iter().map(|l| l.name.as_str()).collect();
     assert_eq!(names, ["kick", "hh", "cajon"]);
     assert_eq!(grid.lanes[2].key, 80, "a lane line adds a lane");
-    assert_eq!(grid.bars[0].vel[0], [120, 0, 0, 0, 100, 0]);
+    assert_eq!(grid.bar_row(0, 1), [120, 0, 0, 0, 100, 0]);
     assert_eq!(grid.levels.hit, 100);
     let written = grid.to_text().expect("text");
     assert!(written.contains("lane cajon 80\n"), "{written}");
@@ -565,7 +605,7 @@ fn ends_that_do_not_fit_a_grid_are_refused_by_name() {
 
     // A bar count asked for stands in for the song's end, but never cuts a hit.
     let grid = DrumGrid::from_song(&ending("4.1.0"), g8, &gm, None, Some(2)).expect("2 bars");
-    assert_eq!((grid.bars.len(), grid.end), (2, None));
+    assert_eq!((grid.bar_count(), grid.end), (2, None));
     let mut late = drum_song(&[("3.1.0", 36, 90)]);
     late.end = Some("4.1.0".parse().expect("position"));
     let err = DrumGrid::from_song(&late, g8, &gm, None, Some(2))
@@ -579,9 +619,9 @@ fn ends_that_do_not_fit_a_grid_are_refused_by_name() {
     // An end that fits: three bars from a hit in bar 1, then an end inside bar 2, which
     // a bar count of 2 keeps.
     let grid = DrumGrid::from_song(&ending("4.1.0"), g8, &gm, None, None).expect("fits");
-    assert_eq!((grid.bars.len(), grid.end), (3, None));
+    assert_eq!((grid.bar_count(), grid.end), (3, None));
     let grid = DrumGrid::from_song(&ending("2.2.0"), g8, &gm, None, None).expect("fits");
-    assert_eq!(grid.bars.len(), 2);
+    assert_eq!(grid.bar_count(), 2);
     assert_eq!(grid.end.map(|e| e.to_string()).as_deref(), Some("2.2.0"));
     assert_eq!(
         DrumGrid::from_song(&ending("2.2.0"), g8, &gm, None, Some(2)).expect("fits"),
@@ -603,9 +643,11 @@ fn a_rendered_grid_states_its_end() {
     let mut grid = DrumGrid::from_text(&text).expect("parse");
     let end = |g: &DrumGrid| g.to_song().expect("song").end.map(|e| e.to_string());
     assert_eq!(end(&grid).as_deref(), Some("3.1.0"));
-    for row in &mut grid.bars[1].vel {
+    let mut bars = bars_of(&grid);
+    for row in &mut bars[1] {
         row.fill(0);
     }
+    set_bars(&mut grid, &bars);
     assert_eq!(
         end(&grid).as_deref(),
         Some("3.1.0"),
@@ -923,4 +965,64 @@ fn a_patch_changes_what_it_sets_and_refuses_what_breaks_the_map() {
         ])
         .expect("both moved");
     assert_eq!(moved.by_key(35).map(|l| l.name.as_str()), Some("kick"));
+}
+
+/// A drum-grid document whose `vel` does not match its shape, its lanes or its bars is
+/// refused, naming what disagrees.
+#[test]
+fn a_mismatched_tensor_is_refused_by_name() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../samples/groove.drums"
+    ))
+    .expect("the sample");
+    let grid = DrumGrid::from_text(&text).expect("parse");
+    let doc = Document::new(Tool::new("duet", "test"), grid)
+        .write()
+        .expect("written");
+    let good: serde_json::Value = serde_json::from_str(&doc).expect("json");
+    let refused = |change: &dyn Fn(&mut serde_json::Value), says: &[&str]| {
+        let mut doc = good.clone();
+        change(&mut doc);
+        let err = Document::<DrumGrid>::read(&doc.to_string())
+            .expect_err("refused")
+            .to_string();
+        for want in says {
+            assert!(err.contains(want), "{err}\nshould say: {want}");
+        }
+    };
+    let (lanes, steps) = (5, 32);
+    refused(
+        &|d| {
+            d["body"]["vel"]["data"].as_array_mut().unwrap().pop();
+        },
+        &[
+            "vel:",
+            &format!(
+                "shape [{lanes}, {steps}] holds {} numbers, but data has {}",
+                lanes * steps,
+                lanes * steps - 1
+            ),
+        ],
+    );
+    refused(
+        &|d| d["body"]["vel"]["dtype"] = "i16".into(),
+        &["vel:", "its dtype is i16, but this tensor holds u8"],
+    );
+    refused(
+        &|d| d["body"]["vel"]["shape"] = serde_json::json!([lanes * steps]),
+        &["vel:", "a column is a plain array"],
+    );
+    refused(
+        &|d| d["body"]["vel"]["shape"] = serde_json::json!([steps, lanes]),
+        &["vel has shape [32, 5]", "need [5, 32]"],
+    );
+    refused(
+        &|d| d["body"]["bar_steps"] = serde_json::json!([16, 8, 8]),
+        &["bar 2 says 8 steps", "needs 16"],
+    );
+    refused(
+        &|d| d["body"]["bars"] = serde_json::json!([]),
+        &["unknown field `bars`"],
+    );
 }

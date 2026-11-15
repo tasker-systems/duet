@@ -41,7 +41,7 @@ use std::fmt::Write as _;
 use duet_core::{Grid, Song};
 
 use crate::error::{Error, Result};
-use crate::grid::{Bar, BarShape, DrumGrid, Lane, Levels};
+use crate::grid::{BarShape, DrumGrid, Lane, Levels};
 use crate::lanes::{LaneMap, valid_lane_name};
 
 const HEADER_COMMENT: &str =
@@ -75,7 +75,7 @@ struct Block {
 /// Where the reader is: in the header, or in a block with the header settled.
 enum State<'a> {
     Header(Header<'a>),
-    Body(Frame, Block),
+    Body(Box<Frame>, Block),
 }
 
 /// What the header knows once the first block starts.
@@ -84,6 +84,10 @@ struct Frame {
     map: LaneMap,
     time: duet_core::TimeMap,
     step: u64,
+    /// Each bar's steps so far.
+    bar_steps: Vec<u32>,
+    /// Each lane's velocities so far, over every bar read.
+    rows: Vec<Vec<u8>>,
 }
 
 fn words(line: &str) -> Vec<&str> {
@@ -195,6 +199,8 @@ impl Header<'_> {
             map,
             time,
             step,
+            bar_steps: Vec::new(),
+            rows: Vec::new(),
         })
     }
 }
@@ -223,7 +229,7 @@ fn parse_block_header(inner: &str) -> Result<(u32, u32)> {
 
 impl Frame {
     fn open(&self, line: usize, first: u32, last: u32) -> Result<Block> {
-        let expected = self.grid.bars.len() as u32 + 1;
+        let expected = self.bar_steps.len() as u32 + 1;
         if first != expected {
             return Err(Error::invalid(format!(
                 "this block starts at bar {first}, but bar {expected} comes next; blocks cover \
@@ -324,6 +330,7 @@ impl Frame {
         };
         if block.first == 1 {
             self.grid.lanes = block.lanes;
+            self.rows = vec![Vec::new(); self.grid.lanes.len()];
         } else if block.lanes != self.grid.lanes {
             return Err(Error::parse(
                 block.line,
@@ -336,11 +343,10 @@ impl Frame {
             ));
         }
         for (i, shape) in block.shapes.iter().enumerate() {
-            self.grid.bars.push(Bar {
-                bar: block.first + i as u32,
-                steps: shape.steps,
-                vel: block.rows.iter().map(|r| r[i].clone()).collect(),
-            });
+            self.bar_steps.push(shape.steps);
+            for (row, block_row) in self.rows.iter_mut().zip(&block.rows) {
+                row.extend_from_slice(&block_row[i]);
+            }
         }
         Ok(())
     }
@@ -382,7 +388,7 @@ impl DrumGrid {
             if let Some(inner) = line.strip_prefix('[') {
                 let (first, last) = parse_block_header(inner).map_err(at)?;
                 let frame = match state {
-                    State::Header(h) => h.frame().map_err(at)?,
+                    State::Header(h) => Box::new(h.frame().map_err(at)?),
                     State::Body(mut f, done) => {
                         f.close(done)?;
                         f
@@ -412,10 +418,11 @@ impl DrumGrid {
             State::Header(h) => h.frame()?,
             State::Body(mut f, done) => {
                 f.close(done)?;
-                f
+                *f
             }
         };
         let mut grid = frame.grid;
+        grid.set_matrix(frame.bar_steps, frame.rows)?;
         grid.check()?;
         grid.canonical_end()?;
         Ok(grid)
@@ -470,18 +477,17 @@ impl DrumGrid {
         let (Ok(time), Ok(step)) = (self.time_map(), self.step_ticks()) else {
             return Ok(());
         };
-        let shapes: Vec<BarShape> = self
-            .bars
-            .iter()
-            .filter_map(|b| self.bar_shape(&time, step, b.bar).ok())
+        let shapes: Vec<BarShape> = (1..=self.bar_count())
+            .filter_map(|b| self.bar_shape(&time, step, b).ok())
             .collect();
         let width = self.lanes.iter().map(|l| l.name.len()).max().unwrap_or(1);
 
         let mut start = 0;
-        while start < self.bars.len() {
+        let bars = shapes.len();
+        while start < bars {
             let mut end = start + 1;
             let mut steps = shapes[start].steps;
-            while end < self.bars.len()
+            while end < bars
                 && end - start < BLOCK_BARS
                 && steps + shapes[end].steps <= BLOCK_STEPS
                 && shapes[end].sig == shapes[start].sig
@@ -503,8 +509,8 @@ impl DrumGrid {
             writeln!(out, "{:<width$}   {}", "#", counts.join("   "))?;
             for (i, lane) in self.lanes.iter().enumerate() {
                 write!(out, "{:<width$} |", lane.name)?;
-                for bar in &self.bars[start..end] {
-                    for v in &bar.vel[i] {
+                for bar in start + 1..=end {
+                    for v in self.bar_row(i, bar as u32) {
                         write!(out, " {}", self.levels.cell(*v).unwrap_or('?'))?;
                     }
                     write!(out, " |")?;

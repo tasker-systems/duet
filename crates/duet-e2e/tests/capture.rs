@@ -333,12 +333,7 @@ fn rhythm_without_a_lane_is_beatboxed() {
     let wav = take(&dir, "beat.wav", &kick_and_hat());
     let count = |grid: &DrumGrid, lane: &str| -> usize {
         let row = grid.lanes.iter().position(|l| l.name == lane);
-        row.map_or(0, |i| {
-            grid.bars
-                .iter()
-                .map(|b| b.vel[i].iter().filter(|v| **v > 0).count())
-                .sum()
-        })
+        row.map_or(0, |i| grid.row(i).iter().filter(|v| **v > 0).count())
     };
 
     let out = capture(
@@ -920,12 +915,7 @@ fn hits_no_grid_parts_are_merged_and_stated() {
         "{drums}"
     );
     let grid = DrumGrid::from_text(&drums).expect(".drums parses");
-    let hits: usize = grid
-        .bars
-        .iter()
-        .flat_map(|b| b.vel.iter().flatten())
-        .filter(|v| **v > 0)
-        .count();
+    let hits = grid.vel.data().iter().filter(|v| **v > 0).count();
     assert_eq!(hits, 2, "{drums}");
     let notes = Song::from_text(&read(&dir.join("flam.notes"))).expect("parses");
     assert_eq!(notes.tracks[0].notes.len(), 3, "the .notes lost a hit");
