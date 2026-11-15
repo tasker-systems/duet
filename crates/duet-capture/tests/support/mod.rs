@@ -186,6 +186,7 @@ fn capture(take: &Take, path: &Path) -> Result<Song, String> {
 }
 
 fn analyse(path: &Path, melody: bool, mode: LaneMode) -> Result<Vec<Event>, String> {
+    // The source's errors are duet-capture's, the stages' duet-dsp's: both become their message.
     let fail = |e: duet_capture::Error| e.to_string();
     let mut source = FileSource::open(path).map_err(fail)?;
     let mut prepare = Prepare::new(ANALYSIS_RATE);
@@ -196,16 +197,16 @@ fn analyse(path: &Path, melody: bool, mode: LaneMode) -> Result<Vec<Event>, Stri
     };
     let (mut mono, mut events) = (Vec::new(), Vec::new());
     while let Some(chunk) = source.next_chunk().map_err(fail)? {
-        prepare.push(chunk, &mut mono).map_err(fail)?;
+        prepare.push(chunk, &mut mono).map_err(|e| fail(e.into()))?;
         for m in mono.drain(..) {
-            stage.push(m, &mut events).map_err(fail)?;
+            stage.push(m, &mut events).map_err(|e| fail(e.into()))?;
         }
     }
-    prepare.finish(&mut mono).map_err(fail)?;
+    prepare.finish(&mut mono).map_err(|e| fail(e.into()))?;
     for m in mono.drain(..) {
-        stage.push(m, &mut events).map_err(fail)?;
+        stage.push(m, &mut events).map_err(|e| fail(e.into()))?;
     }
-    stage.finish(&mut events).map_err(fail)?;
+    stage.finish(&mut events).map_err(|e| fail(e.into()))?;
     Ok(events)
 }
 

@@ -1,7 +1,7 @@
 [package]
 name = "duet-capture"
 version = "0.2.0"
-description = "duet capture: audio in, analysis events out, as a stream of stages that settle their output as they go."
+description = "duet capture: audio files in, a Song out. Decodes takes through Symphonia, runs duet-dsp's analysis and assembles the events."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -15,16 +15,15 @@ include = ["src/**", "Cargo.toml"]
 workspace = true
 
 [dependencies]
-audioadapter-buffers = "5.2.0"
 duet-abc = { path = "../duet-abc", version = "0.2.0" }
 duet-core = { path = "../duet-core", version = "0.2.0" }
 duet-drums = { path = "../duet-drums", version = "0.2.0" }
-rubato = "5.1.0"
-rustfft = "6.4.1"
+duet-dsp = { path = "../duet-dsp", version = "0.2.0" }
 serde = { version = "1", features = ["derive"] }
 symphonia = { version = "0.6.1", default-features = false, features = ["aac", "flac", "id3v1", "id3v2", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 thiserror = "2"
 
 [dev-dependencies]
+rustfft = "6.4.1"
 serde_json = "1"
 toml = "1"

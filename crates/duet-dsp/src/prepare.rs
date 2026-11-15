@@ -23,8 +23,8 @@ const RESAMPLE_CHUNK: usize = 1024;
 /// Downmixes to one channel and resamples to one rate, so every stage after it can assume both.
 ///
 /// Its output is one unbroken stream from the first chunk's start frame. A gap between input
-/// chunks, where a [`Source`](crate::Source) left out a damaged packet, is filled with
-/// silence of the gap's length, so everything after it keeps its true time. A gap longer than
+/// chunks, where a source left out a damaged packet, is filled with silence of the gap's
+/// length, so everything after it keeps its true time. A gap longer than
 /// [`MAX_GAP_SECS`] is refused, and so is a chunk that starts before the end of the last one.
 ///
 /// The input rate is the first chunk's, and a later chunk at another rate is refused.

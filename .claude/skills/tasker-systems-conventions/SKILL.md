@@ -100,16 +100,16 @@ Statuses for **duet**:
 | PY-TYPE-1 | n/a: no Python in this repository (the projected tool is the baseline's) |
 | PY-TYPE-2 | n/a: no Python in this repository (the projected tool is the baseline's) |
 | PY-VER-1 | n/a: no Python in this repository (the projected tool is the baseline's) |
-| RUST-API-1 | convention: duet-core, duet-midi, duet-drums, duet-abc, duet-play and duet-capture are library crates, duet-cli is the application, and duet-e2e is an unpublished test crate; review applies the API rules to the libraries' public API |
-| RUST-API-2 | convention: the libraries are published to crates.io; the open sets are #[non_exhaustive] (the six Error enums, Control, Song, Track, Note, DrumGrid, LaneDef, duet-capture's Event, HitLane, LaneMode, Timing, BeatTempo, Kind, Captured, Analysis, QuantizeOffset, Quantized, Merge and KeyEstimate, and duet-abc's Refusal, Notice, Reading, ReadOptions, WriteOptions, Dynamics) and the closed ones are exhaustive (duet-capture's Chunk and Mono, deliberately, so other crates can build them for their own sources and stages; duet-capture's Origin, Given and LeadIn, deliberately, since a value is given or estimated, the command line builds a Given, and a lead-in is none, a pickup or rest bars; Position, TimeSig, Key, Mode, the three *Change events, Lane, Bar, Levels, Span, and duet-play's Event); Book, Tune, and duet-play's Message, Schedule and Renderer have private fields; a new public type is judged in review |
+| RUST-API-1 | convention: duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-dsp and duet-capture are library crates, duet-cli is the application, and duet-e2e is an unpublished test crate; review applies the API rules to the libraries' public API |
+| RUST-API-2 | convention: the libraries are published to crates.io; the open sets are #[non_exhaustive] (the seven Error enums, Control, Song, Track, Note, DrumGrid, LaneDef, duet-dsp's Event, HitLane, LaneMode, PitchFrame, Timing, BeatTempo and KeyEstimate, duet-capture's Kind, Captured, Analysis, QuantizeOffset, Quantized and Merge, and duet-abc's Refusal, Notice, Reading, ReadOptions, WriteOptions, Dynamics) and the closed ones are exhaustive (duet-dsp's Chunk and Mono, deliberately, so other crates can build them for their own sources and stages; duet-dsp's Origin and Given and duet-capture's LeadIn, deliberately, since a value is given or estimated, the command line builds a Given, and a lead-in is none, a pickup or rest bars; Position, TimeSig, Key, Mode, the three *Change events, Lane, Bar, Levels, Span, and duet-play's Event); Book, Tune, and duet-play's Message, Schedule and Renderer have private fields; a new public type is judged in review |
 | RUST-API-3 | partial: should_implement_trait and derivable_impls gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
 | RUST-API-4 | partial: ptr_arg and borrowed_box gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
 | RUST-API-5 | partial: new_without_default and wrong_self_convention gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
 | RUST-API-6 | uncovered: no #[must_use] audit, and must_use_candidate is not on |
 | RUST-DOC-1 | uncovered: missing_docs is not on; the public API is documented by habit |
-| RUST-ERR-1 | practiced: the Error types of duet-core, duet-midi, duet-drums, duet-abc, duet-play and duet-capture derive thiserror::Error behind Result aliases, and duet-cli returns anyhow::Result with context on file errors; nothing checks that a new error type does the same |
+| RUST-ERR-1 | practiced: the Error types of duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-dsp and duet-capture derive thiserror::Error behind Result aliases, and duet-cli returns anyhow::Result with context on file errors; nothing checks that a new error type does the same |
 | RUST-ERR-2 | convention: judged in review |
-| RUST-ERR-3 | convention: judged in review; the 13 expect calls in library code each state the invariant they rely on: five in duet-core's time map, two in duet-play's tempo segments, two in duet-drums (the built-in gm map, a grid's lanes) and four in duet-capture (the pitch smoothing, and three in timing); duet-e2e's harness is test code |
+| RUST-ERR-3 | convention: judged in review; the 13 expect calls in library code each state the invariant they rely on: five in duet-core's time map, two in duet-play's tempo segments, two in duet-drums (the built-in gm map, a grid's lanes) and four in duet-dsp (the pitch smoothing, and three in timing); duet-e2e's harness is test code |
 | RUST-ERR-4 | practiced: no unwrap outside tests; unwrap_used is held off in the table, so nothing would catch a new one |
 | RUST-FMT-1 | gated: .github/workflows/ci.yml#gate |
 | RUST-INIT-1 | convention: no ctor-style crates; judged in review |
@@ -129,7 +129,7 @@ Statuses for **duet**:
 | RUST-TC-3 | gated: .github/workflows/ci.yml#check |
 | RUST-TYPE-1 | gated: .github/workflows/ci.yml#check |
 | RUST-TYPE-2 | convention: judged in review |
-| RUST-UNSAFE-1 | partial: every crate root (duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-capture, duet-cli, duet-e2e) declares #![forbid(unsafe_code)] and the table denies unsafe_code; nothing checks that a new crate root declares the forbid |
+| RUST-UNSAFE-1 | partial: every crate root (duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-dsp, duet-capture, duet-cli, duet-e2e) declares #![forbid(unsafe_code)] and the table denies unsafe_code; nothing checks that a new crate root declares the forbid |
 | RUST-UNSAFE-2 | n/a: no unsafe code and no registered exceptions |
 | RUST-UNSAFE-3 | n/a: no FFI |
 | SC-ADV-1 | gated: .github/workflows/ci.yml#gate |

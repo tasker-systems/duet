@@ -10,12 +10,10 @@ use duet_abc::pickup_meter_for;
 use duet_core::time::beats_from_ticks;
 use duet_core::{Grid, Key, Note, Pitch, Position, Song, TimeChange, TimeSig, Track};
 use duet_drums::LaneMap;
+use duet_dsp::{BeatTempo, Event, HitLane, KeyEstimate, Timing, beat_series, estimate_key};
 use serde::Serialize;
 
 use crate::error::{Error, Result};
-use crate::event::{Event, HitLane};
-use crate::key::{KeyEstimate, estimate_key};
-use crate::timing::{BeatTempo, Timing, beat_series};
 
 /// The velocity of a note or hit of no strength. Velocity rises in a straight line from it to
 /// 127, the velocity of the take's strongest note or hit, so no note is all but silent however
@@ -303,6 +301,13 @@ fn hits(events: &[Event], lanes: &LaneMap, asked: Option<&str>) -> Result<Vec<Pl
                     "a hit is on the asked lane, but no lane was asked for".into(),
                 ));
             }
+            // HitLane is non_exhaustive now that it is duet-dsp's: a lane added there is
+            // refused by name until assembly knows its key.
+            (None, other) => {
+                return Err(Error::Invalid(format!(
+                    "a hit is on the {other:?} lane, which assembly has no key for"
+                )));
+            }
         };
         hits.push(Played {
             start: frame,
@@ -403,10 +408,8 @@ pub fn quantize_offsets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::onset::Onsets;
-    use crate::stage::{Mono, Stage};
     use crate::synth;
-    use crate::timing::{Given, Origin, estimate};
+    use duet_dsp::{Given, Mono, Onsets, Origin, Stage, estimate};
 
     const RATE: u32 = 22_050;
 
@@ -424,14 +427,26 @@ mod tests {
     }
 
     /// A timing given in full: `bpm`, `meter`, and the downbeat `downbeat` seconds in.
+    ///
+    /// `Timing` is duet-dsp's and non-exhaustive, so it is built the way the command line
+    /// builds one: everything given, which `estimate` uses exactly and needs no onsets for.
     fn given(bpm: f64, meter_text: &str, downbeat: f64) -> Timing {
-        Timing {
-            tempo_bpm: Origin::Given(bpm),
-            tempo_alternatives: None,
-            beat_period_frames: 60.0 * f64::from(RATE) / bpm,
-            meter: Origin::Given(meter(meter_text)),
-            downbeat_frame: Origin::Given(frame(downbeat)),
-        }
+        let timing = estimate(
+            &[],
+            RATE,
+            &Given {
+                tempo_bpm: Some(bpm),
+                meter: Some(meter(meter_text)),
+                downbeat_secs: Some(downbeat),
+            },
+        )
+        .unwrap();
+        assert_eq!(timing.tempo_bpm, Origin::Given(bpm));
+        assert_eq!(timing.tempo_alternatives, None);
+        assert_eq!(timing.beat_period_frames, 60.0 * f64::from(RATE) / bpm);
+        assert_eq!(timing.meter, Origin::Given(meter(meter_text)));
+        assert_eq!(timing.downbeat_frame, Origin::Given(frame(downbeat)));
+        timing
     }
 
     /// A note from `start` for `secs` seconds.
@@ -828,7 +843,7 @@ mod tests {
         assert_eq!(captured.timing, timing);
         assert_eq!(
             analysis.beats,
-            crate::timing::beat_series(&events, RATE, &timing)
+            duet_dsp::beat_series(&events, RATE, &timing)
         );
         assert!(!analysis.beats.is_empty());
         assert!(analysis.offsets.is_empty());

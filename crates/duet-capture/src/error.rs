@@ -1,10 +1,13 @@
 use std::path::PathBuf;
 
 /// Everything that can go wrong capturing a take.
+///
+/// What the analysis itself refuses is a [`duet_dsp::Error`], carried whole as
+/// [`Error::Analysis`] with its message unchanged.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// A source, a stage or a conversion met input it cannot work with.
+    /// A source or a conversion met input it cannot work with.
     #[error("{0}")]
     Invalid(String),
 
@@ -17,22 +20,17 @@ pub enum Error {
         codec: String,
     },
 
-    /// The take has too few onsets to estimate a tempo from.
-    #[error(
-        "found {found} onset{}, too few to estimate a tempo; give one with --tempo",
-        if *found == 1 { "" } else { "s" }
-    )]
-    TooFewOnsets {
-        /// How many onsets the take has.
-        found: usize,
-    },
-
     /// The take has nothing to assemble: a melody with no notes, or a rhythm with no hits.
     #[error("no {what} found")]
     NothingFound {
         /// What was looked for: `notes` or `hits`.
         what: &'static str,
     },
+
+    /// The analysis refused: a stage met input it cannot work with, or the take has too few
+    /// onsets to estimate a tempo from.
+    #[error(transparent)]
+    Analysis(#[from] duet_dsp::Error),
 }
 
 impl From<duet_core::Error> for Error {

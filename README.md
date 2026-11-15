@@ -19,6 +19,8 @@ The workspace is split by domain:
 | `duet-drums` | the drum grid, its lane maps, and grid ⇄ `Song` |
 | `duet-abc` | a subset of ABC 2.1 ⇄ `Song`, and the corpus that checks it against abc2midi |
 | `duet-play` | a `Song` as timed MIDI events, and a SoundFont synth that renders them |
+| `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
+| `duet-capture` | decoding a take, and assembling `duet-dsp`'s events into a `Song` and score |
 | `duet-cli` | the `duet` binary |
 
 ## How the formats fit together
@@ -667,8 +669,10 @@ per quarter, and check every kept event survives MIDI to text to MIDI unchanged.
 `crates/duet-drums/tests` generate drum grids in several meters (with a change of meter),
 grids and resolutions, with any velocity, ending in empty bars or inside a bar, and check
 grid → song → grid, through MIDI, JSON and TOML, and the text form all round-trip unchanged.
-`crates/duet-capture` is the audio-to-events library behind `duet capture`; its tests decode
-a one-second tone in every format it reads and run the reference corpus through the pipeline.
+`crates/duet-dsp` is the analysis behind `duet capture`, tested on synthesized signals and on
+a committed pYIN reading. `crates/duet-capture` decodes and assembles around it; its tests
+decode a one-second tone in every format it reads and run the reference corpus through the
+pipeline.
 `crates/duet-abc/corpus` holds our own ABC tunes, MIT, one per construct the subset reads
 plus six whole tunes, each with committed recordings of abc2midi's reading of it and of the
 ABC our writer makes from it. CI compares our reading with those recordings
