@@ -54,6 +54,8 @@ FileSource ─▶ Prepare ─Mono─▶ Performance ──frames + onsets──�
 
 ## 1. Layer 1: what it holds, and where it is written
 
+> **File name (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.performance.jsonl` becomes `<stem>.performance.duet.jsonl`, a `performance` stream: its header is the envelope's `head`, and each later line is a record.
+
 **Ruled (owner, 2026-11-15): its own file, `<stem>.performance.jsonl`.** The rest of this answer is proposed.
 - **Contents, per frame:**
   - `pitch`: the smoothed fundamental, or `null` when the track says unvoiced.

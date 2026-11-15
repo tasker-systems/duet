@@ -171,6 +171,8 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
 
 ### The analysis is kept, not thrown away (owner, 2026-11-14)
 
+> **File name (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.capture.json` becomes `<stem>.capture.duet`, a `capture-analysis` document.
+
 Every stage's settled output can be stored and read, so the owner and Claude can reason about a capture with numbers.
 - **The event vocabulary and `Timing` serialize** with serde. It's the same payload the MCP stream will send later.
 - **Capture writes `<stem>.capture.json`** beside the `.notes` and the score. It holds:
