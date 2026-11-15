@@ -250,6 +250,30 @@ ReadNote {
 > - **`c` = 4 nats (`NOTE_COST`), shared with the loss's notes term.** It is the loss's own derivation (the shortest note's 4 frames times `w`) and close to pYIN's 4.6. It was set by sweeping `c` from 1 to 12 over the witnesses and the synthetic takes, never by the residual. Every take reads its expected number of notes for `c` from 2 to 8. Below 2, staying in a note costs `ln(1 − e^−c)` a frame (0.46 nats at `c` = 1), and every take shatters. At 12, the semitone step and a legato tune merge. **The owner's takes were not available to this build:** `c` has yet to be checked on them.
 > - **Where it is worse than the rules:** it leaves the last, weakly voiced frame of a decaying note unread (one unread frame a note, or two between attacked notes). A glide slower than about 8 semitones a second (15 at `c/2`) reads as a note on every key it passes, where the rules read a few fewer.
 
+> **Amended (2026-11-15, the listening findings' first task): sung frames are never cheaper to leave unread than to read, and the decoder and the loss price the same events the same way.** The owner's takes showed the HMM leaving 45–55 % of the voiced frames unread, as attack runs ending in silence, and the loss scoring that better, because `w` = 1 sat below a read frame's typical `r²/σ²`. What changes:
+> - **Attack → silent is forbidden, and the take never ends in an attack** (the task's option b, over a: pricing an attack run that never holds "as unread" needs the decoder to know, at the run's first frame, whether it will hold, which is no Markov state). With the transition gone, the only way to leave voiced frames out is the silent state, and silent already prices each frame by its voicing, `−ln(1 − v)`. So an attack that never holds is priced as unread singing, frame by frame, which is what option a asks; b gets it with one transition fewer and no new state.
+> - **One price per frame, defined once** (`residual.rs`: `sounding_cost`, `silent_cost`, `held_cost`, `unread_cost`), and the decoder scores frames by it. The loss takes each frame's price relative to the cheapest the frame could be, so every term stays at least zero, and becomes four terms, in nats:
+>   - **pitch:** `d²/2σ²` a held frame (σ = 50 cents, the decoder's `STABLE_SIGMA_SEMITONES`), and a flat `ATTACK_COST` a slide frame. It was `r²/σ²`, twice the decoder's.
+>   - **voicing (new):** for each frame a note covers, what sounding it costs beyond leaving it out: `max(0, ln((1 − v)/v) + ln(σ√2π))`, so a breath read as a note costs what its voicing says it is not; and `−ln DROPOUT` for a frame the pitch track decoded unvoiced inside a note, as the decoder charges.
+>   - **unread:** `max(0, ln(v/(1 − v)) − ln(σ√2π))` for each voiced frame no note covers, not 1. That is about 2 nats at v = 0.9 and 4.4 at the floor's 0.99, and nothing below v ≈ 0.56, so breath and consonants stay free to leave out.
+>   - **notes:** `c` a note, unchanged.
+> - **What "never cheaper" means exactly:** a frame voiced above about 0.67 costs more unread than read anywhere within half a key, held or as slide. A frame voiced below about 0.56 costs more read than unread. Between the two, the voicing itself is in doubt, and the decoder and the loss weigh pitch against it in the same way.
+> - **Slide frames are measured as slide.** The frames a note covers before its `held_from` cost the flat `ATTACK_COST`, as the decoder's attack does, and not `d²/2σ²` against the key they arrive at. They stay the note's, by the #28 ruling. The reading's own `held_from` says which frames are slide, not the residual's measured scoop: for the HMM, that is exactly its attack, so the decoder and the loss agree frame by frame. The residual's re-found held span would call a dip's first frames held, since they start on the pitch. The guard against hiding pitch as slide is that a slide frame still costs `ATTACK_COST` and gives no key. Neither reader moves `held_from` to lower the loss: the HMM's is its first stable frame, and the rules' is where the pitch arrives and holds for 50 ms.
+> - **Where the decoder and the loss still differ** (named on `Loss`):
+>   - onsets: the decoder leaves a note at an onset for `−ln 0.9` rather than `c`. The loss has no onsets, so any reading of a performance can be scored.
+>   - staying held: the decoder charges `−ln(1 − e^−c)`, 0.018 a frame at `c` = 4. The loss leaves it out.
+>   - dropped notes: a decoded note shorter than the shortest note, or less voiced than the rules allow, is dropped from the reading as the rules drop it, and its frames are unread in the loss.
+>   - the rules' `held_from` is theirs.
+> - **`c` stays 4,** though its derivation (4 frames × `w` = 1) no longer holds: an unread frame at v = 0.9 now costs about 2, so 4 is two such frames' worth. It is re-judged by ear through `duet-listen`, after this change, not by note counts. On the synthetic takes, every take reads its expected notes for `c` from 2 to 8 (and to 12, but for the legato tune), as before. The HMM still leaves the last, weakly voiced frames of a decaying note unread (one to seven a take), and their unread cost is nothing.
+> - **Witnesses:**
+>   - a note held 45 cents off its key, bounded by weakly voiced consonants, is read;
+>   - a short note between two breaths is read: 0.08 s on its key, and 0.15 s held 33 cents flat. 0.15 s on its key was already read before this change, since on its key nine frames pay a note's cost;
+>   - a breath is left unread;
+>   - dropping a held note raises the loss, on its key, 45 cents off, or scooped;
+>   - a breath is cheaper left out than read;
+>   - dropping any note the HMM reads, on every synthetic take, raises the loss.
+> - **Format:** `capture-analysis` 1.4, additive in shape: `loss.voicing`, taken as 0 when absent. `pitch` and `unread` are priced anew, so a 1.3 loss and a 1.4 loss are not compared term by term.
+
 ## 5. Transformations
 
 **Proposed.** A transformation maps a `Reading` (with its residual) to a `Reading`. It never touches the performance file.

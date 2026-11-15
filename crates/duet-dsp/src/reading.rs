@@ -365,7 +365,7 @@ pub struct Reading {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reader: Option<Reader>,
     pub notes: Vec<ReadNote>,
-    /// What the notes leave of the take as a whole, with the loss as its three terms. Added in
+    /// What the notes leave of the take as a whole, with the loss as its terms. Added in
     /// `capture-analysis` 1.2; absent before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub residual: Option<TakeResidual>,

@@ -589,8 +589,12 @@ cannot be, that is reported after them, and they stay:
   performance: per note its centre, drift (cents a second), vibrato (rate and depth), the slide
   in and the fall off (cents and milliseconds) and the rest; per take the centres' histogram
   and their slope over the take, the voiced frames read and unread, and the **loss** as its
-  three terms (pitch, unread, notes), never as one number; and since 1.3 its `reader`, which
-  reader chose the notes (`rules` or `hmm`) and the cost per note the loss counts.
+  terms (pitch, unread, notes), never as one number; since 1.3 its `reader`, which
+  reader chose the notes (`rules` or `hmm`) and the cost per note the loss counts; and since
+  1.4 the loss priced, in nats, as the note HMM decodes: a fourth term, `voicing` (what reading
+  frames costs that their voicing says are not sung), `unread` costing each frame left out by
+  its voicing (about 2 at 0.9, nothing for a breath), and `pitch` measuring a slide as slide,
+  not as though held on the key it arrives at.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -652,12 +656,15 @@ held note and holds somewhere new, or at an onset. The **note HMM** (`--reader h
 frame by frame, whether the voice is sliding into a key (attack), holding it (stable) or silent,
 by fixed-lag Viterbi a second behind. A note is a key's held frames with the slide into them; a
 note may follow another with no breath (legato), and a dip that leaves a pitch and comes back
-is two notes. Every note costs the same, `c` = 4 nats (the negative log probability of leaving a
+is two notes. A slide that never holds is no note, and its frames are left unread, which costs
+what leaving singing out costs by its voicing; so a short note, or one held far from its key,
+is read, while a breath is left out. Every note costs the same, `c` = 4 nats (the negative log probability of leaving a
 held note): raising it merges notes, lowering it splits them. Vibrato of half a semitone either
 way with a slow drift stays one note at `c` and at `c/2`; a semitone step held 0.5 s is two.
 Known limits: a glide slower than about 8 semitones a second (15 at `c/2`) is read as a short
-note on each key it passes, where the rules read a few fewer; the HMM leaves the last, weakly voiced frame of a decaying note unread, where the rules
-read it.
+note on each key it passes, where the rules read a few fewer; the HMM leaves the last, weakly
+voiced frames of a decaying note unread, where the rules read them, and the loss charges
+nothing for them, since their voicing says they are not sung.
 
 **Rhythm.** Without `--lane`, each hit is sorted by sound into `kick`, `snare` or `hh` (a closed
 hat). With `--lane`, every hit goes to that lane. Known limit: a hit has one lane. A kick and a
