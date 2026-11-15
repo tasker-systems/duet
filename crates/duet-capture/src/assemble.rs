@@ -93,6 +93,10 @@ pub struct Analysis {
     pub key: Option<KeyEstimate>,
     /// The tempo from each beat to the next.
     pub beats: Vec<BeatTempo>,
+    /// The grid the score was quantized to, which `offsets` count steps of: the one asked for,
+    /// or the finer one it was refined to ([`quantize_apart`](crate::quantize_apart)).
+    /// Assembly leaves it `None`, since the grid is chosen later.
+    pub grid: Option<Grid>,
     /// How far quantizing moved each note. Assembly leaves it empty: the grid is chosen
     /// later, and [`quantize_offsets`] fills it once the song is quantized.
     pub offsets: Vec<QuantizeOffset>,
@@ -219,6 +223,7 @@ pub fn assemble(
         timing: timing.clone(),
         key: estimate,
         beats: beat_series(events, rate, timing),
+        grid: None,
         offsets: Vec::new(),
     };
     Ok(Captured {

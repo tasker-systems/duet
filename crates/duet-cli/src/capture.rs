@@ -3,7 +3,8 @@
 //!
 //! Every estimate is stated on standard error and as a comment in the `.notes` and the score
 //! ([`statement`]). Every refusal comes before anything is written, and nothing is
-//! overwritten.
+//! overwritten. Once the take is analysed, the performance (`.notes` and `.capture.json`) is
+//! written whatever becomes of the score, which is written, or reported as failed, after it.
 
 mod statement;
 
@@ -16,7 +17,8 @@ use clap::{Args, Subcommand};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
     ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Melody, Mono, Prepare,
-    Source, Stage, assemble, estimate, quantize_offsets,
+    Quantized, Source, Stage, assemble, estimate, merge_collisions, quantize_apart,
+    quantize_offsets,
 };
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 
@@ -55,10 +57,11 @@ pub struct TakeArgs {
     /// Where bar 1 starts, in seconds from the start of the recording.
     #[arg(long)]
     downbeat: Option<f64>,
-    /// The step the score is quantized to, such as 1/16 or 1/8t. The .notes is never
-    /// quantized.
-    #[arg(long, default_value = "1/16")]
-    grid: Grid,
+    /// The step the score is quantized to, such as 1/16 (the default) or 1/8t. Where two
+    /// notes, or two hits on one lane, would share a step, the step is halved, down to 1/64,
+    /// and what still shares one is merged; each is stated. The .notes is never quantized.
+    #[arg(long)]
+    grid: Option<Grid>,
     /// A rhythm's lane, such as hh or kick: every hit goes to it (a tapped take).
     #[arg(long)]
     lane: Option<String>,
@@ -81,6 +84,14 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
     };
     let key = flags(take, &args)?;
+    let grid = match args.grid {
+        Some(grid) => grid,
+        None => DEFAULT_GRID.parse()?,
+    };
+    // Refused before anything is read, like every refusal: a score on this grid could not be
+    // quantized at all.
+    grid.step_ticks(Song::default().ticks_per_quarter)
+        .with_context(|| format!("--grid {grid}"))?;
     let outputs = Outputs::new(&args.input, args.output.as_deref(), take)?;
 
     let events = analyse(&args.input, take, args.lane.is_some())?;
@@ -111,13 +122,20 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     };
     let mut captured = assemble(&events, ANALYSIS_RATE, &timing, key, &kind)?;
 
-    let quantized = captured.song.quantized(args.grid)?;
+    // The score's grid is settled before the analysis is written, since the analysis gives
+    // each note's quantize offset in its steps. A failure here is the score's, reported once
+    // the performance is written.
     let ms_per_quarter = 1000.0 * timing.beat_period_frames / f64::from(ANALYSIS_RATE);
-    captured.analysis.offsets =
-        quantize_offsets(&captured.song, &quantized, args.grid, ms_per_quarter)?;
-    let meter = *timing.meter.value();
-    let trimmed = without_empty_lead_in(&quantized, captured.downbeat_tick, meter)?;
+    let quantized = quantize_apart(&captured.song, grid, &kind).and_then(|q| {
+        let offsets = quantize_offsets(&captured.song, &q.song, q.grid, ms_per_quarter)?;
+        Ok((q, offsets))
+    });
+    if let Ok((q, offsets)) = &quantized {
+        captured.analysis.grid = Some(q.grid);
+        captured.analysis.offsets.clone_from(offsets);
+    }
 
+    let meter = *timing.meter.value();
     let mut said = statement::timing(&timing, ANALYSIS_RATE);
     said.extend(statement::key(captured.analysis.key.as_ref()));
     let lead_in = statement::lead_in(
@@ -127,66 +145,150 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         captured.song.ticks_per_quarter,
     );
     let notes_said = [said.clone(), vec![lead_in.clone()]].concat();
-    let mut score_said = said.clone();
-    let mut stderr_said = notes_said.clone();
-    if trimmed.is_some() {
-        score_said.push(statement::LEAD_IN_REMOVED.to_owned());
-        stderr_said.push(statement::LEAD_IN_REMOVED.to_owned());
-    } else {
-        score_said.push(lead_in);
-    }
-    let score = trimmed.as_ref().unwrap_or(&quantized);
-
     let notes = commented(
         &with_end(&captured.song, config.end)?.to_text(),
         "#",
         &notes_said,
     );
-    let score_text = match take {
-        Take::Melody => {
-            let options = WriteOptions::default().with_dynamics(Dynamics::Nearest);
-            let abc = duet_abc::write(&with_end(score, config.end)?, &options)?;
-            // The ABC writer states the snap in the file itself.
-            let moved = off_level_velocities(score);
-            if moved > 0 {
-                stderr_said.push(statement::snapped(
-                    moved,
-                    "the nearest dynamic's level in the .abc",
-                ));
-            }
-            commented(&abc, "%", &score_said)
-        }
-        Take::Rhythm => {
-            let options = ReadOptions {
-                grid: args.grid,
-                track: None,
-                bars: None,
-                snap_levels: false,
-            };
-            // Read with every velocity kept (the exact form's rule), then snapped here, so the
-            // moves can be counted as `duet drums snap` counts them.
-            let exact = grid_of_song(score, &options, GridForm::Json, config)?;
-            let grid = exact.snapped_to_levels();
-            let moved = moved_velocities(&exact, &grid);
-            if moved > 0 {
-                let snapped = statement::snapped(moved, "the levels of the .drums text (g, x, X)");
-                score_said.push(snapped.clone());
-                stderr_said.push(snapped);
-            }
-            commented(&grid.to_text()?, "#", &score_said)
-        }
-    };
     let mut analysis = serde_json::to_string_pretty(&captured.analysis)?;
     analysis.push('\n');
 
-    for line in &stderr_said {
+    // The performance is written whatever becomes of the score.
+    for line in &notes_said {
         eprintln!("{line}");
     }
-    write_all(&[
-        (&outputs.notes, &notes),
-        (&outputs.score, &score_text),
-        (&outputs.analysis, &analysis),
-    ])
+    write_all(&[(&outputs.notes, &notes), (&outputs.analysis, &analysis)])?;
+
+    let wrote = || {
+        format!(
+            "{} not written; {} and {} hold the performance",
+            outputs.score.display(),
+            outputs.notes.display(),
+            outputs.analysis.display()
+        )
+    };
+    let (quantized, _) = quantized.map_err(|e| anyhow::Error::from(e).context(wrote()))?;
+    let scored = Scoring {
+        take,
+        kind: &kind,
+        grid,
+        grid_given: args.grid.is_some(),
+        downbeat_tick: captured.downbeat_tick,
+        meter,
+        said,
+        lead_in,
+        config,
+    }
+    .score(quantized)
+    .with_context(wrote)?;
+    for line in &scored.stated {
+        eprintln!("{line}");
+    }
+    write_new(&outputs.score, &scored.text).with_context(wrote)
+}
+
+/// The grid a score is quantized to when no `--grid` is given.
+const DEFAULT_GRID: &str = "1/16";
+
+/// What a take's score is made from, besides the quantized song.
+struct Scoring<'a> {
+    take: Take,
+    kind: &'a Kind,
+    /// The grid asked for, and whether `--grid` asked for it.
+    grid: Grid,
+    grid_given: bool,
+    downbeat_tick: u64,
+    meter: TimeSig,
+    /// The estimates the performance states, which the score states too.
+    said: Vec<String>,
+    /// What the performance states about its lead-in.
+    lead_in: String,
+    config: &'a Config,
+}
+
+/// A score's text, and the lines it states beyond the performance's, for standard error.
+struct Scored {
+    text: String,
+    stated: Vec<String>,
+}
+
+impl Scoring<'_> {
+    /// The score of `quantized`: its empty lead-in removed, what still shares a step merged,
+    /// its velocities snapped, and each of those stated.
+    fn score(self, quantized: Quantized) -> Result<Scored> {
+        let mut stated = Vec::new();
+        if quantized.grid != self.grid {
+            stated.push(statement::refined(
+                self.grid,
+                self.grid_given,
+                quantized.grid,
+                self.take == Take::Rhythm,
+            ));
+        }
+        let trimmed = without_empty_lead_in(&quantized.song, self.downbeat_tick, self.meter)?;
+        if trimmed.is_some() {
+            stated.push(statement::LEAD_IN_REMOVED.to_owned());
+        }
+        let mut score = trimmed.unwrap_or(quantized.song);
+        for merge in merge_collisions(&mut score, self.kind)? {
+            stated.push(match self.take {
+                Take::Melody => statement::merged_notes(&merge),
+                Take::Rhythm => {
+                    let lane = self
+                        .config
+                        .lanes
+                        .by_key(merge.kept.pitch.midi())
+                        .map_or_else(
+                            || format!("key {}", merge.kept.pitch.midi()),
+                            |l| l.name.clone(),
+                        );
+                    statement::merged_hits(&merge, &lane)
+                }
+            });
+        }
+
+        let mut score_said = self.said;
+        if !stated.iter().any(|l| l == statement::LEAD_IN_REMOVED) {
+            score_said.push(self.lead_in);
+        }
+        score_said.extend(stated.iter().cloned());
+        let text = match self.take {
+            Take::Melody => {
+                let options = WriteOptions::default().with_dynamics(Dynamics::Nearest);
+                let abc = duet_abc::write(&with_end(&score, self.config.end)?, &options)?;
+                // The ABC writer states the snap in the file itself.
+                let moved = off_level_velocities(&score);
+                if moved > 0 {
+                    stated.push(statement::snapped(
+                        moved,
+                        "the nearest dynamic's level in the .abc",
+                    ));
+                }
+                commented(&abc, "%", &score_said)
+            }
+            Take::Rhythm => {
+                let options = ReadOptions {
+                    grid: quantized.grid,
+                    track: None,
+                    bars: None,
+                    snap_levels: false,
+                };
+                // Read with every velocity kept (the exact form's rule), then snapped here, so the
+                // moves can be counted as `duet drums snap` counts them.
+                let exact = grid_of_song(&score, &options, GridForm::Json, self.config)?;
+                let grid = exact.snapped_to_levels();
+                let moved = moved_velocities(&exact, &grid);
+                if moved > 0 {
+                    let snapped =
+                        statement::snapped(moved, "the levels of the .drums text (g, x, X)");
+                    score_said.push(snapped.clone());
+                    stated.push(snapped);
+                }
+                commented(&grid.to_text()?, "#", &score_said)
+            }
+        };
+        Ok(Scored { text, stated })
+    }
 }
 
 /// Refuses a flag the take cannot use, before anything is read, and reads the key.

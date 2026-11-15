@@ -471,7 +471,9 @@ options; everything about the timing that is left out is estimated and stated.
   its extension, beside the input.
 
 **Files written.** Three, all beside each other, and none ever overwrites a file that exists
-(the whole capture is refused before anything is written):
+(the whole capture is refused before anything is written). Once the take is analysed, the
+`.notes` and the `.capture.json` are always written; if the score then cannot be, that is
+reported after them, and they stay:
 
 - `STEM.notes`: the exact performance, unquantized, at the detected times. Quantizing never
   replaces it.
@@ -528,6 +530,14 @@ rests holding them. A drum grid always gets the rest bars, because grids number 
 with no gaps. When quantizing leaves nothing in that lead-in, it is removed from the score and
 the score says so. Each case is stated (`lead-in: none`, `a pickup of 1/4`,
 `1 bar of rests`, `removed from the score`). The `.notes` always keeps the true time.
+
+**Notes that share a step.** A quick run or a flam can put two notes, or two hits on one lane,
+on the same step of the grid. The score cannot hold both, so the grid's step is halved (1/16,
+then 1/32, then 1/64) until none do, and the grid used is stated:
+`grid: 1/16 refined to 1/32, so no two notes share a step`. A `--grid` you give is refined the
+same way. What a 1/64 still cannot part is merged into one, each merge stated: a melody keeps
+the longest note's pitch, and a rhythm the strongest hit. The `.notes` keeps every note, and the
+analysis gives the grid used, which the quantize offsets are counted in.
 
 **Velocity.** A hit's or note's velocity is its strength relative to the take's strongest
 (20 to 127). The score writers refuse a velocity that is not one of their levels, so asking for

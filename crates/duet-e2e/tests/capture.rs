@@ -682,3 +682,194 @@ fn undecodable_audio_is_refused_by_name() {
     assert_eq!(files(&dir), ["words.mp3"]);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+/// The files a capture of `stem` from `input` writes, with the input: every one of them.
+fn all_written(dir: &Path, input: &str, stem: &str, score: &str) {
+    let mut want = vec![
+        input.to_owned(),
+        format!("{stem}.capture.json"),
+        format!("{stem}.notes"),
+        format!("{stem}{score}"),
+    ];
+    want.sort();
+    assert_eq!(files(dir), want);
+}
+
+/// A phrase at 120 a minute from half a second in, with a run of four 80 ms notes (G F E D)
+/// in its second bar: quicker than a sixteenth, so two of them share a sixteenth's step.
+fn a_quick_run() -> (Vec<f32>, Vec<u8>) {
+    let q = 0.5;
+    let notes = [
+        (60, q),
+        (62, q),
+        (64, q),
+        (65, q),
+        (67, 0.08),
+        (65, 0.08),
+        (64, 0.08),
+        (62, 0.08),
+        (60, q),
+        (64, q),
+        (67, q),
+        (72, q),
+        (60, q),
+        (62, q),
+        (64, 2.0 * q),
+    ];
+    let midis = notes.iter().map(|n| n.0).collect();
+    (audio::notes(0.5, &notes), midis)
+}
+
+/// Snare-band bursts, 50 ms long, at each time.
+fn snares(secs: f64, times: &[f64]) -> Vec<f32> {
+    let at: Vec<(f64, f64)> = times.iter().map(|&t| (t, 0.05)).collect();
+    audio::bursts(secs, &at, 1_000.0, 4_000.0)
+}
+
+/// The pitches of a song's notes, in order.
+fn midis(song: &Song) -> Vec<u8> {
+    song.tracks
+        .iter()
+        .flat_map(|t| t.notes.iter().map(|n| n.pitch.midi()))
+        .collect()
+}
+
+/// The events of one type (`note` or `hit`) in a `.capture.json`.
+fn analysed(json_path: &Path, kind: &str) -> Vec<serde_json::Value> {
+    let json: serde_json::Value = serde_json::from_str(&read(json_path)).expect("JSON");
+    json["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .filter(|e| e["type"] == kind)
+        .cloned()
+        .collect()
+}
+
+/// A run quicker than the grid writes all three files: the score's grid is refined until no
+/// two notes share a step, the refinement is stated, and the `.notes` keeps every note.
+#[test]
+fn a_quick_run_refines_the_grid_and_writes_everything() {
+    let dir = scratch("capture-run");
+    let (samples, played) = a_quick_run();
+    let wav = take(&dir, "run.wav", &samples);
+    let out = capture(&dir, &["melody", s(&wav), "--tempo", "120"]);
+    ok(&out, "capture melody --tempo 120");
+    all_written(&dir, "run.wav", "run", ".abc");
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("grid: 1/16 refined to "))
+        .unwrap_or_else(|| panic!("no refinement stated: {err}"));
+    assert!(
+        comments(&read(&dir.join("run.abc")), "%").contains(&format!("% {line}")),
+        "the score does not state its grid"
+    );
+    let notes = Song::from_text(&read(&dir.join("run.notes"))).expect("parses");
+    let found: Vec<u8> = analysed(&dir.join("run.capture.json"), "note")
+        .iter()
+        .map(|e| e["midi"].as_u64().expect("midi") as u8)
+        .collect();
+    assert_eq!(midis(&notes), found, "the .notes lost a note");
+    let run = &played[4..8];
+    assert!(
+        found.windows(4).any(|w| w == run),
+        "the run {run:?} was not heard: {found:?}"
+    );
+    ok(
+        &duet(&dir, &["abc", "check", s(&dir.join("run.abc"))]),
+        "abc check",
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A flam, two snare hits 60 ms apart, writes all three files: the grid is refined until the
+/// two hits have a cell each, and it is stated.
+#[test]
+fn a_flam_refines_the_grid_and_writes_everything() {
+    let dir = scratch("capture-flam");
+    // Beats at 120 a minute; on beat 6 a grace hit 30 ms before it and the hit 30 ms after.
+    let mut times: Vec<f64> = (0..8).map(|n| 0.5 + 0.5 * f64::from(n)).collect();
+    times[5] -= 0.03;
+    times.insert(6, times[5] + 0.06);
+    let wav = take(&dir, "flam.wav", &snares(6.0, &times));
+    let out = capture(
+        &dir,
+        &["rhythm", s(&wav), "--lane", "snare", "--tempo", "120"],
+    );
+    ok(&out, "capture rhythm --lane snare --tempo 120");
+    all_written(&dir, "flam.wav", "flam", ".drums");
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("grid: 1/16 refined to "))
+        .unwrap_or_else(|| panic!("no refinement stated: {err}"));
+    assert!(
+        comments(&read(&dir.join("flam.drums")), "#").contains(&format!("# {line}")),
+        "the score does not state its grid"
+    );
+    let notes = Song::from_text(&read(&dir.join("flam.notes"))).expect("parses");
+    assert_eq!(
+        analysed(&dir.join("flam.capture.json"), "hit").len(),
+        times.len(),
+        "a hit was not heard"
+    );
+    assert_eq!(
+        notes.tracks[0].notes.len(),
+        times.len(),
+        "the .notes lost a hit"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// Two hits closer together than a 1/64 step, at 20 a minute, where a 1/64 is 187.5 ms: no
+/// grid parts them, so they are merged into one in the score, the merge is stated, and the
+/// `.notes` keeps both.
+#[test]
+fn hits_no_grid_parts_are_merged_and_stated() {
+    let dir = scratch("capture-merge");
+    // The downbeat at 0.5 s, and the next beat 3 s on, with the flam's two hits 30 ms either
+    // side of it.
+    let times = [0.5, 3.47, 3.53];
+    let wav = take(&dir, "flam.wav", &snares(5.0, &times));
+    let out = capture(
+        &dir,
+        &[
+            "rhythm",
+            s(&wav),
+            "--lane",
+            "snare",
+            "--tempo",
+            "20",
+            "--meter",
+            "4/4",
+            "--downbeat",
+            "0.5",
+        ],
+    );
+    ok(&out, "capture rhythm --tempo 20");
+    all_written(&dir, "flam.wav", "flam", ".drums");
+    let err = stderr(&out);
+    assert!(err.contains("grid: 1/16 refined to 1/64"), "{err}");
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("merged: "))
+        .unwrap_or_else(|| panic!("no merge stated: {err}"));
+    assert!(line.contains("snare"), "{line}");
+    let drums = read(&dir.join("flam.drums"));
+    assert!(
+        comments(&drums, "#").contains(&format!("# {line}")),
+        "{drums}"
+    );
+    let grid = DrumGrid::from_text(&drums).expect(".drums parses");
+    let hits: usize = grid
+        .bars
+        .iter()
+        .flat_map(|b| b.vel.iter().flatten())
+        .filter(|v| **v > 0)
+        .count();
+    assert_eq!(hits, 2, "{drums}");
+    let notes = Song::from_text(&read(&dir.join("flam.notes"))).expect("parses");
+    assert_eq!(notes.tracks[0].notes.len(), 3, "the .notes lost a hit");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}

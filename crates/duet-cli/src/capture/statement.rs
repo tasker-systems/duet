@@ -4,9 +4,9 @@
 //! A given value is used exactly and is not stated: only an estimate is reported as one.
 
 use duet_capture::{
-    KeyEstimate, LeadIn, Origin, Timing, WEAK_CONFIDENCE, felt_quarters, is_compound,
+    KeyEstimate, LeadIn, Merge, Origin, Timing, WEAK_CONFIDENCE, felt_quarters, is_compound,
 };
-use duet_core::TimeSig;
+use duet_core::{Grid, TimeSig};
 
 /// The line the score states, in place of its lead-in, when it has had the lead-in removed.
 pub const LEAD_IN_REMOVED: &str = "lead-in: removed from the score, where no note starts \
@@ -72,6 +72,37 @@ pub fn lead_in(lead_in: LeadIn, downbeat_tick: u64, meter: TimeSig, tpq: u16) ->
             )
         }
     }
+}
+
+/// The score's grid, stated only when it was refined from `asked`, the default or the one
+/// `--grid` gave, to `used`, so that no two notes (for a rhythm, no two hits on one lane)
+/// share a step.
+pub fn refined(asked: Grid, given: bool, used: Grid, rhythm: bool) -> String {
+    let what = if rhythm {
+        "no two hits on a lane"
+    } else {
+        "no two notes"
+    };
+    format!(
+        "grid: {}{asked} refined to {used}, so {what} share a step; the .notes keeps them as played",
+        if given { "--grid " } else { "" }
+    )
+}
+
+/// Notes on one step of the finest grid, merged into the longest of them.
+pub fn merged_notes(merge: &Merge) -> String {
+    format!(
+        "merged: {} notes at {} into one, the longest ({}); the .notes keeps them all",
+        merge.count, merge.at, merge.kept.pitch
+    )
+}
+
+/// Hits on one lane and one step of the finest grid, merged into the strongest of them.
+pub fn merged_hits(merge: &Merge, lane: &str) -> String {
+    format!(
+        "merged: {} {lane} hits at {} into one, the strongest; the .notes keeps them all",
+        merge.count, merge.at
+    )
 }
 
 /// The snap, stated only when a velocity moved: how many, and to what.

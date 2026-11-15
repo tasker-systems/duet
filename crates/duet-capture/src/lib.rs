@@ -20,6 +20,8 @@
 //! - [`assemble`] places the events as a `Song` by the timing, and returns a [`Captured`]: the
 //!   song, what was done before the downbeat ([`LeadIn`]), and the [`Analysis`] behind it.
 //!   [`quantize_offsets`] fills in how far quantizing moved each note ([`QuantizeOffset`]).
+//! - [`quantize_apart`] quantizes the song for its score, refining the grid until no two notes
+//!   share a step, and [`merge_collisions`] merges what the finest grid still cannot part.
 //!
 //! Times inside the chain are sample frames at the analysis rate, not musical positions:
 //! musical time does not exist until a tempo does. [`Timing`] carries the beat period actually
@@ -62,6 +64,7 @@ mod notes;
 mod onset;
 mod pitch;
 mod prepare;
+mod score;
 mod source;
 mod stage;
 #[cfg(test)]
@@ -77,6 +80,7 @@ pub use notes::Melody;
 pub use onset::Onsets;
 pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, Prepare};
+pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
 pub use source::FileSource;
 pub use stage::{Chunk, Mono, Source, Stage};
 pub use timing::{

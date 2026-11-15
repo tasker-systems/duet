@@ -51,6 +51,15 @@ impl Grid {
         }
         Ok(num / den)
     }
+
+    /// The grid with half this one's step: `1/32` for `1/16`, `1/16t` for `1/8t`. `None` when
+    /// the step cannot be halved again, past `1/2147483648`.
+    pub fn halved(self) -> Option<Grid> {
+        Some(Grid {
+            den: self.den.checked_mul(2)?,
+            triplet: self.triplet,
+        })
+    }
 }
 
 impl fmt::Display for Grid {
@@ -160,6 +169,14 @@ mod tests {
         for bad in ["", "1/", "1/0", "2/16", "1/x", "1/16tt", "16"] {
             assert!(bad.parse::<Grid>().is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_halved_grid_has_half_the_step() {
+        let g = |s: &str| s.parse::<Grid>().unwrap();
+        assert_eq!(g("1/16").halved(), Some(g("1/32")));
+        assert_eq!(g("1/8t").halved(), Some(g("1/16t")));
+        assert_eq!(Grid::new(1 << 31, false).unwrap().halved(), None);
     }
 
     #[test]
