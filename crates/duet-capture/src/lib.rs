@@ -4,7 +4,8 @@
 //! [`Stage`] takes input a piece at a time, holds it back only until its output is settled,
 //! and reports how long that takes ([`Stage::latency_frames`]). The vocabulary the stages
 //! speak is [`Event`]. Times inside the chain are sample frames at the analysis rate, not
-//! musical positions: musical time does not exist until a tempo does.
+//! musical positions: musical time does not exist until a tempo does. Once [`estimate`] has
+//! one, [`assemble`] places the settled events as a `Song`.
 //!
 //! Known boundary: [`FileSource`] refuses HE-AAC by name when the file's header declares it.
 //! HE-AAC signalled only inside the audio data decodes as AAC-LC at half bandwidth, without
@@ -16,9 +17,11 @@
 
 #![forbid(unsafe_code)]
 
+mod assemble;
 mod error;
 mod event;
 mod hits;
+mod key;
 mod notes;
 mod onset;
 mod pitch;
@@ -29,9 +32,11 @@ mod stage;
 mod synth;
 mod timing;
 
+pub use assemble::{Analysis, Captured, Kind, LeadIn, QuantizeOffset, assemble, quantize_offsets};
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
 pub use hits::{Hits, LaneMode};
+pub use key::{KeyEstimate, estimate_key};
 pub use notes::Melody;
 pub use onset::Onsets;
 pub use pitch::{PitchFrame, PitchTrack};

@@ -1281,6 +1281,23 @@ pub(crate) fn pickup_meter(len: Ratio, meter: TimeSig) -> Option<TimeSig> {
         .flatten()
 }
 
+/// The time signature a pickup `len_ticks` long gets before a first full bar of `meter`, at
+/// `ticks_per_quarter`: its length over the meter's denominator, or over a finer one when it
+/// needs it, so a quarter before 4/4 is 1/4 and a quarter before 6/8 is 2/8.
+///
+/// `None` when the length is no time signature: a length of zero, one that is not a whole
+/// number of 64ths, or one that would need more than 255 beats.
+///
+/// This is the rule the writer applies: a song whose first bar has this signature, followed
+/// by a change to `meter` at bar 2, is written as a pickup before the first bar line. Anything
+/// that builds a song with a pickup uses it, so the two cannot drift apart.
+pub fn pickup_meter_for(len_ticks: u64, ticks_per_quarter: u16, meter: TimeSig) -> Option<TimeSig> {
+    pickup_meter(
+        Ratio::new(len_ticks, 4 * u64::from(ticks_per_quarter)),
+        meter,
+    )
+}
+
 impl Tune {
     /// Reads the tune as a song, with the notation-only constructs it held.
     ///

@@ -445,7 +445,9 @@ name = "duet-capture"
 version = "0.2.0"
 dependencies = [
  "audioadapter-buffers",
+ "duet-abc",
  "duet-core",
+ "duet-drums",
  "pyin",
  "rubato",
  "rustfft",

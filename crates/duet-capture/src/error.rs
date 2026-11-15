@@ -26,6 +26,13 @@ pub enum Error {
         /// How many onsets the take has.
         found: usize,
     },
+
+    /// The take has nothing to assemble: a melody with no notes, or a rhythm with no hits.
+    #[error("no {what} found")]
+    NothingFound {
+        /// What was looked for: `notes` or `hits`.
+        what: &'static str,
+    },
 }
 
 impl From<duet_core::Error> for Error {
