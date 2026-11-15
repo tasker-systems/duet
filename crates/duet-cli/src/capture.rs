@@ -1,11 +1,10 @@
 //! `duet capture`: a recorded take in; the exact performance (`.duet`, a song document), a
-//! quantized score (`.abc` for a melody, `.drums` for a rhythm) and the analysis
-//! (`.capture.duet`, a `capture-analysis` document) out. Both documents are written through
-//! duet-schemas.
+//! quantized score (`.abc` for a melody, or `.grid.duet`, a drum-grid document, for a rhythm)
+//! and the analysis (`.capture.duet`, a `capture-analysis` document) out. Every document is
+//! written through duet-schemas.
 //!
-//! Every estimate is stated on standard error, in the song document's envelope `statements`,
-//! and as a comment in the score
-//! ([`statement`]). Every refusal comes before anything is written, and nothing is
+//! Every estimate is stated ([`statement`]) on standard error, in each document's envelope
+//! `statements`, and as a `%` comment in an `.abc`. Every refusal comes before anything is written, and nothing is
 //! overwritten. Once the take is analysed, the performance (`.duet` and `.capture.duet`) is
 //! written whatever becomes of the score, which is written, or reported as failed, after it.
 //!
@@ -32,7 +31,7 @@ use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 use duet_schemas::{Document, Stream};
 
 use crate::config::Config;
-use crate::drums::{ReadOptions, grid_of_song, moved_velocities, refuse_overwrite};
+use crate::drums::{ReadOptions, grid_of_song, refuse_overwrite};
 use crate::io::{tool, with_end};
 
 #[derive(Subcommand)]
@@ -42,7 +41,7 @@ pub enum CaptureCommand {
     /// frame in STEM.performance.duet.jsonl.
     Melody(TakeArgs),
     /// Capture a tapped or beatboxed rhythm: hits in lanes, written as STEM.duet (exactly
-    /// as played) and STEM.drums (quantized to --grid). Without --lane, each hit is told
+    /// as played) and STEM.grid.duet (quantized to --grid). Without --lane, each hit is told
     /// apart by sound as a kick, snare or closed hat.
     Rhythm(TakeArgs),
 }
@@ -75,7 +74,7 @@ pub struct TakeArgs {
     /// A rhythm's lane, such as hh or kick: every hit goes to it (a tapped take).
     #[arg(long)]
     lane: Option<String>,
-    /// The output files' stem: STEM.duet, STEM.abc or STEM.drums, and STEM.capture.duet.
+    /// The output files' stem: STEM.duet, STEM.abc or STEM.grid.duet, and STEM.capture.duet.
     /// Without it, the input's name without its extension, beside it.
     #[arg(short, long, value_name = "STEM")]
     output: Option<PathBuf>,
@@ -228,7 +227,9 @@ struct Scored {
 
 impl Scoring<'_> {
     /// The score of `quantized`: its empty lead-in removed, what still shares a step merged,
-    /// its velocities snapped, and each of those stated.
+    /// a melody's velocities snapped to the ABC's dynamics, and each of those stated. A
+    /// rhythm's score is a drum-grid document, with those statements in its envelope and every
+    /// velocity kept.
     fn score(self, quantized: Quantized) -> Result<Scored> {
         let mut stated = Vec::new();
         if quantized.grid != self.grid {
@@ -287,18 +288,12 @@ impl Scoring<'_> {
                     bars: None,
                     snap_levels: false,
                 };
-                // Read with every velocity kept (the exact form's rule), then snapped here, so the
-                // moves can be counted as `duet drums snap` counts them.
-                let exact = grid_of_song(&score, &options, self.config)?;
-                let grid = exact.snapped_to_levels();
-                let moved = moved_velocities(&exact, &grid);
-                if moved > 0 {
-                    let snapped =
-                        statement::snapped(moved, "the levels of the .drums text (g, x, X)");
-                    score_said.push(snapped.clone());
-                    stated.push(snapped);
-                }
-                commented(&grid.to_text()?, "#", &score_said)
+                // Every velocity kept exactly: a drum-grid document holds any velocity, so nothing
+                // is snapped to the text's levels, and nothing needs stating.
+                let grid = grid_of_song(&score, &options, self.config)?;
+                let mut doc = Document::new(tool(), grid);
+                doc.statements = score_said;
+                doc.write()?
             }
         };
         Ok(Scored { text, stated })
@@ -366,7 +361,7 @@ impl Outputs {
             song: named(".duet"),
             score: named(match take {
                 Take::Melody => ".abc",
-                Take::Rhythm => ".drums",
+                Take::Rhythm => ".grid.duet",
             }),
             analysis: named(".capture.duet"),
             performance: (take == Take::Melody).then(|| named(".performance.duet.jsonl")),
