@@ -1,0 +1,21 @@
+[package]
+name = "duet-schemas"
+version = "0.2.0"
+description = "duet's documents: the envelope, the versioned kinds, the .duet and .duet.jsonl framing, and the version policy."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["midi", "music", "json-schema", "llm"]
+categories = ["multimedia::audio", "encoding"]
+include = ["src/**", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: every float a document holds reads back to the same bits.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
