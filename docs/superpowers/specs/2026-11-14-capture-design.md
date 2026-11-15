@@ -125,6 +125,7 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
   - The `pyin` crate (MIT) is **batch only**: `PYINExecutor::pyin` takes the whole signal. It cannot be a stage. It may be a **dev-dependency** used to check our tracker on files, since its output is the reference pYIN's.
 - **Notes:** voiced runs are split at onsets and at pitch changes held long enough to count. Each note's pitch is the **median** of its voiced frames, rounded to the nearest semitone.
   - The median is the declared reading for vibrato and slides, which the goal lists as unexamined.
+  - **Amended (owner, 2026-11-14): a note is held pitch, and a moving pitch is not a note yet.** Pitch that leaves where a note is held and has not yet arrived anywhere and stayed is a slide. A slide is never a note of its own. It belongs, for timing, to the note it arrives at, and is dropped if it ends in silence or at an onset before arriving. A note's pitch is the median of its held frames only, never its slide's. A dip that leaves a pitch and comes back to it, such as a voiced consonant between two syllables, is two notes. A drift of up to about half a semitone stays one note.
   - The builder sets the thresholds: the shortest note, and how long a pitch must hold to start a new note.
 - **Key (owner, 2026-11-14), handled like tempo:**
   - **Given** with `--key`, it is used exactly.
