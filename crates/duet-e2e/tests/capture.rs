@@ -351,32 +351,36 @@ fn a_bad_tuning_is_refused_before_anything_is_written() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// `--reader hmm` chooses a melody's notes by the note HMM: the same keys as the rules on an
-/// attacked scale, the reader and its cost per note stated and written in the analysis. The
-/// rules stay the default, unstated, and written as the reader too. A rhythm refuses it.
+/// The note HMM is the default reader, unstated and written in the analysis; `--reader rules`
+/// chooses the segmentation rules, stated and written too. On an attacked scale they read the
+/// same keys. A rhythm refuses `--reader`.
 #[test]
 fn the_reader_is_chosen_stated_and_written() {
     let dir = scratch("capture-reader");
     let wav = take(&dir, "tune.wav", &eb_major());
-    let rules = capture(&dir, &["melody", s(&wav), "-o", s(&dir.join("rules"))]);
-    ok(&rules, "capture");
-    assert!(!stderr(&rules).contains("reader:"), "{}", stderr(&rules));
-    let hmm = capture(
+    let hmm = capture(&dir, &["melody", s(&wav), "-o", s(&dir.join("hmm"))]);
+    ok(&hmm, "capture");
+    assert!(!stderr(&hmm).contains("reader:"), "{}", stderr(&hmm));
+    let rules = capture(
         &dir,
         &[
             "melody",
             s(&wav),
             "--reader",
-            "hmm",
+            "rules",
             "-o",
-            s(&dir.join("hmm")),
+            s(&dir.join("rules")),
         ],
     );
-    ok(&hmm, "capture --reader hmm");
-    let line = "reader: the note HMM, cost per note 4";
-    assert!(stderr(&hmm).lines().any(|l| l == line), "{}", stderr(&hmm));
+    ok(&rules, "capture --reader rules");
+    let line = "reader: the segmentation rules";
     assert!(
-        document_of(&dir.join("hmm.duet"))
+        stderr(&rules).lines().any(|l| l == line),
+        "{}",
+        stderr(&rules)
+    );
+    assert!(
+        document_of(&dir.join("rules.duet"))
             .statements
             .iter()
             .any(|l| l == line)

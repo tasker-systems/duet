@@ -552,10 +552,10 @@ options; everything about the timing that is left out is estimated and stated.
 - **`--tuning <a4>`** is a melody's tuning: A4 in Hz (`440`, `442`) or in cents from 440 Hz
   (`+44c`, `-12c`), used exactly, up to a key either way. A rhythm take's hits have no pitch,
   and `--tuning` is refused for one.
-- **`--reader rules|hmm`** is what chooses a melody's notes from its performance: `rules`, the
-  segmentation rules (the default), or `hmm`, the note HMM, whose cost per note is stated on
-  standard error (`reader: the note HMM, cost per note 4`). See *Readers* below. A rhythm
-  take's hits are not read as notes, and `--reader` is refused for one.
+- **`--reader hmm|rules`** is what chooses a melody's notes from its performance: `hmm`, the
+  note HMM (the default), or `rules`, the segmentation rules, stated on standard error when
+  chosen (`reader: the segmentation rules`). See *Readers* below. A rhythm take's hits are not
+  read as notes, and `--reader` is refused for one.
 - **`--key <key>`** is a melody's key as ABC's `K:` names it (`Eb`, `Bm`, `F#m`), used exactly.
   A rhythm take has no key, and `--key` is refused for one.
 - **`--grid <step>`** is the step the score is quantized to, such as `1/16` (the default) or
@@ -651,8 +651,8 @@ marked in the analysis's `reading`, with every note's `centre`, its distance fro
 cents. The key is estimated after, from those notes, and never changes one.
 
 **Readers.** Two readers choose a melody's notes from its performance, on its tuning, and both
-are judged by the same loss. The **rules** (the default) segment the pitch where it leaves a
-held note and holds somewhere new, or at an onset. The **note HMM** (`--reader hmm`) decodes,
+are judged by the same loss. The **rules** (`--reader rules`) segment the pitch where it leaves a
+held note and holds somewhere new, or at an onset. The **note HMM** (the default) decodes,
 frame by frame, whether the voice is sliding into a key (attack), holding it (stable) or silent,
 by fixed-lag Viterbi a second behind. A note is a key's held frames with the slide into them; a
 note may follow another with no breath (legato), and a dip that leaves a pitch and comes back
