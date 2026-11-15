@@ -271,8 +271,8 @@ impl DrumGrid {
                 row.len()
             )));
         }
-        self.vel = Tensor::new(
-            vec![rows.len() as u32, steps as u32],
+        self.vel = Tensor::from_parts(
+            vec![rows.len(), steps],
             rows.into_iter().flatten().collect(),
         )?;
         self.bar_steps = bar_steps;
@@ -360,7 +360,7 @@ impl DrumGrid {
                 )));
             }
         }
-        let want = [self.lanes.len() as u32, self.steps() as u32];
+        let want = [self.lanes.len(), self.steps()];
         if self.vel.shape() != &want[..] {
             return Err(Error::invalid(format!(
                 "vel has shape {:?}; {} lanes over the bars' {} steps need {want:?}",
