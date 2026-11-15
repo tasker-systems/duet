@@ -1,86 +1,88 @@
-//! Reading and writing songs in every format, chosen by file extension.
+//! Reading and writing songs. A `.duet` file is read by its envelope, so the kind decides what it
+//! is, never the name. `.mid` (`.midi`, `.smf`) and `.abc` are the outside formats, read by their
+//! names. notefmt text is a view of a song, so no file name means it: it is read and written only
+//! when `--from text` or `--to text` says so, or on standard input and output.
 
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use clap::builder::PossibleValue;
 use duet_core::{EndRule, Song};
 use duet_midi::Midi;
-
-use crate::drums::GridForm;
+use duet_schemas::{AnyDocument, Document, Tool};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Format {
+    /// A duet document (.duet), read by its envelope.
+    Duet,
+    /// A Standard MIDI File (.mid, .midi or .smf).
     Midi,
-    Text,
-    Json,
-    Toml,
     /// ABC: the first tune of the file when reading (`duet abc render --tune` picks
     /// another), one tune `X:1` when writing.
     Abc,
+    /// notefmt text, the song's text view. No file name means it.
+    Text,
 }
 
-/// The format a path's extension names: .mid, .midi or .smf is MIDI, .json, .toml and .abc
-/// are themselves, and .notes is notefmt text. So is anything else, such as the .txt notefmt
-/// files had before .notes, so no older file changes meaning. `-` (standard input or output)
-/// has no extension, so it takes `default`.
-pub fn format_of(path: &Path, default: Format) -> Format {
-    if path == Path::new("-") {
-        return default;
-    }
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("mid" | "midi" | "smf") => Format::Midi,
-        Some("json") => Format::Json,
-        Some("toml") => Format::Toml,
-        Some("abc") => Format::Abc,
-        Some("notes") => Format::Text,
-        _ => Format::Text,
-    }
-}
-
-/// Every format `duet convert` goes between: a song's, or a drum grid's.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AnyFormat {
+/// What a file's name says it is, when it is not a song's format.
+enum Named {
     Song(Format),
-    Grid(GridForm),
+    /// A `.duet.jsonl` stream.
+    Stream,
+    /// A name duet no longer reads: `.json`, `.toml`, and the `.drums.json` and `.drums.toml`
+    /// of drum grids.
+    Cut,
+    /// A view's old name: `.notes`, `.txt` or `.drums`.
+    View,
+    Unknown,
 }
 
-impl AnyFormat {
-    /// The format a path's name gives: `.drums` is .drums text, a `.json` or `.toml` whose
-    /// name ends `.drums.json` or `.drums.toml` is a grid's exact form, and anything else is
-    /// a song's format by [`format_of`]. `-` has no name, so it takes `default`.
-    pub fn of(path: &Path, default: AnyFormat) -> AnyFormat {
-        if path == Path::new("-") {
-            return default;
-        }
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(str::to_ascii_lowercase)
-            .unwrap_or_default();
-        if name.ends_with(".drums") {
-            AnyFormat::Grid(GridForm::Text)
-        } else if name.ends_with(".drums.json") {
-            AnyFormat::Grid(GridForm::Json)
-        } else if name.ends_with(".drums.toml") {
-            AnyFormat::Grid(GridForm::Toml)
-        } else {
-            AnyFormat::Song(format_of(path, Format::Text))
-        }
+fn named(path: &Path) -> Named {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if name.ends_with(".duet.jsonl") {
+        return Named::Stream;
+    }
+    match name.rsplit_once('.').map(|(_, ext)| ext) {
+        Some("duet") => Named::Song(Format::Duet),
+        Some("mid" | "midi" | "smf") => Named::Song(Format::Midi),
+        Some("abc") => Named::Song(Format::Abc),
+        Some("json" | "toml") => Named::Cut,
+        Some("notes" | "txt" | "drums") => Named::View,
+        _ => Named::Unknown,
     }
 }
 
-/// The song format of a path a command reads or writes as a song: `given` when the user
-/// named one, or else the path's name, by [`AnyFormat::of`]. A name that is a drum grid's is
-/// refused rather than misread, so a file name means the same thing to every command.
+/// Why a name is refused as a song's, and what to do instead.
+fn refusal(path: &Path, named: &Named, what: &str) -> String {
+    let path = path.display();
+    match named {
+        Named::Stream => format!("{path} is a stream (.duet.jsonl), and {what} a song"),
+        Named::Cut => format!(
+            "{path} is not a duet document: duet's documents are .duet, and .json and .toml \
+             are no longer read or written"
+        ),
+        Named::View => format!(
+            "{path} is not a duet document or an outside format: duet reads .duet, .mid and \
+             .abc by name. notefmt text is a view, read only when --from text says so"
+        ),
+        Named::Song(_) | Named::Unknown => format!(
+            "{path}: duet reads and writes .duet, .mid (.midi, .smf) and .abc by name; name \
+             any other with --from or --to"
+        ),
+    }
+}
+
+/// The format of a path a command reads or writes as a song: `given` when the user named one,
+/// `default` for `-` (standard input or output), or else the format the path's name gives.
+/// Any other name is refused, so a file is never misread: `.json` and `.toml` are no longer
+/// read, and a view's text is read only when `--from text` says so.
 pub fn song_format(
     path: &Path,
     given: Option<Format>,
@@ -90,33 +92,24 @@ pub fn song_format(
     if let Some(format) = given {
         return Ok(format);
     }
-    match AnyFormat::of(path, AnyFormat::Song(default)) {
-        AnyFormat::Song(format) => Ok(format),
-        AnyFormat::Grid(_) => anyhow::bail!(
-            "{} is a drum grid's name (.drums, .drums.json or .drums.toml), and {what} a \
-             song; duet convert goes between a grid and a song",
-            path.display()
-        ),
+    if path == Path::new("-") {
+        return Ok(default);
+    }
+    match named(path) {
+        Named::Song(format) => Ok(format),
+        other => bail!("{}", refusal(path, &other, what)),
     }
 }
 
-/// The form of a path a command reads or writes as a drum grid, by its name: `.drums`,
-/// `.drums.json` or `.drums.toml`, or `-` for .drums text. Any other name is a song's, and
-/// is refused rather than misread.
-pub fn grid_form(path: &Path, what: &str) -> Result<GridForm> {
-    match AnyFormat::of(path, AnyFormat::Grid(GridForm::Text)) {
-        AnyFormat::Grid(form) => Ok(form),
-        AnyFormat::Song(_) => anyhow::bail!(
-            "{} is not a drum grid's name, and {what} a grid; name it .drums, .drums.json or \
-             .drums.toml, or - for .drums text",
-            path.display()
-        ),
-    }
+/// Every format `duet convert` goes between: a song's, or a drum grid's text.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AnyFormat {
+    Song(Format),
+    /// A drum grid's text, its `grid` view. No file name means it.
+    Grid,
 }
 
-/// The song formats by their own names, then the grid forms as `drums`, `drums-json` and
-/// `drums-toml`. Built from [`Format`]'s own list, so a song format added there is a
-/// convert format too.
+/// The song formats by their own names, then `drums`, a drum grid's text.
 impl ValueEnum for AnyFormat {
     fn value_variants<'a>() -> &'a [Self] {
         static ALL: std::sync::LazyLock<Vec<AnyFormat>> = std::sync::LazyLock::new(|| {
@@ -124,11 +117,7 @@ impl ValueEnum for AnyFormat {
                 .iter()
                 .copied()
                 .map(AnyFormat::Song)
-                .chain(
-                    [GridForm::Text, GridForm::Json, GridForm::Toml]
-                        .into_iter()
-                        .map(AnyFormat::Grid),
-                )
+                .chain([AnyFormat::Grid])
                 .collect()
         });
         &ALL
@@ -137,35 +126,104 @@ impl ValueEnum for AnyFormat {
     fn to_possible_value(&self) -> Option<PossibleValue> {
         match self {
             AnyFormat::Song(format) => format.to_possible_value(),
-            AnyFormat::Grid(GridForm::Text) => Some(PossibleValue::new("drums")),
-            AnyFormat::Grid(GridForm::Json) => Some(PossibleValue::new("drums-json")),
-            AnyFormat::Grid(GridForm::Toml) => Some(PossibleValue::new("drums-toml")),
+            AnyFormat::Grid => Some(PossibleValue::new("drums").help("A drum grid's text")),
         }
     }
 }
 
-pub fn read(path: &Path, format: Format) -> Result<Song> {
-    let bytes = if path == Path::new("-") {
+/// Checks a path a command reads or writes as a drum grid's text. A name that is something
+/// else is refused rather than misread: a song's format, a stream, or a name duet no longer
+/// reads. A `.duet` is read by its envelope ([`read_grid_text`] says why it is refused); one
+/// is never written, as this duet has no drum-grid documents yet.
+pub fn grid_path(path: &Path, what: &str, writing: bool) -> Result<()> {
+    if path == Path::new("-") {
+        return Ok(());
+    }
+    let shown = path.display();
+    match named(path) {
+        Named::Song(Format::Duet) if writing => bail!(
+            "{shown}: this duet writes no drum-grid documents yet, and {what} a grid's text; \
+             name it anything but .duet, .mid or .abc, or - for standard output"
+        ),
+        Named::Song(Format::Duet) | Named::View | Named::Unknown => Ok(()),
+        Named::Song(format) => bail!(
+            "{shown} is a song's name ({}), and {what} a drum grid's text",
+            format
+                .to_possible_value()
+                .map_or_else(String::new, |v| v.get_name().to_owned())
+        ),
+        other => bail!(
+            "{}",
+            refusal(path, &other, what).replace(" a song", " a grid")
+        ),
+    }
+}
+
+/// Reads a drum grid's text from a path [`grid_path`] accepted. A `.duet` is read by its
+/// envelope and refused, naming its kind: this duet reads no drum-grid documents yet.
+pub fn read_grid_text(path: &Path, what: &str) -> Result<String> {
+    let bytes = bytes_of(path)?;
+    if path != Path::new("-") && matches!(named(path), Named::Song(Format::Duet)) {
+        let text = String::from_utf8(bytes).context("a .duet is UTF-8 text")?;
+        let doc = AnyDocument::read(&text).with_context(|| path.display().to_string())?;
+        bail!(
+            "{} is a {} document, and {what} a drum grid's text",
+            path.display(),
+            doc.kind()
+        );
+    }
+    String::from_utf8(bytes).context("input is not UTF-8 text")
+}
+
+fn bytes_of(path: &Path) -> Result<Vec<u8>> {
+    if path == Path::new("-") {
         let mut buf = Vec::new();
         io::stdin()
             .read_to_end(&mut buf)
             .context("reading standard input")?;
-        buf
+        Ok(buf)
     } else {
-        fs::read(path).with_context(|| path.display().to_string())?
+        fs::read(path).with_context(|| path.display().to_string())
+    }
+}
+
+/// Whether standard input holds a document: its first non-blank byte is `{`. No MIDI file,
+/// ABC tune or notefmt text starts with one.
+fn is_document(bytes: &[u8]) -> bool {
+    bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{')
+}
+
+/// Reads a song. `what` says what the command does with it, as in "duet play reads", for a
+/// document of another kind. Standard input is read as a document when its first non-blank
+/// byte is `{`, and as `format` otherwise.
+pub fn read(path: &Path, format: Format, what: &str) -> Result<Song> {
+    let bytes = bytes_of(path)?;
+    let format = if path == Path::new("-") && is_document(&bytes) {
+        Format::Duet
+    } else {
+        format
     };
     let text = || String::from_utf8(bytes.clone()).context("input is not UTF-8 text");
-    // MIDI and text come back normalized. Hand-edited JSON or TOML may hold lengths or
-    // positions in a loose form, so those are normalized here.
+    // MIDI, ABC and text come back normalized. A hand-edited document may hold lengths or
+    // positions in a loose form, so it is normalized here.
     let song = match format {
+        Format::Duet => {
+            let doc = AnyDocument::read(&text()?).with_context(|| path.display().to_string())?;
+            match doc {
+                AnyDocument::Song(doc) => normalized(doc.body)?,
+                other => bail!(
+                    "{} is a {} document, and {what} a song",
+                    path.display(),
+                    other.kind()
+                ),
+            }
+        }
         Format::Midi => Song::from_midi(&bytes)?,
         Format::Text => Song::from_text(&text()?)?,
-        Format::Json => normalized(serde_json::from_str(&text()?)?)?,
-        Format::Toml => normalized(toml::from_str(&text()?)?)?,
         Format::Abc => {
             let book = duet_abc::Book::parse(&text()?)?;
             if book.tunes().len() > 1 {
-                anyhow::bail!(
+                bail!(
                     "{} holds {} tunes; pick one with duet abc render --tune <X>",
                     path.display(),
                     book.tunes().len()
@@ -191,31 +249,34 @@ pub fn with_end(song: &Song, end: EndRule) -> Result<Song> {
     Ok(song)
 }
 
+/// What every document duet writes names as its tool.
+pub fn tool() -> Tool {
+    Tool::new("duet", env!("CARGO_PKG_VERSION"))
+}
+
 /// Writes the song in a format. Every file written says where the song ends, whatever
-/// default computed it: text and MIDI state it themselves, and JSON and TOML carry it as
-/// the `end` field.
+/// default computed it: text and MIDI state it themselves, and a document carries it as its
+/// body's `end`.
 pub fn write(song: &Song, path: &Path, format: Format, end: EndRule) -> Result<()> {
     let song = with_end(song, end)?;
-    let song = &song;
     let bytes = match format {
+        Format::Duet => Document::new(tool(), song).write()?.into_bytes(),
         Format::Midi => song.to_midi()?,
         Format::Text => song.to_text().into_bytes(),
-        Format::Json => {
-            let mut s = serde_json::to_string_pretty(song)?;
-            s.push('\n');
-            s.into_bytes()
-        }
-        Format::Toml => toml::to_string(song)?.into_bytes(),
-        Format::Abc => duet_abc::write(song, &duet_abc::WriteOptions::default())?.into_bytes(),
+        Format::Abc => duet_abc::write(&song, &duet_abc::WriteOptions::default())?.into_bytes(),
     };
+    write_bytes(path, &bytes)
+}
+
+/// Writes to a file, or to standard output for `-`.
+pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     if path == Path::new("-") {
         io::stdout()
-            .write_all(&bytes)
-            .context("writing standard output")?;
+            .write_all(bytes)
+            .context("writing standard output")
     } else {
-        fs::write(path, bytes).with_context(|| path.display().to_string())?;
+        fs::write(path, bytes).with_context(|| path.display().to_string())
     }
-    Ok(())
 }
 
 /// Whether two paths name the same existing file.
@@ -228,32 +289,54 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use duet_core::{Note, Position, Song, Track};
-
     use std::path::Path;
 
-    use super::{AnyFormat, Format, read};
-    use crate::drums::GridForm;
+    use duet_core::{Note, Position, Song, Track};
+
+    use super::{Format, read, song_format, tool};
+    use duet_schemas::Document;
 
     #[test]
-    fn a_name_ending_drums_is_a_grid_and_a_plain_json_or_toml_is_a_song() {
-        let text = AnyFormat::Song(Format::Text);
-        let of = |name: &str| AnyFormat::of(Path::new(name), text);
-        assert_eq!(of("beat.drums"), AnyFormat::Grid(GridForm::Text));
-        assert_eq!(of("dir/Beat.DRUMS.JSON"), AnyFormat::Grid(GridForm::Json));
-        assert_eq!(of("beat.drums.toml"), AnyFormat::Grid(GridForm::Toml));
-        assert_eq!(of("song.json"), AnyFormat::Song(Format::Json));
-        assert_eq!(of("song.toml"), AnyFormat::Song(Format::Toml));
-        assert_eq!(of("drums.json"), AnyFormat::Song(Format::Json));
-        assert_eq!(of("take.mid"), AnyFormat::Song(Format::Midi));
-        assert_eq!(of("take.notes"), text);
-        assert_eq!(of("Take.NOTES"), text);
-        assert_eq!(of("take.txt"), text, "a notefmt file named before .notes");
-        assert_eq!(of("-"), text);
+    fn a_song_is_named_by_dot_duet_mid_or_abc_and_nothing_else() {
+        let of = |name: &str| song_format(Path::new(name), None, Format::Text, "reads");
+        assert_eq!(of("song.duet").unwrap(), Format::Duet);
+        assert_eq!(of("Song.DUET").unwrap(), Format::Duet);
+        assert_eq!(of("take.mid").unwrap(), Format::Midi);
+        assert_eq!(of("take.smf").unwrap(), Format::Midi);
+        assert_eq!(of("tune.abc").unwrap(), Format::Abc);
+        assert_eq!(
+            of("-").unwrap(),
+            Format::Text,
+            "standard streams take the default"
+        );
+        for (name, says) in [
+            ("song.json", "no longer read"),
+            ("song.toml", "no longer read"),
+            ("beat.drums.json", "no longer read"),
+            ("take.notes", "--from text"),
+            ("take.txt", "--from text"),
+            ("beat.drums", "--from text"),
+            ("perf.duet.jsonl", "is a stream"),
+            ("song", "name any other with --from or --to"),
+        ] {
+            let err = of(name).expect_err(name).to_string();
+            assert!(err.contains(says), "{name}: {err}");
+        }
+        let given = song_format(
+            Path::new("x.notes"),
+            Some(Format::Text),
+            Format::Midi,
+            "reads",
+        );
+        assert_eq!(
+            given.unwrap(),
+            Format::Text,
+            "--from says what a name does not"
+        );
     }
 
     #[test]
-    fn read_normalizes_json_and_toml() {
+    fn read_normalizes_a_document() {
         // A loose position and a length that is not whole ticks, as a hand edit might leave.
         let mut song = Song::default();
         let mut track = Track::new("P", 1);
@@ -267,16 +350,12 @@ mod tests {
 
         let dir = std::env::temp_dir().join(format!("duet-read-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let json = dir.join("song.json");
-        let toml_path = dir.join("song.toml");
-        std::fs::write(&json, serde_json::to_string(&song).expect("json")).expect("write");
-        std::fs::write(&toml_path, toml::to_string(&song).expect("toml")).expect("write");
-
-        for (path, format) in [(&json, Format::Json), (&toml_path, Format::Toml)] {
-            let read = read(path, format).expect("read");
-            let note = &read.tracks[0].notes[0];
-            assert_eq!((note.at.to_string(), note.beats), ("1.3.0".into(), 0.333));
-        }
+        let path = dir.join("song.duet");
+        let text = Document::new(tool(), song).write().expect("written");
+        std::fs::write(&path, text).expect("write");
+        let read = read(&path, Format::Duet, "reads").expect("read");
+        let note = &read.tracks[0].notes[0];
+        assert_eq!((note.at.to_string(), note.beats), ("1.3.0".into(), 0.333));
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }

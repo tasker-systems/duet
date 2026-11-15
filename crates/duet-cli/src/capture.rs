@@ -23,7 +23,7 @@ use duet_capture::{
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 
 use crate::config::Config;
-use crate::drums::{GridForm, ReadOptions, grid_of_song, moved_velocities, refuse_overwrite};
+use crate::drums::{ReadOptions, grid_of_song, moved_velocities, refuse_overwrite};
 use crate::io::with_end;
 
 #[derive(Subcommand)]
@@ -279,7 +279,7 @@ impl Scoring<'_> {
                 };
                 // Read with every velocity kept (the exact form's rule), then snapped here, so the
                 // moves can be counted as `duet drums snap` counts them.
-                let exact = grid_of_song(&score, &options, GridForm::Json, self.config)?;
+                let exact = grid_of_song(&score, &options, self.config)?;
                 let grid = exact.snapped_to_levels();
                 let moved = moved_velocities(&exact, &grid);
                 if moved > 0 {

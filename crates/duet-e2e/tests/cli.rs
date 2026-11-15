@@ -66,8 +66,10 @@ fn midi_tracks(bytes: &[u8]) -> (Vec<Vec<String>>, Vec<u64>) {
 /// files `.txt` too; only the names changed) and `samples/groove.drums` (which now
 /// state their ends, `end 5.1.0` and `end 3.1.0`, the defaults). Every file written now
 /// holds exactly the same music, every note, control and conductor event at the same
-/// tick, and differs only by stating its end: an `end` line in text, an `end` field in
-/// a song's JSON and TOML, and every MIDI track ending there.
+/// tick, and differs only by stating its end: an `end` line in text, and every MIDI track
+/// ending there. The song's `.json` and `.toml` are no longer written: a song document's
+/// body is what they held, so each is compared with the `.duet` written now, whose body
+/// states its end.
 #[test]
 fn every_output_holds_the_same_music_and_states_its_end() {
     let dir = scratch("golden");
@@ -76,28 +78,48 @@ fn every_output_holds_the_same_music_and_states_its_end() {
     let groove = root().join("samples/groove.drums");
     let out = |name: &str| dir.join(name);
     let p = |s: &'static str| Path::new(s);
+    let (from_text, to_text) = ([p("--from"), p("text")], [p("--to"), p("text")]);
 
-    for name in ["sketch.mid", "sketch.notes", "sketch.json", "sketch.toml"] {
-        duet(&[p("convert"), &sketch, &out(name)]);
+    for name in ["sketch.mid", "sketch.duet"] {
+        duet(&[&[p("convert"), &sketch, &out(name)][..], &from_text].concat());
     }
-    duet(&[
-        p("convert"),
-        &out("sketch.mid"),
-        &out("sketch-from-midi.notes"),
-    ]);
-    for name in ["groove.mid", "groove.notes", "groove.json"] {
+    duet(
+        &[
+            &[p("convert"), &sketch, &out("sketch.notes")][..],
+            &from_text,
+            &to_text,
+        ]
+        .concat(),
+    );
+    duet(
+        &[
+            &[
+                p("convert"),
+                &out("sketch.mid"),
+                &out("sketch-from-midi.notes"),
+            ][..],
+            &to_text,
+        ]
+        .concat(),
+    );
+    for name in ["groove.mid", "groove.duet"] {
         duet(&[p("drums"), p("render"), &groove, &out(name)]);
     }
-    for name in ["groove.drums", "groove.drums.json"] {
-        duet(&[
-            p("drums"),
-            p("read"),
-            &out("groove.mid"),
-            &out(name),
-            p("--grid"),
-            p("1/16"),
-        ]);
-    }
+    duet(
+        &[
+            &[p("drums"), p("render"), &groove, &out("groove.notes")][..],
+            &to_text,
+        ]
+        .concat(),
+    );
+    duet(&[
+        p("drums"),
+        p("read"),
+        &out("groove.mid"),
+        &out("groove.drums"),
+        p("--grid"),
+        p("1/16"),
+    ]);
 
     // (file, the end it states, that end in ticks at 480 per quarter in 4/4)
     let ends = [("sketch", "5.1.0", 4 * 1920), ("groove", "3.1.0", 2 * 1920)];
@@ -110,16 +132,16 @@ fn every_output_holds_the_same_music_and_states_its_end() {
             .to_str()
             .expect("utf-8")
             .to_owned();
-        let (_, end, end_tick) = ends
+        let (stem, end, end_tick) = ends
             .iter()
             .find(|(stem, ..)| name.starts_with(stem))
             .copied()
             .expect("a known sample");
         let want = std::fs::read(&path).expect("golden");
-        let got = std::fs::read(dir.join(&name)).expect("written");
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         match ext {
             "mid" => {
+                let got = std::fs::read(dir.join(&name)).expect("written");
                 let (want_tracks, _) = midi_tracks(&want);
                 let (got_tracks, got_ends) = midi_tracks(&got);
                 assert_eq!(got_tracks, want_tracks, "{name}: the same events");
@@ -128,26 +150,23 @@ fn every_output_holds_the_same_music_and_states_its_end() {
                     "{name}: {got_ends:?}"
                 );
             }
-            "json" if name.ends_with(".drums.json") => {
-                // A grid's bars say where it ends; one ending on its last bar line has no
-                // end field, so the exact form is unchanged.
-                assert!(got == want, "{name} differs");
-            }
-            "json" => {
-                let want: serde_json::Value = serde_json::from_slice(&want).expect("json");
-                let mut got: serde_json::Value = serde_json::from_slice(&got).expect("json");
-                let stated = got.as_object_mut().expect("an object").remove("end");
+            "json" | "toml" => {
+                let want: serde_json::Value = if ext == "json" {
+                    serde_json::from_slice(&want).expect("json")
+                } else {
+                    let table: toml::Table = toml::from_slice(&want).expect("toml");
+                    serde_json::to_value(table).expect("as JSON")
+                };
+                let doc = std::fs::read(dir.join(format!("{stem}.duet"))).expect("written");
+                let mut doc: serde_json::Value = serde_json::from_slice(&doc).expect("a .duet");
+                assert_eq!(doc["duet"]["kind"], "song", "{stem}.duet");
+                let body = doc["body"].as_object_mut().expect("a body");
+                let stated = body.remove("end");
                 assert_eq!(stated, Some(serde_json::Value::from(end)), "{name}");
-                assert_eq!(got, want, "{name}: the same song");
-            }
-            "toml" => {
-                let want: toml::Table = toml::from_slice(&want).expect("toml");
-                let mut got: toml::Table = toml::from_slice(&got).expect("toml");
-                let stated = got.remove("end");
-                assert_eq!(stated, Some(toml::Value::from(end)), "{name}");
-                assert_eq!(got, want, "{name}: the same song");
+                assert_eq!(doc["body"], want, "{name}: the same song");
             }
             _ => {
+                let got = std::fs::read(dir.join(&name)).expect("written");
                 let got = String::from_utf8(got).expect("text");
                 let (rest, stated) = without_end_line(&got);
                 assert_eq!(stated.as_deref(), Some(end), "{name} states its end");
@@ -156,7 +175,7 @@ fn every_output_holds_the_same_music_and_states_its_end() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 10);
+    assert_eq!(compared, 9);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -188,57 +207,33 @@ fn a_song_with_no_end_is_written_stating_its_default() {
     let take = dir.join("take.notes");
     std::fs::write(&take, "[track \"P\" ch1]\n2.3.0 C4 1 80\n").expect("write");
     let p = |s: &'static str| Path::new(s);
-    for name in ["take.json", "take.toml", "take-out.notes"] {
-        duet(&[p("convert"), &take, &dir.join(name)]);
-    }
+    duet(&[
+        p("convert"),
+        &take,
+        &dir.join("take.duet"),
+        p("--from"),
+        p("text"),
+    ]);
+    duet(&[
+        p("convert"),
+        &take,
+        &dir.join("take-out.notes"),
+        p("--from"),
+        p("text"),
+        p("--to"),
+        p("text"),
+    ]);
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect("read");
     assert!(
-        read("take.json").contains("\"end\": \"3.1.0\""),
+        read("take.duet").contains("\"end\": \"3.1.0\""),
         "{}",
-        read("take.json")
-    );
-    assert!(
-        read("take.toml").contains("end = \"3.1.0\""),
-        "{}",
-        read("take.toml")
+        read("take.duet")
     );
     assert!(
         read("take-out.notes").contains("\nend 3.1.0\n"),
         "{}",
         read("take-out.notes")
     );
-    std::fs::remove_dir_all(&dir).expect("clean up");
-}
-
-/// notefmt's extension is .notes, and a file named .txt from before it still reads and
-/// writes as notefmt: the sample is written byte for byte under both names, and each
-/// name read back gives the same MIDI.
-#[test]
-fn a_txt_file_is_still_notefmt() {
-    let dir = scratch("txt");
-    let sample = root().join("samples/sketch.notes");
-    let want = std::fs::read(&sample).expect("the sample");
-    let p = |s: &'static str| Path::new(s);
-    for name in ["sketch.notes", "sketch.txt"] {
-        duet(&[p("convert"), &sample, &dir.join(name)]);
-        assert_eq!(
-            std::fs::read(dir.join(name)).expect("written"),
-            want,
-            "{name}"
-        );
-    }
-    duet(&[
-        p("convert"),
-        &dir.join("sketch.notes"),
-        &dir.join("from-notes.mid"),
-    ]);
-    duet(&[
-        p("convert"),
-        &dir.join("sketch.txt"),
-        &dir.join("from-txt.mid"),
-    ]);
-    let mid = |name: &str| std::fs::read(dir.join(name)).expect("MIDI");
-    assert_eq!(mid("from-txt.mid"), mid("from-notes.mid"));
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -316,7 +311,11 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
     let take = dir.join("take.notes");
     write(&take, "[track \"P\" ch1]\n1.1.0 C4 1 80\n");
     let convert = |cwd: &Path, user_dir: &Path| {
-        let out = duet_in(cwd, user_dir, &[p("convert"), &take, p("-")]);
+        let out = duet_in(
+            cwd,
+            user_dir,
+            &[p("convert"), &take, p("-"), p("--from"), p("text")],
+        );
         assert!(
             out.status.success(),
             "{}",
@@ -339,7 +338,15 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
         let out = duet_in(
             cwd,
             &user,
-            &[p("convert"), &take, p("--to"), p("midi"), p("-")],
+            &[
+                p("convert"),
+                &take,
+                p("--from"),
+                p("text"),
+                p("--to"),
+                p("midi"),
+                p("-"),
+            ],
         );
         assert!(out.status.success());
         out.stdout
@@ -401,7 +408,16 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
         "[track \"Kit\" ch10]\n1.1.0 B5 0.25 90\n1.3.0 C2 0.25 90\n",
     );
     let grid = dir.join("kit.drums");
-    let args = [p("drums"), p("read"), &kit, &grid, p("--grid"), p("1/8")];
+    let args = [
+        p("drums"),
+        p("read"),
+        &kit,
+        &grid,
+        p("--grid"),
+        p("1/8"),
+        p("--from"),
+        p("text"),
+    ];
     let out = duet_in(&below, &user, &args);
     assert!(
         out.status.success(),
@@ -522,7 +538,16 @@ fn a_config_that_moves_a_gm_lane_never_changes_how_drums_text_reads() {
     let kit = dir.join("kit.notes");
     write(&kit, "[track \"Kit\" ch10]\n1.1.0 E7 0.25 90\n");
     let grid = dir.join("kit.drums");
-    let args = [p("drums"), p("read"), &kit, &grid, p("--grid"), p("1/8")];
+    let args = [
+        p("drums"),
+        p("read"),
+        &kit,
+        &grid,
+        p("--grid"),
+        p("1/8"),
+        p("--from"),
+        p("text"),
+    ];
     let out = duet_in(&dir, &user, &args);
     assert!(
         out.status.success(),
@@ -559,7 +584,12 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
 
     // A file of two tunes needs --tune; the second is in 3/4.
     let notes = dir.join("second.notes");
-    let out = run(&[Path::new("abc"), Path::new("render"), &tunes, &notes]);
+    let to_text = [Path::new("--to"), Path::new("text")];
+    let out = run(&[
+        &[Path::new("abc"), Path::new("render"), &tunes, &notes][..],
+        &to_text,
+    ]
+    .concat());
     assert!(!out.status.success(), "two tunes and no --tune is refused");
     let out = run(&[
         Path::new("abc"),
@@ -568,6 +598,8 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
         &notes,
         Path::new("--tune"),
         Path::new("2"),
+        Path::new("--to"),
+        Path::new("text"),
     ]);
     assert!(
         out.status.success(),
@@ -582,14 +614,20 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
 
     // convert goes both ways through .abc.
     let abc = dir.join("second.abc");
-    duet(&[Path::new("convert"), &notes, &abc]);
+    duet(&[
+        Path::new("convert"),
+        &notes,
+        &abc,
+        Path::new("--from"),
+        Path::new("text"),
+    ]);
     let written = std::fs::read_to_string(&abc).expect("written");
     assert!(
         written.starts_with("X:1\n") && written.contains("M:3/4"),
         "{written}"
     );
     let back = dir.join("back.notes");
-    duet(&[Path::new("convert"), &abc, &back]);
+    duet(&[&[Path::new("convert"), &abc, &back][..], &to_text].concat());
     assert_eq!(std::fs::read_to_string(&back).expect("back"), text);
 
     // A construct outside the subset is refused by name, with its line.

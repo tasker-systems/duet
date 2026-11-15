@@ -24,7 +24,7 @@ use crate::abc::AbcCommand;
 use crate::capture::CaptureCommand;
 use crate::config::{Config, Dirs};
 use crate::drums::{DrumsCommand, ReadOptions};
-use crate::io::{AnyFormat, Format, read, write};
+use crate::io::{AnyFormat, Format, read, song_format, write};
 use crate::song::SongCommand;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
@@ -37,9 +37,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Convert between formats. Formats come from the file names (.mid or .midi, .json,
-    /// .toml, .abc, .drums, .drums.json, .drums.toml, .notes or anything else is notefmt
-    /// text) unless --from or --to is given. A drum grid is read as `duet drums render` reads it, and
+    /// Convert between formats. A .duet is a document, read by its envelope; .mid (.midi,
+    /// .smf) is MIDI and .abc is ABC. No other name means a format: --from and --to name
+    /// notefmt text (text) and a drum grid's text (drums), and standard input is a document
+    /// when it starts with {. A drum grid is read as `duet drums render` reads it, and
     /// written from a song as `duet drums read` writes it, which needs --grid. Grid to grid
     /// is a straight copy, or with --grid goes through a song at that step.
     Convert {
@@ -158,9 +159,14 @@ fn convert(
     flags: GridFlags,
     config: &Config,
 ) -> Result<()> {
-    let text = AnyFormat::Song(Format::Text);
-    let from = from.unwrap_or_else(|| AnyFormat::of(input, text));
-    let to = to.unwrap_or_else(|| AnyFormat::of(output, text));
+    let side = |path: &Path, given: Option<AnyFormat>, what: &str| -> Result<AnyFormat> {
+        match given {
+            Some(format) => Ok(format),
+            None => song_format(path, None, Format::Text, what).map(AnyFormat::Song),
+        }
+    };
+    let from = side(input, from, "convert reads")?;
+    let to = side(output, to, "convert writes")?;
     let GridFlags {
         grid,
         track,
@@ -169,7 +175,7 @@ fn convert(
     } = flags;
     // Grid to grid with no step named: a straight copy, read and written as `drums snap`
     // does, so nothing a song cannot hold (an unplayed lane, the grid's own levels) is lost.
-    if let (AnyFormat::Grid(from), AnyFormat::Grid(to), None) = (from, to, grid) {
+    if let (AnyFormat::Grid, AnyFormat::Grid, None) = (from, to, grid) {
         let given: Vec<&str> = [(track.is_some(), "--track"), (bars.is_some(), "--bars")]
             .into_iter()
             .filter_map(|(set, flag)| set.then_some(flag))
@@ -182,12 +188,15 @@ fn convert(
                 if given.len() == 1 { "is" } else { "are" },
             );
         }
-        let copy = drums::levels_for(drums::read_grid(input, from, config)?, snap_levels, to)?;
-        return drums::write_grid(&copy, output, to);
+        let copy = drums::levels_for(
+            drums::read_grid(input, "convert reads", config)?,
+            snap_levels,
+        )?;
+        return drums::write_grid(&copy, output, "convert writes");
     }
     let song = match from {
-        AnyFormat::Song(format) => read(input, format)?,
-        AnyFormat::Grid(form) => drums::read_grid(input, form, config)?.to_song()?,
+        AnyFormat::Song(format) => read(input, format, "convert reads")?,
+        AnyFormat::Grid => drums::read_grid(input, "convert reads", config)?.to_song()?,
     };
     match to {
         AnyFormat::Song(format) => {
@@ -202,8 +211,8 @@ fn convert(
             .collect();
             if !given.is_empty() {
                 bail!(
-                    "{} {} for writing a drum grid, and {} is not one; a grid is .drums, \
-                     .drums.json or .drums.toml, or --to drums, drums-json or drums-toml",
+                    "{} {} for writing a drum grid, and {} is not one; a grid's text is \
+                     written with --to drums",
                     given.join(", "),
                     if given.len() == 1 { "is" } else { "are" },
                     output.display()
@@ -211,7 +220,7 @@ fn convert(
             }
             write(&song, output, format, config.end)
         }
-        AnyFormat::Grid(form) => {
+        AnyFormat::Grid => {
             let Some(grid) = grid else {
                 bail!(
                     "writing a drum grid from a song needs --grid, the step, such as \
@@ -225,9 +234,9 @@ fn convert(
                 snap_levels,
             };
             drums::write_grid(
-                &drums::grid_of_song(&song, &options, form, config)?,
+                &drums::grid_of_song(&song, &options, config)?,
                 output,
-                form,
+                "convert writes",
             )
         }
     }

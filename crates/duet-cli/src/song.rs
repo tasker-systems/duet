@@ -11,9 +11,10 @@ use crate::io::{Format, read, same_file, song_format, write};
 
 #[derive(Subcommand)]
 pub enum SongCommand {
-    /// Print a file as notefmt text (or another format with --to).
+    /// Print a song as notefmt text (or another format with --to).
     Show {
-        /// The file to read, or - for standard input.
+        /// The song to read: a .duet document, MIDI or ABC by its name, notefmt text with
+        /// --from text, or - for standard input (a document if it starts with {, else MIDI).
         input: PathBuf,
         #[arg(long, value_enum)]
         from: Option<Format>,
@@ -22,9 +23,11 @@ pub enum SongCommand {
     },
     /// Write a copy with every note snapped to a grid. The input is never changed.
     Quantize {
-        /// The file to read, or - for standard input.
+        /// The song to read, by its name as for `song show`, or - for standard input (a
+        /// document if it starts with {, else notefmt text).
         input: PathBuf,
-        /// The file to write, or - for standard output. Must not be the input.
+        /// The song to write, by its name, or - for notefmt text on standard output. Must not
+        /// be the input.
         output: PathBuf,
         /// The grid, such as 1/16 for sixteenths or 1/8t for triplet eighths.
         #[arg(long)]
@@ -40,7 +43,12 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
     match command {
         SongCommand::Show { input, from, to } => {
             let from = song_format(&input, from, Format::Midi, "song show reads")?;
-            write(&read(&input, from)?, Path::new("-"), to, config.end)
+            write(
+                &read(&input, from, "song show reads")?,
+                Path::new("-"),
+                to,
+                config.end,
+            )
         }
         SongCommand::Quantize {
             input,
@@ -58,7 +66,7 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
             let from = song_format(&input, from, Format::Text, "quantize reads")?;
             let to = song_format(&output, to, Format::Text, "quantize writes")?;
             write(
-                &read(&input, from)?.quantized(grid)?,
+                &read(&input, from, "quantize reads")?.quantized(grid)?,
                 &output,
                 to,
                 config.end,
@@ -87,6 +95,8 @@ mod tests {
                 out.to_str().expect("utf-8 path"),
                 "--grid",
                 "1/8",
+                "--from",
+                "text",
             ])
         };
 
@@ -95,9 +105,9 @@ mod tests {
         let kept = std::fs::read_to_string(&take).expect("read");
         assert_eq!(kept, played, "the input is untouched");
 
-        let out = dir.join("take-q.notes");
+        let out = dir.join("take-q.duet");
         cli(&out).expect("quantize to a new file");
-        let q = read(&out, Format::Text).expect("read the output");
+        let q = read(&out, Format::Duet, "reads").expect("read the output");
         assert_eq!(q.tracks[0].notes[0].at.to_string(), "1.1.0");
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
