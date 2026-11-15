@@ -269,7 +269,7 @@ fn a_take_sung_sharp_is_read_on_its_own_tuning_and_says_so() {
         read_notes.iter().all(|n| n["between_keys"] == false),
         "{reading}"
     );
-    // Each note's residual, and the take's, with the loss as its three terms.
+    // Each note's residual, and the take's, with the loss as its terms.
     assert!(
         read_notes
             .iter()
@@ -277,7 +277,7 @@ fn a_take_sung_sharp_is_read_on_its_own_tuning_and_says_so() {
         "{reading}"
     );
     let loss = &reading["residual"]["loss"];
-    for term in ["pitch", "unread", "notes"] {
+    for term in ["pitch", "voicing", "unread", "notes"] {
         assert!(
             loss[term].as_f64().is_some_and(|t| t >= 0.0),
             "{term}: {loss}"

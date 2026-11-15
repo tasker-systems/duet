@@ -27,10 +27,14 @@
 //! - silent → silent, or the attack, or the stable state directly, of **any** key: so a dip
 //!   through silence back to the same pitch is two notes, and a note that starts on its pitch
 //!   has no slide;
-//! - attack → attack, or that key's stable state, or silent (a slide that never holds is no
-//!   note), each for nothing: an attack's length is left to its pitch, since its every frame
-//!   costs [`ATTACK_COST`] and nothing else does. (pYIN's attack stays with probability 0.9,
-//!   which favours an attack of ten frames whatever the pitch does.)
+//! - attack → attack, or that key's stable state, each for nothing: an attack's length is left
+//!   to its pitch, since its every frame costs [`ATTACK_COST`] and nothing else does. (pYIN's
+//!   attack stays with probability 0.9, which favours an attack of ten frames whatever the
+//!   pitch does.) **An attack never goes to silent,** and the take never ends in one: a slide
+//!   that never holds is no note, so its frames are unread, and unread they are priced as
+//!   silent, frame by frame, by their voicing. Were attack → silent allowed, such a run would
+//!   cost [`ATTACK_COST`] a frame and never pay `c`, so a short note, or one held far from its
+//!   key, would be cheaper left as a slide to nowhere than read, however strongly it was sung.
 //! - stable → stable, or **leaving it** for silent, or the attack or stable state of **any** key,
 //!   the same key included. The last is **legato**, which pYIN's model lacks: there, stable
 //!   leaves only through silent, so a step with no breath is decoded through a silent state
@@ -55,6 +59,11 @@
 //! scores `ln` [`DROPOUT`] in a note state, so a single dropped frame stays inside a note and
 //! two or more end it.
 //!
+//! These scores are the negated prices of the residual's functions
+//! ([`sounding_cost`], [`silent_cost`], [`held_cost`]), which the loss sums too: the path the
+//! decoder chooses is the reading of least loss, but for the differences
+//! [`Loss`](crate::Loss) names.
+//!
 //! # Decoding
 //!
 //! Fixed-lag Viterbi, as the pitch track decodes: a frame's state is settled once
@@ -67,7 +76,7 @@ use crate::notes::{
     median,
 };
 use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, tuning_of};
-use crate::residual::{NOTE_COST, residual_with_cost};
+use crate::residual::{NOTE_COST, held_cost, residual_with_cost, silent_cost, sounding_cost};
 
 /// The held pitch's σ, in semitones: about the vibrato tolerance. A vibrato swings up to half a
 /// semitone either side of where it is held; at this σ, a frame at the top of such a swing
@@ -162,19 +171,16 @@ struct Costs {
     leave_held: f64,
     stay_held_onset: f64,
     leave_held_onset: f64,
-    stable_norm: f64,
 }
 
 impl Costs {
     fn new(note_cost: f64) -> Costs {
-        let gaussian_norm = |sigma: f64| -(sigma * (std::f64::consts::TAU).sqrt()).ln();
         let leave = (-note_cost).exp();
         Costs {
             stay_held: (1.0 - leave).ln(),
             leave_held: -note_cost,
             stay_held_onset: (1.0 - ONSET_LEAVE).ln(),
             leave_held_onset: ONSET_LEAVE.ln(),
-            stable_norm: gaussian_norm(STABLE_SIGMA_SEMITONES),
         }
     }
 }
@@ -207,19 +213,16 @@ impl Decoder {
 
     /// Each state's log likelihood of `o`, written into `out`.
     fn observe(&self, o: Observed, out: &mut [f64]) {
-        let floor = |p: f64| p.clamp(VOICING_FLOOR, 1.0 - VOICING_FLOOR).ln();
         if o.pitch.is_nan() {
             out.fill(DROPOUT.ln());
             out[Layout::SILENT] = 0.0;
             return;
         }
-        let voiced = floor(o.voicing);
-        out[Layout::SILENT] = floor(1.0 - o.voicing);
-        let c = &self.costs;
-        let attack = voiced + c.stable_norm - ATTACK_COST;
+        let sounding = -sounding_cost(o.voicing);
+        out[Layout::SILENT] = -silent_cost(o.voicing);
+        let attack = sounding - ATTACK_COST;
         for key in 0..KEYS {
-            let d = o.pitch - key as f64;
-            let stable = voiced + c.stable_norm - d * d / (2.0 * STABLE_SIGMA_SEMITONES.powi(2));
+            let stable = sounding - held_cost(o.pitch - key as f64);
             out[self.layout.attack(key)] = attack;
             for step in 0..self.layout.chain {
                 out[self.layout.stable(key, step)] = stable;
@@ -248,13 +251,11 @@ impl Decoder {
         }
         let mut score = vec![f64::NEG_INFINITY; l.states()];
         let mut back = vec![0u16; l.states()];
-        let mut silent = entry;
+        // Silence is entered from silence or from a held note, never from an attack.
+        let silent = entry;
         for key in 0..KEYS {
             let attack = l.attack(key);
             let from_attack = old[attack];
-            if from_attack > silent.0 {
-                silent = (from_attack, attack);
-            }
             let stay = old[attack];
             (score[attack], back[attack]) = if stay > entry.0 {
                 (stay, attack as u16)
@@ -319,9 +320,12 @@ impl Decoder {
         states
     }
 
+    /// The state the best path so far ends in; at the take's `ending`, a held note pays its
+    /// cost and an attack, which can no longer hold, is no end.
     fn best(&self, ending: bool) -> usize {
         let end = |s: usize| match self.layout.what(s) {
             Some((_, Some(_))) if ending => self.costs.leave_held,
+            Some((_, None)) if ending => f64::NEG_INFINITY,
             _ => 0.0,
         };
         (0..self.score.len())

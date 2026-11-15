@@ -24,7 +24,7 @@
 //!   begins;
 //! - **on standard output:** one line per note (its time, key, centre and whether it is between
 //!   keys), with its residual's parts (held centre, drift, vibrato, scoop, fall and rest) when
-//!   the reading has them, then the take's loss as its three terms. A 1.1 reading has neither,
+//!   the reading has them, then the take's loss as its terms. A 1.1 reading has neither,
 //!   and the output says so.
 //!
 //! `--from` and `--to` window all three to a stretch of the take, in seconds.
@@ -213,7 +213,7 @@ pub fn run(args: &CompareArgs) -> Result<()> {
 
 /// The lines on standard output: the title, then one line per note shown, with its residual's
 /// parts when the reading measured them (capture-analysis 1.2), then the take's loss as its
-/// three terms.
+/// terms.
 fn notes_table(title: &str, reading: &Reading, from: u64, to: u64, rate: f64) -> String {
     let parts = reading.residual.is_some();
     let mut out = format!("# {title}\n#     time  key    centre");
@@ -256,8 +256,10 @@ fn notes_table(title: &str, reading: &Reading, from: u64, to: u64, rate: f64) ->
     }
     match &reading.residual {
         Some(take) => out.push_str(&format!(
-            "# loss: pitch {:.1}, unread {:.1}, notes {:.1} ({} frames read, {} unread)\n",
+            "# loss: pitch {:.1}, voicing {:.1}, unread {:.1}, notes {:.1} ({} frames read, {} \
+             unread)\n",
             take.loss.pitch,
+            take.loss.voicing,
             take.loss.unread,
             take.loss.notes,
             take.read_frames,

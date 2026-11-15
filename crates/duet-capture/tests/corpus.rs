@@ -55,11 +55,12 @@ fn every_reference_take_matches_its_transcription() {
     );
 }
 
-/// The loss's three terms, as a row of the per-take table.
+/// The loss's terms, as a row of the per-take table.
 fn row(loss: &Loss) -> String {
     format!(
-        "pitch {:8.1}  unread {:6.1}  notes {:6.1}  total {:8.1}",
+        "pitch {:8.1}  voicing {:6.1}  unread {:6.1}  notes {:6.1}  total {:8.1}",
         loss.pitch,
+        loss.voicing,
         loss.unread,
         loss.notes,
         loss.total()
@@ -67,7 +68,7 @@ fn row(loss: &Loss) -> String {
 }
 
 /// The note HMM must match every melody take's transcription as the rules do, and both
-/// readings' losses are reported per take, as their three terms, with each term the HMM is
+/// readings' losses are reported per take, as their terms, with each term the HMM is
 /// worse on named.
 #[test]
 fn the_note_hmm_matches_every_melody_transcription_and_both_losses_are_reported() {
@@ -110,6 +111,7 @@ fn the_note_hmm_matches_every_melody_transcription_and_both_losses_are_reported(
         if let [(_, (rules, ..)), (_, (hmm, ..))] = losses.as_slice() {
             let worse: Vec<&str> = [
                 ("pitch", hmm.pitch > rules.pitch),
+                ("voicing", hmm.voicing > rules.voicing),
                 ("unread", hmm.unread > rules.unread),
                 ("notes", hmm.notes > rules.notes),
             ]

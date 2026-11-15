@@ -307,27 +307,54 @@ fn takes() -> Vec<(&'static str, Vec<f32>)> {
     ]
 }
 
-/// The per-take report: each reader's notes and its loss's three terms, and the HMM's note
+#[test]
+fn the_loss_agrees_with_the_decoder_that_each_note_it_reads_is_worth_reading() {
+    // The decoder and the loss price the same frames the same way, so a note the decoder
+    // chose over leaving its frames unread is one the loss scores better read too.
+    for (name, signal) in takes() {
+        let (frames, onsets) = performance(&signal);
+        let reading = NoteModel::default().read(&frames, &onsets, Some(A440_CENTS));
+        let whole = reading.residual.as_ref().unwrap().loss;
+        for i in 0..reading.notes.len() {
+            let mut fewer = reading.notes.clone();
+            fewer.remove(i);
+            let (_, less) = residual_with_cost(&frames, &reading.tuning, &fewer, NOTE_COST);
+            assert!(
+                less.loss.total() > whole.total(),
+                "{name}: without note {i}, {:?} against {whole:?}",
+                less.loss
+            );
+        }
+    }
+}
+
+/// The per-take report: each reader's notes and its loss's terms, and the HMM's note
 /// count across costs per note. Run it with `cargo test -p duet-dsp hmm::tests::report --
 /// --ignored --nocapture`.
 #[test]
 #[ignore = "a report, not a witness: run with --ignored --nocapture"]
 fn report() {
     let costs = [1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0];
-    eprintln!("| take | reader | notes | keys | pitch | unread | notes term | total |");
-    eprintln!("|---|---|---|---|---|---|---|---|");
+    eprintln!(
+        "| take | reader | notes | keys | unread frames | pitch | voicing | unread | notes term | \
+         total |"
+    );
+    eprintln!("|---|---|---|---|---|---|---|---|---|---|");
     let mut sweep = Vec::new();
     for (name, signal) in takes() {
         let (frames, onsets) = performance(&signal);
         let rules = read(&frames, &onsets, None);
         let hmm = NoteModel::default().read(&frames, &onsets, None);
         for (reader, reading) in [("rules", &rules), ("hmm", &hmm)] {
-            let loss = reading.residual.as_ref().unwrap().loss;
+            let take = reading.residual.as_ref().unwrap();
+            let loss = take.loss;
             eprintln!(
-                "| {name} | {reader} | {} | {:?} | {:.1} | {:.0} | {:.0} | {:.1} |",
+                "| {name} | {reader} | {} | {:?} | {} | {:.1} | {:.1} | {:.1} | {:.0} | {:.1} |",
                 reading.notes.len(),
                 keys(reading),
+                take.unread_frames,
                 loss.pitch,
+                loss.voicing,
                 loss.unread,
                 loss.notes,
                 loss.total()
@@ -351,4 +378,115 @@ fn report() {
     for line in sweep {
         eprintln!("{line}");
     }
+}
+
+/// What a hand-built frame is: unvoiced, or voiced at `cents` from [`KEY`] on A440 with
+/// `voicing`.
+#[derive(Clone, Copy)]
+enum Hand {
+    Unvoiced,
+    Voiced { cents: f32, voicing: f32 },
+}
+
+/// Frames at the analysis hop, built by hand from runs of `(count, frame)`; a run's frames may
+/// vary with their index in it through `frame`.
+fn by_hand(runs: &[(usize, &dyn Fn(usize) -> Hand)]) -> PerformanceFrames {
+    let head = PerformanceHead::new(RATE, 256, 0);
+    let mut frames = PerformanceFrames::new(&head);
+    let on_key = (A440_CENTS + 100.0 * (f64::from(KEY) - 69.0)) as f32;
+    let (mut pitch, mut voicing) = (Vec::new(), Vec::new());
+    for &(count, frame) in runs {
+        for i in 0..count {
+            match frame(i) {
+                Hand::Unvoiced => {
+                    pitch.push(None);
+                    voicing.push(0.0);
+                }
+                Hand::Voiced { cents, voicing: v } => {
+                    pitch.push(Some(on_key + cents));
+                    voicing.push(v);
+                }
+            }
+        }
+    }
+    let n = pitch.len();
+    frames
+        .push(&FrameBlock::new(0, pitch, voicing, vec![0.1; n]).unwrap())
+        .unwrap();
+    frames
+}
+
+/// Frames at the analysis rate in `secs`.
+fn hops(secs: f64) -> usize {
+    (secs * f64::from(RATE) / 256.0).round() as usize
+}
+
+const UNVOICED: &dyn Fn(usize) -> Hand = &|_| Hand::Unvoiced;
+/// A voiced consonant: weakly voiced, its pitch anywhere.
+const CONSONANT: &dyn Fn(usize) -> Hand = &|i| Hand::Voiced {
+    cents: [-310.0, 240.0, -180.0, 90.0, -260.0][i % 5],
+    voicing: 0.3,
+};
+/// A breath: barely voiced, its pitch anywhere near the note.
+const BREATH: &dyn Fn(usize) -> Hand = &|i| Hand::Voiced {
+    cents: [-40.0, 25.0, -15.0, 35.0][i % 4],
+    voicing: 0.02,
+};
+
+#[test]
+fn a_note_held_45_cents_off_its_key_between_consonants_is_read() {
+    // 0.3 s held 45 cents sharp of E4, strongly voiced, with a voiced consonant either side:
+    // an attack that never holds would leave it all unread.
+    let held: &dyn Fn(usize) -> Hand = &|_| Hand::Voiced {
+        cents: 45.0,
+        voicing: 0.95,
+    };
+    let frames = by_hand(&[
+        (20, UNVOICED),
+        (4, CONSONANT),
+        (hops(0.3), held),
+        (4, CONSONANT),
+        (20, UNVOICED),
+    ]);
+    let reading = NoteModel::default().read(&frames, &[], Some(A440_CENTS));
+    assert_eq!(keys(&reading), [KEY], "{:?}", reading.notes);
+    let take = reading.residual.unwrap();
+    assert!(
+        take.unread_frames <= 8,
+        "only the consonants are left unread: {take:?}"
+    );
+}
+
+#[test]
+fn a_short_note_between_two_breaths_is_read() {
+    // 0.15 s on its key (which main already read: on its key, nine frames pay a note's cost
+    // against an attack's), 0.08 s on its key, and 0.15 s held 33 cents flat: each strongly
+    // voiced, with a breath either side.
+    for (secs, cents) in [(0.15, 0.0), (0.08, 0.0), (0.15, -33.0)] {
+        let held = move |_| Hand::Voiced {
+            cents,
+            voicing: 0.95,
+        };
+        let frames = by_hand(&[
+            (20, UNVOICED),
+            (8, BREATH),
+            (hops(secs), &held),
+            (8, BREATH),
+            (20, UNVOICED),
+        ]);
+        let reading = NoteModel::default().read(&frames, &[], Some(A440_CENTS));
+        assert_eq!(
+            keys(&reading),
+            [KEY],
+            "{secs} s at {cents} cents: {:?}",
+            reading.notes
+        );
+    }
+}
+
+#[test]
+fn a_breath_is_left_unread() {
+    let frames = by_hand(&[(20, UNVOICED), (hops(0.3), BREATH), (20, UNVOICED)]);
+    let reading = NoteModel::default().read(&frames, &[], Some(A440_CENTS));
+    assert!(reading.notes.is_empty(), "{:?}", reading.notes);
 }

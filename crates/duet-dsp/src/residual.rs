@@ -4,8 +4,29 @@
 //! On every voiced frame a note covers, the residual is `performance − (tuning + 100·key)`, in
 //! cents: how far the singing is from the note's key on the take's tuning. A slide into a note
 //! is measured against the note it arrives at. A voiced frame no note covers has no residual:
-//! it is **unread**, and is counted apart, so a reading cannot lower its loss by leaving singing
-//! out. The per-frame residual is never written: the performance and the reading rebuild it.
+//! it is **unread**, and is counted apart. The per-frame residual is never written: the
+//! performance and the reading rebuild it.
+//!
+//! # The loss, and the note HMM's objective
+//!
+//! The loss prices each frame as the note HMM ([`NoteModel`](crate::NoteModel)) decodes it, in
+//! nats, from the same functions: so the reading the decoder chooses is the one of least loss,
+//! up to the differences [`Loss`] names. Each frame's price is taken relative to the cheapest
+//! the frame could be, read or unread, so every term is at least zero:
+//! - a voiced frame of voicing `v` costs `−ln v + ln(σ√2π)` in a note ([`sounding_cost`]) and
+//!   `−ln(1 − v)` left unread ([`silent_cost`]): the decoder's observation of it in a note
+//!   state and in silence. What exceeds the cheaper of the two goes in the loss's `voicing`
+//!   term for a read frame, and in its `unread` term ([`unread_cost`]) for an unread one. So a
+//!   strongly voiced frame is dear to leave out and a breath is free to, and a breath read as
+//!   a note costs what its voicing says it is not;
+//! - a held frame `d` semitones from its key costs `d²/2σ²` ([`held_cost`]) more, in `pitch`;
+//! - a slide frame, one a note covers before its held pitch begins (its `held_from`), costs a
+//!   flat [`ATTACK_COST`](crate::ATTACK_COST) more, in `pitch`: it is measured as slide, as the
+//!   decoder's attack is, and not as though held on the key it arrives at. It is still the
+//!   note's, by the #28 ruling;
+//! - a frame the pitch track decoded unvoiced costs `−ln DROPOUT` inside a note, in `voicing`,
+//!   and nothing outside one;
+//! - every note costs `c`, in `notes`.
 //!
 //! All of it is plain arithmetic over one note's frames at a time (a least-squares line, a
 //! two-term sinusoid fit and an autocorrelation over a few dozen lags), so no array library is
@@ -14,24 +35,66 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::hmm::{ATTACK_COST, DROPOUT, STABLE_SIGMA_SEMITONES, VOICING_FLOOR};
 use crate::reading::{PerformanceFrames, ReadNote, Tuning};
 
-/// The held-pitch tolerance of the loss, `σ`, in cents: half a key. A frame held this far from
-/// its key costs as much as one left unread, so leaving singing out never beats reading it
-/// within half a key. The note HMM sets it on real takes.
-pub const LOSS_SIGMA_CENTS: f64 = 50.0;
-/// The cost of one voiced frame no note covers, `w`.
-pub const LOSS_UNREAD: f64 = 1.0;
-/// The cost of a note, `c`: the shortest note's frames (0.05 s, as in `notes.rs`, is 4 frames at
-/// the analysis rate's 86 a second) times `w`, so a note must account for at least that much
-/// singing that would otherwise be unread.
+/// The held-pitch tolerance of the loss, `σ`, in cents: the note HMM's
+/// [`STABLE_SIGMA_SEMITONES`], half a key. A frame held this far from its key costs half a nat
+/// in the loss's `pitch` term, as it does in the decoder.
+pub const LOSS_SIGMA_CENTS: f64 = STABLE_SIGMA_SEMITONES * 100.0;
+/// The cost of a note, `c`, in nats: the note HMM's cost per note ([`NoteModel`](crate::NoteModel)),
+/// the negative log probability of leaving a held note, and the loss's `notes` term per note.
+/// pYIN's note HMM leaves its stable state with probability 0.01, a cost of 4.6. Raising it
+/// merges notes; lowering it splits them. It is set by ear and on the synthetic witnesses of
+/// the three rulings, never by the residual alone, since one note per frame has the least
+/// residual of all.
 ///
-/// It is also the note HMM's cost per note ([`NoteModel`](crate::NoteModel)): the negative log
-/// probability, in nats, of leaving a held note. pYIN's note HMM leaves its stable state with
-/// probability 0.01, a cost of 4.6. Raising it merges notes; lowering it splits them. It is set
-/// on the corpus and the synthetic witnesses of the three rulings, never by the residual alone,
-/// since one note per frame has the least residual of all.
+/// It was derived as the shortest note's 4 frames times a flat unread cost of 1. The unread
+/// cost is now the frame's voicing's ([`unread_cost`]), about 2 nats for a frame voiced at 0.9,
+/// so 4 is two such frames' worth; it stands until the owner re-judges it by ear.
 pub const NOTE_COST: f64 = 4.0;
+
+/// A voicing as the decoder and the loss take it: floored at [`VOICING_FLOOR`] either way.
+fn floored(voicing: f64) -> f64 {
+    voicing.clamp(VOICING_FLOOR, 1.0 - VOICING_FLOOR)
+}
+
+/// What a voiced frame of `voicing` costs in a note, before its pitch, in nats: `−ln v` less
+/// the held pitch's log density at its peak, `ln(σ√2π)` with `σ` in semitones. A frame held
+/// exactly on its key costs this; an attack frame costs [`ATTACK_COST`] more.
+#[must_use]
+pub fn sounding_cost(voicing: f64) -> f64 {
+    -floored(voicing).ln() + (STABLE_SIGMA_SEMITONES * std::f64::consts::TAU.sqrt()).ln()
+}
+
+/// What a voiced frame of `voicing` costs left unread, in nats: `−ln(1 − v)`, the decoder's
+/// silent state.
+#[must_use]
+pub fn silent_cost(voicing: f64) -> f64 {
+    -(1.0 - floored(voicing)).ln()
+}
+
+/// What a held frame `semitones` from its key costs beyond [`sounding_cost`], in nats:
+/// `d²/2σ²`, the held pitch's Normal density.
+#[must_use]
+pub fn held_cost(semitones: f64) -> f64 {
+    semitones * semitones / (2.0 * STABLE_SIGMA_SEMITONES * STABLE_SIGMA_SEMITONES)
+}
+
+/// What a voiced frame of `voicing` costs the loss left unread, in nats: what leaving it out
+/// costs beyond the cheaper of leaving it out and holding it exactly on a key. About 2 at a
+/// voicing of 0.9 and 4.4 at the floor's 0.99; nothing below a voicing of about 0.56, where
+/// leaving the frame out is already the cheaper.
+#[must_use]
+pub fn unread_cost(voicing: f64) -> f64 {
+    (silent_cost(voicing) - sounding_cost(voicing)).max(0.0)
+}
+
+/// What a voiced frame of `voicing` costs the loss read, beyond its pitch, in nats: what
+/// sounding it costs beyond the cheaper of leaving it out and holding it on a key.
+fn read_voicing_cost(voicing: f64) -> f64 {
+    (sounding_cost(voicing) - silent_cost(voicing)).max(0.0)
+}
 /// The slowest and fastest vibrato looked for, in cycles a second.
 const VIBRATO_HZ: (f64, f64) = (3.0, 9.0);
 /// The least normalized autocorrelation at a vibrato's period for it to be one: a held note's
@@ -109,16 +172,42 @@ pub struct NoteResidual {
     pub frames: u32,
 }
 
-/// The loss of a reading, `Σ r²/σ² + Σ_unread w + Σ_notes c`, as its three terms. It is never
-/// reported as one number alone, so that a reading that wins by adding notes shows it.
+/// The loss of a reading, in nats, as its terms: `pitch`, `voicing`, `unread` and `notes`
+/// (the module's doc gives each frame's price). It is never reported as one number alone, so
+/// that a reading that wins by adding notes, or by leaving singing out, shows it.
+///
+/// It is the note HMM's objective: for two readings of one take, the difference of their
+/// totals is the difference of their paths' costs to the decoder, but for these, each named
+/// so that a reader of the loss knows where the two part:
+/// - **onsets:** the loss is the same whatever the onsets; the decoder leaves a held note at
+///   an onset for `−ln 0.9` ([`ONSET_LEAVE`](crate::ONSET_LEAVE)) rather than `c`, and holds
+///   one across an onset for `−ln 0.1`. The loss is reckoned from the frames and the notes
+///   alone, so that any reading of a performance can be scored, with or without its onsets;
+/// - **staying held:** the decoder charges `−ln(1 − e^−c)` (0.018 at `c` = 4) for every frame
+///   a note holds past the shortest note's; the loss leaves it out, as too small to move a
+///   note;
+/// - **the decoder's notes the reading drops:** a decoded note shorter than the shortest note,
+///   or less voiced than the rules allow one, is dropped from the reading, as the rules drop
+///   it, and its frames are unread in the loss;
+/// - **a slide is what its reader says:** the frames before a note's `held_from` are its
+///   slide. For the HMM that is its attack; for the rules it is until the pitch arrives and
+///   holds for 50 ms.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Loss {
-    /// `Σ r²/σ²` over every voiced frame a note covers, its slide and fall included, with `σ`
-    /// [`LOSS_SIGMA_CENTS`].
+    /// `Σ d²/2σ²` over every held frame a note covers, its fall included, with `σ`
+    /// [`LOSS_SIGMA_CENTS`], and [`ATTACK_COST`](crate::ATTACK_COST) for every frame of its
+    /// slide, before its `held_from`. Before `capture-analysis` 1.4 it was `Σ r²/σ²` over every
+    /// frame, the slide's measured against the key as though held.
     pub pitch: f64,
-    /// `w` for every voiced frame no note covers, with `w` [`LOSS_UNREAD`].
+    /// For every frame a note covers, what sounding it costs beyond leaving it out: nothing for
+    /// a voicing above about 0.56, and `−ln DROPOUT` for a frame the pitch track decoded
+    /// unvoiced. Added in `capture-analysis` 1.4; absent, and taken as 0, before.
+    #[serde(default)]
+    pub voicing: f64,
+    /// [`unread_cost`] for every voiced frame no note covers: what leaving it out costs, by its
+    /// voicing. Before `capture-analysis` 1.4 it was 1 a frame, whatever the voicing.
     pub unread: f64,
     /// `c` for every note: [`NOTE_COST`] unless the reader was given another, the reading's
     /// `reader.note_cost`.
@@ -126,10 +215,10 @@ pub struct Loss {
 }
 
 impl Loss {
-    /// The three terms' sum, for comparing two readings of one take.
+    /// The terms' sum, for comparing two readings of one take.
     #[must_use]
     pub fn total(&self) -> f64 {
-        self.pitch + self.unread + self.notes
+        self.pitch + self.voicing + self.unread + self.notes
     }
 }
 
@@ -442,29 +531,52 @@ pub fn residual_with_cost(
     let fps = f64::from(frames.rate) / f64::from(frames.hop);
     let rate = f64::from(frames.rate);
     let mut covered = vec![false; frames.len()];
-    let mut pitch = 0.0;
+    let (mut pitch, mut voicing) = (0.0, 0.0);
     let mut per_note = Vec::with_capacity(notes.len());
     for note in notes {
         let target = tuning.a4.value() + 100.0 * (f64::from(note.key) - 69.0);
         let mut voiced = Vec::new();
         for (k, &cents) in frames.cents.iter().enumerate() {
             let at = frames.frame(k);
-            if at < note.start || at >= note.end || cents.is_nan() {
+            if at < note.start || at >= note.end {
                 continue;
             }
-            covered[k] = true;
+            // A frame two notes cover is priced once, by the first.
+            let priced = !std::mem::replace(&mut covered[k], true);
+            if cents.is_nan() {
+                if priced {
+                    voicing += -DROPOUT.ln();
+                }
+                continue;
+            }
             let r = f64::from(cents) - target;
-            pitch += (r / LOSS_SIGMA_CENTS).powi(2);
+            if priced {
+                pitch += if at < note.held_from {
+                    ATTACK_COST
+                } else {
+                    held_cost(r / 100.0)
+                };
+                voicing += read_voicing_cost(f64::from(frames.voicing[k]));
+            }
             voiced.push((at as f64 / rate, r));
         }
         per_note.push(measure(&voiced, note.held_from as f64 / rate, fps));
     }
-    let voiced = frames.cents.iter().filter(|c| !c.is_nan()).count();
-    let read = covered.iter().filter(|&&c| c).count();
-    let unread = voiced - read;
+    let (mut read, mut unread, mut unread_loss) = (0, 0, 0.0);
+    for (k, &cents) in frames.cents.iter().enumerate() {
+        match (cents.is_nan(), covered[k]) {
+            (true, _) => {}
+            (false, true) => read += 1,
+            (false, false) => {
+                unread += 1;
+                unread_loss += unread_cost(f64::from(frames.voicing[k]));
+            }
+        }
+    }
     let loss = Loss {
         pitch,
-        unread: unread as f64 * LOSS_UNREAD,
+        voicing,
+        unread: unread_loss,
         notes: notes.len() as f64 * note_cost,
     };
     let bins = (100.0 / CENTRE_BIN_CENTS) as usize;
@@ -528,12 +640,6 @@ mod tests {
         out.push(&FrameBlock::new(0, column, vec![0.9; n], vec![0.1; n]).unwrap())
             .unwrap();
         out
-    }
-
-    #[test]
-    fn the_cost_per_note_is_the_shortest_notes_frames_at_the_analysis_rate() {
-        let fps = f64::from(crate::ANALYSIS_RATE) / f64::from(HOP);
-        assert_eq!(NOTE_COST, (0.05 * fps).round() * LOSS_UNREAD);
     }
 
     fn note(start: f64, held_from: f64, end: f64) -> ReadNote {
@@ -655,6 +761,69 @@ mod tests {
         assert!(less.loss.total() > one.loss.total(), "{less:?} {one:?}");
     }
 
+    /// Frames as [`frames`] makes them, with each frame's voicing `voicing(t)`.
+    fn voiced_as(
+        total: f64,
+        pitch: impl Fn(f64) -> Option<f64>,
+        voicing: impl Fn(f64) -> f32,
+    ) -> PerformanceFrames {
+        let mut out = frames(total, pitch);
+        for (k, v) in out.voicing.iter_mut().enumerate() {
+            *v = voicing(secs(k));
+        }
+        out
+    }
+
+    #[test]
+    fn dropping_a_held_note_raises_the_loss() {
+        // Strongly voiced singing: held on the key, held 45 cents off it, and arriving by a
+        // 150 ms scoop from 300 cents below. Each is dearer left out than read, its slide
+        // measured as slide.
+        let scoop = |t: f64| -300.0 * (1.0 - (t - 0.2) / 0.15).max(0.0);
+        type Pitch<'a> = &'a dyn Fn(f64) -> f64;
+        let takes: [(&str, Pitch, f64); 3] = [
+            ("on its key", &|_| 0.0, 0.2),
+            ("45 cents off", &|_| 45.0, 0.2),
+            ("scooped", &scoop, 0.35),
+        ];
+        for (name, pitch, held_from) in takes {
+            for secs in [0.2, 1.0] {
+                let end = 0.35 + secs;
+                let frames = frames(end + 0.2, |t| (0.2..end).contains(&t).then(|| pitch(t)));
+                let (_, read) = residual(&frames, &on_a440(), &[note(0.2, held_from, end)]);
+                let (_, dropped) = residual(&frames, &on_a440(), &[]);
+                assert_eq!(dropped.read_frames, 0);
+                assert!(
+                    dropped.loss.total() > read.loss.total(),
+                    "{name}, {secs} s: dropped {:?}, read {:?}",
+                    dropped.loss,
+                    read.loss
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_breath_is_cheaper_left_out_than_read() {
+        let frames = voiced_as(0.8, |t| (0.2..0.6).contains(&t).then_some(0.0), |_| 0.02);
+        let (_, read) = residual(&frames, &on_a440(), &[note(0.2, 0.2, 0.6)]);
+        let (_, dropped) = residual(&frames, &on_a440(), &[]);
+        assert_eq!(dropped.loss.unread, 0.0, "{dropped:?}");
+        assert!(read.loss.voicing > 0.0, "{read:?}");
+        assert!(dropped.loss.total() < read.loss.total());
+    }
+
+    #[test]
+    fn an_unread_frame_costs_by_its_voicing() {
+        // Leaving a strongly voiced frame out costs more than reading it anywhere within half
+        // a key, held or as slide; leaving a breath out costs nothing.
+        for v in [0.7, 0.9, 0.99] {
+            assert!(unread_cost(v) >= held_cost(0.5).max(ATTACK_COST), "{v}");
+        }
+        assert_eq!(unread_cost(0.02), 0.0);
+        assert!(unread_cost(0.9) < unread_cost(0.95));
+    }
+
     #[test]
     fn only_voiced_frames_are_read_or_unread() {
         // Voiced in two stretches with silence between, one note over the first.
@@ -665,7 +834,9 @@ mod tests {
         let voiced = frames.cents.iter().filter(|c| !c.is_nan()).count() as u32;
         assert_eq!(take.read_frames + take.unread_frames, voiced);
         assert!(take.read_frames > 0 && take.unread_frames > 0);
-        assert_eq!(take.loss.unread, f64::from(take.unread_frames));
+        // Every frame is voiced at 0.9, so each unread one costs that voicing's price.
+        let each = unread_cost(f64::from(0.9f32));
+        assert!((take.loss.unread - f64::from(take.unread_frames) * each).abs() < 1e-9);
     }
 
     #[test]

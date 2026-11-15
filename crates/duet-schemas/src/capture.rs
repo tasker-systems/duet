@@ -20,7 +20,13 @@ use crate::{Kind, Version};
 /// **1.3** adds the reading's optional `reader`, also additive: which reader chose its notes
 /// (`rules` or `hmm`) and the cost per note `c` it chose them with, which the loss's `notes`
 /// term counts. A 1.2 document's reading has none, and was read by the rules.
+///
+/// **1.4** prices the loss as the note HMM decodes, also additive in shape: the loss gains a
+/// `voicing` term (what sounding the frames a note covers costs beyond leaving them out), taken
+/// as 0 in a 1.3 document. Two terms are priced anew: `unread` costs each voiced frame by its
+/// voicing, not 1, and `pitch` is `d²/2σ²` a held frame and a flat attack cost a slide frame,
+/// not `r²/σ²` a frame. So a 1.3 loss and a 1.4 loss are not to be compared term by term.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 3);
+    const VERSION: Version = Version::new(1, 4);
 }
