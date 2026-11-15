@@ -24,7 +24,7 @@ use crate::abc::AbcCommand;
 use crate::capture::CaptureCommand;
 use crate::config::{Config, Dirs};
 use crate::drums::{DrumsCommand, ReadOptions};
-use crate::io::{AnyFormat, Format, GridForm, Loaded, read_any, song_format, write};
+use crate::io::{AnyFormat, Format, GridForm, Loaded, read_any, song_format, write_from};
 use crate::song::SongCommand;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
@@ -221,9 +221,9 @@ fn convert(
         };
         return drums::write_grid(&copy, output, Some(form), "convert writes");
     }
-    let song = match read {
-        Loaded::Song(song) => song,
-        Loaded::Grid(grid) => grid.to_song()?,
+    let (song, from) = match read {
+        Loaded::Song(song, from) => (song, from),
+        Loaded::Grid(grid) => (grid.to_song()?, None),
     };
     let Some(form) = to_grid else {
         if any_grid_flag {
@@ -248,7 +248,7 @@ fn convert(
             Some(AnyFormat::Song(format)) => format,
             _ => song_format(output, None, Format::Text, "convert writes")?,
         };
-        return write(&song, output, format, config.end);
+        return write_from(&song, output, format, config.end, from.as_ref());
     };
     let Some(grid) = grid else {
         bail!(
