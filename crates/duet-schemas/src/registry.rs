@@ -1,10 +1,11 @@
 //! Every kind this build knows, and a document of any of them.
 
 use duet_core::Song;
+use duet_dsp::PerformanceHead;
 use serde_json::Value;
 
-use crate::schema::{document_schema, envelope_schema};
-use crate::{Document, Error, Kind, Result, Version, read_envelope};
+use crate::schema::{document_schema, envelope_schema, stream_schema};
+use crate::{Document, Error, Kind, Result, StreamKind, Version, read_envelope};
 
 /// How a kind's files are framed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +38,17 @@ const fn document<K: Kind>() -> KindInfo {
     }
 }
 
+const fn stream<K: StreamKind>() -> KindInfo {
+    KindInfo {
+        name: K::NAME,
+        version: K::VERSION,
+        framing: Framing::Stream,
+        schema: stream_schema::<K>,
+    }
+}
+
 /// Every kind this build reads and writes.
-pub const KINDS: &[KindInfo] = &[document::<Song>()];
+pub const KINDS: &[KindInfo] = &[document::<Song>(), stream::<PerformanceHead>()];
 
 /// The envelope's schema, as a [`KindInfo`] whose name is [`ENVELOPE`](crate::ENVELOPE). It is
 /// no kind, but the gate commits and checks it like one.
