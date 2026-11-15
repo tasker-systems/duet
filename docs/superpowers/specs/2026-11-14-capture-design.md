@@ -102,6 +102,8 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
 - **`Assemble`** is the one stage that keeps the whole take, and only as events, never samples. It needs the tempo and the downbeat to turn frames into bar.beat.tick:
   - It builds a `Song` at the default 480 ticks per quarter, with one track: `melody`, or the drum track on channel 10.
   - For files it converts at `finish`. For live input later, it converts provisionally under the tempo so far, which is what the MCP stream will send.
+> **File names (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.notes` becomes `<stem>.duet` (a song document) and `<stem>.drums` becomes `<stem>.grid.duet` (a drum-grid document); their text is the `notes` and `grid` views. The `#` comment statements move into the envelope's `statements`, which every view shows.
+
 - **Output.** Capture writes `<stem>.notes` (the exact, unquantized performance) and either `<stem>.abc` or `<stem>.drums`. The score file is the `Song` quantized with `Song::quantized(grid)`.
   - `--grid` sets the grid; the default is a sixteenth.
   - `-o` sets the output stem; the default is the input's stem beside it.
@@ -170,6 +172,8 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
   - A given value is not reported as an estimate.
 
 ### The analysis is kept, not thrown away (owner, 2026-11-14)
+
+> **File name (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.capture.json` becomes `<stem>.capture.duet`, a `capture-analysis` document.
 
 Every stage's settled output can be stored and read, so the owner and Claude can reason about a capture with numbers.
 - **The event vocabulary and `Timing` serialize** with serde. It's the same payload the MCP stream will send later.

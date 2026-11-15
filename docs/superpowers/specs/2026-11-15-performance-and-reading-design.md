@@ -54,6 +54,8 @@ FileSource ─▶ Prepare ─Mono─▶ Performance ──frames + onsets──�
 
 ## 1. Layer 1: what it holds, and where it is written
 
+> **File name (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** `<stem>.performance.jsonl` becomes `<stem>.performance.duet.jsonl`, a `performance` stream: its header is the envelope's `head`, and each later line is a record.
+
 **Ruled (owner, 2026-11-15): its own file, `<stem>.performance.jsonl`.** The rest of this answer is proposed.
 - **Contents, per frame:**
   - `pitch`: the smoothed fundamental, or `null` when the track says unvoiced.
@@ -243,6 +245,8 @@ ReadNote {
   - Bends are emitted where the residual moves more than 2 cents, at most one per frame (86 a second).
   - Bend is channel-wide, which is right for a monophonic melody.
   - **Not known yet:** whether Logic's instruments and `duet play`'s built-in synth honour RPN 0. That is a build-time check by ear. If one doesn't, it is a stated limit, not a silent wrong pitch.
+> **File names (2026-11-15, [duet documents](2026-11-15-duet-documents-design.md)):** capture's `.notes` output becomes a song document, `<stem>.duet`, and its text is the `notes` view; `.capture.json` becomes `<stem>.capture.duet`.
+
 - **The default `.notes`** stays the reading's keys, unquantized, as today, with the tuning as a comment. The performance render is asked for (`--render performance`).
   - The anti-goal "losing the performance" is met by `.performance.jsonl` itself, not by bends in `.notes`.
   - **Proposed; not yet ruled.**
