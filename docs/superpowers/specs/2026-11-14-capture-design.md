@@ -105,6 +105,11 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
   - `--grid` sets the grid; the default is a sixteenth.
   - `-o` sets the output stem; the default is the input's stem beside it.
   - An output file that already exists is refused, never overwritten, because the acts never change their inputs and nothing is overwritten.
+- **The performance is always written** (owner, 2026-11-14). Once analysis succeeds, `.notes` and `.capture.json` are written even if the score can't be. A score failure is reported after them and never takes them down with it.
+- **Collisions in the score** (owner, 2026-11-14). A quick run or a flam can put two notes, or two hits on one lane, on the same grid step once quantized.
+  - Capture first refines the grid, halving the step (1/16 → 1/32 → 1/64), until nothing collides, and states the grid it used.
+  - If the finest grid still collides, it merges each collision into one note or hit and states every merge: a melody keeps the longer note's pitch, and drums keep the stronger hit.
+  - The `.notes` keeps every note. A given `--grid` is refined the same way, and the statement says so.
 - **Velocity** comes from onset strength, mapped to 1–127. The `.notes` file keeps those raw values.
 - **Velocity in the scores is snapped, and the snap is stated** (owner, 2026-11-14).
   - Both score writers refuse off-level velocities by default ("nothing is snapped unasked"). Asking capture for a score counts as asking for the snap.
@@ -151,7 +156,7 @@ Source ──chunks──▶ Prepare ──mono chunks──▶ [analysis stages
   - It states the offset applied, the same way as tempo. A `--downbeat <seconds>` option overrides it.
 - **Notes before the downbeat** (owner, 2026-11-14). A `Song` can't hold a position before `1.1.0`, so:
   - **If they fit a pickup,** they become one: a short first bar whose length the ABC writer accepts as a pickup meter (`pickup_meter`), followed by a time change at bar 2.
-  - **Otherwise,** bar 1 becomes a full bar of rests that holds them, and the downbeat bar becomes bar 2.
+  - **Otherwise,** the take opens with as many whole bars of rests as hold them (usually one), and the downbeat bar follows them.
   - Drum grids number bars from 1 with no gaps, so a rhythm take always gets the full lead-in bar.
   - **Nothing is ever dropped.** The output states which was done.
 - **How estimates are stated:**
