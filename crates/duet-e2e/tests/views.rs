@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use duet_e2e::{duet, duet_with, golden, ok, root, s, scratch};
+use duet_e2e::{duet, duet_with, golden, notes_doc, ok, root, s, scratch};
 use serde_json::Value;
 
 fn read(path: &Path) -> Vec<u8> {
@@ -302,26 +302,16 @@ fn each_one_cell_edit_changes_exactly_one_note() {
 #[test]
 fn an_off_level_velocity_survives_view_and_apply_unedited() {
     let dir = scratch("views-off-level");
-    let take = dir.join("take.notes");
-    std::fs::write(
-        &take,
+    let take = notes_doc(
+        &dir,
+        "take.notes",
         "[track \"Kit\" ch10]\n1.1.0 C2 0.25 101\n1.2.0 D2 0.25 7\n",
-    )
-    .expect("write");
-    let doc = dir.join("take.duet");
+    );
+    let doc = dir.join("grid.duet");
     ok(
         &duet(
             &dir,
-            &[
-                "drums",
-                "read",
-                s(&take),
-                s(&doc),
-                "--grid",
-                "1/16",
-                "--from",
-                "text",
-            ],
+            &["drums", "read", s(&take), s(&doc), "--grid", "1/16"],
         ),
         "a drum-grid document",
     );
@@ -329,7 +319,7 @@ fn an_off_level_velocity_survives_view_and_apply_unedited() {
         &dir,
         &["view", s(&doc)],
         &[
-            "velocity 101 is not one of the drum grid text's levels",
+            "velocity 101 is not one of the grid view's levels",
             "--snap-levels",
         ],
     );
