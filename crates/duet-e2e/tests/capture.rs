@@ -402,6 +402,20 @@ fn the_reader_is_chosen_stated_and_written() {
             Some(4.0 * n as f64)
         });
     }
+    // The HMM's reading compares against the rules', as the owner judges the two by ear.
+    let compared = duet(
+        &dir,
+        &[
+            "capture",
+            "compare",
+            s(&wav),
+            "-o",
+            s(&dir.join("rules")),
+            "--reading",
+            s(&dir.join("hmm.capture.duet")),
+        ],
+    );
+    ok(&compared, "capture compare --reading hmm.capture.duet");
     let out = capture(&dir, &["rhythm", s(&wav), "--reader", "hmm"]);
     assert!(!out.status.success());
     assert!(
