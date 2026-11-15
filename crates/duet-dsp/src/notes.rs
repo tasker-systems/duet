@@ -391,7 +391,9 @@ struct Slide {
 /// is dropped. A voice that comes in moving, after silence or an onset, has not held either:
 /// until its frames over [`CHANGE_HOLD_SECS`] spread no wider than [`CHANGE_SEMITONES`], as a
 /// vibrato's or a tracker's jitter does, it is a scoop into the note it reaches, which starts
-/// where the voice came in. A pitch that dips
+/// where the voice came in. A scoop that leaves where its pitch has been so far, as pitch
+/// leaves a note, before it has held is a slide from then on, so it must arrive as a slide
+/// does, within [`ARRIVED_SEMITONES`]. A pitch that dips
 /// away and comes back to where it was is a slide too, so it
 /// splits one pitch into two notes, as a voiced consonant between two syllables does.
 ///
@@ -411,6 +413,12 @@ struct Slide {
 /// - The bottom of a scoop that wobbles in place for [`CHANGE_HOLD_SECS`] or more, within
 ///   [`CHANGE_SEMITONES`], has held, so it is a note of its own, as a short note is.
 /// - An onset ends whatever note is sounding, so a scoop an onset cuts can be a note.
+/// - A slide that keeps wobbling, so that its frames over every [`CHANGE_HOLD_SECS`] spread
+///   wider than [`ARRIVED_SEMITONES`], never arrives, and is dropped as no note when the voice
+///   stops, however long it is sung. A glide or a scoop into a fast or uneven wobble does this:
+///   an even one of 50 cents either side at 9 swings a second, or 60 at 8. An even vibrato
+///   at 7 a second still arrives at the turns of its swing, even at 60 cents either side. The
+///   note HMM ([`NoteModel`](crate::NoteModel)) reads such a note.
 ///
 /// It must be given every onset up to a pitch frame before that frame.
 pub(crate) struct Segmenter {
@@ -641,6 +649,28 @@ impl Segmenter {
 
 fn take(run: &mut Run, (frame, pitch, voiced, level): Taken) {
     run.take(frame, pitch, voiced, level);
+}
+
+/// Frames for the stated limit of a slide that never arrives, one hop apart: a held note,
+/// a weakly voiced glide straight down from it, a scoop up to the note it is sung to, and a
+/// weakly voiced wobble of 60 cents either side at 9 swings a second on that note, then
+/// silence. Each frame is its pitch in semitones from the note the wobble is on, `None` when
+/// unvoiced, and its voicing. The note HMM's tests read the same frames.
+#[cfg(test)]
+pub(crate) fn wobbling_slide() -> Vec<(Option<f32>, f32)> {
+    let hop_secs = 256.0 / 22_050.0;
+    let mut frames = vec![(None, 0.0); 20];
+    // Held three semitones above, then gliding down through barely voiced frames.
+    frames.extend([(Some(3.0), 0.9); 25]);
+    frames.extend((1..=6).map(|k| (Some(3.0 - 7.5 * k as f32 / 6.0), 0.1)));
+    // The scoop up from 4.5 below, then the wobble, its voicing dipping mid-note.
+    frames.extend((1..=8).map(|k| (Some(-4.5 + 4.5 * k as f32 / 8.0), 0.6)));
+    frames.extend((0..30).map(|k| {
+        let wobble = 0.6 * (std::f32::consts::TAU * 9.0 * k as f32 * hop_secs).sin();
+        (Some(wobble), if (10..16).contains(&k) { 0.3 } else { 0.75 })
+    }));
+    frames.extend([(None, 0.0); 20]);
+    frames
 }
 
 #[cfg(test)]
@@ -1336,5 +1366,31 @@ mod tests {
     fn a_run_shorter_than_the_shortest_note_is_dropped() {
         let found = segment(&[(None, 5), (Some(60.0), 3), (None, 5)]);
         assert_eq!(found, vec![]);
+    }
+
+    /// A stated limit, not a desired reading: a slide into a wobble that never spreads within
+    /// [`ARRIVED_SEMITONES`] is no note, though it is sung for a third of a second. A change
+    /// to how a slide arrives that reads it is a decision about this limit, and changes this
+    /// test with it.
+    #[test]
+    fn stated_limit_a_slide_into_a_wobble_that_never_arrives_is_no_note() {
+        let frames = wobbling_slide();
+        let hold = Segmenter::new(RATE, 256).hold;
+        let wobble: Vec<f32> = frames.iter().skip(59).map_while(|f| f.0).collect();
+        let narrowest = wobble.windows(hold).map(spread).fold(f32::MAX, f32::min);
+        assert!(
+            narrowest > ARRIVED_SEMITONES,
+            "the wobble arrives somewhere: {narrowest}"
+        );
+        let mut segmenter = Segmenter::new(RATE, 256);
+        let mut out = Vec::new();
+        for (k, &(pitch, voiced)) in frames.iter().enumerate() {
+            // On D#3: the held note is F#3.
+            let pitch = pitch.map(|p| 51.0 + p);
+            segmenter.take_frame(k as u64 * 256, pitch, voiced, 0.1, &mut out);
+        }
+        segmenter.finish_segments(&mut out);
+        let keys: Vec<f32> = out.iter().map(|s| s.median.round()).collect();
+        assert_eq!(keys, [54.0], "only the held note: {out:?}");
     }
 }
