@@ -1,6 +1,7 @@
 //! `duet capture melody|rhythm`: a take in, the exact performance (`.duet`, a song document), a
-//! quantized score (`.abc` or `.drums`) and the analysis (`.capture.duet`) out, with every estimate stated on standard
-//! error and in the files, and every refusal made before anything is written.
+//! quantized score (`.abc`, or `.grid.duet`, a drum-grid document) and the analysis
+//! (`.capture.duet`) out, with every estimate stated on standard error and in the files, and
+//! every refusal made before anything is written.
 //!
 //! The takes are generated here (see `capture/audio.rs`) and written to scratch directories.
 
@@ -113,6 +114,16 @@ fn song_of(path: &Path) -> Song {
 /// A song document, as duet-schemas reads it.
 fn document_of(path: &Path) -> Document<Song> {
     Document::read(&read(path)).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// A drum-grid document, as duet-schemas reads it.
+fn grid_document_of(path: &Path) -> Document<DrumGrid> {
+    Document::read(&read(path)).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// The grid in a drum-grid document.
+fn grid_of(path: &Path) -> DrumGrid {
+    grid_document_of(path).body
 }
 
 /// The body of a capture-analysis document, read as one by duet-schemas, as JSON.
@@ -290,14 +301,18 @@ fn melody_writes_its_performance_beside_its_other_outputs_and_never_overwrites_i
 }
 
 #[test]
-fn rhythm_writes_notes_and_drums() {
+fn rhythm_writes_a_song_a_grid_and_the_analysis() {
     let dir = scratch("capture-rhythm");
     let wav = take(&dir, "beat.wav", &kick_and_hat());
     let out = capture(&dir, &["rhythm", s(&wav), "-o", s(&dir.join("out"))]);
     ok(&out, "capture rhythm");
     song_of(&dir.join("out.duet"));
-    DrumGrid::from_text(&read(&dir.join("out.drums"))).expect(".drums parses again");
+    grid_of(&dir.join("out.grid.duet"));
     analysis_of(&dir.join("out.capture.duet"));
+    assert_eq!(
+        files(&dir),
+        ["beat.wav", "out.capture.duet", "out.duet", "out.grid.duet"]
+    );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -479,7 +494,7 @@ fn rhythm_without_a_lane_is_beatboxed() {
         &["rhythm", s(&wav), "--tempo", "120", "--meter", "4/4"],
     );
     ok(&out, "capture rhythm");
-    let grid = DrumGrid::from_text(&read(&dir.join("beat.drums"))).expect("parses");
+    let grid = grid_of(&dir.join("beat.grid.duet"));
     assert_eq!(
         (count(&grid, "kick"), count(&grid, "hh")),
         (8, 8),
@@ -502,7 +517,7 @@ fn rhythm_without_a_lane_is_beatboxed() {
         ],
     );
     ok(&out, "capture rhythm --lane hat");
-    let grid = DrumGrid::from_text(&read(&dir.join("tapped.drums"))).expect("parses");
+    let grid = grid_of(&dir.join("tapped.grid.duet"));
     assert_eq!(
         (count(&grid, "kick"), count(&grid, "hh")),
         (0, 16),
@@ -535,7 +550,7 @@ fn rhythm_lanes_come_from_the_config() {
         b"",
     );
     ok(&out, "capture rhythm");
-    let grid = DrumGrid::from_text(&read(&dir.join("beat.drums"))).expect("parses");
+    let grid = grid_of(&dir.join("beat.grid.duet"));
     let kick = grid
         .lanes
         .iter()
@@ -572,16 +587,87 @@ fn a_fractional_tempo_on_a_rhythm_is_kept() {
 }
 
 #[test]
-fn the_snap_is_stated_in_the_drums_file() {
-    let dir = scratch("capture-snap");
+fn the_grid_document_keeps_every_velocity_exactly() {
+    let dir = scratch("capture-exact-velocity");
     let wav = take(&dir, "beat.wav", &kick_and_hat());
     let out = capture(&dir, &["rhythm", s(&wav), "--tempo", "120"]);
     ok(&out, "capture rhythm");
-    let drums = comments(&read(&dir.join("beat.drums")), "#");
+    let grid = grid_of(&dir.join("beat.grid.duet"));
+    // A take's velocities fall between the grid text's levels, and are kept there.
     assert!(
-        drums.iter().any(|l| l.contains("snapped to the levels")),
-        "{drums:?}"
+        grid.first_off_level().is_some(),
+        "every velocity is on a level"
     );
+    let mut in_grid: Vec<u8> = grid.vel.data().iter().copied().filter(|v| *v > 0).collect();
+    let mut played: Vec<u8> = song_of(&dir.join("beat.duet")).tracks[0]
+        .notes
+        .iter()
+        .map(|n| n.vel)
+        .collect();
+    in_grid.sort_unstable();
+    played.sort_unstable();
+    assert_eq!(
+        in_grid, played,
+        "a velocity moved between the .duet and the grid"
+    );
+    // So nothing is snapped, and nothing is stated as snapped.
+    assert!(!stderr(&out).contains("snapped"), "{}", stderr(&out));
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// The grid document is a document like any other: `duet drums render` reads it by its
+/// envelope, with no `--from`, and it states the estimated tempo in its envelope.
+#[test]
+fn the_grid_document_renders_and_states_its_estimates() {
+    let dir = scratch("capture-grid-render");
+    let wav = take(&dir, "beat.wav", &kick_and_hat());
+    let out = capture(&dir, &["rhythm", s(&wav)]);
+    ok(&out, "capture rhythm");
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("tempo: estimated "))
+        .unwrap_or_else(|| panic!("no tempo statement: {err}"));
+    let path = dir.join("beat.grid.duet");
+    let doc = grid_document_of(&path);
+    assert_eq!(doc.envelope().kind, "drum-grid");
+    assert!(
+        doc.statements.iter().any(|l| l == line),
+        "{:?}",
+        doc.statements
+    );
+    let rendered = dir.join("rendered.duet");
+    ok(
+        &duet(&dir, &["drums", "render", s(&path), s(&rendered)]),
+        "drums render beat.grid.duet",
+    );
+    let song = song_of(&rendered);
+    let hits = doc.body.vel.data().iter().filter(|v| **v > 0).count();
+    assert_eq!(song.tracks[0].notes.len(), hits, "{song:?}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// Every file a rhythm capture writes is refused, rather than overwritten, when it exists.
+#[test]
+fn rhythm_refuses_to_overwrite_each_of_its_outputs() {
+    let dir = scratch("capture-rhythm-refuse-each");
+    let wav = take(&dir, "beat.wav", &kick_and_hat());
+    for name in ["beat.duet", "beat.grid.duet", "beat.capture.duet"] {
+        let path = dir.join(name);
+        std::fs::write(&path, "keep me\n").expect("write");
+        let out = capture(&dir, &["rhythm", s(&wav)]);
+        assert!(!out.status.success(), "{name} was overwritten");
+        let err = stderr(&out);
+        assert!(
+            err.contains(&format!("{name} exists")) && err.contains("never overwrites"),
+            "{name}: {err}"
+        );
+        assert_eq!(read(&path), "keep me\n");
+        let mut want = vec![name, "beat.wav"];
+        want.sort_unstable();
+        assert_eq!(files(&dir), want, "nothing else is written");
+        std::fs::remove_file(&path).expect("remove");
+    }
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -989,14 +1075,17 @@ fn a_flam_refines_the_grid_and_writes_everything() {
         &["rhythm", s(&wav), "--lane", "snare", "--tempo", "120"],
     );
     ok(&out, "capture rhythm --lane snare --tempo 120");
-    all_written(&dir, "flam.wav", "flam", ".drums");
+    all_written(&dir, "flam.wav", "flam", ".grid.duet");
     let err = stderr(&out);
     let line = err
         .lines()
         .find(|l| l.starts_with("grid: 1/16 refined to "))
         .unwrap_or_else(|| panic!("no refinement stated: {err}"));
     assert!(
-        comments(&read(&dir.join("flam.drums")), "#").contains(&format!("# {line}")),
+        grid_document_of(&dir.join("flam.grid.duet"))
+            .statements
+            .iter()
+            .any(|l| l == line),
         "the score does not state its grid"
     );
     let notes = song_of(&dir.join("flam.duet"));
@@ -1039,7 +1128,7 @@ fn hits_no_grid_parts_are_merged_and_stated() {
         ],
     );
     ok(&out, "capture rhythm --tempo 20");
-    all_written(&dir, "flam.wav", "flam", ".drums");
+    all_written(&dir, "flam.wav", "flam", ".grid.duet");
     let err = stderr(&out);
     assert!(err.contains("grid: 1/16 refined to 1/64"), "{err}");
     let line = err
@@ -1047,14 +1136,14 @@ fn hits_no_grid_parts_are_merged_and_stated() {
         .find(|l| l.starts_with("merged: "))
         .unwrap_or_else(|| panic!("no merge stated: {err}"));
     assert!(line.contains("snare"), "{line}");
-    let drums = read(&dir.join("flam.drums"));
+    let doc = grid_document_of(&dir.join("flam.grid.duet"));
     assert!(
-        comments(&drums, "#").contains(&format!("# {line}")),
-        "{drums}"
+        doc.statements.iter().any(|l| l == line),
+        "{:?}",
+        doc.statements
     );
-    let grid = DrumGrid::from_text(&drums).expect(".drums parses");
-    let hits = grid.vel.data().iter().filter(|v| **v > 0).count();
-    assert_eq!(hits, 2, "{drums}");
+    let hits = doc.body.vel.data().iter().filter(|v| **v > 0).count();
+    assert_eq!(hits, 2, "{:?}", doc.body);
     let notes = song_of(&dir.join("flam.duet"));
     assert_eq!(notes.tracks[0].notes.len(), 3, "the .duet lost a hit");
     std::fs::remove_dir_all(&dir).expect("clean up");

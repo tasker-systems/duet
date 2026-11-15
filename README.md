@@ -495,9 +495,9 @@ cannot be, that is reported after them, and they stay:
 - `STEM.duet`: the exact performance, unquantized, at the detected times, as a song document.
   Quantizing never replaces it. Every duet command reads it by its envelope: `duet song show
   STEM.duet` prints it as notefmt text.
-- `STEM.abc` for a melody, or `STEM.drums` for a rhythm: the score, the `.duet` quantized to
-  `--grid`. A rhythm's score becomes a drum-grid document, `STEM.grid.duet`, once that kind
-  lands; until then it is `.drums` text.
+- `STEM.abc` for a melody, or `STEM.grid.duet` for a rhythm: the score, the `.duet` quantized
+  to `--grid`. A rhythm's score is a drum-grid document, which keeps every velocity exactly;
+  `duet drums render STEM.grid.duet` reads it by its envelope.
 - `STEM.capture.duet`: the analysis, a `capture-analysis` document that reads back. Every onset, note and hit, in sample frames at the
   stated rate (22 050 Hz; divide by it for seconds); the timing (tempo, its half and double,
   the measured beat period, meter, downbeat, each marked given or estimated, with a
@@ -522,8 +522,8 @@ comparing the declared and decoded sample rates, which capture does not do.
 **What is estimated, and how it is said.** The tempo, the meter, the downbeat and a melody's
 key are each given or estimated. A given value is used exactly and never reported as an
 estimate. An estimate is applied and stated, on standard error, in the `.duet`'s envelope as
-its `statements`, and as comment lines in the score (`#` in `.drums`, `%` in ABC), with what you would
-reach for if it is wrong: the half and double tempo, the relative major or minor, and in a
+its `statements`, and in the score: in a `.grid.duet`'s envelope, or as `%` comment lines in
+ABC. Each says what you would reach for if it is wrong: the half and double tempo, the relative major or minor, and in a
 compound meter the felt beat. A weak estimate is marked `weak`; a meter that cannot be told
 apart is applied as 4/4 and says so. For the synthetic melody in the reference corpus:
 
@@ -570,11 +570,12 @@ the longest note's pitch, and a rhythm the strongest hit. The `.duet` keeps ever
 analysis gives the grid used, which the quantize offsets are counted in.
 
 **Velocity.** A hit's or note's velocity is its strength relative to the take's strongest
-(20 to 127). The score writers refuse a velocity that is not one of their levels, so asking for
-a score asks for the snap: ABC dynamics are snapped to the nearest, a drum grid's to its
-levels, and the count snapped is stated. The `.duet` keeps the raw values.
+(20 to 127). ABC holds only its dynamics' levels, so a melody's score snaps each velocity to
+the nearest and states the count snapped. A rhythm's `.grid.duet` holds any velocity, so
+nothing is snapped. The `.duet` keeps the raw values.
 
-**Correcting a capture.** Edit the `.drums` or ABC text, which is what they are for. To fix an
+**Correcting a capture.** Edit the ABC text, which is what it is for, or a rhythm's grid with
+the `duet drums` commands, which read the `.grid.duet` by its envelope. To fix an
 estimate, run again with `--tempo`, `--meter`, `--downbeat` or `--key` (add `-o` to keep the
 first). Do not fix a wrong key by editing `K:` in the ABC: that changes every pitch written, not
 only the spelling. Re-run with `--key`, which changes spelling alone.

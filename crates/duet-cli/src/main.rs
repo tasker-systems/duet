@@ -82,8 +82,8 @@ enum Command {
     #[command(subcommand)]
     Abc(AbcCommand),
     /// Capture a recorded take: the exact performance as a .duet song document, a quantized
-    /// score (.abc or .drums) and the analysis as a .capture.duet document. What is not given is estimated, and
-    /// stated on standard error and in the files.
+    /// score (.abc, or a .grid.duet drum-grid document) and the analysis as a .capture.duet
+    /// document. What is not given is estimated, and stated on standard error and in the files.
     #[command(subcommand)]
     Capture(CaptureCommand),
     /// Play a song: through the built-in synth with a General MIDI SoundFont, or to a
