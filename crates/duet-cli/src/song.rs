@@ -7,34 +7,36 @@ use clap::Subcommand;
 use duet_core::Grid;
 
 use crate::config::Config;
-use crate::io::{Format, read_with_from, same_file, song_format, write_from};
+use crate::io::{
+    Format, FormatParser, read_with_from, same_file, song_format, with_end, write_bytes, write_from,
+};
 
 #[derive(Subcommand)]
 pub enum SongCommand {
-    /// Print a song as notefmt text (or another format with --to).
+    /// Print a song as notefmt text (or in another format with --to).
     Show {
-        /// The song to read: a .duet document, MIDI or ABC by its name, notefmt text with
-        /// --from text, or - for standard input (a document if it starts with {, else MIDI).
+        /// The song to read: a .duet document, MIDI or ABC by its name, or - for standard
+        /// input (a document if it starts with {, MIDI, or ABC with --from abc).
         input: PathBuf,
-        #[arg(long, value_enum)]
+        #[arg(long, value_parser = FormatParser)]
         from: Option<Format>,
-        #[arg(long, value_enum, default_value = "text")]
-        to: Format,
+        /// Print the song in this format instead of as notefmt text.
+        #[arg(long, value_parser = FormatParser)]
+        to: Option<Format>,
     },
     /// Write a copy with every note snapped to a grid. The input is never changed.
     Quantize {
-        /// The song to read, by its name as for `song show`, or - for standard input (a
-        /// document if it starts with {, else notefmt text).
+        /// The song to read, by its name or on standard input as for `song show`.
         input: PathBuf,
-        /// The song to write, by its name, or - for notefmt text on standard output. Must not
-        /// be the input.
+        /// The song to write, by its name, or - for a song document on standard output
+        /// (another format with --to). Must not be the input.
         output: PathBuf,
         /// The grid, such as 1/16 for sixteenths or 1/8t for triplet eighths.
         #[arg(long)]
         grid: Grid,
-        #[arg(long, value_enum)]
+        #[arg(long, value_parser = FormatParser)]
         from: Option<Format>,
-        #[arg(long, value_enum)]
+        #[arg(long, value_parser = FormatParser)]
         to: Option<Format>,
     },
 }
@@ -42,9 +44,15 @@ pub enum SongCommand {
 pub fn run(command: SongCommand, config: &Config) -> Result<()> {
     match command {
         SongCommand::Show { input, from, to } => {
-            let from = song_format(&input, from, Format::Midi, "song show reads")?;
+            let from = song_format(&input, from, "song show reads")?;
             let (song, origin) = read_with_from(&input, from, "song show reads")?;
-            write_from(&song, Path::new("-"), to, config.end, origin.as_ref())
+            match to {
+                Some(to) => write_from(&song, Path::new("-"), to, config.end, origin.as_ref()),
+                None => write_bytes(
+                    Path::new("-"),
+                    with_end(&song, config.end)?.to_text().as_bytes(),
+                ),
+            }
         }
         SongCommand::Quantize {
             input,
@@ -59,8 +67,8 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
                     output.display()
                 );
             }
-            let from = song_format(&input, from, Format::Text, "quantize reads")?;
-            let to = song_format(&output, to, Format::Text, "quantize writes")?;
+            let from = song_format(&input, from, "quantize reads")?;
+            let to = song_format(&output, to, "quantize writes")?;
             // Quantizing keeps where the song came from: the notices still name what the
             // import did not carry.
             let (song, origin) = read_with_from(&input, from, "quantize reads")?;
@@ -77,16 +85,22 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::{Format, read};
+    use duet_core::Song;
+    use duet_schemas::Document;
+
+    use crate::io::{Format, read, tool};
     use crate::tests::run_hermetic;
 
     #[test]
     fn quantize_never_writes_over_its_input() {
         let dir = std::env::temp_dir().join(format!("duet-quantize-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let take = dir.join("take.notes");
+        let take = dir.join("take.duet");
         let played = "[track \"P\" ch1]\n1.1.10 C4 0.48 80\n";
-        std::fs::write(&take, played).expect("write");
+        let played = Document::new(tool(), Song::from_text(played).expect("parse"))
+            .write()
+            .expect("document");
+        std::fs::write(&take, &played).expect("write");
         let cli = |out: &std::path::Path| {
             run_hermetic(&[
                 "song",
@@ -95,8 +109,6 @@ mod tests {
                 out.to_str().expect("utf-8 path"),
                 "--grid",
                 "1/8",
-                "--from",
-                "text",
             ])
         };
 

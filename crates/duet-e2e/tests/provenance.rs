@@ -154,11 +154,11 @@ fn a_document_read_and_written_again_keeps_its_from() {
     assert_eq!(json_of(&quantized)["duet"]["from"], from);
     assert_valid(&json_of(&quantized));
 
-    // A song read from text has no provenance.
+    // A song read from a view's text has no provenance.
     let notes = root().join("samples/sketch.notes");
     let plain = dir.join("plain.duet");
     ok(
-        &duet(&dir, &["convert", s(&notes), s(&plain), "--from", "text"]),
+        &duet(&dir, &["apply", s(&notes), "-o", s(&plain)]),
         "from text",
     );
     assert!(json_of(&plain)["duet"].get("from").is_none());

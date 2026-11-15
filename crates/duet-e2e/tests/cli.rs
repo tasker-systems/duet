@@ -6,6 +6,45 @@ use std::path::Path;
 
 use duet_e2e::{root, scratch};
 
+/// Runs duet with no config at all, as [`duet`], and returns its standard output.
+fn duet_out(args: &[&Path]) -> Vec<u8> {
+    let none = scratch("no-config");
+    let out = duet_in(&none, &none.join("user"), args);
+    assert!(
+        out.status.success(),
+        "duet {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+}
+
+/// The text of a document's view, `duet view <doc> --as <view>`, run in `cwd` with `user` as
+/// its user config directory, its header line left out: what `--to text` once wrote.
+fn view_in(cwd: &Path, user: &Path, doc: &Path, view: &str) -> String {
+    let p = Path::new;
+    let out = duet_in(cwd, user, &[p("view"), doc, p("--as"), p(view)]);
+    assert!(
+        out.status.success(),
+        "duet view {}: {}",
+        doc.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).expect("utf-8");
+    text.split_once('\n')
+        .map_or(String::new(), |(_, rest)| rest.to_owned())
+}
+
+/// Reads a view's text into a document with `duet apply <text> --as <view> -o <doc>`, run in
+/// `cwd` with `user` as its user config directory.
+fn apply_in(cwd: &Path, user: &Path, text: &Path, view: &str, doc: &Path) -> std::process::Output {
+    let p = Path::new;
+    duet_in(
+        cwd,
+        user,
+        &[p("apply"), text, p("--as"), p(view), p("-o"), doc],
+    )
+}
+
 /// Runs duet with no config at all: an empty user config directory, and a working
 /// directory with no `.duet` above it.
 fn duet(args: &[&Path]) {
@@ -78,48 +117,48 @@ fn every_output_holds_the_same_music_and_states_its_end() {
     let groove = root().join("samples/groove.drums");
     let out = |name: &str| dir.join(name);
     let p = |s: &'static str| Path::new(s);
-    let (from_text, to_text) = ([p("--from"), p("text")], [p("--to"), p("text")]);
+    let write = |name: &str, bytes: Vec<u8>| std::fs::write(out(name), bytes).expect("write");
 
-    for name in ["sketch.mid", "sketch.duet"] {
-        duet(&[&[p("convert"), &sketch, &out(name)][..], &from_text].concat());
-    }
-    duet(
-        &[
-            &[p("convert"), &sketch, &out("sketch.notes")][..],
-            &from_text,
-            &to_text,
-        ]
-        .concat(),
+    // The sample's text is a view: `duet apply` reads it into a song document, and that
+    // document is what every other output is written from.
+    duet(&[p("apply"), &sketch, p("-o"), &out("sketch-view.duet")]);
+    duet(&[p("convert"), &out("sketch-view.duet"), &out("sketch.duet")]);
+    duet(&[p("convert"), &out("sketch.duet"), &out("sketch.mid")]);
+    write(
+        "sketch.notes",
+        duet_out(&[p("song"), p("show"), &out("sketch.duet")]),
     );
-    duet(
-        &[
-            &[
-                p("convert"),
-                &out("sketch.mid"),
-                &out("sketch-from-midi.notes"),
-            ][..],
-            &to_text,
-        ]
-        .concat(),
+    write(
+        "sketch-from-midi.notes",
+        duet_out(&[p("song"), p("show"), &out("sketch.mid")]),
     );
+    // The groove's text reads into a drum-grid document, and renders from that.
+    duet(&[p("apply"), &groove, p("-o"), &out("groove-grid.duet")]);
     for name in ["groove.mid", "groove.duet"] {
-        duet(&[p("drums"), p("render"), &groove, &out(name)]);
+        duet(&[
+            p("drums"),
+            p("render"),
+            &out("groove-grid.duet"),
+            &out(name),
+        ]);
     }
-    duet(
-        &[
-            &[p("drums"), p("render"), &groove, &out("groove.notes")][..],
-            &to_text,
-        ]
-        .concat(),
+    write(
+        "groove.notes",
+        duet_out(&[p("song"), p("show"), &out("groove.duet")]),
     );
     duet(&[
         p("drums"),
         p("read"),
         &out("groove.mid"),
-        &out("groove.drums"),
+        &out("groove-read.duet"),
         p("--grid"),
         p("1/16"),
     ]);
+    let none = scratch("no-config");
+    write(
+        "groove.drums",
+        view_in(&none, &none.join("user"), &out("groove-read.duet"), "grid").into_bytes(),
+    );
 
     // (file, the end it states, that end in ticks at 480 per quarter in 4/4)
     let ends = [("sketch", "5.1.0", 4 * 1920), ("groove", "3.1.0", 2 * 1920)];
@@ -189,13 +228,12 @@ fn a_grid_ending_in_empty_bars_survives_midi_with_no_bar_count() {
         #       1 . 2 . 3 . 4 .   1 . 2 . 3 . 4 .   1 . 2 . 3 . 4 .\n\
         snare | . . x . . . x . | . . . . . . . . | . . . . . . . . |\n\
         kick  | x . . . x . . . | . . . . . . . . | . . . . . . . . |\n";
-    let grid = dir.join("rests.drums");
-    std::fs::write(&grid, text).expect("write");
-    let (mid, back) = (dir.join("rests.mid"), dir.join("back.drums"));
+    let grid = duet_e2e::grid_doc(&dir, "rests.drums", text);
+    let (mid, back) = (dir.join("rests.mid"), dir.join("back.duet"));
     let p = |s: &'static str| Path::new(s);
     duet(&[p("drums"), p("render"), &grid, &mid]);
     duet(&[p("drums"), p("read"), &mid, &back, p("--grid"), p("1/8")]);
-    let read = std::fs::read_to_string(&back).expect("read back");
+    let read = duet_e2e::view_text(&dir, &back, "grid", &[]);
     assert_eq!(read, text);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
@@ -204,30 +242,19 @@ fn a_grid_ending_in_empty_bars_survives_midi_with_no_bar_count() {
 #[test]
 fn a_song_with_no_end_is_written_stating_its_default() {
     let dir = scratch("default");
-    let take = dir.join("take.notes");
-    std::fs::write(&take, "[track \"P\" ch1]\n2.3.0 C4 1 80\n").expect("write");
+    let take = duet_e2e::notes_doc(&dir, "take.notes", "[track \"P\" ch1]\n2.3.0 C4 1 80\n");
     let p = |s: &'static str| Path::new(s);
-    duet(&[
-        p("convert"),
-        &take,
-        &dir.join("take.duet"),
-        p("--from"),
-        p("text"),
-    ]);
-    duet(&[
-        p("convert"),
-        &take,
-        &dir.join("take-out.notes"),
-        p("--from"),
-        p("text"),
-        p("--to"),
-        p("text"),
-    ]);
+    duet(&[p("convert"), &take, &dir.join("take-out.duet")]);
+    std::fs::write(
+        dir.join("take-out.notes"),
+        duet_out(&[p("song"), p("show"), &take]),
+    )
+    .expect("write");
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect("read");
     assert!(
-        read("take.duet").contains("\"end\": \"3.1.0\""),
+        read("take-out.duet").contains("\"end\": \"3.1.0\""),
         "{}",
-        read("take.duet")
+        read("take-out.duet")
     );
     assert!(
         read("take-out.notes").contains("\nend 3.1.0\n"),
@@ -308,14 +335,12 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
 
     // The end default: round-up 2 in the project, 4 for the user alone, the built-in
     // with no config; the same bytes every time.
-    let take = dir.join("take.notes");
-    write(&take, "[track \"P\" ch1]\n1.1.0 C4 1 80\n");
+    // A document that names no end, so the default decides it: `apply -o` states one, so it
+    // is taken out again, as a document written by hand may leave it.
+    let take = duet_e2e::notes_doc(&dir, "take.notes", "[track \"P\" ch1]\n1.1.0 C4 1 80\n");
+    without_end(&take);
     let convert = |cwd: &Path, user_dir: &Path| {
-        let out = duet_in(
-            cwd,
-            user_dir,
-            &[p("convert"), &take, p("-"), p("--from"), p("text")],
-        );
+        let out = duet_in(cwd, user_dir, &[p("song"), p("show"), &take]);
         assert!(
             out.status.success(),
             "{}",
@@ -338,62 +363,53 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
         let out = duet_in(
             cwd,
             &user,
-            &[
-                p("convert"),
-                &take,
-                p("--from"),
-                p("text"),
-                p("--to"),
-                p("midi"),
-                p("-"),
-            ],
+            &[p("convert"), &take, p("--to"), p("midi"), p("-")],
         );
         assert!(out.status.success());
         out.stdout
     };
     assert_eq!(midi(&below), midi(&below), "the same MIDI every time");
 
-    // Config lanes read without lane lines, and a .drums file written under the config
+    // Config lanes read without lane lines, and a grid's text written under the config
     // reads the same with none.
     let hand = dir.join("hand.drums");
     write(
         &hand,
         "grid 1/8\n\n[bars 1]\nsh2  | x . x . x . x . |\nboom | X . . . X . . . |\n",
     );
-    let written = dir.join("written.drums");
-    let out = duet_in(&below, &user, &[p("drums"), p("snap"), &hand, &written]);
+    let (hand_doc, written) = (dir.join("hand.duet"), dir.join("written.duet"));
+    let out = apply_in(&below, &user, &hand, "grid", &hand_doc);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let text = std::fs::read_to_string(&written).expect("written");
+    let out = duet_in(&below, &user, &[p("drums"), p("snap"), &hand_doc, &written]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = view_in(&below, &user, &written, "grid");
     assert!(text.contains("\nmap gm\nlane shaker-2 83\n"), "{text}");
     assert!(
         text.contains("\nkick     | X"),
         "the lane's own name: {text}"
     );
-    let elsewhere = dir.join("elsewhere.drums");
-    let out = duet_in(
-        &dir,
-        &dir.join("none"),
-        &[p("drums"), p("snap"), &written, &elsewhere],
-    );
+    let (written_text, elsewhere) = (dir.join("written.drums"), dir.join("elsewhere.duet"));
+    write(&written_text, &text);
+    let out = apply_in(&dir, &dir.join("none"), &written_text, "grid", &elsewhere);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(
-        std::fs::read_to_string(&elsewhere).expect("read"),
+        view_in(&dir, &dir.join("none"), &elsewhere, "grid"),
         text,
         "self-contained"
     );
-    let out = duet_in(
-        &dir,
-        &dir.join("none"),
-        &[p("drums"), p("snap"), &hand, &elsewhere],
-    );
+    let out = apply_in(&dir, &dir.join("none"), &hand, "grid", &elsewhere);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success() && err.contains("'sh2' is not a lane"),
@@ -402,29 +418,21 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
 
     // Reading a drum track uses the config's lanes, and runs to its end default: a
     // one-bar take is two bars under round-up 2.
-    let kit = dir.join("kit.notes");
-    write(
-        &kit,
+    let kit = duet_e2e::notes_doc(
+        &dir,
+        "kit.notes",
         "[track \"Kit\" ch10]\n1.1.0 B5 0.25 90\n1.3.0 C2 0.25 90\n",
     );
-    let grid = dir.join("kit.drums");
-    let args = [
-        p("drums"),
-        p("read"),
-        &kit,
-        &grid,
-        p("--grid"),
-        p("1/8"),
-        p("--from"),
-        p("text"),
-    ];
+    without_end(&kit);
+    let grid = dir.join("kit-grid.duet");
+    let args = [p("drums"), p("read"), &kit, &grid, p("--grid"), p("1/8")];
     let out = duet_in(&below, &user, &args);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let text = std::fs::read_to_string(&grid).expect("grid");
+    let text = view_in(&below, &user, &grid, "grid");
     assert!(
         text.contains("\nend 3.1.0\n") && text.contains("[bars 1-2]"),
         "{text}"
@@ -500,16 +508,18 @@ fn a_config_that_moves_a_gm_lane_never_changes_how_drums_text_reads() {
         &beat,
         "grid 1/8\n\n[bars 1]\nsnare | . . X . . . X . |\nkick  | X . . . X . . . |\n",
     );
+    // Reads a grid's text into a document under a config, and writes its text back: the
+    // text and what reading it said on standard error.
     let snap = |user_dir: &Path, input: &Path, out: &Path| {
-        let o = duet_in(&dir, user_dir, &[p("drums"), p("snap"), input, out]);
+        let o = apply_in(&dir, user_dir, input, "grid", out);
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         (
-            std::fs::read_to_string(out).expect("written"),
+            view_in(&dir, user_dir, out, "grid"),
             String::from_utf8_lossy(&o.stderr).into_owned(),
         )
     };
-    let (plain, _) = snap(&dir.join("none"), &beat, &dir.join("plain.drums"));
-    let (moved, err) = snap(&user, &beat, &dir.join("moved.drums"));
+    let (plain, _) = snap(&dir.join("none"), &beat, &dir.join("plain.duet"));
+    let (moved, err) = snap(&user, &beat, &dir.join("moved.duet"));
     assert_eq!(
         moved, plain,
         "the config does not move kick or snare in text"
@@ -525,7 +535,7 @@ fn a_config_that_moves_a_gm_lane_never_changes_how_drums_text_reads() {
         &hand,
         "grid 1/8\n\n[bars 1]\nsnare | . . X . . . X . |\nboom  | X . . . X . . . |\n",
     );
-    assert_eq!(snap(&user, &hand, &dir.join("hand-out.drums")).0, plain);
+    assert_eq!(snap(&user, &hand, &dir.join("hand-out.duet")).0, plain);
 
     let show = duet_in(&dir, &user, &[p("config"), p("show")]);
     let show = String::from_utf8_lossy(&show.stdout);
@@ -535,26 +545,20 @@ fn a_config_that_moves_a_gm_lane_never_changes_how_drums_text_reads() {
     );
 
     // A MIDI drum track on key 100 reads as the config's kick.
-    let kit = dir.join("kit.notes");
-    write(&kit, "[track \"Kit\" ch10]\n1.1.0 E7 0.25 90\n");
-    let grid = dir.join("kit.drums");
-    let args = [
-        p("drums"),
-        p("read"),
-        &kit,
-        &grid,
-        p("--grid"),
-        p("1/8"),
-        p("--from"),
-        p("text"),
-    ];
+    let kit = duet_e2e::notes_doc(
+        &dir,
+        "kit.notes",
+        "[track \"Kit\" ch10]\n1.1.0 E7 0.25 90\n",
+    );
+    let grid = dir.join("kit-grid.duet");
+    let args = [p("drums"), p("read"), &kit, &grid, p("--grid"), p("1/8")];
     let out = duet_in(&dir, &user, &args);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let text = std::fs::read_to_string(&grid).expect("grid");
+    let text = view_in(&dir, &user, &grid, "grid");
     assert!(
         text.contains("\nlane kick 100\n") && text.contains("\nkick | x"),
         "{text}"
@@ -583,30 +587,32 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
     );
 
     // A file of two tunes needs --tune; the second is in 3/4.
-    let notes = dir.join("second.notes");
-    let to_text = [Path::new("--to"), Path::new("text")];
-    let out = run(&[
-        &[Path::new("abc"), Path::new("render"), &tunes, &notes][..],
-        &to_text,
-    ]
-    .concat());
+    let doc = dir.join("second.duet");
+    let show = |doc: &Path| {
+        let out = run(&[Path::new("song"), Path::new("show"), doc]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).expect("utf-8")
+    };
+    let out = run(&[Path::new("abc"), Path::new("render"), &tunes, &doc]);
     assert!(!out.status.success(), "two tunes and no --tune is refused");
     let out = run(&[
         Path::new("abc"),
         Path::new("render"),
         &tunes,
-        &notes,
+        &doc,
         Path::new("--tune"),
         Path::new("2"),
-        Path::new("--to"),
-        Path::new("text"),
     ]);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let text = std::fs::read_to_string(&notes).expect("rendered");
+    let text = show(&doc);
     assert!(
         text.contains("time 3/4") && text.contains("key G major"),
         "{text}"
@@ -614,21 +620,15 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
 
     // convert goes both ways through .abc.
     let abc = dir.join("second.abc");
-    duet(&[
-        Path::new("convert"),
-        &notes,
-        &abc,
-        Path::new("--from"),
-        Path::new("text"),
-    ]);
+    duet(&[Path::new("convert"), &doc, &abc]);
     let written = std::fs::read_to_string(&abc).expect("written");
     assert!(
         written.starts_with("X:1\n") && written.contains("M:3/4"),
         "{written}"
     );
-    let back = dir.join("back.notes");
-    duet(&[&[Path::new("convert"), &abc, &back][..], &to_text].concat());
-    assert_eq!(std::fs::read_to_string(&back).expect("back"), text);
+    let back = dir.join("back.duet");
+    duet(&[Path::new("convert"), &abc, &back]);
+    assert_eq!(show(&back), text);
 
     // A construct outside the subset is refused by name, with its line.
     let grace = dir.join("grace.abc");
@@ -640,4 +640,17 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
         said.contains("line 6, col 4") && said.contains("grace notes"),
         "{said}"
     );
+}
+
+/// Takes the stated end out of a song document, as a document written by hand may leave it,
+/// so the configured default decides it. `duet apply -o` states one, as every writer does.
+fn without_end(doc: &Path) {
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(doc).expect("read")).expect("json");
+    json["body"]
+        .as_object_mut()
+        .expect("a body")
+        .remove("end")
+        .expect("apply -o states the end");
+    std::fs::write(doc, json.to_string()).expect("write");
 }

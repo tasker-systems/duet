@@ -18,7 +18,7 @@ use duet_play::{Renderer, Schedule, load_soundfont, send_timed};
 use etcetera::{AppStrategy, AppStrategyArgs, choose_app_strategy};
 
 use crate::config::Config;
-use crate::io::{Format, read, song_format};
+use crate::io::{Format, FormatParser, read, song_format};
 
 /// The environment variable naming the directory duet's installed files are in, such as
 /// its SoundFont, overriding the platform's data directory.
@@ -30,11 +30,11 @@ pub const SOUNDFONT_NAME: &str = "default.sf2";
 
 #[derive(Args)]
 pub struct PlayArgs {
-    /// The song to play: a .duet document, MIDI or ABC by its name, notefmt text with
-    /// --from text, or - for standard input (a document if it starts with {, else notefmt
-    /// text).
+    /// The song to play: a .duet document, MIDI or ABC by its name, or - for standard input
+    /// (a document if it starts with {, MIDI, or ABC with --from abc). A view's text plays
+    /// through `duet apply`: `duet apply take.notes -o - | duet play -`.
     input: PathBuf,
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = FormatParser)]
     from: Option<Format>,
     /// The SoundFont (.sf2) to sound the song with, instead of duet.toml's `[play]`
     /// `soundfont` or the one duet installs.
@@ -47,7 +47,7 @@ pub struct PlayArgs {
 }
 
 pub fn run(args: PlayArgs, config: &Config) -> Result<()> {
-    let format = song_format(&args.input, args.from, Format::Text, "duet play reads")?;
+    let format = song_format(&args.input, args.from, "duet play reads")?;
     let song = read(&args.input, format, "duet play reads")?;
     let schedule = Schedule::from_song(&song)?;
     match args.port {
