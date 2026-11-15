@@ -504,3 +504,16 @@ fn apply_onto_keeps_the_envelope_and_views_drop_from() {
     assert_eq!(json(&dir.join("stdin.duet"))["body"], json(&doc)["body"]);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+/// `apply -o` writes a document as every writer does, stating where its song ends: a view
+/// that names no end, as an old `.notes` file may not, gets the default's.
+#[test]
+fn apply_o_states_the_end_of_a_view_that_names_none() {
+    let dir = scratch("views-end");
+    let doc = notes_doc(
+        &dir,
+        "take.notes",
+        "[track \"P\" ch1]\n1.1.0 C4 1 80\n2.3.0 D4 1 80\n",
+    );
+    assert_eq!(json(&doc)["body"]["end"], "3.1.0", "{}", text(&doc));
+}

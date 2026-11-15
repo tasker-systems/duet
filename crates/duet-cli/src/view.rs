@@ -628,7 +628,8 @@ fn apply_new(
         ViewName::Notes => {
             let mut song = Song::from_text(text)?;
             song.normalize()?;
-            Document::new(tool(), song).write()?
+            // Every document duet writes states where its song ends, as `convert` does.
+            Document::new(tool(), with_end(&song, config.end)?).write()?
         }
         ViewName::Grid => {
             let grid = read_grid_view(text, config)?;
