@@ -581,7 +581,11 @@ cannot be, that is reported after them, and they stay:
   from each beat to the next, so drift is a series and not a feeling; and how far quantizing
   moved each note, in milliseconds and in grid steps; and a melody's `reading` (since
   `capture-analysis` 1.1): the tuning its notes were read on, and each note's key, `centre` and
-  whether it is between keys.
+  whether it is between keys; and since 1.2 its residual, what the notes leave of the
+  performance: per note its centre, drift (cents a second), vibrato (rate and depth), the slide
+  in and the fall off (cents and milliseconds) and the rest; per take the centres' histogram
+  and their slope over the take, the voiced frames read and unread, and the **loss** as its
+  three terms (pitch, unread, notes), never as one number.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns

@@ -1,11 +1,12 @@
-//! capture-analysis 1.0: a real take's analysis, as `duet capture` makes it, written as a
-//! document, read back exactly, and validated against the committed schema.
+//! capture-analysis: a real take's analysis, as `duet capture` makes it, its reading and
+//! residual included, written as a document, read back exactly, and validated against the
+//! committed schema at the current version.
 
 use std::path::Path;
 
 use duet_capture::{
-    ANALYSIS_RATE, Analysis, Given, Kind, Melody, Mono, Stage, assemble, estimate, quantize_apart,
-    quantize_offsets,
+    ANALYSIS_RATE, Analysis, Event, Given, Kind, Layer1, Mono, Performance, PerformanceFrames,
+    Stage, assemble, estimate, quantize_apart, quantize_offsets, read,
 };
 use duet_schemas::{AnyDocument, Document, Tool};
 use serde_json::{Value, json};
@@ -27,7 +28,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.1.json"))
+        .build(&read_json("schemas/capture-analysis/1.2.json"))
         .unwrap()
 }
 
@@ -63,17 +64,33 @@ fn take() -> Vec<f32> {
 
 /// The take's analysis as capture makes it, with `given` timing, quantized to sixteenths.
 fn analysis(given: &Given) -> Analysis {
-    let mut melody = Melody::new(RATE);
-    let mut events = Vec::new();
+    let mut performance = Performance::new(RATE);
+    let mut layers = Vec::new();
     for (i, piece) in take().chunks(4096).enumerate() {
         let mono = Mono {
             rate: RATE,
             start_frame: (i * 4096) as u64,
             samples: piece.to_vec(),
         };
-        melody.push(mono, &mut events).unwrap();
+        performance.push(mono, &mut layers).unwrap();
     }
-    melody.finish(&mut events).unwrap();
+    performance.finish(&mut layers).unwrap();
+    let (mut frames, mut events) = (None, Vec::new());
+    for layer in layers {
+        match layer {
+            Layer1::Head(head) => frames = Some(PerformanceFrames::new(&head)),
+            Layer1::Frames(block) => frames.as_mut().unwrap().push(&block).unwrap(),
+            Layer1::Onset { frame, strength } => events.push(Event::Onset { frame, strength }),
+            _ => {}
+        }
+    }
+    let reading = read(&frames.unwrap(), &events, None);
+    events.extend(reading.notes.iter().map(|n| n.event()));
+    events.sort_by_key(|e| match *e {
+        Event::Onset { frame, .. } => frame,
+        Event::Note { start, .. } => start,
+        _ => u64::MAX,
+    });
     let timing = estimate(&events, RATE, given).unwrap();
     let mut captured = assemble(&events, RATE, &timing, None, &Kind::Melody).unwrap();
     let ms_per_quarter = 1000.0 * timing.beat_period_frames / f64::from(RATE);
@@ -81,6 +98,7 @@ fn analysis(given: &Given) -> Analysis {
     captured.analysis.offsets =
         quantize_offsets(&captured.song, &q.song, q.grid, ms_per_quarter).unwrap();
     captured.analysis.grid = Some(q.grid);
+    captured.analysis.reading = Some(reading);
     captured.analysis
 }
 
@@ -124,6 +142,21 @@ fn an_estimated_analysis_round_trips_exactly_and_validates() {
         &json!({ "half": bpm / 2.0, "double": bpm * 2.0 })
     );
     assert_eq!(body["grid"], "1/16");
+    // The reading's residual: every note's parts, and the loss as its three terms.
+    let reading = &body["reading"];
+    assert!(
+        reading["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|n| n["residual"].is_object())
+    );
+    for term in ["pitch", "unread", "notes"] {
+        assert!(
+            reading["residual"]["loss"][term].is_number(),
+            "{term}: {reading}"
+        );
+    }
     assert!(body["key"]["key"]["estimated"].is_object(), "{body}");
 }
 
