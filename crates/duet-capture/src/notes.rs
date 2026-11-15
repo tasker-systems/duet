@@ -174,8 +174,9 @@ struct Run {
     /// left the note.
     anchor: Option<f32>,
     held: usize,
-    /// Whether its pitch has ever held: stayed within [`ARRIVED_SEMITONES`] for `hold` frames.
-    /// A run that leaves before it has held was a scoop, not a note.
+    /// Whether its pitch has ever held: stayed within [`CHANGE_SEMITONES`] for `hold` frames,
+    /// as vibrato and a tracker's jitter do. A run that leaves before it has held was a scoop,
+    /// not a note.
     has_held: bool,
     hold: usize,
     /// Every frame taken, on pitch or off it: what its voicing and level are averaged over.
@@ -213,7 +214,7 @@ impl Run {
         self.pitches.push(pitch);
         if !self.has_held && self.pitches.len() >= self.hold {
             let recent = &self.pitches[self.pitches.len() - self.hold..];
-            self.has_held = spread(recent) <= ARRIVED_SEMITONES;
+            self.has_held = spread(recent) <= CHANGE_SEMITONES;
         }
         let from = self.pitches.len().saturating_sub(self.held);
         let recent = &self.pitches[from..];
@@ -299,8 +300,9 @@ struct Slide {
 /// a note is part of the note it arrives at, but only the held frames give the note its pitch.
 /// A slide is never a note of its own: one that ends at an onset or in silence before it holds
 /// is dropped. A voice that comes in moving, after silence or an onset, has not held either:
-/// until its frames over [`CHANGE_HOLD_SECS`] spread no wider than [`ARRIVED_SEMITONES`], it
-/// is a scoop into the note it reaches, which starts where the voice came in. A pitch that dips
+/// until its frames over [`CHANGE_HOLD_SECS`] spread no wider than [`CHANGE_SEMITONES`], as a
+/// vibrato's or a tracker's jitter does, it is a scoop into the note it reaches, which starts
+/// where the voice came in. A pitch that dips
 /// away and comes back to where it was is a slide too, so it
 /// splits one pitch into two notes, as a voiced consonant between two syllables does.
 ///
@@ -317,9 +319,9 @@ struct Slide {
 ///   be a note.
 /// - A vibrato of a full half semitone either side at 7 swings a second, on a note that also
 ///   drifts half a semitone, can leave it at some phases of its swing and split it in two.
-/// - A note that starts after silence or an onset and has not yet held, a scoop into it, is the
-///   start of the note it reaches when the pitch moves on. One that holds for
-///   [`CHANGE_HOLD_SECS`], however low the scoop, is a note of its own.
+/// - The bottom of a scoop that wobbles in place for [`CHANGE_HOLD_SECS`] or more, within
+///   [`CHANGE_SEMITONES`], has held, so it is a note of its own, as a short note is.
+/// - An onset ends whatever note is sounding, so a scoop an onset cuts can be a note.
 ///
 /// It must be given every onset up to a pitch frame before that frame.
 struct Segmenter {
@@ -470,7 +472,6 @@ impl Segmenter {
             // Arrived and holding: the next note, from where the slide began, pitched only by
             // the frames that hold.
             let mut next = Run::new(slide.start, None, slide.strength, (self.held, self.hold));
-            next.has_held = true;
             for &frame in recent {
                 take(&mut next, frame);
             }
@@ -489,9 +490,8 @@ impl Segmenter {
             self.pending = slide.onset;
         }
         if let Some(mut run) = self.run.take() {
-            // A fall-off too short to leave the note ends it, without pitching it.
-            for (frame, _, voiced, level) in self.departed.drain(..) {
-                run.take_off_pitch(frame, voiced, level);
+            for frame in self.departed.drain(..) {
+                take(&mut run, frame);
             }
             let end = run.last + self.hop / 2;
             let onset = run.onset;
@@ -1155,15 +1155,52 @@ mod tests {
 
     #[test]
     fn a_scoop_at_a_notes_start_is_part_of_the_note_it_reaches() {
-        // The voice comes in low, wobbling, and scoops up: its first 70 ms never hold, so they
-        // are the start of the note they reach, not a note of their own.
-        let wobble = [50.6, 49.6, 50.3, 49.8, 50.2, 49.7];
-        let scoop: Vec<Option<f32>> = wobble.iter().map(|&p| Some(p)).collect();
-        let pitches = [vec![None; 5], scoop, line(50.0, 54.0, 6), held(54.0, 40)].concat();
+        // The voice comes in 4 semitones low and scoops up over 255 ms: it moves 0.73 semitone
+        // over every 50 ms, so it never holds, and it is long enough before it leaves its start
+        // to be a note if it had. It is the start of the note it reaches.
+        let pitches = [vec![None; 5], line(50.0, 54.0, 22), held(54.0, 40)].concat();
         let found = segment_pitches(&pitches);
         assert_eq!(midis(&found), vec![54], "{found:?}");
         // It starts where the voice does, half a hop before its first frame.
         assert_eq!(found[0].0, 5 * 256 - 128, "{found:?}");
+    }
+
+    #[test]
+    fn a_short_note_with_vibrato_or_jitter_before_a_step_is_kept() {
+        // Held pitch with a swing or a tracker's jitter is still held: 70 to 93 ms of a 40-cent
+        // vibrato at 6 to 7 a second, in any phase, or 465 ms of jitter up to 0.4 either side.
+        let hop = 256.0 / f64::from(RATE);
+        let step = |note: Vec<Option<f32>>| {
+            let pitches = [vec![None; 5], note, line(60.0, 62.0, 2), held(62.0, 40)].concat();
+            midis(&segment_pitches(&pitches))
+        };
+        for rate in [6.0, 7.0] {
+            for frames in [6usize, 8] {
+                for eighth in 0..8 {
+                    let phase = f64::from(eighth) * std::f64::consts::TAU / 8.0;
+                    let note = (0..frames)
+                        .map(|k| {
+                            let t = k as f64 * hop;
+                            let swing = (std::f64::consts::TAU * rate * t + phase).sin();
+                            Some(60.0 + 0.4 * swing as f32)
+                        })
+                        .collect();
+                    let case = format!("{frames} frames at {rate} Hz from {eighth}/8");
+                    assert_eq!(step(note), vec![60, 62], "{case}");
+                }
+            }
+        }
+        for seed in [1u32, 2, 3, 4] {
+            let mut state = seed;
+            let note = (0..40)
+                .map(|_| {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    let unit = (state >> 8) as f32 / (1 << 24) as f32;
+                    Some(60.0 + 0.8 * (unit - 0.5))
+                })
+                .collect();
+            assert_eq!(step(note), vec![60, 62], "jitter, seed {seed}");
+        }
     }
 
     #[test]
