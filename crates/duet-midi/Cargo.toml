@@ -19,5 +19,5 @@ midly = "0.5.3"
 thiserror = "2"
 
 [dev-dependencies]
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"

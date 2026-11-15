@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 # Reads cargo's build messages to find the binary it just built.
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [dev-dependencies]
 # The capture tests read back the .notes and .drums duet writes, with the readers duet uses.

@@ -24,7 +24,7 @@ duet-drums = { path = "../duet-drums", version = "0.2.0" }
 duet-abc = { path = "../duet-abc", version = "0.2.0" }
 duet-capture = { path = "../duet-capture", version = "0.2.0" }
 duet-play = { path = "../duet-play", version = "0.2.0" }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
