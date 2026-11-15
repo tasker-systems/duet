@@ -1,0 +1,38 @@
+# The duet-capture reference corpus: recorded takes, each with a hand-checked transcription.
+#
+# tests/corpus.rs runs every take here through the library pipeline (FileSource, Prepare,
+# Melody or Hits, estimate, assemble), quantizes the result and the `expected` file to the
+# take's grid, and compares them. It does not run the `duet` binary. A melody take must match
+# note by note in order: every expected note of at least an eighth keeps its pitch to the
+# semitone and its grid step, and shorter notes are reported only. A rhythm take must match as
+# a set of (step, key): no missing and no extra hit; a tapped take's hits are all the asked
+# lane's key, and a beatboxed take's keys are the lanes kick, snare and hh as marked by hand.
+# Lane names are those of the gm lane map.
+#
+# These takes witness the goal clauses a-sung-melody-file-reaches-abc,
+# a-tapped-rhythm-file-reaches-a-drum-grid and a-beatboxed-hit-lands-in-the-drum-it-imitates,
+# and only the owner's recordings do. A take whose provenance starts "synthetic" is made by
+# scripts/capture-fixtures.sh; it proves the harness bites and witnesses no goal clause, and
+# every_kind_has_a_reference_take (ignored until the owner's takes land) does not count it.
+#
+# A [[take]] has:
+#   file        the recording, beside this manifest (FLAC or Ogg, a few seconds)
+#   kind        "melody", "tapped" or "beatboxed"
+#   provenance  who made it and how ("synthetic, generated" for a generated one)
+#   licence     what it may be published under
+#   expected    the hand-checked transcription, a .notes file beside it
+#   lane        a tapped take's asked lane (name or alias in the gm map)
+#   tempo, meter, downbeat, key
+#               optional given timing (bpm, "4/4", seconds into the file, an ABC key name);
+#               left out, the pipeline estimates it, as `duet capture` does
+#   grid        optional quantize grid for the comparison, default "1/16"
+
+[[take]]
+file = "synthetic-melody.flac"
+kind = "melody"
+provenance = "synthetic, generated"
+licence = "MIT"
+expected = "synthetic-melody.notes"
+tempo = 120.0
+meter = "4/4"
+downbeat = 0.25

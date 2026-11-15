@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Regenerates crates/duet-capture/tests/fixtures: a one-second 440 Hz sine, mono at 44.1 kHz
 # (tone-mono44) and stereo at 48 kHz (tone-stereo48), as WAV, FLAC, MP3, Ogg Vorbis and AAC-LC
-# M4A, plus he-aac.m4a, a declared HE-AAC file. The tests use the committed files; run this
-# only to change them.
+# M4A, plus he-aac.m4a, a declared HE-AAC file. It also regenerates the reference corpus's
+# synthetic take, crates/duet-capture/corpus/synthetic-melody.flac: eight quarter-note sine
+# tones at 120 bpm, starting a quarter of a second in. It is made by arithmetic alone, so a
+# rerun gives the same samples. The tests use the committed files; run this only to change them.
 #
 # Needs lame, flac and oggenc (scripts/dev-setup.sh, or `brew bundle`), and macOS's afconvert,
 # which makes the AAC-LC (-d aac) and HE-AAC (-d aach) files. macOS only.
@@ -57,4 +59,33 @@ make tone-stereo48 48000 2 1
 # Declared HE-AAC: the AAC-LC source is encoded as HE-AAC v1 at a low bit rate.
 afconvert -f m4af -d aach -b 48000 "$work/tone-stereo48.wav" "$out/he-aac.m4a"
 
-ls -l "$out"
+# The corpus's synthetic melody: C4 E4 G4 C5 G4 E4 C4 C4 as quarter notes at 120 bpm (0.5 s
+# each, the last 50 ms of each silent so repeated pitches are two notes), from 0.25 s in, with
+# a 5 ms fade at each end of a tone. 16 kHz mono, 16-bit. The manifest gives the tempo, the
+# meter and the downbeat (0.25 s), so only the pitches and onsets are read from the audio.
+corpus="$root/crates/duet-capture/corpus"
+mkdir -p "$corpus"
+python3 -I - "$work/synthetic-melody.wav" <<'PY'
+import math, struct, sys, wave
+rate = 16000
+midis = [60, 64, 67, 72, 67, 64, 60, 60]
+lead, quarter, gap, fade = 0.25, 0.5, 0.05, 0.005
+total = round((lead + quarter * len(midis) + 0.25) * rate)
+samples = [0] * total
+for i, midi in enumerate(midis):
+    hz = 440 * 2 ** ((midi - 69) / 12)
+    start = round((lead + i * quarter) * rate)
+    length = round((quarter - gap) * rate)
+    ramp = round(fade * rate)
+    for n in range(length):
+        envelope = min(1.0, n / ramp, (length - 1 - n) / ramp)
+        samples[start + n] = round(16384 * envelope * math.sin(2 * math.pi * hz * n / rate))
+with wave.open(sys.argv[1], "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(rate)
+    w.writeframes(b"".join(struct.pack("<h", x) for x in samples))
+PY
+flac --silent --force -o "$corpus/synthetic-melody.flac" "$work/synthetic-melody.wav"
+
+ls -l "$out" "$corpus"
