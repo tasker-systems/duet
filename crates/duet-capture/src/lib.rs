@@ -1,5 +1,10 @@
 //! duet capture: audio in, analysis events out, and a `Song` assembled from them.
 //!
+//! This crate holds the ends of the chain: reading a file ([`FileSource`], through Symphonia)
+//! and assembling the settled events into a `Song` ([`assemble`], [`quantize_apart`]). The
+//! analysis between them, from [`Prepare`] to [`estimate`] and [`estimate_key`], is pure DSP and
+//! lives in `duet-dsp`; its types are re-exported here, so a caller needs only this crate.
+//!
 //! # The pipeline
 //!
 //! ```text
@@ -23,6 +28,9 @@
 //! - [`quantize_apart`] quantizes the song for its score, refining the grid until no two notes
 //!   share a step, and [`merge_collisions`] merges what the finest grid still cannot part.
 //!
+//! [`FileSource`], [`Source`], [`assemble`] and what it returns, and the score are this crate's;
+//! everything else above is `duet-dsp`'s.
+//!
 //! Times inside the chain are sample frames at the analysis rate, not musical positions:
 //! musical time does not exist until a tempo does. [`Timing`] carries the beat period actually
 //! measured, and [`assemble`] converts frames to beats with it; the song states the whole bpm.
@@ -35,17 +43,13 @@
 //! back only until its output is settled, and reports how long that takes
 //! ([`Stage::latency_frames`]). [`estimate`] and [`assemble`] are functions over the settled
 //! events, not stages: they are the one place the whole take is kept, and only as events.
+//! `duet-dsp`'s documentation says where a model fits in the chain later.
 //!
-//! # Where a model fits later
+//! # Errors
 //!
-//! This version has no model, no model runtime and no model download. A model such as
-//! basic-pitch (Apache-2.0, with an ONNX export, run through `ort`) would be one more
-//! implementation of [`Stage`] with `In = Mono` and `Out = Event`: it owns whatever buffering
-//! the model's window needs, reports it as its `latency_frames`, and emits [`Event::Note`]s as
-//! they settle. It would replace [`Melody`] for polyphonic takes, and [`estimate`] and
-//! [`assemble`] would not change. [`Event`] is `#[non_exhaustive]` so a model stage or a
-//! streaming consumer can add to it. ONNX is the starting point; if a model ships only
-//! PyTorch weights, burn and candle come before a Python sidecar.
+//! [`Error`] is this crate's: reading, decoding and assembling. The stages and [`estimate`]
+//! return `duet-dsp`'s error, [`duet_dsp::Error`], which converts into [`Error::Analysis`] with
+//! its message unchanged.
 //!
 //! # Known boundary
 //!
@@ -57,33 +61,17 @@
 
 mod assemble;
 mod error;
-mod event;
-mod hits;
-mod key;
-mod notes;
-mod onset;
-mod pitch;
-mod prepare;
 mod score;
 mod source;
-mod stage;
 #[cfg(test)]
 mod synth;
-mod timing;
 
 pub use assemble::{Analysis, Captured, Kind, LeadIn, QuantizeOffset, assemble, quantize_offsets};
-pub use error::{Error, Result};
-pub use event::{Event, HitLane};
-pub use hits::{Hits, LaneMode};
-pub use key::{KeyEstimate, estimate_key};
-pub use notes::Melody;
-pub use onset::Onsets;
-pub use pitch::{PitchFrame, PitchTrack};
-pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
-pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
-pub use source::FileSource;
-pub use stage::{Chunk, Mono, Source, Stage};
-pub use timing::{
-    BeatTempo, Given, Origin, Timing, WEAK_CONFIDENCE, beat_series, estimate, felt_quarters,
-    is_compound,
+pub use duet_dsp::{
+    ANALYSIS_RATE, BeatTempo, Chunk, Event, Given, HitLane, Hits, KeyEstimate, LaneMode,
+    MAX_GAP_SECS, Melody, Mono, Onsets, Origin, PitchFrame, PitchTrack, Prepare, Stage, Timing,
+    WEAK_CONFIDENCE, beat_series, estimate, estimate_key, felt_quarters, is_compound,
 };
+pub use error::{Error, Result};
+pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
+pub use source::{FileSource, Source};

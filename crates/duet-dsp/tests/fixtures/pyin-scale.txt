@@ -1,6 +1,6 @@
 # The reference pYIN's reading of the pitch tracker's test scale, recorded so CI never runs pyin.
 #
-# Read by `our_track_agrees_with_pyin_on_a_scale` in crates/duet-capture/src/pitch.rs.
+# Read by `our_track_agrees_with_pyin_on_a_scale` in crates/duet-dsp/src/pitch.rs.
 # Recorded with pyin 1.2.0 (crates.io, MIT): PYINExecutor::<f32>::new(fmin 60.0, fmax 1400.0,
 # sr 22050, frame_length 1024, win_length Some(512), hop_length Some(256), resolution Some(0.1)),
 # then .pyin(&signal, f32::NAN, Framing::Valid). The signal is that file's `tests::scale()`:
@@ -13,7 +13,7 @@
 # To re-record (only when the signal or the settings above change, never to make a failing
 # comparison pass): add `pyin = "1.2.0"` under [dev-dependencies], paste the recorder in that
 # test's doc comment into pitch.rs's tests, run
-#   PYIN_OUT=crates/duet-capture/tests/fixtures/pyin-scale.body cargo test -p duet-capture --lib record_pyin_scale
+#   PYIN_OUT=crates/duet-dsp/tests/fixtures/pyin-scale.body cargo test -p duet-dsp --lib record_pyin_scale
 # put this header above the body, then delete the recorder and the dependency again: pyin pulls
 # in zip 0.5, which cargo audit refuses.
 0 - 0

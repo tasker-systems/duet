@@ -405,11 +405,10 @@ dependencies = [
 name = "duet-capture"
 version = "0.2.0"
 dependencies = [
- "audioadapter-buffers",
  "duet-abc",
  "duet-core",
  "duet-drums",
- "rubato",
+ "duet-dsp",
  "rustfft",
  "serde",
  "serde_json",
@@ -457,6 +456,19 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "toml",
+]
+
+[[package]]
+name = "duet-dsp"
+version = "0.2.0"
+dependencies = [
+ "audioadapter-buffers",
+ "duet-core",
+ "rubato",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

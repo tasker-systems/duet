@@ -1,8 +1,9 @@
 use crate::error::Result;
 
-/// A block of interleaved samples from a [`Source`].
+/// A block of interleaved samples, as a source of audio yields it: [`Prepare`](crate::Prepare)'s
+/// input.
 ///
-/// Deliberately exhaustive, so other crates can build one in their own [`Source`].
+/// Deliberately exhaustive, so other crates can build one in their own source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
     /// Sample rate in Hz.
@@ -23,12 +24,6 @@ pub struct Mono {
     /// Frames before this chunk, counted at `rate`.
     pub start_frame: u64,
     pub samples: Vec<f32>,
-}
-
-/// Audio, a chunk at a time.
-pub trait Source {
-    /// The next chunk, or `None` at the end of the stream.
-    fn next_chunk(&mut self) -> Result<Option<Chunk>>;
 }
 
 /// One step of the chain. It may hold input back until its output is settled.

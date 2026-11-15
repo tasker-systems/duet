@@ -16,8 +16,18 @@ use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{MetadataOptions, MetadataRevision, RawValue};
 
+use duet_dsp::Chunk;
+
 use crate::error::{Error, Result};
-use crate::stage::{Chunk, Source};
+
+/// Audio, a chunk at a time: what feeds [`Prepare`](crate::Prepare).
+///
+/// It lives here rather than in `duet-dsp`, beside its one implementation, because a source
+/// is I/O: its errors are about reading and decoding, which the analysis knows nothing of.
+pub trait Source {
+    /// The next chunk, or `None` at the end of the stream.
+    fn next_chunk(&mut self) -> Result<Option<Chunk>>;
+}
 
 /// A file of audio, read one packet at a time through Symphonia.
 ///
