@@ -490,3 +490,31 @@ fn a_breath_is_left_unread() {
     let reading = NoteModel::default().read(&frames, &[], Some(A440_CENTS));
     assert!(reading.notes.is_empty(), "{:?}", reading.notes);
 }
+
+#[test]
+fn the_slide_into_a_wobble_the_rules_drop_is_read() {
+    // The frames of the rules' stated limit (`notes::wobbling_slide`), on KEY: a held note
+    // three semitones above, a weakly voiced glide down, a scoop, and a fast wobble. The rules
+    // read only the held note; the HMM reads the wobbled note as well.
+    let on_key = (A440_CENTS + 100.0 * (f64::from(KEY) - 69.0)) as f32;
+    let (pitch, voicing): (Vec<Option<f32>>, Vec<f32>) = crate::notes::wobbling_slide()
+        .into_iter()
+        .map(|(semitones, voicing)| (semitones.map(|s| on_key + 100.0 * s), voicing))
+        .unzip();
+    let n = pitch.len();
+    let mut frames = PerformanceFrames::new(&PerformanceHead::new(RATE, 256, 0));
+    frames
+        .push(&FrameBlock::new(0, pitch, voicing, vec![0.1; n]).unwrap())
+        .unwrap();
+    let rules = read(&frames, &[], Some(A440_CENTS));
+    assert_eq!(keys(&rules), [KEY + 3], "{:?}", rules.notes);
+    // The wobble is read on its key. How many notes it is read as (the voicing dip mid-note
+    // can split it) is not what this records.
+    let reading = NoteModel::default().read(&frames, &[], Some(A440_CENTS));
+    let read = keys(&reading);
+    assert!(
+        read.len() >= 2 && read[0] == KEY + 3 && read[1..].iter().all(|&k| k == KEY),
+        "{:?}",
+        reading.notes
+    );
+}
