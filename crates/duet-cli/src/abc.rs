@@ -11,7 +11,7 @@ use duet_core::Song;
 use duet_schemas::{From, Notice};
 
 use crate::config::Config;
-use crate::io::{Format, read, same_file, song_format, with_end, write_from};
+use crate::io::{Format, FormatParser, read, same_file, song_format, with_end, write_from};
 
 #[derive(Subcommand)]
 pub enum AbcCommand {
@@ -22,7 +22,7 @@ pub enum AbcCommand {
         input: PathBuf,
     },
     /// Render one tune as a song: a document (.duet) or MIDI (.mid or .midi) by the output's
-    /// name, or notefmt text with --to text. Standard output is MIDI unless --to says.
+    /// name. Standard output is MIDI unless --to says. `duet view` shows a song as text.
     Render {
         /// The ABC file to read, or - for standard input.
         input: PathBuf,
@@ -31,14 +31,14 @@ pub enum AbcCommand {
         /// The tune's X: number. Needed only when the file holds more than one tune.
         #[arg(long)]
         tune: Option<u32>,
-        #[arg(long, value_enum)]
+        #[arg(long, value_parser = FormatParser)]
         to: Option<Format>,
     },
     /// Write a song as ABC. Nothing is quantized: a note ABC cannot write where it is
     /// is refused by name.
     Write {
-        /// The song to read: a .duet document or MIDI by its name, notefmt text with --from
-        /// text, or - for standard input (a document if it starts with {, else notefmt text).
+        /// The song to read: a .duet document or MIDI by its name, or - for standard input (a
+        /// document if it starts with {, else MIDI).
         input: PathBuf,
         /// The ABC file to write, or - for standard output. Must not be the input.
         output: PathBuf,
@@ -50,7 +50,7 @@ pub enum AbcCommand {
         /// default), or snap it to the nearest, which the ABC then says in a comment.
         #[arg(long, value_enum, default_value = "refuse")]
         dynamics: DynamicsArg,
-        #[arg(long, value_enum)]
+        #[arg(long, value_parser = FormatParser)]
         from: Option<Format>,
     },
 }
@@ -175,7 +175,9 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
                 ),
             };
             let (song, from) = reading(tune)?;
-            let to = song_format(&output, to, Format::Midi, "duet abc render writes")?;
+            // Standard output is MIDI here unless --to says, as it always was.
+            let to = to.or((output == Path::new("-")).then_some(Format::Midi));
+            let to = song_format(&output, to, "duet abc render writes")?;
             write_from(&song, &output, to, config.end, Some(&from))
         }
         AbcCommand::Write {
@@ -188,7 +190,7 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             if input != Path::new("-") && same_file(&input, &output) {
                 bail!("{} is the input; write makes a new file", output.display());
             }
-            let from = song_format(&input, from, Format::Text, "duet abc write reads")?;
+            let from = song_format(&input, from, "duet abc write reads")?;
             let song = with_end(&read(&input, from, "duet abc write reads")?, config.end)?;
             let mut options = WriteOptions::default().with_dynamics(match dynamics {
                 DynamicsArg::Refuse => Dynamics::Refuse,

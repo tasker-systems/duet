@@ -388,7 +388,7 @@ fn text_of(path: &Path) -> Result<String> {
 /// Reads a document by its envelope, or a song from an outside format with its provenance.
 /// The body comes back normalized, as every reader gives it.
 fn load(path: &Path, what: &str) -> Result<Source> {
-    let format = song_format(path, None, Format::Duet, what)?;
+    let format = song_format(path, None, what)?;
     if format != Format::Duet {
         let (song, from) = read_with_from(path, format, what)?;
         let mut doc = Document::new(tool(), song);
@@ -640,9 +640,7 @@ fn apply_new(
 
 /// A document is written as a `.duet`, or to standard output.
 fn refuse_named_output(output: &Path) -> Result<()> {
-    if output != Path::new("-")
-        && song_format(output, None, Format::Duet, "apply writes")? != Format::Duet
-    {
+    if output != Path::new("-") && song_format(output, None, "apply writes")? != Format::Duet {
         bail!("{}: apply writes a document, a .duet", output.display());
     }
     Ok(())
@@ -665,9 +663,7 @@ fn apply_onto(
     args: &ApplyArgs,
     config: &Config,
 ) -> Result<()> {
-    if song_format(onto, None, Format::Duet, "apply --onto changes")? != Format::Duet
-        || onto == Path::new("-")
-    {
+    if song_format(onto, None, "apply --onto changes")? != Format::Duet || onto == Path::new("-") {
         bail!(
             "{}: --onto names the document to change, a .duet",
             onto.display()
