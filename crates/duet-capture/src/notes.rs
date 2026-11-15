@@ -14,8 +14,8 @@ const CHANGE_SEMITONES: f32 = 0.7;
 /// How widely, in semitones, a slide's frames over [`CHANGE_HOLD_SECS`] may spread for its
 /// pitch to have arrived. A vibrato of 40 cents either side at 7 a second spreads about 0.2
 /// over that span at each turn of its swing; a glide of 7.5 semitones a second spreads this
-/// much, and the turn of a V-shaped dip of 15 a second does, so anything moving faster is still
-/// on its way.
+/// much, and the turn of a V-shaped dip of about 16 a second does, so anything moving faster is
+/// still on its way.
 const ARRIVED_SEMITONES: f32 = 0.35;
 /// How long the pitch must be away from a note to end it without an onset, and how long a new
 /// pitch must hold to start the next.
@@ -174,6 +174,8 @@ struct Run {
     /// left the note.
     anchor: Option<f32>,
     held: usize,
+    /// Every frame taken, on pitch or off it: what its voicing and level are averaged over.
+    frames: usize,
     voicing: f32,
     level: f32,
 }
@@ -189,22 +191,30 @@ impl Run {
             reference: 0.0,
             anchor: None,
             held,
+            frames: 0,
             voicing: 0.0,
             level: 0.0,
         }
     }
 
     fn take(&mut self, frame: u64, pitch: f32, voiced: f32, level: f32) {
-        self.last = frame;
+        self.take_off_pitch(frame, voiced, level);
         self.pitches.push(pitch);
-        self.voicing += voiced;
-        self.level += level;
         let from = self.pitches.len().saturating_sub(self.held);
         let recent = &self.pitches[from..];
         self.reference = recent.iter().sum::<f32>() / recent.len() as f32;
         if self.pitches.len() == self.held {
             self.anchor = Some(self.reference);
         }
+    }
+
+    /// Takes a frame that belongs to the note's time but not to its pitch: a short excursion
+    /// that came back, which must not move where the note is held.
+    fn take_off_pitch(&mut self, frame: u64, voiced: f32, level: f32) {
+        self.last = frame;
+        self.frames += 1;
+        self.voicing += voiced;
+        self.level += level;
     }
 
     /// Whether the pitch, following the note slowly, has moved far from where it was held.
@@ -219,7 +229,7 @@ impl Run {
 
     fn strength(&self) -> f32 {
         self.strength
-            .unwrap_or_else(|| level_strength(self.level / self.pitches.len().max(1) as f32))
+            .unwrap_or_else(|| level_strength(self.level / self.frames.max(1) as f32))
     }
 }
 
@@ -275,7 +285,7 @@ struct Slide {
 /// - A glide slower than about 7.5 semitones a second spreads no wider than
 ///   [`ARRIVED_SEMITONES`] over [`CHANGE_HOLD_SECS`], so it arrives on its way and can still
 ///   give a note every semitone or two it passes, sometimes two at its last pitch.
-/// - The turn of a dip slower than about 17 semitones a second can arrive in the same way and
+/// - The turn of a dip slower than about 16 semitones a second can arrive in the same way and
 ///   be a note.
 /// - A vibrato of a full half semitone either side at 7 swings a second, on a note that also
 ///   drifts half a semitone, can leave it at some phases of its swing and split it in two.
@@ -368,9 +378,9 @@ impl Segmenter {
             return;
         };
         if (taken.1 - run.reference).abs() <= CHANGE_SEMITONES {
-            // Back on pitch: a short excursion belongs to the note.
-            for frame in self.departed.drain(..) {
-                take(run, frame);
+            // Back on pitch: a short excursion belongs to the note's time, not its pitch.
+            for (frame, _, voiced, level) in self.departed.drain(..) {
+                run.take_off_pitch(frame, voiced, level);
             }
             take(run, taken);
             if run.drifted_away() {
@@ -441,8 +451,9 @@ impl Segmenter {
             self.pending = slide.onset;
         }
         if let Some(mut run) = self.run.take() {
-            for frame in self.departed.drain(..) {
-                take(&mut run, frame);
+            // A fall-off too short to leave the note ends it, without pitching it.
+            for (frame, _, voiced, level) in self.departed.drain(..) {
+                run.take_off_pitch(frame, voiced, level);
             }
             let end = run.last + self.hop / 2;
             let onset = run.onset;
@@ -460,7 +471,7 @@ impl Segmenter {
     /// Emits `run` as a note ending at `end`, unless it is shorter than the shortest note or too
     /// weakly voiced to be one. Returns whether it was emitted.
     fn emit(&self, run: Run, end: u64, out: &mut Vec<Event>) -> bool {
-        let confidence = run.voicing / run.pitches.len().max(1) as f32;
+        let confidence = run.voicing / run.frames.max(1) as f32;
         if run.pitches.is_empty()
             || end < run.start + self.shortest
             || confidence < LEAST_CONFIDENCE
@@ -1074,6 +1085,34 @@ mod tests {
         }
         segmenter.finish(&mut out);
         assert_eq!(strengths(&out), vec![0.9], "{out:?}");
+    }
+
+    #[test]
+    fn a_short_excursion_early_or_through_vibrato_stays_in_the_note() {
+        // A tracker blip of 1 to 4 frames, 2 to 9 semitones away, at a consonant or a break in
+        // the voice: the pitch comes straight back, so it never left the note, and the blip
+        // must not move where the note is held.
+        let hop = 256.0 / f64::from(RATE);
+        let blips: [&[f32]; 5] = [&[3.0; 3], &[-3.0; 4], &[5.0, 9.0, 5.0], &[2.0; 4], &[5.0]];
+        for blip in blips {
+            for at in [8usize, 40] {
+                for eighth in [None, Some(0), Some(2), Some(4), Some(6)] {
+                    let pitches: Vec<Option<f32>> = (0..100usize)
+                        .map(|k| {
+                            let vibrato = eighth.map_or(0.0, |e: i32| {
+                                let phase = f64::from(e) * std::f64::consts::TAU / 8.0;
+                                0.4 * (std::f64::consts::TAU * 6.0 * k as f64 * hop + phase).sin()
+                            });
+                            let away = k.checked_sub(at).and_then(|i| blip.get(i)).copied();
+                            Some(60.0 + vibrato as f32 + away.unwrap_or(0.0))
+                        })
+                        .collect();
+                    let found = segment_pitches(&pitches);
+                    let case = format!("{blip:?} at frame {at}, vibrato {eighth:?}: {found:?}");
+                    assert_eq!(midis(&found), vec![60], "{case}");
+                }
+            }
+        }
     }
 
     #[test]
