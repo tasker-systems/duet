@@ -48,3 +48,12 @@ for nothing else.
   (default `1/16`) before comparing, and a note's step is where it lands. Write the
   transcription on the grid you will compare at (positions are `bar.beat.tick`, 480 ticks to
   the quarter, so a sixteenth is 120 ticks), and use `grid = "1/8t"` for a triplet feel.
+
+## Listened takes
+
+A `[[listened]]` entry in the manifest is a recording the owner has judged by ear but not
+transcribed note by note: `wayfaring-stranger.flac`, the owner singing the traditional song,
+is the first. Its test holds only what the owner agreed (the key, the tuning, and the number
+of notes, each within a tolerance), so it catches a reader change that moves the take a long
+way, and says nothing about any one note. It is licensed CC BY 4.0, not MIT; the notice is
+`wayfaring-stranger.flac.license`, beside it.

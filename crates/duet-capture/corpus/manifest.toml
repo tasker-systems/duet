@@ -49,3 +49,28 @@ expected = "synthetic-beatbox.notes"
 tempo = 120.0
 meter = "4/4"
 downbeat = 0.25
+
+# A [[listened]] is a recorded melody the owner has listened to and judged by ear, with no
+# note-by-note transcription. tests/corpus.rs reads it as `duet capture melody` does with
+# nothing given (the note HMM, timing, tuning and key estimated) and holds only what the owner
+# agreed, each within its tolerance. It witnesses no goal clause.
+#   file          the recording, beside this manifest
+#   provenance    what it is, who made it, when and how
+#   licence       what it may be published under
+#   licence_file  the licence notice, beside the recording
+#   key           the estimated key, as ABC names it in `K:`
+#   tuning_cents, tuning_within
+#                 the estimated A4's offset from 440 Hz, in cents, and how far it may move
+#   notes, notes_within
+#                 how many notes the HMM reads, and how far that may move
+
+[[listened]]
+file = "wayfaring-stranger.flac"
+provenance = "The owner's recording of the traditional song Wayfaring Stranger, sung by Pete Taylor, recorded 2026-11-15 with `duet record` (48 kHz 24-bit) and resampled to 22.05 kHz 16-bit mono"
+licence = "CC-BY-4.0"
+licence_file = "wayfaring-stranger.flac.license"
+key = "Eb"
+tuning_cents = -7.0
+tuning_within = 3.0
+notes = 31
+notes_within = 2
