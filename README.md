@@ -631,7 +631,12 @@ cannot be, that is reported after them, and they stay:
   not as though held on the key it arrives at; and since 1.5 an estimated tuning's confidence
   measured above a flat spread: 0 when the take's held pitch spreads evenly across the hundred
   cents, 1 when all of it sits within 15 cents of the estimate. Below 0.5 the tuning is stated
-  weak, and capture suggests giving it with `--tuning`.
+  weak, and capture suggests giving it with `--tuning`. Since 1.6 a note's residual states its
+  `excursions`, the ornaments inside it as measured: each a run of at least 3 frames (35 ms)
+  held at least 50 cents from where the note is held, as its `start`, `end` and `cents` from
+  the note's key. A held approach before the note's held pitch is one too. They are never
+  named in the file: a grace, a turn or a trill is worked out from them when something is
+  written. A note with none writes none.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns

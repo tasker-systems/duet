@@ -489,7 +489,8 @@ fn example_grid() -> duet_drums::DrumGrid {
 
 /// A melody take's analysis that uses every field: each kind of event, an estimated tempo with
 /// its half and double, a given meter, an estimated downbeat, a key with its evidence, the tempo
-/// beat by beat, the grid, the quantize offsets, and the reading (1.1) with a note between keys.
+/// beat by beat, the grid, the quantize offsets, and the reading (1.1) with a note between keys
+/// and a note with excursions (1.6).
 pub fn example_analysis() -> Analysis {
     serde_json::from_value(json!({
         "rate": 22050,
@@ -539,7 +540,11 @@ pub fn example_analysis() -> Analysis {
                       "modulation": { "rate_hz": 5.75, "depth_cents": 31.5 },
                       "scoop": { "cents": -180.0, "ms": 92.875 },
                       "rest_cents": 3.25,
-                      "frames": 41
+                      "frames": 41,
+                      "excursions": [
+                          { "start": 11100, "end": 11868, "cents": -96.5 },
+                          { "start": 14428, "end": 15452, "cents": 198.0 }
+                      ]
                   } },
                 { "start": 22100, "end": 32600, "held_from": 22612, "key": 67, "centre": 38.0,
                   "between_keys": true, "confidence": 0.875, "strength": 0.5,

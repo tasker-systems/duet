@@ -16,10 +16,10 @@ const CHANGE_SEMITONES: f32 = 0.7;
 /// over that span at each turn of its swing; a glide of 7.5 semitones a second spreads this
 /// much, and the turn of a V-shaped dip of about 16 a second does, so anything moving faster is
 /// still on its way.
-const ARRIVED_SEMITONES: f32 = 0.35;
+pub(crate) const ARRIVED_SEMITONES: f32 = 0.35;
 /// How long the pitch must be away from a note to end it without an onset, and how long a new
 /// pitch must hold to start the next.
-const CHANGE_HOLD_SECS: f64 = 0.05;
+pub(crate) const CHANGE_HOLD_SECS: f64 = 0.05;
 /// How far back where a note is held is measured: the mean of its latest frames over this span,
 /// so it follows a slow drift. A mean over a whole swing of a vibrato cancels it; over 0.2 s, a
 /// vibrato of 4.5 to 7 a second is cancelled to within about a quarter of its swing, where a

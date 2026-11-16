@@ -79,7 +79,7 @@ fn a_held_note_with_vibrato_and_drift_is_one_note_at_c_and_at_half_c() {
     for cost in [NOTE_COST, NOTE_COST / 2.0] {
         let reading = hmm(&signal, cost);
         assert_eq!(keys(&reading), [KEY], "c = {cost}: {:?}", reading.notes);
-        let note = reading.notes[0];
+        let note = &reading.notes[0];
         assert!((secs(note.start) - 0.25).abs() < 0.03, "{note:?}");
         assert!((secs(note.end) - 2.25).abs() < 0.05, "{note:?}");
         assert!(note.centre.abs() < 15.0, "{note:?}");
@@ -106,7 +106,7 @@ fn the_same_note_stepped_a_semitone_halfway_is_two_legato_notes() {
             "c = {cost}: {:?}",
             reading.notes
         );
-        let (first, second) = (reading.notes[0], reading.notes[1]);
+        let (first, second) = (&reading.notes[0], &reading.notes[1]);
         assert_eq!(first.end, second.start, "legato: no silence between them");
         assert!((secs(second.start) - 0.75).abs() < 0.06, "{second:?}");
     }
@@ -118,7 +118,7 @@ fn a_scoop_into_a_note_belongs_to_the_note_it_arrives_at() {
     let scoop = |t: f64| -300.0 * (1.0 - t / 0.15).max(0.0);
     let reading = hmm(&sung(0.75, scoop), NOTE_COST);
     assert_eq!(keys(&reading), [KEY], "{:?}", reading.notes);
-    let note = reading.notes[0];
+    let note = &reading.notes[0];
     // The note starts where the voice comes in, its slide included, and is held from where
     // the slide arrives.
     assert!((secs(note.start) - 0.25).abs() < 0.03, "{note:?}");
@@ -126,6 +126,7 @@ fn a_scoop_into_a_note_belongs_to_the_note_it_arrives_at() {
     assert!((0.08..0.2).contains(&held), "held from {held} s: {note:?}");
     let scoop = note
         .residual
+        .as_ref()
         .unwrap()
         .scoop
         .expect("the scoop is the note's");
@@ -138,7 +139,7 @@ fn a_slide_between_two_notes_belongs_to_the_one_it_arrives_at() {
     let glide = |t: f64| 500.0 * ((t - 0.5) / 0.15).clamp(0.0, 1.0);
     let reading = hmm(&sung(1.15, glide), NOTE_COST);
     assert_eq!(keys(&reading), [KEY, KEY + 5], "{:?}", reading.notes);
-    let (first, second) = (reading.notes[0], reading.notes[1]);
+    let (first, second) = (&reading.notes[0], &reading.notes[1]);
     assert_eq!(first.end, second.start);
     // The boundary is where the glide leaves the first note, in its first half (before 0.825 s
     // into the take), and the second is held only once the glide has arrived.
@@ -165,7 +166,7 @@ fn a_dip_that_leaves_a_pitch_and_comes_back_is_two_notes() {
     };
     let reading = hmm(&sung(1.16, dip), NOTE_COST);
     assert_eq!(keys(&reading), [KEY, KEY], "{:?}", reading.notes);
-    let (first, second) = (reading.notes[0], reading.notes[1]);
+    let (first, second) = (&reading.notes[0], &reading.notes[1]);
     assert_eq!(first.end, second.start, "legato through the dip");
     // The dip is the second note's slide: no note at its bottom.
     assert!(second.held_from > second.start, "{second:?}");
@@ -187,9 +188,9 @@ fn splitting_a_held_note_in_two_raises_the_loss() {
     // least loss.
     let (frames, onsets) = performance(&sung(2.0, |t| wobble(t, 2.0)));
     let reading = NoteModel::default().read(&frames, &onsets, Some(A440_CENTS));
-    let note = reading.notes[0];
+    let note = &reading.notes[0];
     let middle = (note.held_from + note.end) / 2;
-    let (mut a, mut b) = (note, note);
+    let (mut a, mut b) = (note.clone(), note.clone());
     a.end = middle;
     b.start = middle;
     b.held_from = middle;
@@ -517,4 +518,104 @@ fn the_slide_into_a_wobble_the_rules_drop_is_read() {
         "{:?}",
         reading.notes
     );
+}
+
+/// G#3, the key of the ornament witnesses, as in Blood Sport's turn.
+const G_SHARP_3: u8 = 56;
+
+/// What the reading's notes' excursions are, each `(first frame, last frame, cents)` in seconds,
+/// with its note's key.
+fn excursions(reading: &Reading) -> Vec<(u8, f64, f64, f32)> {
+    let hop = 256.0 / f64::from(RATE);
+    reading
+        .notes
+        .iter()
+        .flat_map(|n| {
+            let part = n.residual.as_ref().expect("a residual");
+            part.excursions
+                .iter()
+                .map(move |e| (n.key, secs(e.start), secs(e.end) - hop, e.cents))
+        })
+        .collect()
+}
+
+#[test]
+fn a_turn_at_a_notes_start_is_one_note_with_one_excursion() {
+    // G#3, turning up to A#3 and back over its first 0.14 s, the shape of Blood Sport's turn:
+    // 0.04 s up, held at A#3 for 0.06 s, 0.04 s down. The HMM takes it in as the note's attack.
+    // A turn held longer at A#3 is read as a note of its own: 0.08 s held there costs more as
+    // attack than a note does.
+    let (ramp, held) = (0.04, 0.06);
+    let turn = move |t: f64| {
+        let up = |x: f64| 200.0 * (std::f64::consts::FRAC_PI_2 * x / ramp).sin();
+        match t {
+            t if t < ramp => up(t),
+            t if t <= ramp + held => 200.0,
+            t if t < 2.0 * ramp + held => up(2.0 * ramp + held - t),
+            _ => 0.0,
+        }
+    };
+    let signal = padded(synth::contour(RATE, hz(G_SHARP_3), 0.8, turn, 4, 0.3));
+    let reading = hmm(&signal, NOTE_COST);
+    assert_eq!(keys(&reading), [G_SHARP_3], "{:?}", reading.notes);
+    let found = excursions(&reading);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let (_, first, last, cents) = found[0];
+    assert!((f64::from(cents) - 200.0).abs() <= 10.0, "{found:?}");
+    // Its first and last frames are within one of the first and last frames held at A#3.
+    let hop = 256.0 / f64::from(RATE);
+    let (from, to) = (0.25 + ramp, 0.25 + ramp + held);
+    let first_held = (from / hop).ceil() * hop;
+    let last_held = (to / hop).floor() * hop;
+    assert!(
+        (first - first_held).abs() <= hop + 1e-9,
+        "{found:?} from {first_held}"
+    );
+    assert!(
+        (last - last_held).abs() <= hop + 1e-9,
+        "{found:?} to {last_held}"
+    );
+}
+
+#[test]
+fn a_held_approach_the_hmm_takes_in_is_one_excursion_before_held_from() {
+    // 0.1 s held a semitone below G#3, then G#3: the HMM reads one G#3, the approach its
+    // attack, and the approach is its one excursion, a grace before its held pitch.
+    let approach = |t: f64| if t < 0.1 { -100.0 } else { 0.0 };
+    let signal = padded(synth::contour(RATE, hz(G_SHARP_3), 0.8, approach, 4, 0.3));
+    let reading = hmm(&signal, NOTE_COST);
+    assert_eq!(keys(&reading), [G_SHARP_3], "{:?}", reading.notes);
+    let note = &reading.notes[0];
+    let part = note.residual.as_ref().unwrap();
+    assert_eq!(part.excursions.len(), 1, "{part:?}");
+    let grace = part.excursions[0];
+    assert!((f64::from(grace.cents) + 100.0).abs() <= 10.0, "{grace:?}");
+    assert!(
+        note.start <= grace.start && grace.end <= note.held_from,
+        "{grace:?} {note:?}"
+    );
+    assert!(
+        (secs(grace.end - grace.start) - 0.1).abs() <= 0.025,
+        "{grace:?}"
+    );
+}
+
+#[test]
+fn a_vibrato_and_a_plain_note_have_no_excursion() {
+    // ±40 cents at 6 Hz, and the same note held plain, under both readers.
+    let vibrato = |t: f64| 40.0 * (TAU * 6.0 * t).sin();
+    for (what, cents) in [
+        ("vibrato", &vibrato as &dyn Fn(f64) -> f64),
+        ("plain", &|_| 0.0),
+    ] {
+        let signal = padded(synth::contour(RATE, hz(G_SHARP_3), 1.0, cents, 4, 0.3));
+        let (frames, onsets) = performance(&signal);
+        for reading in [
+            NoteModel::default().read(&frames, &onsets, Some(A440_CENTS)),
+            read(&frames, &onsets, Some(A440_CENTS)),
+        ] {
+            assert_eq!(keys(&reading), [G_SHARP_3], "{what}: {:?}", reading.notes);
+            assert_eq!(excursions(&reading), [], "{what}: {:?}", reading.notes);
+        }
+    }
 }

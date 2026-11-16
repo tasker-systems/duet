@@ -5,8 +5,8 @@
 use std::path::Path;
 
 use duet_capture::{
-    ANALYSIS_RATE, Analysis, Event, Given, Kind, Layer1, Mono, Performance, PerformanceFrames,
-    Stage, assemble, estimate, quantize_apart, quantize_offsets, read,
+    ANALYSIS_RATE, Analysis, Event, Given, Kind, Layer1, Mono, NoteModel, Performance,
+    PerformanceFrames, Stage, assemble, estimate, quantize_apart, quantize_offsets, read,
 };
 use duet_schemas::{AnyDocument, Document, Tool};
 use serde_json::{Value, json};
@@ -18,7 +18,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.5 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.6 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -28,7 +28,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.5.json"))
+        .build(&read_json("schemas/capture-analysis/1.6.json"))
         .unwrap()
 }
 
@@ -43,16 +43,41 @@ fn assert_valid(document: &Value) {
 
 /// An E-flat major scale at 120 a minute from half a second in, a quarter note each.
 fn take() -> Vec<f32> {
+    sung(|_, _| 0.0)
+}
+
+/// The scale, its fourth note (A-flat) turning up a whole tone and back over its first 0.14 s
+/// (0.04 s up, held 0.06 s, 0.04 s down): the shape of the turn the note HMM takes in as attack
+/// (`duet-dsp`'s `a_turn_at_a_notes_start_is_one_note_with_one_excursion`).
+fn take_with_a_turn() -> Vec<f32> {
+    let (ramp, held) = (0.04, 0.06);
+    let up = move |x: f64| 200.0 * (std::f64::consts::FRAC_PI_2 * x / ramp).sin();
+    sung(move |note, t| match t {
+        _ if note != 3 => 0.0,
+        t if t < ramp => up(t),
+        t if t <= ramp + held => 200.0,
+        t if t < 2.0 * ramp + held => up(2.0 * ramp + held - t),
+        _ => 0.0,
+    })
+}
+
+/// The scale, each note's pitch `cents(note, t)` from its key at `t` seconds into it.
+fn sung(cents: impl Fn(usize, f64) -> f64) -> Vec<f32> {
     let mut out = vec![0.0; RATE as usize / 2];
-    for midi in [
+    for (note, midi) in [
         63, 65, 67, 68, 70, 72, 74, 75, 74, 72, 70, 68, 67, 65, 63, 63,
-    ] {
-        let hz = 440.0 * ((f64::from(midi) - 69.0) / 12.0).exp2();
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let len = RATE as usize / 2;
+        let mut phase = 0.0;
         for i in 0..len {
             let t = i as f64 / f64::from(RATE);
+            let hz = 440.0 * ((f64::from(midi) - 69.0 + cents(note, t) / 100.0) / 12.0).exp2();
+            phase += std::f64::consts::TAU * hz / f64::from(RATE);
             let tone: f64 = (1..=4)
-                .map(|h| (std::f64::consts::TAU * hz * f64::from(h) * t).sin() / f64::from(h))
+                .map(|h| (phase * f64::from(h)).sin() / f64::from(h))
                 .sum();
             let envelope = (i as f64 / 100.0).min((len - i) as f64 / 400.0).min(1.0);
             out.push((0.15 * tone * envelope) as f32);
@@ -64,9 +89,22 @@ fn take() -> Vec<f32> {
 
 /// The take's analysis as capture makes it, with `given` timing, quantized to sixteenths.
 fn analysis(given: &Given) -> Analysis {
+    analysis_of(&take(), given, Reader::Rules)
+}
+
+/// Which reader reads a take's notes.
+#[derive(Clone, Copy)]
+enum Reader {
+    Rules,
+    Hmm,
+}
+
+/// `take`'s analysis as capture makes it, read by `reader` with `given` timing, quantized to
+/// sixteenths.
+fn analysis_of(take: &[f32], given: &Given, reader: Reader) -> Analysis {
     let mut performance = Performance::new(RATE);
     let mut layers = Vec::new();
-    for (i, piece) in take().chunks(4096).enumerate() {
+    for (i, piece) in take.chunks(4096).enumerate() {
         let mono = Mono {
             rate: RATE,
             start_frame: (i * 4096) as u64,
@@ -84,7 +122,11 @@ fn analysis(given: &Given) -> Analysis {
             _ => {}
         }
     }
-    let reading = read(&frames.unwrap(), &events, None);
+    let frames = frames.unwrap();
+    let reading = match reader {
+        Reader::Rules => read(&frames, &events, None),
+        Reader::Hmm => NoteModel::default().read(&frames, &events, None),
+    };
     events.extend(reading.notes.iter().map(|n| n.event()));
     events.sort_by_key(|e| match *e {
         Event::Onset { frame, .. } => frame,
@@ -157,12 +199,41 @@ fn an_estimated_analysis_round_trips_exactly_and_validates() {
             "{term}: {reading}"
         );
     }
+    // A scale sung plain states no ornament, so no note writes `excursions` (1.6).
+    assert!(
+        reading["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|n| n["residual"].get("excursions").is_none()),
+        "{reading}"
+    );
     // The reader, since 1.3: the rules, with the loss's cost per note.
     assert_eq!(
         reading["reader"],
         json!({ "name": "rules", "note_cost": 4.0 })
     );
     assert!(body["key"]["key"]["estimated"].is_object(), "{body}");
+}
+
+#[test]
+fn a_notes_excursion_round_trips_exactly_and_validates() {
+    // The HMM takes the turn into the A-flat, and it is the note's one excursion (1.6).
+    let analysis = analysis_of(&take_with_a_turn(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let notes = value["body"]["reading"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 16, "the turn is no note of its own");
+    let with: Vec<(u64, &Value)> = notes
+        .iter()
+        .filter_map(|n| Some((n["key"].as_u64()?, n["residual"].get("excursions")?)))
+        .collect();
+    assert_eq!(with.len(), 1, "{with:?}");
+    let (key, excursions) = with[0];
+    assert_eq!(key, 68);
+    let excursions = excursions.as_array().unwrap();
+    assert_eq!(excursions.len(), 1, "{excursions:?}");
+    let cents = excursions[0]["cents"].as_f64().unwrap();
+    assert!((cents - 200.0).abs() <= 10.0, "{excursions:?}");
 }
 
 #[test]

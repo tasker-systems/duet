@@ -31,7 +31,13 @@ use crate::{Kind, Version};
 /// 0 when the steady frames spread flat across the hundred cents, 1 when every one is within
 /// 15 cents of the estimate. Before, it was the share within 15 cents, which a flat spread
 /// already puts at 0.31; a 1.4 confidence of `s` is `(s − 0.31) / 0.69` in 1.5, at least 0.
+///
+/// **1.6** adds each note residual's optional `excursions`, also additive: the runs of frames
+/// inside a note held somewhere other than where the note is held, each its `start`, its `end`
+/// and its `cents` from the note's key. They are measured, never named: a grace, a turn or a
+/// trill is worked out from them when something is written. Omitted when a note has none, so a
+/// 1.5 document reads as one with no ornament stated.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 5);
+    const VERSION: Version = Version::new(1, 6);
 }

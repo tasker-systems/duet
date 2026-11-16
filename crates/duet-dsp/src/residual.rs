@@ -36,6 +36,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::hmm::{ATTACK_COST, DROPOUT, STABLE_SIGMA_SEMITONES, VOICING_FLOOR};
+use crate::notes::{ARRIVED_SEMITONES, CHANGE_HOLD_SECS};
 use crate::reading::{PerformanceFrames, ReadNote, Tuning};
 
 /// The held-pitch tolerance of the loss, `σ`, in cents: the note HMM's
@@ -110,6 +111,15 @@ const TRANSITION_CENTS: f32 = 30.0;
 const FEWEST_HELD: usize = 4;
 /// The width of a bin of the take's centre histogram, in cents.
 const CENTRE_BIN_CENTS: f32 = 10.0;
+/// The fewest frames an excursion holds: 3, 35 ms at 22 050 Hz with a hop of 256. Fewer stay
+/// in `rest`. The owner heard Blood Sport's "-eak" wobble as an ornament, and each of its rise
+/// and dip holds longer than this (the 2026-11-16 arrivals and ornaments design, question 1).
+pub const SHORTEST_EXCURSION_FRAMES: usize = 3;
+/// How far, in cents, a frame must sit from where its note is held to be part of an excursion:
+/// from the note's centre and drift (and its vibrato's swing, where it has one) inside the
+/// note, and from its key before its `held_from`. Half a key, so a vibrato's or a tracker's
+/// swing about the held pitch never makes one.
+pub const EXCURSION_CENTS: f64 = 50.0;
 
 /// A slow move across a note's held span: a least-squares line through its held residual.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -146,8 +156,30 @@ pub struct Transition {
     pub ms: f32,
 }
 
-/// One note's residual, split as Melodyne splits a note (a concept here, not code).
+/// A run of frames inside a note held somewhere other than where the note is held: a measured
+/// ornament. It is never named: whether it is a grace, a mordent, a turn, a trill or a wobble is
+/// worked out from where it sits whenever something is written, so that the naming can change
+/// without a format change.
+///
+/// Its frames hold at least [`SHORTEST_EXCURSION_FRAMES`], each at least [`EXCURSION_CENTS`]
+/// from where the note is held, and spread no wider than a slide's frames may when they have
+/// arrived (35 cents over 50 ms, and in proportion over fewer frames), so a slide passing
+/// through is none.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Excursion {
+    /// Its first frame, on the take's timeline, inside the note.
+    pub start: u64,
+    /// Where it ends: one hop after its last frame, at most the note's end, and at most its
+    /// `held_from` for one before it.
+    pub end: u64,
+    /// Where it is held, in cents from the note's key: its frames' median residual.
+    pub cents: f32,
+}
+
+/// One note's residual, split as Melodyne splits a note (a concept here, not code).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct NoteResidual {
@@ -170,6 +202,11 @@ pub struct NoteResidual {
     pub rest_cents: f32,
     /// The voiced frames the note covers, its slide and fall included.
     pub frames: u32,
+    /// Its excursions, in order: the ornaments inside it, and a held approach before its
+    /// `held_from`. `rest_cents` is still measured over every held frame, theirs included.
+    /// Added in `capture-analysis` 1.6; omitted when there are none, and absent before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excursions: Vec<Excursion>,
 }
 
 /// The loss of a reading, in nats, as its terms: `pitch`, `voicing`, `unread` and `notes`
@@ -461,6 +498,7 @@ fn parts(held: &[(f64, f64)], fps: f64) -> NoteResidual {
         fall: None,
         rest_cents: 0.0,
         frames: held.len() as u32,
+        excursions: Vec::new(),
     };
     if held.len() < FEWEST_HELD {
         return out;
@@ -508,6 +546,140 @@ fn parts(held: &[(f64, f64)], fps: f64) -> NoteResidual {
     out
 }
 
+/// One voiced frame of a note, as the excursions are measured from it: its index in the
+/// performance, where it is on the take's timeline, its time in seconds and its residual.
+#[derive(Debug, Clone, Copy)]
+struct Voiced {
+    k: usize,
+    at: u64,
+    secs: f64,
+    cents: f64,
+}
+
+/// Where a note is held at each of its held frames' times: a line, with the vibrato's sinusoid
+/// at `rate_hz` where it has one, fitted to `held` by least squares, and then again to the
+/// frames the first fit left within [`EXCURSION_CENTS`], so that an excursion does not pull
+/// where the note is held toward itself. A flat line at the median with too few frames to fit.
+fn held_line(held: &[(f64, f64)], rate_hz: Option<f64>) -> impl Fn(f64) -> f64 {
+    let t0 = held.first().map_or(0.0, |f| f.0);
+    let flat = median(&held.iter().map(|f| f.1).collect::<Vec<_>>());
+    let w = std::f64::consts::TAU * rate_hz.unwrap_or(0.0);
+    let basis = move |t: f64| {
+        let (s, c) = (w * (t - t0)).sin_cos();
+        [1.0, t - t0, s, c]
+    };
+    let at = move |coefficients: &[f64; 4], t: f64| -> f64 {
+        basis(t).iter().zip(coefficients).map(|(x, a)| x * a).sum()
+    };
+    let fitted = |frames: &[(f64, f64)]| -> Option<[f64; 4]> {
+        if frames.len() < FEWEST_HELD {
+            return None;
+        }
+        if rate_hz.is_some() {
+            let rows: Vec<([f64; 4], f64)> = frames.iter().map(|&(t, r)| (basis(t), r)).collect();
+            fit(&rows).map(|(c, _)| c)
+        } else {
+            let rows: Vec<([f64; 2], f64)> =
+                frames.iter().map(|&(t, r)| ([1.0, t - t0], r)).collect();
+            fit(&rows).map(|([a, b], _)| [a, b, 0.0, 0.0])
+        }
+    };
+    let first = fitted(held).unwrap_or([flat, 0.0, 0.0, 0.0]);
+    let near: Vec<(f64, f64)> = held
+        .iter()
+        .copied()
+        .filter(|&(t, r)| (r - at(&first, t)).abs() < EXCURSION_CENTS)
+        .collect();
+    let second = fitted(&near).unwrap_or(first);
+    move |t| at(&second, t)
+}
+
+/// The excursions of a note from its voiced frames, in order, on the take's timeline with a
+/// hop of `hop`: where its held pitch begins (`held_from`), where it ends, and the vibrato's
+/// rate its residual found, if any.
+///
+/// A frame is away from the note when it sits at least [`EXCURSION_CENTS`] from where the note
+/// is held: from its key before `held_from`, from [`held_line`] after. Each run of consecutive
+/// voiced frames away on one side, an unvoiced frame breaking it, is cut into excursions from
+/// its start: the longest stretch from each frame whose frames spread no wider than a slide's
+/// may when it has arrived, in proportion to its length below `hold` frames, kept when it holds
+/// at least [`SHORTEST_EXCURSION_FRAMES`].
+fn excursions(
+    voiced: &[Voiced],
+    (held_from, end): (u64, u64),
+    rate_hz: Option<f64>,
+    (hop, hold): (u64, usize),
+) -> Vec<Excursion> {
+    let held: Vec<(f64, f64)> = voiced
+        .iter()
+        .filter(|v| v.at >= held_from)
+        .map(|v| (v.secs, v.cents))
+        .collect();
+    let line = held_line(&held, rate_hz);
+    // Each frame's side of where the note is held, or 0 when it is near it, and whether it is
+    // before `held_from`: a run never crosses from the one to the other.
+    let side = |v: &Voiced| -> (i8, bool) {
+        let before = v.at < held_from;
+        let from = if before { 0.0 } else { line(v.secs) };
+        let away = v.cents - from;
+        let side = if away >= EXCURSION_CENTS {
+            1
+        } else if away <= -EXCURSION_CENTS {
+            -1
+        } else {
+            0
+        };
+        (side, before)
+    };
+    let arrived = f64::from(ARRIVED_SEMITONES) * 100.0;
+    let allowed =
+        |frames: usize| arrived * ((frames - 1) as f64 / (hold.max(2) - 1) as f64).min(1.0);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < voiced.len() {
+        let (on, before) = side(&voiced[i]);
+        if on == 0 {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < voiced.len()
+            && voiced[j].k == voiced[j - 1].k + 1
+            && side(&voiced[j]) == (on, before)
+        {
+            j += 1;
+        }
+        let run = &voiced[i..j];
+        let mut from = 0;
+        while from < run.len() {
+            let (mut low, mut high) = (run[from].cents, run[from].cents);
+            let mut to = from + 1;
+            while to < run.len() {
+                let (l, h) = (low.min(run[to].cents), high.max(run[to].cents));
+                if h - l > allowed(to - from + 1) {
+                    break;
+                }
+                (low, high) = (l, h);
+                to += 1;
+            }
+            if to - from >= SHORTEST_EXCURSION_FRAMES {
+                let cents: Vec<f64> = run[from..to].iter().map(|v| v.cents).collect();
+                let until = if before { held_from } else { end };
+                out.push(Excursion {
+                    start: run[from].at,
+                    end: (run[to - 1].at + hop).min(until),
+                    cents: median(&cents) as f32,
+                });
+                from = to;
+            } else {
+                from += 1;
+            }
+        }
+        i = j;
+    }
+    out
+}
+
 /// Each note's residual and the take's, for `notes` read on `tuning` from `frames`, with the
 /// loss counting [`NOTE_COST`] per note.
 #[must_use]
@@ -530,12 +702,14 @@ pub fn residual_with_cost(
 ) -> (Vec<NoteResidual>, TakeResidual) {
     let fps = f64::from(frames.rate) / f64::from(frames.hop);
     let rate = f64::from(frames.rate);
+    let hold = (CHANGE_HOLD_SECS * rate / f64::from(frames.hop)).ceil() as usize;
     let mut covered = vec![false; frames.len()];
     let (mut pitch, mut voicing) = (0.0, 0.0);
     let mut per_note = Vec::with_capacity(notes.len());
     for note in notes {
         let target = tuning.a4.value() + 100.0 * (f64::from(note.key) - 69.0);
         let mut voiced = Vec::new();
+        let mut each = Vec::new();
         for (k, &cents) in frames.cents.iter().enumerate() {
             let at = frames.frame(k);
             if at < note.start || at >= note.end {
@@ -559,8 +733,21 @@ pub fn residual_with_cost(
                 voicing += read_voicing_cost(f64::from(frames.voicing[k]));
             }
             voiced.push((at as f64 / rate, r));
+            each.push(Voiced {
+                k,
+                at,
+                secs: at as f64 / rate,
+                cents: r,
+            });
         }
-        per_note.push(measure(&voiced, note.held_from as f64 / rate, fps));
+        let mut part = measure(&voiced, note.held_from as f64 / rate, fps);
+        part.excursions = excursions(
+            &each,
+            (note.held_from, note.end),
+            part.modulation.map(|m| f64::from(m.rate_hz)),
+            (u64::from(frames.hop), hold),
+        );
+        per_note.push(part);
     }
     let (mut read, mut unread, mut unread_loss) = (0, 0, 0.0);
     for (k, &cents) in frames.cents.iter().enumerate() {
@@ -690,7 +877,7 @@ mod tests {
         // Segmentation finds the held pitch a little after the scoop arrives.
         let notes = [note(start, arrive + 0.06, end)];
         let (parts, take) = residual(&frames, &on_a440(), &notes);
-        let part = parts[0];
+        let part = &parts[0];
         within(part.centre, 20.0, 0.1, "centre");
         within(part.drift.cents_per_sec, 10.0, 0.1, "drift");
         within(part.drift.range_cents, 15.0, 0.1, "drift range");
@@ -702,6 +889,8 @@ mod tests {
         within(scoop.ms, 300.0, 0.1, "scoop length");
         assert_eq!(part.fall, None);
         assert!(part.rest_cents < 4.0, "{part:?}");
+        // A scoop, a drift and a vibrato are each a part of their own, and no excursion.
+        assert_eq!(part.excursions, [], "{part:?}");
         assert_eq!(take.unread_frames, 0);
         assert_eq!(take.read_frames, part.frames);
     }
@@ -718,12 +907,17 @@ mod tests {
         };
         let frames = frames(1.4, |t| (0.2..1.2).contains(&t).then(|| 5.0 + jitter(t)));
         let (parts, _) = residual(&frames, &on_a440(), &[note(0.2, 0.2, 1.2)]);
-        let part = parts[0];
+        let part = &parts[0];
         assert_eq!(part.modulation, None, "{part:?}");
         assert_eq!((part.scoop, part.fall), (None, None), "{part:?}");
         within(part.centre, 5.0, 0.3, "centre");
         assert!(part.drift.cents_per_sec.abs() < 3.0, "{part:?}");
         assert!(part.rest_cents < 3.0, "{part:?}");
+        assert_eq!(
+            part.excursions,
+            [],
+            "a note with no ornament has none: {part:?}"
+        );
     }
 
     #[test]
@@ -739,6 +933,67 @@ mod tests {
         within(fall.ms, 150.0, 0.1, "fall length");
         assert_eq!(parts[0].scoop, None);
         within(parts[0].centre, 0.0, 0.1, "centre");
+        assert_eq!(
+            parts[0].excursions,
+            [],
+            "a fall passes through, and holds nowhere"
+        );
+    }
+
+    /// A note held on its key from 0.2 s to 1.2 s, with `held` frames from frame 60 at +200
+    /// cents, and its one note.
+    fn held_away(held: usize) -> (PerformanceFrames, [ReadNote; 1]) {
+        let frames = frames(1.4, |t| {
+            let k = (t * f64::from(RATE) / f64::from(HOP)).round() as usize;
+            match t {
+                t if !(0.2..1.2).contains(&t) => None,
+                _ if (60..60 + held).contains(&k) => Some(200.0),
+                _ => Some(0.0),
+            }
+        });
+        (frames, [note(0.2, 0.2, 1.2)])
+    }
+
+    #[test]
+    fn a_pitch_held_two_frames_is_no_excursion_and_one_held_three_is() {
+        let (frames, notes) = held_away(2);
+        let (parts, _) = residual(&frames, &on_a440(), &notes);
+        assert_eq!(parts[0].excursions, [], "under the floor: {:?}", parts[0]);
+        let (frames, notes) = held_away(SHORTEST_EXCURSION_FRAMES);
+        let (parts, _) = residual(&frames, &on_a440(), &notes);
+        let hop = u64::from(HOP);
+        assert_eq!(
+            parts[0].excursions,
+            [Excursion {
+                start: 60 * hop,
+                end: 63 * hop,
+                cents: 200.0,
+            }],
+            "{:?}",
+            parts[0]
+        );
+    }
+
+    #[test]
+    fn an_excursion_leaves_the_loss_as_it_was() {
+        // The loss prices frames, not parts: the three frames at +200 cost what three held
+        // frames two semitones from their key cost, and nothing else costs any pitch.
+        let (frames, notes) = held_away(SHORTEST_EXCURSION_FRAMES);
+        let (parts, take) = residual(&frames, &on_a440(), &notes);
+        assert_eq!(parts[0].excursions.len(), 1);
+        assert!(
+            (take.loss.pitch - 3.0 * held_cost(2.0)).abs() < 1e-9,
+            "{take:?}"
+        );
+        let voiced = frames.cents.iter().filter(|c| !c.is_nan()).count();
+        let each = read_voicing_cost(f64::from(0.9f32));
+        assert!(
+            (take.loss.voicing - voiced as f64 * each).abs() < 1e-9,
+            "{take:?}"
+        );
+        assert_eq!((take.loss.unread, take.loss.notes), (0.0, NOTE_COST));
+        // And `rest_cents` is still measured over every held frame, the excursion's included.
+        assert!(parts[0].rest_cents > 20.0, "{:?}", parts[0]);
     }
 
     #[test]
@@ -896,7 +1151,7 @@ mod tests {
         }
         let reading = read(&frames.unwrap(), &onsets, Some(A440_CENTS));
         assert_eq!(reading.notes.len(), 1, "{reading:?}");
-        let part = reading.notes[0].residual.expect("a residual");
+        let part = reading.notes[0].residual.clone().expect("a residual");
         let vibrato = part.modulation.expect("a vibrato");
         within(vibrato.rate_hz, 6.0, 0.1, "rate");
         within(vibrato.depth_cents, 40.0, 0.15, "depth");
