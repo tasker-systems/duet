@@ -11,6 +11,7 @@ mod config;
 mod drums;
 mod io;
 mod play;
+mod record;
 mod song;
 mod view;
 
@@ -97,6 +98,9 @@ enum Command {
     /// Play a song: through the built-in synth with a General MIDI SoundFont, or to a
     /// MIDI port with --port.
     Play(play::PlayArgs),
+    /// Record a take from the microphone (the default input, or one named with --device) to
+    /// a FLAC file, until Ctrl-C or for --seconds. `duet capture` reads it like any take.
+    Record(record::RecordArgs),
     /// Show duet's configuration: where its duet.toml files are, and what they set.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -143,6 +147,7 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
         Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
         Command::Capture(command) => capture::run(command, &Config::load(dirs)?),
         Command::Play(args) => play::run(args, &Config::load(dirs)?),
+        Command::Record(args) => record::run(args),
         Command::View(args) => view::run_view(args, &Config::load(dirs)?),
         Command::Apply(args) => view::run_apply(args, &Config::load(dirs)?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),

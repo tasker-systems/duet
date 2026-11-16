@@ -20,6 +20,17 @@ pub enum Error {
         codec: String,
     },
 
+    /// A take could not be written: the file could not be created or written, or the
+    /// encoder refused a frame.
+    /// Its message is the file's alone: the cause follows as the error's source, so a chain
+    /// printed whole names it once.
+    #[error("cannot write {}", path.display())]
+    Write {
+        /// The file being written.
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
     /// The take has nothing to assemble: a melody with no notes, or a rhythm with no hits.
     #[error("no {what} found")]
     NothingFound {

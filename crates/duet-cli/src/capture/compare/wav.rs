@@ -1,5 +1,5 @@
 //! The comparison's audio: the take beside the reading, as a two-channel WAV, and the reading
-//! rendered as one sine. Hand-written, with no dependency.
+//! rendered as a sine that bridges short gaps and falls silent at rests ([`Gaps`]). Hand-written, with no dependency.
 
 use std::f64::consts::TAU;
 
@@ -34,27 +34,78 @@ pub fn slide_end(note: &ReadNote, rate: u32) -> u64 {
         .min(note.end)
 }
 
-/// The pitch the reading's sine is at on sample frame `at` (at `rate`), in absolute cents, or
-/// `None` before its first note and after its last.
+/// The longest gap between two notes that the sine bridges, in seconds: a gap shorter than this
+/// is held through, and one this long or longer is silent.
 ///
-/// The sine is legato: one continuous tone from the first note's start to the last note's end.
-/// It holds each note's key, on the take's tuning, from where its slide in ends ([`slide_end`])
-/// until the next note starts, through any gap between them, and glides in a straight line in
-/// cents only through a note's slide in, from the note before to this one. The first note has
+/// A fifth of a second sits between the two things a gap can be. A consonant between two sung
+/// vowels, or a catch-breath inside a phrase, lasts about 0.05–0.15 s, and the sine silent
+/// through each would break a phrase into the beeps of a gapped rendering. A breath between
+/// phrases, or a rest, lasts 0.25 s or more, and the sine must fall silent there, so a note the
+/// reading drops is heard as a gap and not as the note before it held on.
+pub const BRIDGE_SECS: f64 = 0.2;
+
+/// What the sine does in a gap between two notes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Gaps {
+    /// It holds the note before through a gap shorter than [`BRIDGE_SECS`], and is silent
+    /// through a longer one: the default.
+    Bridged,
+    /// It holds the note before through every gap: one tone from the first note to the last.
+    Legato,
+    /// It is silent through every gap, sounding only inside a note.
+    Gapped,
+}
+
+impl Gaps {
+    /// Whether the sine holds through a gap of `frames` at `rate`.
+    fn bridges(self, frames: u64, rate: u32) -> bool {
+        match self {
+            Gaps::Legato => true,
+            Gaps::Gapped => frames == 0,
+            Gaps::Bridged => (frames as f64) < BRIDGE_SECS * f64::from(rate),
+        }
+    }
+}
+
+/// The spans the sine sounds through, as `(first note, start, end)`: each runs from a note's
+/// start to the end of the last note it bridges to.
+fn phrases(reading: &Reading, rate: u32, gaps: Gaps) -> Vec<(usize, u64, u64)> {
+    let mut out: Vec<(usize, u64, u64)> = Vec::new();
+    for (i, note) in reading.notes.iter().enumerate() {
+        match out.last_mut() {
+            Some((_, _, end)) if gaps.bridges(note.start.saturating_sub(*end), rate) => {
+                *end = (*end).max(note.end);
+            }
+            _ => out.push((i, note.start, note.end)),
+        }
+    }
+    out
+}
+
+/// The pitch the reading's sine is at on sample frame `at` (at `rate`), in absolute cents, or
+/// `None` where it is silent: before the first note, after the last, and in each gap between
+/// `phrases` ([`phrases`]).
+///
+/// Within a phrase (the notes it bridges between), the sine is one continuous tone. It holds
+/// each note's key, on the take's tuning, from where its slide in ends ([`slide_end`]) until the
+/// next note starts, through any gap it bridges, and glides in a straight line in cents only
+/// through a note's slide in, from the note before to this one. A phrase's first note has
 /// nothing to glide from, and holds its key from its start.
-pub fn sine_cents(reading: &Reading, rate: u32, at: u64) -> Option<f64> {
-    let notes = &reading.notes;
-    let first = notes.first()?;
-    let last = notes.last()?;
-    if at < first.start || at >= last.end {
+fn sine_cents(reading: &Reading, rate: u32, phrases: &[(usize, u64, u64)], at: u64) -> Option<f64> {
+    let p = phrases
+        .partition_point(|&(_, start, _)| start <= at)
+        .checked_sub(1)?;
+    let (first, _, end) = phrases[p];
+    if at >= end {
         return None;
     }
+    let notes = &reading.notes;
     // The last note that has started by `at`.
     let i = notes.partition_point(|n| n.start <= at).saturating_sub(1);
     let note = &notes[i];
     let here = key_cents(reading, note.key);
     let slid = slide_end(note, rate);
-    if i == 0 || at >= slid || slid <= note.start {
+    if i == first || at >= slid || slid <= note.start {
         return Some(here);
     }
     let before = key_cents(reading, notes[i - 1].key);
@@ -62,20 +113,21 @@ pub fn sine_cents(reading: &Reading, rate: u32, at: u64) -> Option<f64> {
     Some(before + (here - before) * along)
 }
 
-/// The reading as a sine at `rate`, one sample for each frame of `from..to`.
-pub fn sine(reading: &Reading, rate: u32, from: u64, to: u64) -> Vec<f32> {
+/// The reading as a sine at `rate`, one sample for each frame of `from..to`, silent in each gap
+/// `gaps` does not bridge. Each phrase fades in at its start and out at its end.
+pub fn sine(reading: &Reading, rate: u32, gaps: Gaps, from: u64, to: u64) -> Vec<f32> {
     let fade = FADE_SECS * f64::from(rate);
-    let (Some(first), Some(last)) = (reading.notes.first(), reading.notes.last()) else {
-        return vec![0.0; (to - from) as usize];
-    };
+    let phrases = phrases(reading, rate, gaps);
     let mut phase = 0.0_f64;
     (from..to)
         .map(|at| {
-            let Some(cents) = sine_cents(reading, rate, at) else {
+            let Some(cents) = sine_cents(reading, rate, &phrases, at) else {
                 return 0.0;
             };
-            let envelope = ((at - first.start) as f64 / fade)
-                .min((last.end - at) as f64 / fade)
+            let p = phrases.partition_point(|&(_, start, _)| start <= at) - 1;
+            let (_, start, end) = phrases[p];
+            let envelope = ((at - start) as f64 / fade)
+                .min((end - at) as f64 / fade)
                 .min(1.0);
             let sample = SINE_LEVEL * envelope * phase.sin();
             phase = (phase + TAU * hz(cents) / f64::from(rate)) % TAU;

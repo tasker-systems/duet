@@ -20,7 +20,7 @@ The workspace is split by domain:
 | `duet-abc` | a subset of ABC 2.1 ⇄ `Song`, and the corpus that checks it against abc2midi |
 | `duet-play` | a `Song` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
-| `duet-capture` | decoding a take, and assembling `duet-dsp`'s events into a `Song` and score |
+| `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Song` and score |
 | `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy |
 | `duet-cli` | the `duet` binary |
 
@@ -531,6 +531,40 @@ duet apply take.notes -o - | duet play -   # a view's text, through apply
   last of them ends: each note sounds at least to its own end. The synth renders in blocks of
   64 samples, so an event sounds within 1.5 ms of its time.
 
+## Recording a take
+
+```sh
+duet record idea.flac                           # from the default input, until Ctrl-C
+duet record idea.flac --seconds 30              # stop after 30 seconds
+duet record idea.flac --device scarlett         # an input by its name, or part of it
+duet capture melody idea.flac                   # then capture it like any take
+```
+
+`duet record` keeps a take from the machine's microphone as a FLAC file, which `duet capture`
+reads like any other recording. FLAC is lossless: the take is the samples the device
+delivered, at its own rate and channels, stored at 24 bits from a float or 32-bit device and
+16 from a 16-bit one. Nothing is resampled, mixed or turned up. A 24-bit mono take is about 5 MB
+a minute.
+
+- **The file must be new and named `.flac`.** A take never replaces a file; a path that exists,
+  another extension, or a directory that does not exist is refused before any device is
+  opened.
+- **`--device <name>`** picks an input by its name, or a part only one input's name holds,
+  ignoring case. A name that matches none lists the inputs there are.
+- **`--seconds <n>`** stops the take after that long. Without it, Ctrl-C stops it; either way
+  the file is finished and kept.
+- **What it says on standard error.** The device, rate, channels and depth as it starts; the
+  file and its length when it ends; and anything the owner should know about the take: input
+  lost (when, and how many milliseconds, written as silence so what follows keeps its time),
+  overruns the device reported, samples at full scale (the take may be clipped), and a take
+  silent throughout.
+- **A take that ends early is kept.** The file is written a frame at a time, so a device that
+  disconnects, or a process that is killed, leaves a file that reads up to its last whole
+  frame.
+- **On macOS**, the terminal app needs microphone access (System Settings, Privacy & Security,
+  Microphone). Without it the system records silence rather than refusing, and `duet record`
+  says the take is silent throughout.
+
 ## Capturing an idea
 
 ```sh
@@ -699,7 +733,7 @@ was sung. It reads the recording and what `duet capture melody` wrote at its ste
 
 ```sh
 duet capture compare idea.m4a                       # idea.compare.svg and idea.compare.wav
-duet capture compare idea.m4a --from 33 --to 38     # five seconds of it
+duet capture compare idea.m4a --from 33 --to 38     # five seconds of it: idea.compare.33.0-38.0.svg, .wav
 duet capture compare idea.m4a -o scratch/idea       # the stem it was captured to
 duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of the take
 ```
@@ -709,15 +743,21 @@ duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of 
   them, shaded; and the onsets as ticks under it.
 - `STEM.compare.wav`: the take in the left channel, as the analysis heard it (one channel at
   22 050 Hz, so it lines up with the reading sample for sample), and the reading in the right as
-  one legato sine at the take's own tuning, gliding only through each note's slide in (its
-  scoop, where the residual measured one). 32-bit float.
+  a sine at the take's own tuning, gliding only through each note's slide in (its scoop, where
+  the residual measured one). 32-bit float. The sine holds the note before through a gap shorter
+  than 0.2 s, about a consonant or a catch-breath, so a phrase plays as one tone. It is silent
+  through a gap of 0.2 s or more, a breath or a rest, so a note the reading drops is heard as
+  silence, not as the note before held on. `--legato` holds it through every gap; `--gapped`
+  silences it in every gap.
 - On standard output, one line per note: when it starts, its key, its `centre` in cents, its
   residual's parts (where it is held, its drift in cents a second, its vibrato, scoop and fall,
   and the rest), and whether it is between keys; then the take's loss as its three terms (pitch,
   unread and notes). A reading written before `capture-analysis` 1.2 has no residual, and the
   output says so.
 
-`--from` and `--to` (seconds) window all three. `--reading` compares another analysis of the same
+`--from` and `--to` (seconds) window all three, and name the files after the window
+(`STEM.compare.FROM-TO.svg`, with `0.0` or `end` for a side not given), so a window never
+collides with the whole take's files. `--reading` compares another analysis of the same
 take: its reading is the bars and the sine, the stem's own is drawn beside it dashed, and the
 outputs are named after it (`hmm.compare.svg`). Nothing is overwritten. Neither file the stem
 holds names the recording it was read from, so the recording is checked only by its length
@@ -832,12 +872,13 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
   - **What it builds:** clips of the whole take and of each named moment, for the stem's
     reading and for any `--reading` beside it. Each clip has the take on the left and the
     reading's sine on the right, raised 6 dB.
-  - **Two versions of each clip:**
-    - legato, as `duet capture compare` plays it, with the sine held through gaps;
-    - gapped, with the sine silent wherever the reading has no note, so a dropped note is
-      heard as a gap.
-  - **Playing them:** a menu plays one clip at a time. `N` plays clip N legato, `Ng` plays it
-    gapped, and `q` quits. While a clip plays, it shows where the clip is in the take and
+  - **Three versions of each clip,** each as `duet capture compare` renders it:
+    - bridged, its default: the sine held through a gap under 0.2 s and silent at a longer one,
+      so a dropped note is heard as a gap;
+    - legato (`--legato`), with the sine held through every gap;
+    - gapped (`--gapped`), with the sine silent wherever the reading has no note.
+  - **Playing them:** a menu plays one clip at a time. `N` plays clip N bridged, `Nl` legato,
+    `Ng` gapped, and `q` quits. While a clip plays, it shows where the clip is in the take and
     which note is being read.
   - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
     the start of the take, with a free-text label. A line starting with `#` is a comment.
