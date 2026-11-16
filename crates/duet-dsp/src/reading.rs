@@ -47,6 +47,9 @@ const SMOOTH_SECS: f64 = 0.2;
 /// whose window holds the most weight, and is refined by the frames in that window. It is also
 /// how far from the estimate a frame may be and count toward its confidence.
 const WINDOW_CENTS: usize = 15;
+/// The share of the weight a window holds when the frames are spread flat across the hundred
+/// cents: its width over the hundred. A tuning's confidence is measured above it.
+const FLAT_SHARE: f64 = (2 * WINDOW_CENTS + 1) as f64 / 100.0;
 
 /// A performance's frames as columns of numbers: an unvoiced frame's pitch is `NaN`.
 #[derive(Debug, Clone, PartialEq)]
@@ -212,7 +215,11 @@ fn steady_distances(frames: &PerformanceFrames) -> Vec<(f64, f64)> {
 ///   finds where most of the singing sits.
 /// - **A window, not a single bin:** a take sung 40 cents flat whose flattest notes sit 52 flat
 ///   has its single heaviest bin at +48, a key away; the heaviest window is where it is sung.
-/// - **Confidence** is the share of the weight within `WINDOW_CENTS` of the estimate.
+/// - **Confidence** is how far the share of the weight within `WINDOW_CENTS` of the estimate
+///   stands above `FLAT_SHARE`, the share a flat spread would give, scaled so that a flat
+///   spread is 0 and every frame within the window is 1. A take whose held pitch wanders
+///   across the hundred cents is therefore weak, although half its frames sit near the
+///   estimate.
 /// - **Spread** is the weighted root mean square distance of every steady frame from it.
 ///
 /// A take with no steady voiced frame is estimated at 440 Hz with no confidence.
@@ -259,7 +266,7 @@ pub fn estimate_tuning(frames: &PerformanceFrames) -> Tuning {
     Tuning {
         a4: Origin::Estimated {
             value: A440_CENTS + offset,
-            confidence: (near / total) as f32,
+            confidence: ((near / total - FLAT_SHARE) / (1.0 - FLAT_SHARE)).clamp(0.0, 1.0) as f32,
         },
         spread_cents: Some(spread),
     }
@@ -486,6 +493,7 @@ mod tests {
     use super::*;
     use crate::performance::{Layer1, Performance};
     use crate::stage::{Mono, Stage};
+    use crate::timing::WEAK_CONFIDENCE;
     use crate::{Melody, synth};
 
     const RATE: u32 = 22_050;
@@ -653,6 +661,29 @@ mod tests {
         let (offset, confidence) = estimated_offset(&read(&frames, &onsets, None));
         assert!((offset - 20.0).abs() <= 3.0, "{offset}");
         assert!((0.5..0.9).contains(&confidence), "{confidence}");
+    }
+
+    #[test]
+    fn a_tuning_held_by_little_more_than_half_the_singing_is_weak() {
+        // Six notes in eleven held at +32 cents, and five spread evenly across the far half of
+        // the octave's cents, as a take whose held pitch wanders: 55 % of the singing sits within
+        // the window of +32, where a flat spread would already put 31 %.
+        let spread = (0..5).map(|i| fold(32.0 + 35.0 + 7.5 * f64::from(i)));
+        let cents: Vec<f64> = [32.0; 6].into_iter().chain(spread).collect();
+        let keys = [60, 62, 64, 65, 67, 69, 67, 65, 64, 62, 60];
+        let notes: Vec<(u8, f64, f64)> = keys
+            .iter()
+            .zip(&cents)
+            .map(|(&k, &c)| (k, c, 0.5))
+            .collect();
+        let (frames, onsets) = performance(&take(&notes));
+        let (offset, confidence) = estimated_offset(&read(&frames, &onsets, None));
+        assert!((offset - 32.0).abs() <= 3.0, "{offset}");
+        assert!(confidence < WEAK_CONFIDENCE, "{confidence}");
+        // Held by every note, it is not weak.
+        let (frames, onsets) = performance(&tune(32.0));
+        let (_, confidence) = estimated_offset(&read(&frames, &onsets, None));
+        assert!(confidence >= WEAK_CONFIDENCE, "{confidence}");
     }
 
     #[test]
