@@ -76,8 +76,7 @@ use crate::notes::{
     LEAST_CONFIDENCE, ONSET_GRACE_SECS, SHORTEST_NOTE_SECS, STRENGTH_WINDOW_SECS, level_strength,
     median,
 };
-use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, tuning_of};
-use crate::rejoin::rejoin;
+use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, interpret, tuning_of};
 use crate::residual::{NOTE_COST, held_cost, residual_with_cost, silent_cost, sounding_cost};
 
 /// The held pitch's σ, in semitones: about the vibrato tolerance. A vibrato swings up to half a
@@ -345,9 +344,10 @@ impl NoteModel {
 
     /// Reads `frames` and `onsets` (their [`Event::Onset`]s; other events are ignored) on
     /// `given`, A4 in absolute cents, or on the tuning estimated from the frames, as
-    /// [`read`](crate::read) does, with the notes chosen by this model. Then the same-key
-    /// rejoin ([`rejoin`](crate::rejoin)) is run over them: [`NoteModel::read_as_decoded`] is
-    /// the reading before it.
+    /// [`read`](crate::read) does, with the notes chosen by this model. Then the reading's
+    /// interpretive passes are run over them ([`interpret`](crate::interpret)), the breathy
+    /// ornament and the same-key rejoin: [`NoteModel::read_as_decoded`] is the reading before
+    /// them.
     #[must_use]
     pub fn read(
         &self,
@@ -355,10 +355,10 @@ impl NoteModel {
         onsets: &[Event],
         given: Option<f64>,
     ) -> Reading {
-        rejoin(self.read_as_decoded(frames, onsets, given), frames, onsets)
+        interpret(self.read_as_decoded(frames, onsets, given), frames, onsets)
     }
 
-    /// [`NoteModel::read`], before the same-key rejoin: the notes as this model decodes them.
+    /// [`NoteModel::read`], before its interpretive passes: the notes as this model decodes them.
     #[must_use]
     pub fn read_as_decoded(
         &self,

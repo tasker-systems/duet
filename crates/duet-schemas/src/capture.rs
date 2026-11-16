@@ -49,11 +49,18 @@ use crate::{Kind, Version};
 /// gave each its key, centre and residual on the take's tuning. Every 1.7 document reads as it
 /// did.
 ///
-/// **1.9** adds the reading's optional `reader.thresholds`, also additive: the onset threshold,
+/// **1.9** adds the reading's optional `breathy`, also additive: each note the reading's breathy
+/// pass carried on over the weakly voiced frames after it, its reader had left unread, with the
+/// note as its reader `decoded` it, the `end` it has now, the quietest kept frame's level
+/// against the note's held level (`lowest_db`), and the `loss_change` it made, in nats, above
+/// zero where reading those frames raised the loss. Omitted when no note was carried on, so a
+/// 1.8 document reads as one whose notes end where their reader ended them.
+///
+/// **1.10** adds the reading's optional `reader.thresholds`, also additive: the onset threshold,
 /// frame threshold and minimum note length, in Basic Pitch's own names, that a basic-pitch
-/// reading's notes were decoded with. Only a basic-pitch reader has them. A 1.8 basic-pitch
+/// reading's notes were decoded with. Only a basic-pitch reader has them. A 1.9 basic-pitch
 /// reading has none, and was decoded with Basic Pitch's defaults (0.5, 0.3 and 127.7 ms).
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 9);
+    const VERSION: Version = Version::new(1, 10);
 }

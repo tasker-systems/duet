@@ -156,6 +156,7 @@ pub fn rejoin(reading: Reading, frames: &PerformanceFrames, onsets: &[Event]) ->
     let reader = reading.reader.unwrap_or_else(crate::Reader::rules);
     let mut out = Reading::of(reading.tuning, reader, notes, parts, take);
     out.rejoins = rejoins;
+    out.breathy = reading.breathy;
     out
 }
 
@@ -215,19 +216,19 @@ fn dip_excursion(
 }
 
 /// Where `key` sits on the take's tuning, `offset` cents from A440, in absolute cents.
-fn key_cents(offset: f64, key: u8) -> f64 {
+pub(crate) fn key_cents(offset: f64, key: u8) -> f64 {
     crate::A440_CENTS + offset + 100.0 * (f64::from(key) - 69.0)
 }
 
 /// `note` with its residual left out, as a rejoin states a decoded note.
-fn bare(note: &ReadNote) -> ReadNote {
+pub(crate) fn bare(note: &ReadNote) -> ReadNote {
     let mut out = note.clone();
     out.residual = None;
     out
 }
 
 /// The frames' indices whose place on the take's timeline is in `from..to`.
-fn indices(frames: &PerformanceFrames, from: u64, to: u64) -> std::ops::Range<usize> {
+pub(crate) fn indices(frames: &PerformanceFrames, from: u64, to: u64) -> std::ops::Range<usize> {
     let index = |at: u64| -> usize {
         let hop = u64::from(frames.hop);
         (at.saturating_sub(frames.first_frame).div_ceil(hop) as usize).min(frames.len())

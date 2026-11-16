@@ -267,6 +267,23 @@
           ],
           "loss_change": 6.375
         }
+      ],
+      "breathy": [
+        {
+          "decoded": {
+            "start": 22100,
+            "end": 31832,
+            "held_from": 22612,
+            "key": 67,
+            "centre": 38.0,
+            "between_keys": true,
+            "confidence": 0.90625,
+            "strength": 0.5
+          },
+          "end": 32600,
+          "lowest_db": -9.5,
+          "loss_change": 2.25
+        }
       ]
     }
   }

@@ -23,6 +23,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::breathy::{Breathy, breathe};
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::notes::{Segment, Segmenter};
@@ -349,7 +350,7 @@ pub struct Reader {
     /// is the loss's [`NOTE_COST`].
     pub note_cost: f64,
     /// The thresholds Basic Pitch decoded its notes with. Only the basic-pitch reader writes
-    /// them. Added in `capture-analysis` 1.9: a 1.8 basic-pitch reading has none, and was
+    /// them. Added in `capture-analysis` 1.10: a 1.9 basic-pitch reading has none, and was
     /// decoded with [`Thresholds::BASIC_PITCH`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thresholds: Option<Thresholds>,
@@ -436,6 +437,12 @@ pub struct Reading {
     /// when there is none, and absent before, when no reading was rejoined.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rejoins: Vec<Rejoin>,
+    /// Each note the reading's breathy pass carried on over the weakly voiced frames after it,
+    /// with the note as its reader decoded it, in order ([`breathe`](crate::breathe)). Added in
+    /// `capture-analysis` 1.9; omitted when there is none, and absent before, when no reading
+    /// read a breathy frame.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breathy: Vec<Breathy>,
 }
 
 impl Reading {
@@ -452,14 +459,25 @@ impl Reading {
 /// The notes are segmented by the rules [`Melody`](crate::Melody) segments by, over the
 /// performance's pitch: its refined pitch, written to 0.1 cent. `Melody` segments the 10-cent
 /// pitch track, so a boundary or a median can differ from its by a frame or a few cents. Then
-/// the same-key rejoin ([`rejoin`](crate::rejoin)) is run over them: [`read_as_decoded`] is the
-/// reading before it.
+/// the reading's interpretive passes are run over them ([`interpret`]): [`read_as_decoded`] is
+/// the reading before them.
 #[must_use]
 pub fn read(frames: &PerformanceFrames, onsets: &[Event], given: Option<f64>) -> Reading {
-    rejoin(read_as_decoded(frames, onsets, given), frames, onsets)
+    interpret(read_as_decoded(frames, onsets, given), frames, onsets)
 }
 
-/// [`read`], before the same-key rejoin: the notes as the rules segment them.
+/// A reading's interpretive passes, run over any reader's notes as it decoded them, in order:
+/// the breathy ornament ([`breathe`](crate::breathe)), then the same-key rejoin
+/// ([`rejoin`](crate::rejoin)), which needs the two notes it joins to meet, and so sees a note
+/// the first has carried over a breathy dip. Each states what it did, so the reading keeps
+/// what was decoded. `onsets` are the take's, and `frames` the performance `reading` was read
+/// from.
+#[must_use]
+pub fn interpret(reading: Reading, frames: &PerformanceFrames, onsets: &[Event]) -> Reading {
+    rejoin(breathe(reading, frames, onsets), frames, onsets)
+}
+
+/// [`read`], before its interpretive passes: the notes as the rules segment them.
 #[must_use]
 pub fn read_as_decoded(
     frames: &PerformanceFrames,
@@ -510,6 +528,7 @@ impl Reading {
             notes,
             residual: Some(take),
             rejoins: Vec::new(),
+            breathy: Vec::new(),
         }
     }
 }

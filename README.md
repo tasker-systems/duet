@@ -649,8 +649,18 @@ cannot be, that is reported after them, and they stay:
   `decoded` them, each `dip` (where it starts and ends, and its furthest `cents` from the key)
   and the `loss_change` it made, in nats, above zero when it raised the loss; capture states
   how many it made. A split at an onset, a dip deeper than a whole tone, and two keys are never
-  rejoined. A reading with none writes none. Since 1.8 the reader may be `basic-pitch`, and
-  since 1.9 a basic-pitch reader states the `thresholds` its notes were decoded with.
+  rejoined. A reading with none writes none. Since 1.8 the reader may be `basic-pitch`.
+  Since 1.9 the reading states its `breathy` notes: where a reader ended a note and left the
+  weakly voiced frames after it unread, the note is carried on over each frame whose pitch
+  continues its line (no more than 30 cents from the frame before), whose level is within
+  20 dB of the note's held level, and after which no onset falls before the next note. A
+  breathy fall is then the note's, and a breath, whose pitch is no line or whose level is near
+  the floor, stays unread. Each states the note as its reader `decoded` it, its new `end`, its
+  quietest kept frame against the note's held level (`lowest_db`) and the `loss_change` it
+  made, above zero since reading weakly voiced frames costs their voicing; capture states how
+  many. It runs before the rejoin, so a note carried over a breathy dip meets its second half
+  and is rejoined. A reading with none writes none.
+  Since 1.10 a basic-pitch reader states the `thresholds` its notes were decoded with.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -721,8 +731,9 @@ held note): raising it merges notes, lowering it splits them. Vibrato of half a 
 way with a slow drift stays one note at `c` and at `c/2`; a semitone step held 0.5 s is two.
 Known limits: a glide slower than about 8 semitones a second (15 at `c/2`) is read as a short
 note on each key it passes, where the rules read a few fewer; the HMM leaves the last, weakly
-voiced frames of a decaying note unread, where the rules read them, and the loss charges
-nothing for them, since their voicing says they are not sung.
+voiced frames of a decaying note unread, where the rules read them. The breathy pass (above)
+reads those whose pitch goes on and whose level holds; the rest stay unread, and the loss
+charges nothing for them, since their voicing says they are not sung.
 
 **Basic Pitch** (`--reader basic-pitch`) is an outside reader: Spotify's
 [Basic Pitch](https://github.com/spotify/basic-pitch) note model, run in Rust through
@@ -734,11 +745,11 @@ overlap, the louder is kept whole and a quieter one cut back to where it no long
 dropped when less than half of it would be left. A note starts at the take's onset nearest its
 start when one is within 50 ms, as the note HMM starts its notes, since Basic Pitch's frames fall
 a hop or so either side of the onset the performance hears. Capture states how many notes it
-found, cut back, dropped and keyed differently (`basic-pitch: …`). The same-key rejoin then runs
-over its notes, as over the other readers'. Its thresholds are Basic Pitch's own unless
-`--onset-threshold`, `--frame-threshold` or `--min-note-ms` gives one; on "Wayfaring
-Stranger", of 45 settings of the three around them, none reads both of the owner's moments
-(9.54 s, 16.39 s) with a lower total loss. Its model, Spotify's `nmp.onnx` from
+found, cut back, dropped and keyed differently (`basic-pitch: …`). The breathy pass and the
+same-key rejoin then run over its notes, as over the other readers'. Its thresholds are Basic
+Pitch's own unless `--onset-threshold`, `--frame-threshold` or `--min-note-ms` gives one; on
+"Wayfaring Stranger", of 45 settings of the three around them, none reads both of the owner's
+moments (9.54 s, 16.39 s) with a lower total loss. Its model, Spotify's `nmp.onnx` from
 basic-pitch v0.4.0 (230 kB, Apache-2.0), is built into duet and its SHA-256 checked by the
 tests; its licence and Spotify's NOTICE are in `crates/duet-dsp/models/basic-pitch/`. Nothing is
 downloaded. The reader is the `basic-pitch` feature, on by default; `--no-default-features`
@@ -939,12 +950,16 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
     which note is being read.
   - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
     the start of the take, with a free-text label. A line starting with `#` is a comment.
-    `scripts/listen/synthetic-melody.moments` is an example.
+    `scripts/listen/synthetic-melody.moments` is an example, and
+    `crates/duet-capture/corpus/wayfaring-stranger.moments` names the moments of "Wayfaring
+    Stranger" that the owner rules on by ear.
   - **Clips of a licence-restricted take are copies of it.** Keep them, and its moments
-    file, out of git.
-  - **`scripts/listen/check.sh`** builds the synthetic corpus melody's clips and checks each
-    one's length against its window, and that the steps and bends clips are their own renderings.
-    CI does not run it.
+    file, out of git. "Wayfaring Stranger" is CC BY 4.0, so its moments file is committed; its
+    clips are still copies, and stay out of git.
+  - **`scripts/listen/check.sh`** builds the clips of the synthetic corpus melody and of
+    "Wayfaring Stranger", checks that each moment lies inside its take, each clip's length
+    against its window, and that the steps and bends clips are their own renderings. CI does
+    not run it.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.

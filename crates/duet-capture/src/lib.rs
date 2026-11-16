@@ -82,9 +82,12 @@ pub use duet_dsp::{
     TempoAlternatives, Thresholds, Timing, Tuning, WEAK_CONFIDENCE, a4_cents_of_hz, absolute_cents,
     beat_series, estimate, estimate_key, estimate_tuning, felt_quarters, is_compound, read,
 };
+pub use duet_dsp::{
+    BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, Dip, REJOIN_CENTS, Rejoin, breathe, interpret,
+    read_as_decoded, rejoin,
+};
 #[cfg(feature = "basic-pitch")]
 pub use duet_dsp::{BasicPitch, BasicPitchRead, MODEL_SHA256};
-pub use duet_dsp::{Dip, REJOIN_CENTS, Rejoin, read_as_decoded, rejoin};
 pub use error::{Error, Result};
 pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
 pub use source::{FileSource, Source};

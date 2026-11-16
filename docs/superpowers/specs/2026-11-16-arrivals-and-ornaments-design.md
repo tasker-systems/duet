@@ -229,6 +229,11 @@ its key. The rejoin never joins notes on two keys.
     does not.
 - Ruling how these combine is the owner's call, not this design's. No task is filed until it is
   ruled (task F).
+- **Ruled (owner, 2026-11-16):** a weakly voiced frame belongs to the note it sits in when its
+  pitch continues the note's line, its level stays within a stated range of the note's held
+  level, and no onset follows before the next note; otherwise it is a breath, left unread as
+  #48 prices it. Pitch continuity weighs above level. Built as a pass over the reading, before
+  the rejoin (`crates/duet-dsp/src/breathy.rs`, which states the values and why).
 
 ## 3. What each output writes
 
@@ -369,7 +374,9 @@ Each task is filed by the control plane. None is built before the one it needs.
 - **Witness:** the owner's ruling on each moment, by ear, through the three renderings.
 
 **F. A breathy ornament is read as part of its note.**
-- **Not filed** until the breath question in question 2 is ruled.
+- **Filed** once the breath question in question 2 was ruled: temper
+  `01a1e523-ebde-773f-92b7-f810e8c112b5`. `capture-analysis` 1.9 (or the next free minor),
+  additive: the reading's optional `breathy`.
 - **Witness, once ruled:** Blood Sport's "-eak", for local listening only, reads one F#3 with its
   excursions. A synthetic breath between two phrases is still left unread.
 

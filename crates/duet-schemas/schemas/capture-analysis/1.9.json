@@ -83,6 +83,39 @@
       ],
       "type": "object"
     },
+    "Breathy": {
+      "additionalProperties": false,
+      "description": "One note the pass carried on over the weakly voiced frames after it.",
+      "properties": {
+        "decoded": {
+          "$ref": "#/$defs/ReadNote",
+          "description": "The note as its reader decoded it, its residual left out: the frames from its `end` to\nthe `end` below are the ones the pass kept."
+        },
+        "end": {
+          "description": "Where the note ends now, on the take's timeline.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "loss_change": {
+          "description": "What carrying the note on changes the loss's total by, in nats: the kept frames priced\nas read, by their pitch and voicing, less their unread cost. Above zero where reading\nthem raised the loss, as reading a weakly voiced frame does.",
+          "format": "double",
+          "type": "number"
+        },
+        "lowest_db": {
+          "description": "The quietest kept frame's level against the note's held level, in decibels: at least\n[`BREATHY_LEVEL_DB`].",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "decoded",
+        "end",
+        "lowest_db",
+        "loss_change"
+      ],
+      "type": "object"
+    },
     "CentreHistogram": {
       "additionalProperties": false,
       "description": "How the take's notes' centres spread: a histogram in 10-cent bins from -50.",
@@ -765,10 +798,6 @@
           "description": "The cost of a note, `c`, which the loss's `notes` term counts per note. For the note HMM\nit is also the cost, in nats, of leaving a held note: the negative log of the\nprobability of leaving its stable state. The rules have no cost of their own, so theirs\nis the loss's [`NOTE_COST`].",
           "format": "double",
           "type": "number"
-        },
-        "thresholds": {
-          "$ref": "#/$defs/Thresholds",
-          "description": "The thresholds Basic Pitch decoded its notes with. Only the basic-pitch reader writes\nthem. Added in `capture-analysis` 1.9: a 1.8 basic-pitch reading has none, and was\ndecoded with [`Thresholds::BASIC_PITCH`]."
         }
       },
       "required": [
@@ -801,6 +830,13 @@
       "additionalProperties": false,
       "description": "A take's notes, read on its tuning.",
       "properties": {
+        "breathy": {
+          "description": "Each note the reading's breathy pass carried on over the weakly voiced frames after it,\nwith the note as its reader decoded it, in order ([`breathe`](crate::breathe)). Added in\n`capture-analysis` 1.9; omitted when there is none, and absent before, when no reading\nread a breathy frame.",
+          "items": {
+            "$ref": "#/$defs/Breathy"
+          },
+          "type": "array"
+        },
         "notes": {
           "items": {
             "$ref": "#/$defs/ReadNote"
@@ -924,33 +960,6 @@
       "required": [
         "half",
         "double"
-      ],
-      "type": "object"
-    },
-    "Thresholds": {
-      "additionalProperties": false,
-      "description": "Where Basic Pitch decodes a note from its model's output, under Basic Pitch's own names.",
-      "properties": {
-        "frame_threshold": {
-          "description": "The note activation below which a note ends, once it has stayed below for Basic\nPitch's energy tolerance (11 frames).",
-          "format": "double",
-          "type": "number"
-        },
-        "minimum_note_length_ms": {
-          "description": "A note lasts strictly longer than this, in milliseconds.",
-          "format": "double",
-          "type": "number"
-        },
-        "onset_threshold": {
-          "description": "The onset activation at which a note starts.",
-          "format": "double",
-          "type": "number"
-        }
-      },
-      "required": [
-        "onset_threshold",
-        "frame_threshold",
-        "minimum_note_length_ms"
       ],
       "type": "object"
     },

@@ -19,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.9 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.10 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -29,7 +29,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.9.json"))
+        .build(&read_json("schemas/capture-analysis/1.10.json"))
         .unwrap()
 }
 
@@ -398,7 +398,7 @@ fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_8() {
 }
 
 #[test]
-fn a_basic_pitch_reading_records_its_thresholds_and_validates_only_from_1_9() {
+fn a_basic_pitch_reading_records_its_thresholds_and_validates_only_from_1_10() {
     let mut analysis = analysis(&Given::default());
     let reading = analysis.reading.as_mut().unwrap();
     let thresholds = Thresholds {
@@ -416,14 +416,60 @@ fn a_basic_pitch_reading_records_its_thresholds_and_validates_only_from_1_9() {
             "minimum_note_length_ms": 200.0,
         })
     );
-    // capture-analysis 1.8 has no thresholds: a 1.8 reader refuses them.
-    let older = validator_at("1.8");
-    let mut as_1_8 = as_version(&value, "1.8");
-    assert!(!older.is_valid(&as_1_8), "1.8 accepts thresholds");
-    // The same document without them is a valid 1.8 one: only the thresholds differ.
-    as_1_8["body"]["reading"]["reader"]
+    // capture-analysis 1.9 has no thresholds: a 1.9 reader refuses them.
+    let older = validator_at("1.9");
+    let mut as_1_9 = as_version(&value, "1.9");
+    assert!(!older.is_valid(&as_1_9), "1.9 accepts thresholds");
+    // The same document without them is a valid 1.9 one: only the thresholds differ.
+    as_1_9["body"]["reading"]["reader"]
         .as_object_mut()
         .unwrap()
         .remove("thresholds");
+    assert!(older.is_valid(&as_1_9), "the 1.9 control is not valid");
+}
+
+/// A validator for the committed capture-analysis 1.8 schema, the last before `breathy`.
+fn validator_1_8() -> jsonschema::Validator {
+    let envelope = read_json("schemas/envelope/1.0.json");
+    let registry = jsonschema::Registry::new()
+        .add(envelope["$id"].as_str().unwrap(), &envelope)
+        .unwrap()
+        .prepare()
+        .unwrap();
+    jsonschema::options()
+        .with_registry(&registry)
+        .build(&read_json("schemas/capture-analysis/1.8.json"))
+        .unwrap()
+}
+
+#[test]
+fn a_readings_breathy_notes_round_trip_exactly_and_validate_only_from_1_9() {
+    // A tone's last frames, as it dies away, are weakly voiced: the HMM leaves them unread, and
+    // the pass carries the note on over those whose pitch goes on, stating so (1.9).
+    let analysis = analysis_of(&take(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let reading = &value["body"]["reading"];
+    let breathy = reading["breathy"]
+        .as_array()
+        .expect("a breathy note is stated");
+    assert!(!breathy.is_empty());
+    for b in breathy {
+        assert!(b["decoded"].get("residual").is_none(), "{b}");
+        assert!(b["end"].as_u64() > b["decoded"]["end"].as_u64(), "{b}");
+        assert!(b["lowest_db"].as_f64().unwrap() >= -20.0, "{b}");
+    }
+    // capture-analysis 1.8 has no `breathy`: a 1.8 reader refuses it, and takes the same
+    // document without it.
+    let mut as_1_8 = value.clone();
+    as_1_8["$schema"] = json!(
+        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.8.json"
+    );
+    as_1_8["duet"]["version"] = json!("1.8");
+    let older = validator_1_8();
+    assert!(!older.is_valid(&as_1_8), "1.8 accepts breathy");
+    as_1_8["body"]["reading"]
+        .as_object_mut()
+        .unwrap()
+        .remove("breathy");
     assert!(older.is_valid(&as_1_8), "the 1.8 control is not valid");
 }
