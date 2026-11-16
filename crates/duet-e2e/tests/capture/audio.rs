@@ -55,8 +55,14 @@ pub fn notes(lead: f64, notes: &[(u8, f64)]) -> Vec<f32> {
 
 /// [`notes`], every one sung `cents` off its key on A440.
 pub fn notes_off(lead: f64, notes: &[(u8, f64)], cents: f64) -> Vec<f32> {
+    let each: Vec<(u8, f64, f64)> = notes.iter().map(|&(m, s)| (m, s, cents)).collect();
+    notes_each_off(lead, &each)
+}
+
+/// [`notes`], each `(midi, secs, cents)` sung its own `cents` off A440.
+pub fn notes_each_off(lead: f64, notes: &[(u8, f64, f64)]) -> Vec<f32> {
     let mut out = silence(lead);
-    for &(midi, secs) in notes {
+    for &(midi, secs, cents) in notes {
         let freq = 440.0 * ((f64::from(midi) - 69.0 + cents / 100.0) / 12.0).exp2();
         let len = frames(secs);
         let (attack, release) = (frames(0.005) as f64, frames(0.02) as f64);

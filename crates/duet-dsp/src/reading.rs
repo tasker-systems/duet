@@ -128,7 +128,10 @@ impl PerformanceFrames {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Tuning {
-    /// A4, in absolute cents: 6900.0 is 440 Hz.
+    /// A4, in absolute cents: 6900.0 is 440 Hz. An estimate's confidence is how far the share
+    /// of the steady frames within 15 cents of it stands above the share a flat spread across
+    /// the hundred cents would give: 0 for a flat spread, 1 when every steady frame is that
+    /// near (since capture-analysis 1.5; before, it was the share itself).
     pub a4: Origin<f64>,
     /// How widely, in cents, the steady frames spread about an estimate: their root mean square
     /// distance from it. Absent for a given tuning.

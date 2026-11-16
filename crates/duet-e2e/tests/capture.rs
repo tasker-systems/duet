@@ -224,6 +224,41 @@ fn keys(song: &Song) -> Vec<u8> {
         .collect()
 }
 
+/// A take whose held pitch wanders has a weak tuning, and capture suggests giving it: six notes
+/// in eleven held 32 cents sharp and five spread across the far half of the cents. A take held
+/// 44 cents sharp throughout is firm, and gets no suggestion. The suggestion is advice, on
+/// standard error only, never a statement in the files.
+#[test]
+fn a_weak_tuning_suggests_giving_it_and_a_firm_one_does_not() {
+    let dir = scratch("capture-weak-tuning");
+    let keys = [63, 65, 67, 68, 70, 72, 70, 68, 67, 65, 63];
+    // Five spread 7.5 cents apart from 35 cents above +32, wrapping round at +50.
+    let spread = (0..5).map(|i| (32.0 + 35.0 + 7.5 * f64::from(i) + 50.0).rem_euclid(100.0) - 50.0);
+    let cents: Vec<f64> = [32.0; 6].into_iter().chain(spread).collect();
+    let wander: Vec<(u8, f64, f64)> = keys.iter().zip(cents).map(|(&k, c)| (k, 0.5, c)).collect();
+    let weak = take(&dir, "weak.wav", &audio::notes_each_off(0.5, &wander));
+    let firm = take(&dir, "firm.wav", &eb_major_off(44.0));
+    let advice = "tuning is weak; give it with --tuning 440|+44c";
+
+    let out = capture(&dir, &["melody", s(&weak)]);
+    ok(&out, "capture weak");
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("tuning: estimated A4 = "))
+        .unwrap_or_else(|| panic!("no tuning statement: {err}"));
+    assert!(line.ends_with(", weak"), "{line}");
+    assert!(err.lines().any(|l| l == advice), "{err}");
+    let stated = document_of(&dir.join("weak.duet")).statements;
+    assert!(stated.iter().all(|l| l != advice), "{stated:?}");
+
+    let out = capture(&dir, &["melody", s(&firm)]);
+    ok(&out, "capture firm");
+    let err = stderr(&out);
+    assert!(!err.contains("tuning is weak"), "{err}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
 /// A take sung 44 cents sharp is read on its own tuning: the same keys as in tune, the
 /// estimate stated on standard error and in the song document, and the reading in the
 /// analysis.

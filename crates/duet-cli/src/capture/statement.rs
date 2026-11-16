@@ -66,6 +66,20 @@ pub fn tuning(tuning: &Tuning) -> Option<String> {
     ))
 }
 
+/// What to do about a weak tuning estimate: give the tuning. Advice, not a statement, so it is
+/// written on standard error only, never into the files. None for a given or a firm tuning.
+pub fn tuning_advice(tuning: &Tuning) -> Option<&'static str> {
+    match tuning.a4 {
+        Origin::Estimated { confidence, .. } if confidence < WEAK_CONFIDENCE => {
+            Some(WEAK_TUNING_ADVICE)
+        }
+        _ => None,
+    }
+}
+
+/// The line `duet capture` writes after a weak tuning estimate.
+pub const WEAK_TUNING_ADVICE: &str = "tuning is weak; give it with --tuning 440|+44c";
+
 /// A whole number of cents, as written: `+1 cent`, `-12 cents`.
 fn cents(n: String) -> String {
     if n.trim_start_matches(['+', '-']) == "1" {
@@ -205,6 +219,21 @@ mod tests {
             Some("tuning: estimated A4 = 451.3 Hz (+44 cents), spread 26 cents, confidence 0.62")
         );
         assert_eq!(tuning(&Tuning::given(6944.0)), None);
+    }
+
+    #[test]
+    fn a_weak_tuning_estimate_is_advised_and_a_firm_or_given_one_is_not() {
+        let estimated = |confidence: f64| -> Tuning {
+            serde_json::from_value(serde_json::json!({
+                "a4": { "estimated": { "value": 6944.0, "confidence": confidence } },
+                "spread_cents": 26.4
+            }))
+            .expect("a tuning")
+        };
+        assert_eq!(tuning_advice(&estimated(0.3)), Some(WEAK_TUNING_ADVICE));
+        assert!(tuning(&estimated(0.3)).expect("stated").ends_with(", weak"));
+        assert_eq!(tuning_advice(&estimated(0.8)), None);
+        assert_eq!(tuning_advice(&Tuning::given(6944.0)), None);
     }
 
     fn sig(s: &str) -> TimeSig {
