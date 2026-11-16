@@ -20,7 +20,7 @@ The workspace is split by domain:
 | `duet-abc` | a subset of ABC 2.1 ⇄ `Song`, and the corpus that checks it against abc2midi |
 | `duet-play` | a `Song` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
-| `duet-capture` | decoding a take, and assembling `duet-dsp`'s events into a `Song` and score |
+| `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Song` and score |
 | `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy |
 | `duet-cli` | the `duet` binary |
 
@@ -530,6 +530,40 @@ duet apply take.notes -o - | duet play -   # a view's text, through apply
   say which of two overlapping notes on one key a note-off ends, so the key is held until the
   last of them ends: each note sounds at least to its own end. The synth renders in blocks of
   64 samples, so an event sounds within 1.5 ms of its time.
+
+## Recording a take
+
+```sh
+duet record idea.flac                           # from the default input, until Ctrl-C
+duet record idea.flac --seconds 30              # stop after 30 seconds
+duet record idea.flac --device scarlett         # an input by its name, or part of it
+duet capture melody idea.flac                   # then capture it like any take
+```
+
+`duet record` keeps a take from the machine's microphone as a FLAC file, which `duet capture`
+reads like any other recording. FLAC is lossless: the take is the samples the device
+delivered, at its own rate and channels, stored at 24 bits from a float or 32-bit device and
+16 from a 16-bit one. Nothing is resampled, mixed or turned up. A 24-bit mono take is about 5 MB
+a minute.
+
+- **The file must be new and named `.flac`.** A take never replaces a file; a path that exists,
+  another extension, or a directory that does not exist is refused before any device is
+  opened.
+- **`--device <name>`** picks an input by its name, or a part only one input's name holds,
+  ignoring case. A name that matches none lists the inputs there are.
+- **`--seconds <n>`** stops the take after that long. Without it, Ctrl-C stops it; either way
+  the file is finished and kept.
+- **What it says on standard error.** The device, rate, channels and depth as it starts; the
+  file and its length when it ends; and anything the owner should know about the take: input
+  lost (when, and how many milliseconds, written as silence so what follows keeps its time),
+  overruns the device reported, samples at full scale (the take may be clipped), and a take
+  silent throughout.
+- **A take that ends early is kept.** The file is written a frame at a time, so a device that
+  disconnects, or a process that is killed, leaves a file that reads up to its last whole
+  frame.
+- **On macOS**, the terminal app needs microphone access (System Settings, Privacy & Security,
+  Microphone). Without it the system records silence rather than refusing, and `duet record`
+  says the take is silent throughout.
 
 ## Capturing an idea
 

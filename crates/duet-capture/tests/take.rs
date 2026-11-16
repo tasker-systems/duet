@@ -71,7 +71,10 @@ fn a_24_bit_mono_take_reads_back_exactly() {
     write_in_pieces(&mut writer, &samples, 1);
     let written = writer.finish().unwrap();
     assert_eq!(written.frames, samples.len() as u64);
-    assert_eq!(written.full_scale, 1, "the one -1.0");
+    let top = (8_388_607.0 / 8_388_608.0) as f32;
+    let rails = samples.iter().filter(|&&s| s == -1.0 || s == top).count();
+    assert!(rails >= 2, "the walk starts on both rails");
+    assert_eq!(written.full_scale, rails as u64);
 
     let (rate, channels, back) = read_back(&path);
     assert_eq!((rate, channels), (48_000, 1));
@@ -114,13 +117,17 @@ fn a_sample_between_steps_is_stored_at_the_nearest() {
 fn beyond_full_scale_is_stored_at_full_scale_and_counted() {
     let path = scratch("loud.flac");
     let mut writer = TakeWriter::create(&path, 22_050, 1, Depth::Sixteen).unwrap();
-    writer.write(&[1.5, -2.0, 1.0, 0.5, f32::NAN]).unwrap();
+    let top = 32_767.0 / 32_768.0;
+    // The last two are a 16-bit device's own rails, as cpal converts them: the top one
+    // arrives just under 1.0 and still counts.
+    writer
+        .write(&[1.5, -2.0, 1.0, 0.5, f32::NAN, top, -1.0])
+        .unwrap();
     let written = writer.finish().unwrap();
-    assert_eq!(written.full_scale, 3);
+    assert_eq!(written.full_scale, 5);
 
     let (_, _, back) = read_back(&path);
-    let top = 32_767.0 / 32_768.0;
-    assert_eq!(back, [top, -1.0, top, 0.5, 0.0]);
+    assert_eq!(back, [top, -1.0, top, 0.5, 0.0, top, -1.0]);
 }
 
 /// Lost input is written as silence, so what follows keeps its time.

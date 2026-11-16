@@ -59,8 +59,8 @@ pub struct Written {
     pub rate: u32,
     pub channels: u16,
     pub depth: Depth,
-    /// Samples that reached full scale or beyond, and were stored at full scale: a take
-    /// with any may be clipped.
+    /// Samples stored at full scale, the top or bottom step, whether they reached it or went
+    /// beyond: a take with any may be clipped.
     pub full_scale: u64,
 }
 
@@ -191,15 +191,17 @@ impl TakeWriter {
         let steps = (1i64 << (self.depth.bits() - 1)) as f32;
         let (lowest, highest) = (-steps, steps - 1.0);
         for &sample in samples {
-            if sample.abs() >= 1.0 {
-                self.full_scale += 1;
-            }
             // NaN, which no device should send, is stored as silence.
             let step = if sample.is_nan() {
                 0.0
             } else {
                 (sample * steps).round().clamp(lowest, highest)
             };
+            // Counted by the step stored, not the sample: an integer device's top step
+            // arrives just under 1.0, as 32767 / 32768 does.
+            if step <= lowest || step >= highest {
+                self.full_scale += 1;
+            }
             self.push(step as i32)?;
         }
         Ok(())

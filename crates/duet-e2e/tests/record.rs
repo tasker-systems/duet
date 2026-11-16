@@ -32,6 +32,17 @@ fn a_take_is_named_flac() {
 }
 
 #[test]
+fn a_take_goes_in_a_directory_that_exists() {
+    let dir = scratch("record-dir");
+    let take = dir.join("missing").join("take.flac");
+    let out = duet(&dir, &["record", s(&take), "--seconds", "1"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("not a directory"), "{err}");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
 fn seconds_are_above_zero() {
     let dir = scratch("record-seconds");
     let out = duet(
@@ -39,6 +50,8 @@ fn seconds_are_above_zero() {
         &["record", s(&dir.join("take.flac")), "--seconds", "0"],
     );
     assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("above zero"), "{err}");
     assert!(!dir.join("take.flac").exists());
     std::fs::remove_dir_all(&dir).expect("clean up");
 }

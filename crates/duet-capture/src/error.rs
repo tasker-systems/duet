@@ -22,7 +22,9 @@ pub enum Error {
 
     /// A take could not be written: the file could not be created or written, or the
     /// encoder refused a frame.
-    #[error("writing {}: {source}", path.display())]
+    /// Its message is the file's alone: the cause follows as the error's source, so a chain
+    /// printed whole names it once.
+    #[error("cannot write {}", path.display())]
     Write {
         /// The file being written.
         path: PathBuf,
