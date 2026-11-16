@@ -37,7 +37,12 @@ use crate::{Kind, Version};
 /// and its `cents` from the note's key. They are measured, never named: a grace, a turn or a
 /// trill is worked out from them when something is written. Omitted when a note has none, so a
 /// 1.5 document reads as one with no ornament stated.
+///
+/// **1.7** adds `basic-pitch` to the reading's `reader.name`, also additive: Spotify's Basic
+/// Pitch, an outside model, chose where the notes start and end, and the take's performance
+/// gave each its key, centre and residual on the take's tuning. Every 1.6 document reads as it
+/// did.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 6);
+    const VERSION: Version = Version::new(1, 7);
 }

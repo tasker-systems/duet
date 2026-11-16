@@ -91,8 +91,26 @@ fn cents(n: String) -> String {
 
 /// The reader, stated only when it is not the note HMM (the default): the segmentation rules.
 pub fn reader(reading: &Reading) -> Option<String> {
-    let reader = reading.reader?;
-    (reader.name == ReaderName::Rules).then(|| "reader: the segmentation rules".to_owned())
+    match reading.reader?.name {
+        ReaderName::Rules => Some("reader: the segmentation rules".to_owned()),
+        ReaderName::BasicPitch => Some(
+            "reader: Spotify's Basic Pitch (basic-pitch-rs), each note keyed by the performance \
+             on the take's tuning"
+                .to_owned(),
+        ),
+        _ => None,
+    }
+}
+
+/// What became of Basic Pitch's notes: how many it found, and how many were cut back, dropped
+/// or keyed differently on the way to a reading of one note at a time.
+#[cfg(feature = "basic-pitch")]
+pub fn basic_pitch(read: &duet_capture::BasicPitchRead) -> String {
+    format!(
+        "basic-pitch: {} notes found; {} cut back and {} dropped where a louder note overlapped \
+         them; {} dropped with no voiced frame; {} on another key than on A440",
+        read.found, read.trimmed, read.overlapped, read.unvoiced, read.rekeyed
+    )
 }
 
 /// How many notes were read, and how many of them are between keys on the take's tuning.

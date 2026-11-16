@@ -6,7 +6,8 @@ use std::path::Path;
 
 use duet_capture::{
     ANALYSIS_RATE, Analysis, Event, Given, Kind, Layer1, Mono, NoteModel, Performance,
-    PerformanceFrames, Stage, assemble, estimate, quantize_apart, quantize_offsets, read,
+    PerformanceFrames, Reader as ReadingReader, Stage, assemble, estimate, quantize_apart,
+    quantize_offsets, read,
 };
 use duet_schemas::{AnyDocument, Document, Tool};
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.6 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.7 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -28,7 +29,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.6.json"))
+        .build(&read_json("schemas/capture-analysis/1.7.json"))
         .unwrap()
 }
 
@@ -297,4 +298,36 @@ fn the_schema_and_the_reader_refuse_what_capture_never_writes() {
             );
         }
     }
+}
+
+#[test]
+fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_7() {
+    let mut analysis = analysis(&Given::default());
+    let reading = analysis.reading.as_mut().unwrap();
+    reading.reader = Some(ReadingReader::basic_pitch());
+    let (_, value) = round_trip(analysis);
+    assert_eq!(
+        value["body"]["reading"]["reader"]["name"],
+        json!("basic-pitch")
+    );
+    // capture-analysis 1.6 has no basic-pitch reader: a 1.6 reader refuses the name.
+    let envelope = read_json("schemas/envelope/1.0.json");
+    let registry = jsonschema::Registry::new()
+        .add(envelope["$id"].as_str().unwrap(), &envelope)
+        .unwrap()
+        .prepare()
+        .unwrap();
+    let older = jsonschema::options()
+        .with_registry(&registry)
+        .build(&read_json("schemas/capture-analysis/1.6.json"))
+        .unwrap();
+    let mut as_1_6 = value.clone();
+    as_1_6["$schema"] = json!(
+        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.6.json"
+    );
+    as_1_6["duet"]["version"] = json!("1.6");
+    assert!(!older.is_valid(&as_1_6), "1.6 accepts basic-pitch");
+    // The same document read by the rules is a valid 1.6 one: only the reader's name differs.
+    as_1_6["body"]["reading"]["reader"]["name"] = json!("rules");
+    assert!(older.is_valid(&as_1_6), "the 1.6 control is not valid");
 }

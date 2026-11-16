@@ -82,6 +82,8 @@ pub use duet_dsp::{
     TempoAlternatives, Timing, Tuning, WEAK_CONFIDENCE, a4_cents_of_hz, absolute_cents,
     beat_series, estimate, estimate_key, estimate_tuning, felt_quarters, is_compound, read,
 };
+#[cfg(feature = "basic-pitch")]
+pub use duet_dsp::{BasicPitch, BasicPitchRead, MODEL_SHA256};
 pub use error::{Error, Result};
 pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
 pub use source::{FileSource, Source};

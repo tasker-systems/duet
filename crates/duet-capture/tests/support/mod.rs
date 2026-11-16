@@ -257,6 +257,9 @@ fn analyse(
     let mut performance = Performance::new(ANALYSIS_RATE);
     let mut hits = Hits::new(ANALYSIS_RATE, mode);
     let (mut mono, mut events, mut layers) = (Vec::new(), Vec::new(), Vec::new());
+    // Basic Pitch reads the samples themselves, as `duet capture` keeps them for it.
+    let mut samples: Vec<f32> = Vec::new();
+    let keep = melody && reader == ReaderName::BasicPitch;
     let mut push = |m: Mono, events: &mut Vec<Event>, layers: &mut Vec<Layer1>| {
         if melody {
             performance.push(m, layers)
@@ -267,11 +270,17 @@ fn analyse(
     while let Some(chunk) = source.next_chunk().map_err(fail)? {
         prepare.push(chunk, &mut mono).map_err(|e| fail(e.into()))?;
         for m in mono.drain(..) {
+            if keep {
+                samples.extend_from_slice(&m.samples);
+            }
             push(m, &mut events, &mut layers).map_err(|e| fail(e.into()))?;
         }
     }
     prepare.finish(&mut mono).map_err(|e| fail(e.into()))?;
     for m in mono.drain(..) {
+        if keep {
+            samples.extend_from_slice(&m.samples);
+        }
         push(m, &mut events, &mut layers).map_err(|e| fail(e.into()))?;
     }
     if !melody {
@@ -298,6 +307,15 @@ fn analyse(
     let reading = match reader {
         ReaderName::Rules => duet_capture::read(&frames, &events, None),
         ReaderName::Hmm => NoteModel::default().read(&frames, &events, None),
+        #[cfg(feature = "basic-pitch")]
+        ReaderName::BasicPitch => {
+            duet_capture::BasicPitch::new()
+                .and_then(|bp| bp.read(&samples, &frames, None))
+                .map_err(|e| fail(e.into()))?
+                .reading
+        }
+        #[cfg(not(feature = "basic-pitch"))]
+        ReaderName::BasicPitch => return Err("basic-pitch is not built here".to_owned()),
     };
     events.extend(reading.notes.iter().map(|n| n.event()));
     events.sort_by_key(|e| match *e {

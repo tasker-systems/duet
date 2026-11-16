@@ -586,9 +586,10 @@ options; everything about the timing that is left out is estimated and stated.
 - **`--tuning <a4>`** is a melody's tuning: A4 in Hz (`440`, `442`) or in cents from 440 Hz
   (`+44c`, `-12c`), used exactly, up to a key either way. A rhythm take's hits have no pitch,
   and `--tuning` is refused for one.
-- **`--reader hmm|rules`** is what chooses a melody's notes from its performance: `hmm`, the
-  note HMM (the default), or `rules`, the segmentation rules, stated on standard error when
-  chosen (`reader: the segmentation rules`). See *Readers* below. A rhythm take's hits are not
+- **`--reader hmm|rules|basic-pitch`** is what chooses a melody's notes from its performance:
+  `hmm`, the note HMM (the default); `rules`, the segmentation rules; or `basic-pitch`,
+  Spotify's Basic Pitch. A reader other than the HMM is stated on standard error when chosen
+  (`reader: the segmentation rules`). See *Readers* below. A rhythm take's hits are not
   read as notes, and `--reader` is refused for one.
 - **`--key <key>`** is a melody's key as ABC's `K:` names it (`Eb`, `Bm`, `F#m`), used exactly.
   A rhythm take has no key, and `--key` is refused for one.
@@ -636,7 +637,7 @@ cannot be, that is reported after them, and they stay:
   held at least 50 cents from where the note is held, as its `start`, `end` and `cents` from
   the note's key. A held approach before the note's held pitch is one too. They are never
   named in the file: a grace, a turn or a trill is worked out from them when something is
-  written. A note with none writes none.
+  written. A note with none writes none. Since 1.7 the reader may be `basic-pitch`.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -694,7 +695,7 @@ held more than 35 cents from its key is **between keys**, counted on the `notes:
 marked in the analysis's `reading`, with every note's `centre`, its distance from its key in
 cents. The key is estimated after, from those notes, and never changes one.
 
-**Readers.** Two readers choose a melody's notes from its performance, on its tuning, and both
+**Readers.** Three readers choose a melody's notes from its performance, on its tuning, and all
 are judged by the same loss. The **rules** (`--reader rules`) segment the pitch where it leaves a
 held note and holds somewhere new, or at an onset. The **note HMM** (the default) decodes,
 frame by frame, whether the voice is sliding into a key (attack), holding it (stable) or silent,
@@ -709,6 +710,22 @@ Known limits: a glide slower than about 8 semitones a second (15 at `c/2`) is re
 note on each key it passes, where the rules read a few fewer; the HMM leaves the last, weakly
 voiced frames of a decaying note unread, where the rules read them, and the loss charges
 nothing for them, since their voicing says they are not sung.
+
+**Basic Pitch** (`--reader basic-pitch`) is an outside reader: Spotify's
+[Basic Pitch](https://github.com/spotify/basic-pitch) note model, run in Rust through
+[basic-pitch-rs](https://github.com/AThevon/basic-pitch-rs), an unofficial port, on the take's
+own samples. It says where each note starts and ends; the performance then gives each note its
+key, centre and residual on the take's tuning, as for the other readers, so Basic Pitch's own
+A440 keys are only counted, never used. It is polyphonic and a reading is not: where its notes
+overlap, the louder is kept whole and a quieter one cut back to where it no longer overlaps, or
+dropped when less than half of it would be left. Capture states how many notes it found, cut
+back, dropped and keyed differently (`basic-pitch: …`). Its model, Spotify's `nmp.onnx` from
+basic-pitch v0.4.0 (230 kB, Apache-2.0), is built into duet and its SHA-256 checked by the
+tests; its licence and Spotify's NOTICE are in `crates/duet-dsp/models/basic-pitch/`. Nothing is
+downloaded. The reader is the `basic-pitch` feature, on by default; `--no-default-features`
+builds duet without it. Known limits: Basic Pitch takes no tuning and knows nothing of where a
+note settles, so a whole note is taken as held, its scoop in read as drift; and its notes reach
+into frames the performance hears as unvoiced, which the loss's `voicing` term charges.
 
 **Rhythm.** Without `--lane`, each hit is sorted by sound into `kick`, `snare` or `hh` (a closed
 hat). With `--lane`, every hit goes to that lane. Known limit: a hit has one lane. A kick and a

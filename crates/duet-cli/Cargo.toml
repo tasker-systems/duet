@@ -36,3 +36,8 @@ cpal = "0.18.2"
 midir = "0.11.1"
 # duet play --port: on Ctrl-C, the port is sent note-offs so nothing is left sounding.
 ctrlc = "3.5.2"
+
+[features]
+# `duet capture melody --reader basic-pitch`: Spotify's Basic Pitch, its model embedded.
+default = ["basic-pitch"]
+basic-pitch = ["duet-capture/basic-pitch"]

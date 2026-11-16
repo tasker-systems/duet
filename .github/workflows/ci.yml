@@ -116,6 +116,13 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: Tests
         run: cargo test --locked
+      # duet-cli builds the basic-pitch reader by default, which turns the feature on for the
+      # whole workspace above. Build, lint and test once without it, so the build without a
+      # model keeps working.
+      - name: Without the basic-pitch reader
+        run: |
+          cargo clippy --locked -p duet-cli --all-targets --no-default-features -- -D warnings
+          cargo test --locked -p duet-dsp -p duet-capture -p duet-cli --no-default-features
       # duet reads config from the user's directory and from a .duet above the working
       # directory. The tests must not: a developer's own duet.toml must never change what
       # they check. So run them again under a hostile config in both places.

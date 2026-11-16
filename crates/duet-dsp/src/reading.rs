@@ -329,6 +329,11 @@ pub enum ReaderName {
     Rules,
     /// The note HMM ([`NoteModel`](crate::NoteModel)).
     Hmm,
+    /// Spotify's Basic Pitch, an outside model: it chooses where notes start and end, and the
+    /// take's performance gives each its key, centre and residual. Added in `capture-analysis`
+    /// 1.7. A build without the `basic-pitch` feature still reads it.
+    #[serde(rename = "basic-pitch")]
+    BasicPitch,
 }
 
 /// The reader that chose a reading's notes, and the cost per note it chose them with.
@@ -360,6 +365,14 @@ impl Reader {
         Reader {
             name: ReaderName::Hmm,
             note_cost,
+        }
+    }
+    /// Basic Pitch, with the loss's cost per note: like the rules, it has no cost of its own.
+    #[must_use]
+    pub const fn basic_pitch() -> Reader {
+        Reader {
+            name: ReaderName::BasicPitch,
+            note_cost: NOTE_COST,
         }
     }
 }

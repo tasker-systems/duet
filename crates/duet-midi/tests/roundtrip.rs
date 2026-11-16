@@ -1270,10 +1270,32 @@ fn excursions_in(text: &str) -> Vec<Option<serde_json::Value>> {
 }
 
 #[test]
+fn a_basic_pitch_reader_round_trips_exactly_through_json() {
+    // capture-analysis 1.7: a reading by Basic Pitch names its reader `basic-pitch`, and the
+    // document writes back as the text it was read from.
+    let text = analysis_example("1.7").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
+    assert!(
+        text.contains(r#""name": "basic-pitch""#),
+        "the example has no hmm reader"
+    );
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    let written = doc.write().unwrap();
+    assert_eq!(written, text);
+    let value: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(
+        value["body"]["reading"]["reader"]["name"],
+        serde_json::json!("basic-pitch")
+    );
+}
+
+#[test]
 fn a_notes_excursions_round_trip_exactly_through_json() {
-    // capture-analysis 1.6: every excursion's start, end and cents read back to the bit, and
-    // the document writes back as the text it was read from.
-    let text = analysis_example("1.6");
+    // capture-analysis 1.6 added excursions: every excursion's start, end and cents read back
+    // to the bit, and the document writes back as the text it was read from. The current
+    // example carries them, since a document is written at the current version.
+    let text = analysis_example("1.7");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
