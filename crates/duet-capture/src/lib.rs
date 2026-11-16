@@ -45,6 +45,12 @@
 //! events, not stages: they are the one place the whole take is kept, and only as events.
 //! `duet-dsp`'s documentation says where a model fits in the chain later.
 //!
+//! # Writing a take
+//!
+//! [`TakeWriter`] is the other direction: samples from a device written to a FLAC file a frame
+//! at a time, losslessly at a [`Depth`], so `duet record` leaves a take [`FileSource`] reads
+//! like any other.
+//!
 //! # Errors
 //!
 //! [`Error`] is this crate's: reading, decoding and assembling. The stages and [`estimate`]
@@ -65,6 +71,7 @@ mod score;
 mod source;
 #[cfg(test)]
 mod synth;
+mod take;
 
 pub use assemble::{Analysis, Captured, Kind, LeadIn, QuantizeOffset, assemble, quantize_offsets};
 pub use duet_dsp::{
@@ -78,3 +85,4 @@ pub use duet_dsp::{
 pub use error::{Error, Result};
 pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
 pub use source::{FileSource, Source};
+pub use take::{Depth, TakeWriter, Written};

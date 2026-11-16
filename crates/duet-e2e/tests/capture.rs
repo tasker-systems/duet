@@ -1365,3 +1365,35 @@ fn hits_no_grid_parts_are_merged_and_stated() {
     assert_eq!(notes.tracks[0].notes.len(), 3, "the .duet lost a hit");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+/// A take `duet record` would write, a FLAC file from `TakeWriter`, captures like the same take
+/// as a WAV: the same keys at the same places.
+#[test]
+fn a_recorded_flac_take_captures_like_the_same_take_as_wav() {
+    let dir = scratch("capture-recorded");
+    let samples = eb_major();
+    let wav = take(&dir, "wav.wav", &samples);
+    let flac = dir.join("flac.flac");
+    let mut writer =
+        duet_capture::TakeWriter::create(&flac, audio::RATE, 1, duet_capture::Depth::TwentyFour)
+            .expect("create the take");
+    writer.write(&samples).expect("write the take");
+    writer.finish().expect("finish the take");
+
+    ok(&capture(&dir, &["melody", s(&wav)]), "capture melody wav");
+    ok(&capture(&dir, &["melody", s(&flac)]), "capture melody flac");
+    let placed = |song: &Song| -> Vec<_> {
+        song.tracks[0]
+            .notes
+            .iter()
+            .map(|n| (n.pitch.midi(), n.at))
+            .collect()
+    };
+    let (from_wav, from_flac) = (
+        song_of(&dir.join("wav.duet")),
+        song_of(&dir.join("flac.duet")),
+    );
+    assert!(from_wav.tracks[0].notes.len() >= 20, "{from_wav:?}");
+    assert_eq!(placed(&from_flac), placed(&from_wav));
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}

@@ -24,6 +24,9 @@ schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
 symphonia = { version = "0.6.1", default-features = false, features = ["aac", "flac", "id3v1", "id3v2", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 thiserror = "2"
+# duet record: a take is written as FLAC a frame at a time. Default features are off: they add
+# threading, serde and logging the writer does not use.
+flacenc = { version = "0.5.1", default-features = false }
 
 [dev-dependencies]
 rustfft = "6.4.1"
