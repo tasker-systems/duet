@@ -136,6 +136,8 @@ ReadNote {
 
 > **Built (2026-11-15, build task 3):** `duet_dsp::read` and `estimate_tuning`, with `--tuning`; the reading is `capture-analysis` 1.1's optional `reading` (additive). Where it departs from the above:
 > - **The peak is a 30-cent window's, not a 1-cent bin's.** The bin whose ±15-cent window holds the most weight is the peak, refined by that window's weighted mean. A take sung 40 cents flat whose flattest notes sit 52 flat has its heaviest single bin at +48, a key away; its heaviest window is where it is sung. Confidence is still the share within ±15 cents.
+>
+> **Amended (capture-analysis 1.5):** confidence is that share measured above a flat spread's (0.31), `(share − 0.31) / 0.69`, at least 0, so a take whose held pitch wanders across the hundred cents is stated weak, and capture then suggests `--tuning`. The estimate is unchanged.
 > - **A frame's pitch is smoothed over 0.2 s before it is binned,** and is steady when that smoothed pitch moves no more than 10 cents over 50 ms. Unsmoothed, a vibrato's steady frames are its extremes, which make two peaks either side of where it is sung.
 > - **The notes are segmented from the performance's cents** (`fine_hz`, to 0.1 cent), by `Melody`'s rules, so the reading is a function of the kept performance and its onsets alone. `Melody` itself is unchanged and still segments the 10-cent track; the two agree within a frame on synthetic takes, and the corpus passes on the reading.
 > - **The key is not in `Reading`:** it stays the analysis's `key`, estimated by assembly from the read notes.

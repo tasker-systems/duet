@@ -18,7 +18,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.4 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.5 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -28,7 +28,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.4.json"))
+        .build(&read_json("schemas/capture-analysis/1.5.json"))
         .unwrap()
 }
 

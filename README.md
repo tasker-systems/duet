@@ -628,7 +628,10 @@ cannot be, that is reported after them, and they stay:
   1.4 the loss priced, in nats, as the note HMM decodes: a fourth term, `voicing` (what reading
   frames costs that their voicing says are not sung), `unread` costing each frame left out by
   its voicing (about 2 at 0.9, nothing for a breath), and `pitch` measuring a slide as slide,
-  not as though held on the key it arrives at.
+  not as though held on the key it arrives at; and since 1.5 an estimated tuning's confidence
+  measured above a flat spread: 0 when the take's held pitch spreads evenly across the hundred
+  cents, 1 when all of it sits within 15 cents of the estimate. Below 0.5 the tuning is stated
+  weak, and capture suggests giving it with `--tuning`.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -678,8 +681,10 @@ are spelled and the signature, never a pitch.
 sharp reads the keys it would in tune. The tuning is estimated from the performance: every
 voiced frame whose pitch holds steady for 50 ms gives its distance from the nearest key, and the
 30-cent window where most of the singing sits (weighted by how voiced each frame is) is where
-A4 is. Its confidence is the share of the singing within 15 cents of it, and its spread how
-widely the take strays from it. Each note is the key nearest its held pitch on that tuning; one
+A4 is. Its confidence is how far the share of the singing within 15 cents of it stands above
+what a flat spread across the hundred cents would put there (0.31): 0 for a take whose held
+pitch wanders evenly, 1 when all of it is that near. Below 0.5 it is stated weak, and capture
+suggests giving the tuning with `--tuning`. Its spread is how widely the take strays from it. Each note is the key nearest its held pitch on that tuning; one
 held more than 35 cents from its key is **between keys**, counted on the `notes:` line and
 marked in the analysis's `reading`, with every note's `centre`, its distance from its key in
 cents. The key is estimated after, from those notes, and never changes one.

@@ -194,6 +194,9 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     }
 
     let meter = *timing.meter.value();
+    let advice = reading
+        .as_ref()
+        .and_then(|reading| statement::tuning_advice(&reading.tuning));
     let mut said = statement::timing(&timing, ANALYSIS_RATE);
     if let Some(reading) = &reading {
         said.extend(statement::tuning(&reading.tuning));
@@ -217,6 +220,9 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     // The performance is written whatever becomes of the score.
     for line in &song_said {
         eprintln!("{line}");
+    }
+    if let Some(advice) = advice {
+        eprintln!("{advice}");
     }
     write_all(&[(&outputs.song, &song), (&outputs.analysis, &analysis)])?;
     if let Some(performance) = performance {

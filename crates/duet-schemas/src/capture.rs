@@ -26,7 +26,12 @@ use crate::{Kind, Version};
 /// as 0 in a 1.3 document. Two terms are priced anew: `unread` costs each voiced frame by its
 /// voicing, not 1, and `pitch` is `d²/2σ²` a held frame and a flat attack cost a slide frame,
 /// not `r²/σ²` a frame. So a 1.3 loss and a 1.4 loss are not to be compared term by term.
+///
+/// **1.5** measures an estimated tuning's confidence above a flat spread, unchanged in shape:
+/// 0 when the steady frames spread flat across the hundred cents, 1 when every one is within
+/// 15 cents of the estimate. Before, it was the share within 15 cents, which a flat spread
+/// already puts at 0.31; a 1.4 confidence of `s` is `(s − 0.31) / 0.69` in 1.5, at least 0.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 4);
+    const VERSION: Version = Version::new(1, 5);
 }
