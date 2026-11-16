@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Witness for scripts/duet-listen.sh: captures the synthetic corpus melody with both readers,
 # builds its clips from scripts/listen/synthetic-melody.moments, and checks that every clip,
-# legato and gapped, for each reader, lasts exactly its window (the whole take for `full`).
+# bridged, legato and gapped, for each reader, lasts exactly its window (the whole take for `full`).
 # A clip at the wrong window, or a stale clip left in place of a new one, fails it.
 #
 #   scripts/listen/check.sh
@@ -43,7 +43,7 @@ failed=0 checked=0
 for e in "${expect[@]}"; do
   read -r key want <<<"$e"
   for reader in rules hmm; do
-    for suffix in "" -gap; do
+    for suffix in "" -legato -gap; do
       clip="$work/clips/$key-$reader$suffix.wav"
       if [[ ! -f "$clip" ]]; then echo "FAIL $key-$reader$suffix: missing" >&2; failed=1; continue; fi
       got=$(seconds "$clip")
@@ -58,4 +58,4 @@ for e in "${expect[@]}"; do
   done
 done
 ((failed == 0)) || exit 1
-echo "duet-listen: $checked clips at their windows (${#expect[@]} windows, two readers, legato and gapped)"
+echo "duet-listen: $checked clips at their windows (${#expect[@]} windows, two readers, bridged, legato and gapped)"

@@ -699,7 +699,7 @@ was sung. It reads the recording and what `duet capture melody` wrote at its ste
 
 ```sh
 duet capture compare idea.m4a                       # idea.compare.svg and idea.compare.wav
-duet capture compare idea.m4a --from 33 --to 38     # five seconds of it
+duet capture compare idea.m4a --from 33 --to 38     # five seconds of it: idea.compare.33.0-38.0.svg, .wav
 duet capture compare idea.m4a -o scratch/idea       # the stem it was captured to
 duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of the take
 ```
@@ -709,15 +709,21 @@ duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of 
   them, shaded; and the onsets as ticks under it.
 - `STEM.compare.wav`: the take in the left channel, as the analysis heard it (one channel at
   22 050 Hz, so it lines up with the reading sample for sample), and the reading in the right as
-  one legato sine at the take's own tuning, gliding only through each note's slide in (its
-  scoop, where the residual measured one). 32-bit float.
+  a sine at the take's own tuning, gliding only through each note's slide in (its scoop, where
+  the residual measured one). 32-bit float. The sine holds the note before through a gap shorter
+  than 0.2 s, about a consonant or a catch-breath, so a phrase plays as one tone. It is silent
+  through a gap of 0.2 s or more, a breath or a rest, so a note the reading drops is heard as
+  silence, not as the note before held on. `--legato` holds it through every gap; `--gapped`
+  silences it in every gap.
 - On standard output, one line per note: when it starts, its key, its `centre` in cents, its
   residual's parts (where it is held, its drift in cents a second, its vibrato, scoop and fall,
   and the rest), and whether it is between keys; then the take's loss as its three terms (pitch,
   unread and notes). A reading written before `capture-analysis` 1.2 has no residual, and the
   output says so.
 
-`--from` and `--to` (seconds) window all three. `--reading` compares another analysis of the same
+`--from` and `--to` (seconds) window all three, and name the files after the window
+(`STEM.compare.FROM-TO.svg`, with `0.0` or `end` for a side not given), so a window never
+collides with the whole take's files. `--reading` compares another analysis of the same
 take: its reading is the bars and the sine, the stem's own is drawn beside it dashed, and the
 outputs are named after it (`hmm.compare.svg`). Nothing is overwritten. Neither file the stem
 holds names the recording it was read from, so the recording is checked only by its length
@@ -832,12 +838,13 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
   - **What it builds:** clips of the whole take and of each named moment, for the stem's
     reading and for any `--reading` beside it. Each clip has the take on the left and the
     reading's sine on the right, raised 6 dB.
-  - **Two versions of each clip:**
-    - legato, as `duet capture compare` plays it, with the sine held through gaps;
-    - gapped, with the sine silent wherever the reading has no note, so a dropped note is
-      heard as a gap.
-  - **Playing them:** a menu plays one clip at a time. `N` plays clip N legato, `Ng` plays it
-    gapped, and `q` quits. While a clip plays, it shows where the clip is in the take and
+  - **Three versions of each clip,** each as `duet capture compare` renders it:
+    - bridged, its default: the sine held through a gap under 0.2 s and silent at a longer one,
+      so a dropped note is heard as a gap;
+    - legato (`--legato`), with the sine held through every gap;
+    - gapped (`--gapped`), with the sine silent wherever the reading has no note.
+  - **Playing them:** a menu plays one clip at a time. `N` plays clip N bridged, `Nl` legato,
+    `Ng` gapped, and `q` quits. While a clip plays, it shows where the clip is in the take and
     which note is being read.
   - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
     the start of the take, with a free-text label. A line starting with `#` is a comment.
