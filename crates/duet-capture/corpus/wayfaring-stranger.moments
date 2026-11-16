@@ -1,0 +1,83 @@
+# Moments of wayfaring-stranger.flac, for scripts/duet-listen.sh and scripts/listen/check.sh.
+#
+# The take is "Wayfaring Stranger" (traditional), sung by James (Pete) Taylor, recorded
+# 2026-11-15. Copyright 2026 James (Pete) Taylor, licensed CC BY 4.0
+# (https://creativecommons.org/licenses/by/4.0/); the notice is wayfaring-stranger.flac.license.
+# This file names moments in that recording and holds none of its audio. A clip built from it is
+# a copy of part of the recording: credit it as above, and keep clips out of git.
+#
+# One moment per line: FROM TO LABEL, in seconds from the start of the take; the label is free
+# text naming it and what to listen for. They are the moments of "What the take shows" in
+# docs/superpowers/specs/2026-11-16-arrivals-and-ornaments-design.md, each window framing its
+# moment with a little context either side. Pitches are on the take's estimated tuning (A4 =
+# 438.3 Hz). The readings quoted are capture-analysis 1.8 on main, read as the corpus test reads
+# it (nothing given): `duet capture melody` with --reader hmm (the default) and --reader rules.
+# The owner rules on each by ear; the rulings are on temper task 01a1e4f9.
+
+# The turn on D#3, 1.42-1.61: down to D3 +30, up to E3 -30, back.
+#   hmm: one D#3 (1.13-1.64), excursion -67c 1.43-1.50; the rise to E3 is no excursion.
+#   rules: D#3, then E3 (between keys) 1.55-1.62.
+1.20 1.85 turn on D#3 at 1.42: one D#3 with a turn (down, up, back), or a note of its own?
+
+# Held approaches: the voice holds a key a step below for 0.05-0.1 s, often overshoots, then
+# settles on the arrival. Table 1 of the spec.
+
+# 2.28: G#3 held 0.07 s, overshoots to B3 -40, arrives on A#3.
+#   hmm: A#3 from 2.22, excursions -206c 2.28-2.33 (the G#3) and +64c 2.43-2.48 (the overshoot).
+#   rules: G#3 2.15-2.35, then A#3.
+2.05 2.70 approach at 2.28: G#3 held, overshoot, A#3; is the G#3 a note or part of the A#3?
+
+# 3.77: G#3 held 0.05 s, arrives on A#3.
+#   hmm: A#3 from 3.74, excursion -176c 3.77-3.82.   rules: G#3 3.61-3.84, then A#3.
+3.55 4.10 approach at 3.77: G#3 held 0.05 s, then A#3; one A#3 with its approach, or two notes?
+
+# 5.17-5.52: wobbles C3-D3-C#3-D3-E3, then settles on D#3.
+#   hmm: D#3 from 5.18, held from 5.51, excursion -173c 5.29-5.33 (the C#3).
+#   rules: C#3 (between keys) 5.10-5.35, then D#3.
+4.95 5.80 approach at 5.17-5.52: the wobble below D#3; one D#3 arriving, or a C#3 first?
+
+# 9.07: C3 +30 held 0.08 s, overshoots to E3 -30, arrives on D#3.
+#   hmm: D#3 from 8.99 with a -472c scoop; no excursion states the C3.
+#   rules: C3 (between keys) 8.91-9.14, then D#3.
+8.80 9.45 approach at 9.07: C3 held, overshoot to E3, D#3; the hmm hears only a scoop here
+
+# 12.03: A3 +20 held 0.09 s, overshoots to B3 -45, arrives on A#3.
+#   hmm: A#3 from 12.00, excursion -78c 12.09-12.14.   rules: A3 (between keys) 11.95-12.19.
+11.80 12.40 approach at 12.03: A3 held, overshoot, A#3; an approach or an A3 of its own?
+
+# 13.84: G#3 held 0.06 s, after the fall from A#3 to C#3 and the leap back up; arrives on A#3.
+#   hmm: A#3 from 13.71, excursion -222c 13.86-13.90.   rules: G#3 13.64-13.90, then A#3.
+13.45 14.15 approach at 13.84: the leap up from C#3, G#3 held, A#3; one note or two?
+
+# 14.87: F#3 held 0.07 s, overshoots to A3 -25, arrives on G#3.
+#   hmm: G#3 from 14.84, excursions -156c 14.91-14.97 and +79c 15.05-15.08 (the overshoot).
+#   rules: F#3 (between keys) 14.84-14.98, then G#3.
+14.70 15.25 approach at 14.87: F#3 held, overshoot to A3, G#3; one G#3 or two notes?
+
+# 18.56: F3 -35 held 0.1 s, about as long as the F#3 it arrives at (held 0.12 s). Like Blood
+# Sport's opening, whose F3 the owner hears as a sung note of its own. Not yet listened to.
+#   hmm: one F#3 18.47-18.80, excursion -132c 18.56-18.66 (the F3).
+#   rules: F3 18.49-18.68, then F#3.
+18.35 18.95 approach at 18.56: the flat F3 held 0.1 s, then F#3; is the F3 a sung note?
+
+# Ornaments inside a held note. Table 2 of the spec.
+
+# 9.55: dips from D#3 to C#3 +40 and back. The owner hears one D#3 (check 3); since the same-key
+# rejoin (#59) both readers read one.
+#   hmm: one D#3 8.99-10.03, excursion -143c 9.56-9.63.   rules: one D#3 9.14-10.04, the same.
+9.30 9.90 dip at 9.55, now rejoined: one D#3 with the dip in it, and no break in the sine?
+
+# 16.39: two F#3 at a new word, the split at the consonant. The owner hears two (check 3); an
+# onset falls at the split, so the rejoin leaves it.
+#   hmm: F#3 16.12-16.39, F#3 16.39-16.75.   rules: F#3 16.05-16.39, F#3 16.39-16.77.
+16.15 16.65 split at 16.39: two F#3, the second starting on the new word's consonant
+
+# 16.40-16.55: on the new word's F#3, rises to G3 -25 and back.
+#   hmm: excursion +77c 16.50-16.56 in the second F#3.   rules: no excursion.
+16.35 16.80 upper neighbour at 16.40-16.55: the rise to G3 and back inside the second F#3
+
+# 19.27 and 20.05: leans up to E3 on D#3. Neither reader reads a note at either.
+#   19.27 hmm: D#3 from 19.24, excursion +122c 19.28-19.33.   rules: no excursion.
+#   20.05 hmm: D#3 19.64-20.11, vibrato 5.3 Hz; no excursion (the lean is about +70c, 0.05 s).
+19.10 19.55 lean at 19.27: up to E3 on D#3; an ornament of the D#3, heard in steps and bends
+19.85 20.30 lean at 20.05: up to E3 at the end of the D#3; no reader states it, bends only

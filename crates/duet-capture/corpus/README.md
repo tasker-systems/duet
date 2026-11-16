@@ -56,4 +56,5 @@ transcribed note by note: `wayfaring-stranger.flac`, the owner singing the tradi
 is the first. Its test holds only what the owner agreed (the key, the tuning, and the number
 of notes, each within a tolerance), so it catches a reader change that moves the take a long
 way, and says nothing about any one note. It is licensed CC BY 4.0, not MIT; the notice is
-`wayfaring-stranger.flac.license`, beside it.
+`wayfaring-stranger.flac.license`, beside it. `wayfaring-stranger.moments`, also beside it,
+names the moments the owner rules on by ear, for `scripts/duet-listen.sh --moments`.
