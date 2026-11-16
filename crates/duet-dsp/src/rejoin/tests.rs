@@ -66,9 +66,11 @@ enum By {
 }
 
 /// The take read by `by` on A440 (the witnesses are sung on it), before the pass and after it.
+/// Before it is as the rejoin is given it: after the breathy pass ([`breathe`](crate::breathe)),
+/// which runs first.
 fn readings(by: By, frames: &PerformanceFrames, onsets: &[Event]) -> (Reading, Reading) {
     let given = Some(A440_CENTS);
-    match by {
+    let (decoded, read) = match by {
         By::Rules => (
             read_as_decoded(frames, onsets, given),
             read(frames, onsets, given),
@@ -77,7 +79,8 @@ fn readings(by: By, frames: &PerformanceFrames, onsets: &[Event]) -> (Reading, R
             NoteModel::default().read_as_decoded(frames, onsets, given),
             NoteModel::default().read(frames, onsets, given),
         ),
-    }
+    };
+    (crate::breathe(decoded, frames, onsets), read)
 }
 
 fn keys(reading: &Reading) -> Vec<u8> {

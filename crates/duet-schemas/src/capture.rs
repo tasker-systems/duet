@@ -48,7 +48,14 @@ use crate::{Kind, Version};
 /// Pitch, an outside model, chose where the notes start and end, and the take's performance
 /// gave each its key, centre and residual on the take's tuning. Every 1.7 document reads as it
 /// did.
+///
+/// **1.9** adds the reading's optional `breathy`, also additive: each note the reading's breathy
+/// pass carried on over the weakly voiced frames after it, its reader had left unread, with the
+/// note as its reader `decoded` it, the `end` it has now, the quietest kept frame's level
+/// against the note's held level (`lowest_db`), and the `loss_change` it made, in nats, above
+/// zero where reading those frames raised the loss. Omitted when no note was carried on, so a
+/// 1.8 document reads as one whose notes end where their reader ended them.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 8);
+    const VERSION: Version = Version::new(1, 9);
 }

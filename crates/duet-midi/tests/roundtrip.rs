@@ -1273,7 +1273,7 @@ fn excursions_in(text: &str) -> Vec<Option<serde_json::Value>> {
 fn a_basic_pitch_reader_round_trips_exactly_through_json() {
     // capture-analysis 1.8: a reading by Basic Pitch names its reader `basic-pitch`, and the
     // document writes back as the text it was read from.
-    let text = analysis_example("1.8").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
+    let text = analysis_example("1.9").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
     assert!(
         text.contains(r#""name": "basic-pitch""#),
         "the example has no hmm reader"
@@ -1294,7 +1294,7 @@ fn a_basic_pitch_reader_round_trips_exactly_through_json() {
 fn a_notes_excursions_round_trip_exactly_through_json() {
     // capture-analysis 1.6, at the current version's example: every excursion's start, end and
     // cents read back to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.8");
+    let text = analysis_example("1.9");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1344,7 +1344,7 @@ fn rejoins_in(text: &str) -> Option<serde_json::Value> {
 fn a_readings_rejoins_round_trip_exactly_through_json() {
     // capture-analysis 1.7: every decoded note, dip and loss change a rejoin states reads back
     // to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.8");
+    let text = analysis_example("1.9");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1379,6 +1379,56 @@ fn a_document_before_rejoins_reads_as_one_with_none_and_writes_none() {
     assert!(doc.body.reading.as_ref().unwrap().rejoins.is_empty());
     let written = doc.write().unwrap();
     assert_eq!(rejoins_in(&written), None);
+    let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(again, doc);
+}
+
+/// The reading's `breathy` in a capture-analysis document's text, `None` where it has none.
+fn breathy_in(text: &str) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(text).unwrap();
+    value["body"]["reading"].get("breathy").cloned()
+}
+
+#[test]
+fn a_readings_breathy_notes_round_trip_exactly_through_json() {
+    // capture-analysis 1.9: every note the breathy pass carried on reads back, as decoded, with
+    // its end, its quietest kept frame and its loss change to the bit, and the document writes
+    // back as the text it was read from.
+    let text = analysis_example("1.9");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(doc.write().unwrap(), text);
+    let reading = doc.body.reading.as_ref().unwrap();
+    let [breathy] = reading.breathy.as_slice() else {
+        panic!("one note carried on: {:?}", reading.breathy);
+    };
+    assert!(breathy.decoded.residual.is_none());
+    assert_eq!((breathy.decoded.start, breathy.decoded.end), (22100, 31832));
+    assert_eq!(breathy.end, 32600);
+    assert_eq!(breathy.lowest_db.to_bits(), (-9.5f32).to_bits());
+    assert_eq!(breathy.loss_change.to_bits(), 2.25f64.to_bits());
+    assert!(
+        breathy_in(&text).unwrap()[0]["decoded"]
+            .get("residual")
+            .is_none(),
+        "a decoded note is written without its residual"
+    );
+}
+
+#[test]
+fn a_document_before_breathy_notes_reads_as_one_with_none_and_writes_none() {
+    // A 1.8 document's notes end where their reader ended them: read today, its reading states
+    // no breathy note, and writing it states none, rather than an empty list.
+    let text = analysis_example("1.8");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert!(doc.body.reading.as_ref().unwrap().breathy.is_empty());
+    let written = doc.write().unwrap();
+    assert_eq!(breathy_in(&written), None);
     let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
         panic!("read as another kind");
     };
