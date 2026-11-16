@@ -6,8 +6,8 @@ use std::path::Path;
 
 use duet_capture::{
     ANALYSIS_RATE, Analysis, Event, Given, Kind, Layer1, Mono, NoteModel, Performance,
-    PerformanceFrames, Reader as ReadingReader, Stage, assemble, estimate, quantize_apart,
-    quantize_offsets, read,
+    PerformanceFrames, Reader as ReadingReader, Stage, Thresholds, assemble, estimate,
+    quantize_apart, quantize_offsets, read,
 };
 use duet_schemas::{AnyDocument, Document, Tool};
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.9 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.10 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -29,8 +29,34 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.9.json"))
+        .build(&read_json("schemas/capture-analysis/1.10.json"))
         .unwrap()
+}
+
+/// A validator for the committed capture-analysis schema at `version`, an older one.
+fn validator_at(version: &str) -> jsonschema::Validator {
+    let envelope = read_json("schemas/envelope/1.0.json");
+    let registry = jsonschema::Registry::new()
+        .add(envelope["$id"].as_str().unwrap(), &envelope)
+        .unwrap()
+        .prepare()
+        .unwrap();
+    jsonschema::options()
+        .with_registry(&registry)
+        .build(&read_json(&format!(
+            "schemas/capture-analysis/{version}.json"
+        )))
+        .unwrap()
+}
+
+/// `document`, restamped as a capture-analysis document at `version`.
+fn as_version(document: &Value, version: &str) -> Value {
+    let mut older = document.clone();
+    older["$schema"] = json!(format!(
+        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/{version}.json"
+    ));
+    older["duet"]["version"] = json!(version);
+    older
 }
 
 fn assert_valid(document: &Value) {
@@ -340,7 +366,10 @@ fn the_schema_and_the_reader_refuse_what_capture_never_writes() {
 fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_8() {
     let mut analysis = analysis(&Given::default());
     let reading = analysis.reading.as_mut().unwrap();
-    reading.reader = Some(ReadingReader::basic_pitch());
+    // As 1.8 wrote it: a basic-pitch reader, with no thresholds.
+    let mut reader = ReadingReader::basic_pitch(Thresholds::BASIC_PITCH);
+    reader.thresholds = None;
+    reading.reader = Some(reader);
     let (_, value) = round_trip(analysis);
     assert_eq!(
         value["body"]["reading"]["reader"]["name"],
@@ -366,6 +395,37 @@ fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_8() {
     // The same document read by the rules is a valid 1.7 one: only the reader's name differs.
     as_1_7["body"]["reading"]["reader"]["name"] = json!("rules");
     assert!(older.is_valid(&as_1_7), "the 1.7 control is not valid");
+}
+
+#[test]
+fn a_basic_pitch_reading_records_its_thresholds_and_validates_only_from_1_10() {
+    let mut analysis = analysis(&Given::default());
+    let reading = analysis.reading.as_mut().unwrap();
+    let thresholds = Thresholds {
+        onset_threshold: 0.6,
+        frame_threshold: 0.25,
+        minimum_note_length_ms: 200.0,
+    };
+    reading.reader = Some(ReadingReader::basic_pitch(thresholds));
+    let (_, value) = round_trip(analysis);
+    assert_eq!(
+        value["body"]["reading"]["reader"]["thresholds"],
+        json!({
+            "onset_threshold": 0.6,
+            "frame_threshold": 0.25,
+            "minimum_note_length_ms": 200.0,
+        })
+    );
+    // capture-analysis 1.9 has no thresholds: a 1.9 reader refuses them.
+    let older = validator_at("1.9");
+    let mut as_1_9 = as_version(&value, "1.9");
+    assert!(!older.is_valid(&as_1_9), "1.9 accepts thresholds");
+    // The same document without them is a valid 1.9 one: only the thresholds differ.
+    as_1_9["body"]["reading"]["reader"]
+        .as_object_mut()
+        .unwrap()
+        .remove("thresholds");
+    assert!(older.is_valid(&as_1_9), "the 1.9 control is not valid");
 }
 
 /// A validator for the committed capture-analysis 1.8 schema, the last before `breathy`.

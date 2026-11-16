@@ -55,7 +55,12 @@ use crate::{Kind, Version};
 /// against the note's held level (`lowest_db`), and the `loss_change` it made, in nats, above
 /// zero where reading those frames raised the loss. Omitted when no note was carried on, so a
 /// 1.8 document reads as one whose notes end where their reader ended them.
+///
+/// **1.10** adds the reading's optional `reader.thresholds`, also additive: the onset threshold,
+/// frame threshold and minimum note length, in Basic Pitch's own names, that a basic-pitch
+/// reading's notes were decoded with. Only a basic-pitch reader has them. A 1.9 basic-pitch
+/// reading has none, and was decoded with Basic Pitch's defaults (0.5, 0.3 and 127.7 ms).
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 9);
+    const VERSION: Version = Version::new(1, 10);
 }

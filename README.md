@@ -591,6 +591,11 @@ options; everything about the timing that is left out is estimated and stated.
   Spotify's Basic Pitch. A reader other than the HMM is stated on standard error when chosen
   (`reader: the segmentation rules`). See *Readers* below. A rhythm take's hits are not
   read as notes, and `--reader` is refused for one.
+- **`--onset-threshold <activation>`, `--frame-threshold <activation>`, `--min-note-ms <ms>`**
+  are, with `--reader basic-pitch`, where Basic Pitch decodes a note: the onset activation at
+  which it starts one (0.5), the note activation below which it ends one (0.3), and the length a
+  note must exceed (127.7 ms). Each defaults to Basic Pitch's own. They are stated with the
+  reader, written in the analysis, and refused for any other reader.
 - **`--key <key>`** is a melody's key as ABC's `K:` names it (`Eb`, `Bm`, `F#m`), used exactly.
   A rhythm take has no key, and `--key` is refused for one.
 - **`--grid <step>`** is the step the score is quantized to, such as `1/16` (the default) or
@@ -655,6 +660,7 @@ cannot be, that is reported after them, and they stay:
   made, above zero since reading weakly voiced frames costs their voicing; capture states how
   many. It runs before the rejoin, so a note carried over a breathy dip meets its second half
   and is rejoined. A reading with none writes none.
+  Since 1.10 a basic-pitch reader states the `thresholds` its notes were decoded with.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -740,7 +746,10 @@ dropped when less than half of it would be left. A note starts at the take's ons
 start when one is within 50 ms, as the note HMM starts its notes, since Basic Pitch's frames fall
 a hop or so either side of the onset the performance hears. Capture states how many notes it
 found, cut back, dropped and keyed differently (`basic-pitch: …`). The breathy pass and the
-same-key rejoin then run over its notes, as over the other readers'. Its model, Spotify's `nmp.onnx` from
+same-key rejoin then run over its notes, as over the other readers'. Its thresholds are Basic
+Pitch's own unless `--onset-threshold`, `--frame-threshold` or `--min-note-ms` gives one; on
+"Wayfaring Stranger", of 45 settings of the three around them, none reads both of the owner's
+moments (9.54 s, 16.39 s) with a lower total loss. Its model, Spotify's `nmp.onnx` from
 basic-pitch v0.4.0 (230 kB, Apache-2.0), is built into duet and its SHA-256 checked by the
 tests; its licence and Spotify's NOTICE are in `crates/duet-dsp/models/basic-pitch/`. Nothing is
 downloaded. The reader is the `basic-pitch` feature, on by default; `--no-default-features`

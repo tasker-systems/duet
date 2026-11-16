@@ -26,14 +26,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
-#[cfg(feature = "basic-pitch")]
-use duet_capture::BasicPitch;
 use duet_capture::{
     A440_CENTS, ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono,
     NoteModel, Performance, PerformanceFrames, PerformanceHead, Prepare, Quantized, ReadNote,
     Source, Stage, a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart,
     quantize_offsets, read,
 };
+#[cfg(feature = "basic-pitch")]
+use duet_capture::{BasicPitch, Thresholds};
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 use duet_schemas::{Document, Stream};
 
@@ -92,6 +92,21 @@ pub struct TakeArgs {
     /// is written in STEM.capture.duet either way.
     #[arg(long, value_enum)]
     reader: Option<ReaderArg>,
+    /// With `--reader basic-pitch`: the onset activation, 0 to 1, at which Basic Pitch starts a
+    /// note. Its own default is 0.5; higher starts fewer notes.
+    #[cfg(feature = "basic-pitch")]
+    #[arg(long, value_name = "ACTIVATION", allow_hyphen_values = true)]
+    onset_threshold: Option<f64>,
+    /// With `--reader basic-pitch`: the note activation, 0 to 1, below which Basic Pitch ends a
+    /// note. Its own default is 0.3; lower holds a note through a deeper dip.
+    #[cfg(feature = "basic-pitch")]
+    #[arg(long, value_name = "ACTIVATION", allow_hyphen_values = true)]
+    frame_threshold: Option<f64>,
+    /// With `--reader basic-pitch`: Basic Pitch keeps only notes longer than this, in
+    /// milliseconds. Its own default is 127.7.
+    #[cfg(feature = "basic-pitch")]
+    #[arg(long, value_name = "MS", allow_hyphen_values = true)]
+    min_note_ms: Option<f64>,
     /// The step the score is quantized to, such as 1/16 (the default) or 1/8t. Where two
     /// notes, or two hits on one lane, would share a step, the step is halved, down to 1/64,
     /// and what still shares one is merged; each is stated. The .duet is never quantized.
@@ -138,6 +153,9 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     grid.step_ticks(Song::default().ticks_per_quarter)
         .with_context(|| format!("--grid {grid}"))?;
     let outputs = Outputs::new(&args.input, args.output.as_deref(), take)?;
+    // Basic Pitch is loaded, and its thresholds checked, before anything is read.
+    #[cfg(feature = "basic-pitch")]
+    let basic_pitch = basic_pitch_of(&args)?;
 
     // Every failure from here on is the take's, so it names the take. FileSource's own errors
     // name it already.
@@ -163,8 +181,10 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
                         ReaderArg::Hmm => NoteModel::default().read(&frames, &events, given),
                         #[cfg(feature = "basic-pitch")]
                         ReaderArg::BasicPitch => {
-                            let read =
-                                BasicPitch::new()?.read(&samples, &frames, &events, given)?;
+                            let read = basic_pitch
+                                .as_ref()
+                                .context("basic-pitch was not loaded")?
+                                .read(&samples, &frames, &events, given)?;
                             read_said.push(statement::basic_pitch(&read));
                             read.reading
                         }
@@ -389,6 +409,30 @@ impl Scoring<'_> {
 }
 
 /// Refuses a flag the take cannot use, before anything is read, and reads the key.
+/// Basic Pitch, loaded with the thresholds given, when it reads the take. A threshold given
+/// for another reader is refused: it would change nothing.
+#[cfg(feature = "basic-pitch")]
+fn basic_pitch_of(args: &TakeArgs) -> Result<Option<BasicPitch>> {
+    let given = [
+        ("--onset-threshold", args.onset_threshold),
+        ("--frame-threshold", args.frame_threshold),
+        ("--min-note-ms", args.min_note_ms),
+    ];
+    if args.reader != Some(ReaderArg::BasicPitch) {
+        if let Some((flag, _)) = given.iter().find(|(_, v)| v.is_some()) {
+            bail!("{flag} is for --reader basic-pitch; no other reader decodes with it");
+        }
+        return Ok(None);
+    }
+    let own = Thresholds::BASIC_PITCH;
+    let thresholds = Thresholds {
+        onset_threshold: args.onset_threshold.unwrap_or(own.onset_threshold),
+        frame_threshold: args.frame_threshold.unwrap_or(own.frame_threshold),
+        minimum_note_length_ms: args.min_note_ms.unwrap_or(own.minimum_note_length_ms),
+    };
+    Ok(Some(BasicPitch::new()?.with_thresholds(thresholds)?))
+}
+
 fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
     if let Some(bpm) = args.tempo
         && !(bpm.is_finite() && bpm > 0.0)

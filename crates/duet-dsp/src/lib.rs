@@ -97,7 +97,7 @@ pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use reading::{
     A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reader, ReaderName, Reading,
-    Tuning, a4_cents_of_hz, estimate_tuning, interpret, read, read_as_decoded,
+    Thresholds, Tuning, a4_cents_of_hz, estimate_tuning, interpret, read, read_as_decoded,
 };
 pub use rejoin::{Dip, REJOIN_CENTS, REJOIN_TOLERANCE_CENTS, Rejoin, rejoin};
 pub use residual::{

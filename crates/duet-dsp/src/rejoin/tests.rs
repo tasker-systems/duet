@@ -209,6 +209,41 @@ fn a_dip_with_an_onset_at_its_bottom_stays_two_notes() {
     }
 }
 
+/// What the pass asks of a reader (the module's "What it asks of a reader"): a split held from
+/// more than a hop before its onset hides the onset, and is rejoined across the consonant that
+/// split it. The readers start a note at its onset, within `ONSET_GRACE_SECS`, so theirs is not.
+#[test]
+fn a_split_held_from_more_than_a_hop_before_its_onset_is_rejoined_across_it() {
+    let (frames, mut onsets) = performance(&d_sharp_dip());
+    let bottom = ((0.25 + 0.55) * f64::from(RATE)).round() as u64;
+    onsets.push(Event::Onset {
+        frame: bottom,
+        strength: 0.3,
+    });
+    onsets.sort_by_key(|e| match *e {
+        Event::Onset { frame, .. } => frame,
+        _ => 0,
+    });
+    let (decoded, _) = readings(By::Hmm, &frames, &onsets);
+    assert_eq!(keys(&decoded), [D_SHARP_3, D_SHARP_3]);
+    // As an outside reader decodes it: the second note held from its start, which is at the
+    // onset, or `early` frames before it. A hop before it, the onset is still the split's.
+    let split_at = |early: u64| {
+        let mut reading = decoded.clone();
+        let at = bottom - early;
+        reading.notes[0].end = at;
+        reading.notes[1].start = at;
+        reading.notes[1].held_from = at;
+        rejoin(reading, &frames, &onsets)
+    };
+    assert_eq!(split_at(0).notes.len(), 2);
+    assert_eq!(split_at(HOP).notes.len(), 2);
+    // Three hops (35 ms) before it, inside the readers' grace, the onset is not seen.
+    let hidden = split_at(3 * HOP);
+    assert_eq!(keys(&hidden), [D_SHARP_3]);
+    assert_eq!(hidden.rejoins.len(), 1);
+}
+
 #[test]
 fn a_turn_in_the_middle_of_a_note_is_one_note_with_one_excursion() {
     // G#3, turning up to A#3 and back over 0.14 s in its middle (0.04 s up, held 0.06 s, 0.04 s

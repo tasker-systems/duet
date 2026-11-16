@@ -93,11 +93,19 @@ fn cents(n: String) -> String {
 pub fn reader(reading: &Reading) -> Option<String> {
     match reading.reader?.name {
         ReaderName::Rules => Some("reader: the segmentation rules".to_owned()),
-        ReaderName::BasicPitch => Some(
-            "reader: Spotify's Basic Pitch (basic-pitch-rs), each note keyed by the performance \
-             on the take's tuning"
-                .to_owned(),
-        ),
+        ReaderName::BasicPitch => {
+            let mut said =
+                "reader: Spotify's Basic Pitch (basic-pitch-rs), each note keyed by the \
+                            performance on the take's tuning"
+                    .to_owned();
+            if let Some(t) = reading.reader?.thresholds {
+                said.push_str(&format!(
+                    "; decoded at onset threshold {}, frame threshold {}, notes over {} ms",
+                    t.onset_threshold, t.frame_threshold, t.minimum_note_length_ms
+                ));
+            }
+            Some(said)
+        }
         _ => None,
     }
 }

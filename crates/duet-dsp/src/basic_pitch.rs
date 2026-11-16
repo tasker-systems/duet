@@ -20,6 +20,9 @@
 //! ([`interpret`](crate::interpret)), the breathy ornament and the same-key rejoin, run over
 //! the notes, as they do over the other readers': [`BasicPitch::read_as_decoded`] is the
 //! reading before them.
+//!
+//! Basic Pitch decodes its notes with the thresholds [`BasicPitch::with_thresholds`] sets,
+//! [`Thresholds::BASIC_PITCH`] unless it is called, and the reading records them.
 
 use basic_pitch::model::TractBackend;
 use basic_pitch::{BasicPitch as Model, NoteEvent, NoteParams};
@@ -27,7 +30,9 @@ use basic_pitch::{BasicPitch as Model, NoteEvent, NoteParams};
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::notes::{ONSET_GRACE_SECS, level_strength, median};
-use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, interpret, tuning_of};
+use crate::reading::{
+    PerformanceFrames, ReadNote, Reader, Reading, Thresholds, interpret, tuning_of,
+};
 use crate::residual::residual;
 
 /// Spotify's Basic Pitch note model, `nmp.onnx` from basic-pitch v0.4.0, unmodified.
@@ -43,6 +48,7 @@ const RATE: u32 = basic_pitch::constants::AUDIO_SAMPLE_RATE;
 #[derive(Debug)]
 pub struct BasicPitch {
     model: Model,
+    thresholds: Thresholds,
 }
 
 /// A basic-pitch reading, and what became of Basic Pitch's notes on the way to it.
@@ -75,7 +81,27 @@ impl BasicPitch {
             .map_err(|e| Error::Invalid(format!("basic-pitch: the model: {e}")))?;
         Ok(BasicPitch {
             model: Model::with_backend(backend),
+            thresholds: Thresholds::BASIC_PITCH,
         })
+    }
+
+    /// Decodes notes with `thresholds` in place of Basic Pitch's defaults.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Invalid`] if Basic Pitch refuses them: a threshold that is not a number, a
+    /// negative frame threshold, or a minimum length that is negative or not finite.
+    pub fn with_thresholds(self, thresholds: Thresholds) -> Result<BasicPitch> {
+        params(thresholds)
+            .validate()
+            .map_err(|e| Error::Invalid(format!("basic-pitch: {e}")))?;
+        Ok(BasicPitch { thresholds, ..self })
+    }
+
+    /// The thresholds it decodes notes with.
+    #[must_use]
+    pub fn thresholds(&self) -> Thresholds {
+        self.thresholds
     }
 
     /// Reads `samples`, the take's mono audio from its first frame at duet's analysis rate, over
@@ -124,7 +150,7 @@ impl BasicPitch {
         }
         let transcription = self
             .model
-            .transcribe_with(samples, &NoteParams::default())
+            .transcribe_with(samples, &params(self.thresholds))
             .map_err(|e| Error::Invalid(format!("basic-pitch: {e}")))?;
         let found = transcription.notes.len();
         let spans = spans_of(&transcription.notes, frames.rate);
@@ -170,13 +196,29 @@ impl BasicPitch {
         }
         let (parts, take) = residual(frames, &tuning, &notes);
         Ok(BasicPitchRead {
-            reading: Reading::of(tuning, Reader::basic_pitch(), notes, parts, take),
+            reading: Reading::of(
+                tuning,
+                Reader::basic_pitch(self.thresholds),
+                notes,
+                parts,
+                take,
+            ),
             found,
             trimmed,
             overlapped,
             unvoiced,
             rekeyed,
         })
+    }
+}
+
+/// Basic Pitch's own parameters, with `thresholds` and its defaults for the rest.
+fn params(thresholds: Thresholds) -> NoteParams {
+    NoteParams {
+        onset_threshold: thresholds.onset_threshold,
+        frame_threshold: thresholds.frame_threshold,
+        minimum_note_length_ms: thresholds.minimum_note_length_ms,
+        ..NoteParams::default()
     }
 }
 
@@ -367,6 +409,61 @@ mod tests {
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(hex, MODEL_SHA256);
         assert_eq!(MODEL.len(), 230_444);
+    }
+
+    #[test]
+    fn the_default_thresholds_are_basic_pitchs_own() {
+        let own = NoteParams::default();
+        assert_eq!(
+            Thresholds::BASIC_PITCH,
+            Thresholds {
+                onset_threshold: own.onset_threshold,
+                frame_threshold: own.frame_threshold,
+                minimum_note_length_ms: own.minimum_note_length_ms,
+            }
+        );
+        assert_eq!(params(Thresholds::BASIC_PITCH), own);
+    }
+
+    #[test]
+    fn notes_are_decoded_with_the_thresholds_given_and_the_reading_records_them() {
+        // Longer than 450 ms: only the tune's 0.5, 0.6 and 0.7 s notes.
+        let signal = tune(0.0);
+        let (frames, onsets) = performance(&signal);
+        let long = Thresholds {
+            minimum_note_length_ms: 450.0,
+            ..Thresholds::BASIC_PITCH
+        };
+        let model = BasicPitch::new().unwrap().with_thresholds(long).unwrap();
+        let read = model.read(&signal, &frames, &onsets, None).unwrap();
+        assert_eq!(keys(&read.reading), [64, 67, 60]);
+        assert_eq!(read.reading.reader.and_then(|r| r.thresholds), Some(long));
+        let read = BasicPitch::new()
+            .unwrap()
+            .read(&signal, &frames, &onsets, None)
+            .unwrap();
+        assert_eq!(
+            read.reading.reader.and_then(|r| r.thresholds),
+            Some(Thresholds::BASIC_PITCH)
+        );
+    }
+
+    #[test]
+    fn thresholds_basic_pitch_refuses_are_refused() {
+        let negative = Thresholds {
+            frame_threshold: -0.1,
+            ..Thresholds::BASIC_PITCH
+        };
+        let err = BasicPitch::new()
+            .unwrap()
+            .with_thresholds(negative)
+            .unwrap_err();
+        assert!(err.to_string().contains("frame_threshold"), "{err}");
+        let nan = Thresholds {
+            onset_threshold: f64::NAN,
+            ..Thresholds::BASIC_PITCH
+        };
+        assert!(BasicPitch::new().unwrap().with_thresholds(nan).is_err());
     }
 
     #[test]

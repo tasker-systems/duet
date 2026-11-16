@@ -468,7 +468,7 @@ fn the_reader_is_chosen_stated_and_written() {
 }
 
 /// `--reader basic-pitch` reads the scale with Spotify's Basic Pitch: stated, counted and
-/// written in the analysis, which reads back as capture-analysis 1.7, with the HMM's keys. Its
+/// written in the analysis, with Basic Pitch's own thresholds, and with the HMM's keys. Its
 /// reading compares against the HMM's.
 #[test]
 fn basic_pitch_reads_a_scale_stated_and_written() {
@@ -506,7 +506,15 @@ fn basic_pitch_reads_a_scale_stated_and_written() {
     let reading = &analysis_of(&dir.join("bp.capture.duet"))["reading"];
     assert_eq!(
         reading["reader"],
-        serde_json::json!({ "name": "basic-pitch", "note_cost": 4.0 })
+        serde_json::json!({
+            "name": "basic-pitch",
+            "note_cost": 4.0,
+            "thresholds": {
+                "onset_threshold": 0.5,
+                "frame_threshold": 0.3,
+                "minimum_note_length_ms": 127.7
+            }
+        })
     );
     let compared = duet(
         &dir,
@@ -522,6 +530,75 @@ fn basic_pitch_reads_a_scale_stated_and_written() {
     );
     ok(&compared, "capture compare --reading bp.capture.duet");
     std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// Basic Pitch's thresholds, given, are stated and written in the analysis; one given for
+/// another reader, or one Basic Pitch refuses, is refused before anything is written.
+#[test]
+fn basic_pitch_thresholds_are_stated_written_and_refused_where_they_would_mean_nothing() {
+    let dir = scratch("capture-basic-pitch-thresholds");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    let out = capture(
+        &dir,
+        &[
+            "melody",
+            s(&wav),
+            "--reader",
+            "basic-pitch",
+            "--onset-threshold",
+            "0.6",
+            "--frame-threshold",
+            "0.25",
+            "--min-note-ms",
+            "200",
+            "-o",
+            s(&dir.join("bp")),
+        ],
+    );
+    ok(&out, "capture --reader basic-pitch with thresholds");
+    let err = stderr(&out);
+    assert!(
+        err.lines()
+            .any(|l| l.starts_with("reader: Spotify's Basic Pitch")
+                && l.ends_with(
+                    "decoded at onset threshold 0.6, frame threshold 0.25, notes over 200 ms"
+                )),
+        "{err}"
+    );
+    assert_eq!(
+        analysis_of(&dir.join("bp.capture.duet"))["reading"]["reader"]["thresholds"],
+        serde_json::json!({
+            "onset_threshold": 0.6,
+            "frame_threshold": 0.25,
+            "minimum_note_length_ms": 200.0
+        })
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+
+    for (args, said) in [
+        (
+            &["--min-note-ms", "200"][..],
+            "--min-note-ms is for --reader basic-pitch",
+        ),
+        (
+            &["--reader", "rules", "--onset-threshold", "0.6"][..],
+            "--onset-threshold is for --reader basic-pitch",
+        ),
+        (
+            &["--reader", "basic-pitch", "--frame-threshold", "-0.1"][..],
+            "frame_threshold",
+        ),
+    ] {
+        let dir = scratch("capture-basic-pitch-refused");
+        let wav = take(&dir, "tune.wav", &eb_major());
+        let mut all = vec!["melody", s(&wav)];
+        all.extend_from_slice(args);
+        let out = capture(&dir, &all);
+        assert!(!out.status.success(), "{args:?} was accepted");
+        assert!(stderr(&out).contains(said), "{args:?}: {}", stderr(&out));
+        assert_eq!(files(&dir), ["tune.wav"], "{args:?}: something was written");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
 }
 
 /// Every file a melody capture writes is refused, rather than overwritten, when it exists.

@@ -1272,8 +1272,9 @@ fn excursions_in(text: &str) -> Vec<Option<serde_json::Value>> {
 #[test]
 fn a_basic_pitch_reader_round_trips_exactly_through_json() {
     // capture-analysis 1.8: a reading by Basic Pitch names its reader `basic-pitch`, and the
-    // document writes back as the text it was read from.
-    let text = analysis_example("1.9").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
+    // document writes back as the text it was read from. As 1.8 and 1.9 wrote it, it has no
+    // thresholds.
+    let text = analysis_example("1.10").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
     assert!(
         text.contains(r#""name": "basic-pitch""#),
         "the example has no hmm reader"
@@ -1288,13 +1289,63 @@ fn a_basic_pitch_reader_round_trips_exactly_through_json() {
         value["body"]["reading"]["reader"]["name"],
         serde_json::json!("basic-pitch")
     );
+    assert!(
+        value["body"]["reading"]["reader"]
+            .get("thresholds")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_basic_pitch_readers_thresholds_round_trip_exactly_through_json() {
+    // capture-analysis 1.10: the thresholds a basic-pitch reading was decoded with read back to
+    // the bit, and the document writes back as the text it was read from.
+    let hmm = "\"name\": \"hmm\",\n        \"note_cost\": 4.0\n";
+    let basic_pitch = concat!(
+        "\"name\": \"basic-pitch\",\n",
+        "        \"note_cost\": 4.0,\n",
+        "        \"thresholds\": {\n",
+        "          \"onset_threshold\": 0.62,\n",
+        "          \"frame_threshold\": 0.1875,\n",
+        "          \"minimum_note_length_ms\": 211.3\n",
+        "        }\n",
+    );
+    let example = analysis_example("1.10");
+    assert!(
+        example.contains(hmm),
+        "the example's reader is not as written here"
+    );
+    let text = example.replace(hmm, basic_pitch);
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    let thresholds = doc
+        .body
+        .reading
+        .as_ref()
+        .and_then(|r| r.reader)
+        .and_then(|r| r.thresholds)
+        .unwrap();
+    assert_eq!(
+        (
+            thresholds.onset_threshold.to_bits(),
+            thresholds.frame_threshold.to_bits(),
+            thresholds.minimum_note_length_ms.to_bits()
+        ),
+        (
+            0.62_f64.to_bits(),
+            0.1875_f64.to_bits(),
+            211.3_f64.to_bits()
+        )
+    );
+    assert_eq!(doc.write().unwrap(), text);
 }
 
 #[test]
 fn a_notes_excursions_round_trip_exactly_through_json() {
     // capture-analysis 1.6, at the current version's example: every excursion's start, end and
     // cents read back to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.9");
+    let text = analysis_example("1.10");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1344,7 +1395,7 @@ fn rejoins_in(text: &str) -> Option<serde_json::Value> {
 fn a_readings_rejoins_round_trip_exactly_through_json() {
     // capture-analysis 1.7: every decoded note, dip and loss change a rejoin states reads back
     // to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.9");
+    let text = analysis_example("1.10");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1396,7 +1447,7 @@ fn a_readings_breathy_notes_round_trip_exactly_through_json() {
     // capture-analysis 1.9: every note the breathy pass carried on reads back, as decoded, with
     // its end, its quietest kept frame and its loss change to the bit, and the document writes
     // back as the text it was read from.
-    let text = analysis_example("1.9");
+    let text = analysis_example("1.10");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
