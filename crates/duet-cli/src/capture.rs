@@ -202,6 +202,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         said.extend(statement::tuning(&reading.tuning));
         said.extend(statement::reader(reading));
         said.push(statement::notes_read(reading));
+        said.extend(statement::rejoined(reading));
     }
     said.extend(statement::key(captured.analysis.key.as_ref()));
     captured.analysis.reading = reading;

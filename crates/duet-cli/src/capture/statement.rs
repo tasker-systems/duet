@@ -101,6 +101,20 @@ pub fn notes_read(reading: &Reading) -> String {
     format!("notes: {n} read, {} between keys", reading.between_keys())
 }
 
+/// How many same-key splits the reading's pass rejoined, and what they did to the loss, in nats:
+/// stated only when it rejoined any, so that a rejoin that raised the loss is never hidden.
+pub fn rejoined(reading: &Reading) -> Option<String> {
+    let n = reading.rejoins.len();
+    if n == 0 {
+        return None;
+    }
+    let change: f64 = reading.rejoins.iter().map(|r| r.loss_change).sum();
+    Some(format!(
+        "rejoined: {n} same-key split{} around a dip within a whole tone, the loss {change:+.1} nats",
+        if n == 1 { "" } else { "s" }
+    ))
+}
+
 /// The key, stated only when it was estimated, with its relative major or minor.
 pub fn key(key: Option<&KeyEstimate>) -> Option<String> {
     let estimate = key?;

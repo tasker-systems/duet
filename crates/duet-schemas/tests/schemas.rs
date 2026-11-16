@@ -490,7 +490,7 @@ fn example_grid() -> duet_drums::DrumGrid {
 /// A melody take's analysis that uses every field: each kind of event, an estimated tempo with
 /// its half and double, a given meter, an estimated downbeat, a key with its evidence, the tempo
 /// beat by beat, the grid, the quantize offsets, and the reading (1.1) with a note between keys
-/// and a note with excursions (1.6).
+/// and a note with excursions (1.6), rejoined from two decoded notes (1.7).
 pub fn example_analysis() -> Analysis {
     serde_json::from_value(json!({
         "rate": 22050,
@@ -564,7 +564,19 @@ pub fn example_analysis() -> Analysis {
                 "read_frames": 81,
                 "unread_frames": 3,
                 "loss": { "pitch": 31.25, "unread": 3.0, "notes": 8.0 }
-            }
+            },
+            "rejoins": [
+                { "decoded": [
+                      { "start": 11100, "end": 16200, "held_from": 11356, "key": 63,
+                        "centre": -2.0, "between_keys": false, "confidence": 0.9375,
+                        "strength": 0.8125 },
+                      { "start": 16200, "end": 21600, "held_from": 17224, "key": 63,
+                        "centre": -3.5, "between_keys": false, "confidence": 0.921875,
+                        "strength": 0.0625 }
+                  ],
+                  "dips": [ { "start": 16200, "end": 17224, "cents": -172.5 } ],
+                  "loss_change": 6.375 }
+            ]
         }
     }))
     .expect("the example analysis reads")

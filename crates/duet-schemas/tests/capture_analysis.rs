@@ -18,7 +18,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.6 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.7 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -28,7 +28,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.6.json"))
+        .build(&read_json("schemas/capture-analysis/1.7.json"))
         .unwrap()
 }
 
@@ -58,6 +58,20 @@ fn take_with_a_turn() -> Vec<f32> {
         t if t <= ramp + held => 200.0,
         t if t < 2.0 * ramp + held => up(2.0 * ramp + held - t),
         _ => 0.0,
+    })
+}
+
+/// The scale, its fifth note (B-flat) dipping 170 cents and back over 0.1 s from 0.2 s in: the
+/// shape of the dip the same-key rejoin reads as one note (`duet-dsp`'s
+/// `a_dip_of_170_cents_with_no_onset_is_rejoined_into_one_note`).
+fn take_with_a_dip() -> Vec<f32> {
+    sung(|note, t| {
+        let into = (t - 0.2) / 0.05;
+        if note == 4 && (0.0..2.0).contains(&into) {
+            -170.0 * (1.0 - (into - 1.0).abs())
+        } else {
+            0.0
+        }
     })
 }
 
@@ -234,6 +248,28 @@ fn a_notes_excursion_round_trips_exactly_and_validates() {
     assert_eq!(excursions.len(), 1, "{excursions:?}");
     let cents = excursions[0]["cents"].as_f64().unwrap();
     assert!((cents - 200.0).abs() <= 10.0, "{excursions:?}");
+}
+
+#[test]
+fn a_readings_rejoin_round_trips_exactly_and_validates() {
+    // The HMM splits the B-flat at its dip, and the pass rejoins it, stating so (1.7).
+    let analysis = analysis_of(&take_with_a_dip(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let reading = &value["body"]["reading"];
+    assert_eq!(reading["notes"].as_array().unwrap().len(), 16, "{reading}");
+    let rejoins = reading["rejoins"].as_array().expect("a rejoin is stated");
+    assert_eq!(rejoins.len(), 1, "{rejoins:?}");
+    let decoded = rejoins[0]["decoded"].as_array().unwrap();
+    assert_eq!(decoded.len(), 2, "{decoded:?}");
+    assert!(
+        decoded
+            .iter()
+            .all(|n| n["key"] == 70 && n.get("residual").is_none())
+    );
+    assert!(rejoins[0]["loss_change"].is_f64(), "{rejoins:?}");
+    // A scale sung plain has nothing to rejoin, and writes no `rejoins`.
+    let (_, plain) = round_trip(analysis_of(&take(), &Given::default(), Reader::Hmm));
+    assert!(plain["body"]["reading"].get("rejoins").is_none());
 }
 
 #[test]

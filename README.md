@@ -636,7 +636,14 @@ cannot be, that is reported after them, and they stay:
   held at least 50 cents from where the note is held, as its `start`, `end` and `cents` from
   the note's key. A held approach before the note's held pitch is one too. They are never
   named in the file: a grace, a turn or a trill is worked out from them when something is
-  written. A note with none writes none.
+  written. A note with none writes none. Since 1.7 the reading states its `rejoins`: where
+  either reader split one note on one key around a dip, with no onset between the two, every
+  frame between them voiced and the dip within a whole tone of the key, the two are read as
+  one note, and the dip is one of its excursions. Each rejoin states the notes as the reader
+  `decoded` them, each `dip` (where it starts and ends, and its furthest `cents` from the key)
+  and the `loss_change` it made, in nats, above zero when it raised the loss; capture states
+  how many it made. A split at an onset, a dip deeper than a whole tone, and two keys are never
+  rejoined. A reading with none writes none.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
