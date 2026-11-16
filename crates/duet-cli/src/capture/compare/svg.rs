@@ -1,16 +1,17 @@
 //! The comparison's plot, as SVG written by hand, with no dependency: the performance's pitch
 //! over time, the reading's notes as bars at their keys on the take's tuning, the residual
-//! shaded between them, and the onsets as ticks.
+//! shaded between them, each excursion marked where it is held, the sine's pitch as it plays,
+//! and the onsets as ticks.
 //!
 //! Every element a reader or a test looks for has a class: `performance`, `note` (and
-//! `between-keys` beside it), `residual`, `beside` (a second reading's notes), `onset` and
-//! `key` (a key's gridline).
+//! `between-keys` beside it), `residual`, `excursion`, `sine`, `beside` (a second reading's
+//! notes), `onset` and `key` (a key's gridline).
 
 use std::fmt::Write as _;
 
 use duet_capture::{PerformanceFrames, ReadNote, Reading};
 
-use super::wav::key_cents;
+use super::wav::{Voice, key_cents};
 
 /// Pixels a second of the take is drawn across, until the plot is as wide as [`MAX_WIDTH`].
 const PX_PER_SEC: f64 = 100.0;
@@ -30,6 +31,9 @@ const BOTTOM: f64 = 40.0;
 const MARGIN_CENTS: f64 = 60.0;
 /// A note bar's height, in pixels.
 const BAR: f64 = 6.0;
+/// How often the sine's pitch is drawn, in sample frames: 64, under 3 ms at 22 050 Hz, so a
+/// step at an excursion's edge is drawn where it is.
+const SINE_STEP: u64 = 64;
 
 /// What a plot shows: the performance and its onsets over `from..to` (sample frames on the
 /// take's timeline), and the reading, with a second reading beside it when one is compared.
@@ -41,6 +45,8 @@ pub struct Plot<'a> {
     pub reading: &'a Reading,
     pub beside: Option<&'a Reading>,
     pub onsets: &'a [u64],
+    /// The sine the audio's right channel plays, drawn as its pitch.
+    pub voice: &'a Voice<'a>,
 }
 
 /// A note shown in the window `from..to`: one that overlaps it.
@@ -137,6 +143,8 @@ pub fn render(plot: &Plot) -> String {
          .note.between-keys{fill:#e65100}\
          .residual{fill:#c62828;fill-opacity:0.25;stroke:none}\
          .beside{fill:none;stroke:#6a1b9a;stroke-width:1;stroke-dasharray:3 2}\
+         .excursion{fill:#f9a825;stroke:#8d6e00;stroke-width:0.8}\
+         .sine{fill:none;stroke:#212121;stroke-width:1;stroke-opacity:0.6;stroke-dasharray:2 2}\
          .onset{stroke:#444;stroke-width:1}\
          .key{stroke:#e0e0e0;stroke-width:1}\
          .key.c{stroke:#bdbdbd}\
@@ -154,7 +162,7 @@ pub fn render(plot: &Plot) -> String {
     );
     let _ = writeln!(
         out,
-        r#"<text x="{LEFT}" y="34" class="label">line: the performance · bars: the reading's keys on its tuning{} · shaded: the residual · orange: between keys · ticks: onsets</text>"#,
+        r#"<text x="{LEFT}" y="34" class="label">line: the performance · bars: the reading's keys on its tuning{} · shaded: the residual · amber: excursions · dotted: the sine · orange: between keys · ticks: onsets</text>"#,
         if plot.beside.is_some() {
             " · dashed: the stem's own reading"
         } else {
@@ -307,6 +315,50 @@ pub fn render(plot: &Plot) -> String {
                 ""
             }
         );
+    }
+    // Each excursion, a short bar where it is held, at its key plus its offset, over its frames.
+    for note in &notes {
+        let Some(r) = &note.residual else { continue };
+        for e in &r.excursions {
+            if !(e.start < plot.to && e.end > plot.from) {
+                continue;
+            }
+            let (x0, x1) = (s.x(e.start.max(plot.from)), s.x(e.end.min(plot.to)));
+            let y = s.y(key_cents(plot.reading, note.key) + f64::from(e.cents));
+            let _ = writeln!(
+                out,
+                r#"<rect class="excursion" x="{x0:.1}" y="{:.1}" width="{:.1}" height="{:.1}"><title>{} {:+.0} cents, {:.0} ms</title></rect>"#,
+                y - BAR / 2.0,
+                (x1 - x0).max(0.5),
+                BAR,
+                key_name(note.key),
+                e.cents,
+                (e.end - e.start) as f64 / rate * 1000.0
+            );
+        }
+    }
+    // The sine's pitch as the right channel plays it, broken where it is silent.
+    let mut d = String::new();
+    let mut pen = false;
+    let mut at = plot.from;
+    while at < plot.to {
+        match plot.voice.cents(at) {
+            Some(c) => {
+                let _ = write!(
+                    d,
+                    "{}{:.1} {:.1} ",
+                    if pen { 'L' } else { 'M' },
+                    s.x(at),
+                    s.y(c)
+                );
+                pen = true;
+            }
+            None => pen = false,
+        }
+        at += SINE_STEP;
+    }
+    if !d.is_empty() {
+        let _ = writeln!(out, r#"<path class="sine" d="{}"/>"#, d.trim_end());
     }
     out.push_str("</g>\n");
 
