@@ -84,6 +84,7 @@ pub use duet_dsp::{
 };
 #[cfg(feature = "basic-pitch")]
 pub use duet_dsp::{BasicPitch, BasicPitchRead, MODEL_SHA256};
+pub use duet_dsp::{Dip, REJOIN_CENTS, Rejoin, read_as_decoded, rejoin};
 pub use error::{Error, Result};
 pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
 pub use source::{FileSource, Source};

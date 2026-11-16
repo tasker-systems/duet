@@ -12,13 +12,22 @@
 //! longer overlaps when that keeps at least half of it, or dropped when it does not. A note
 //! with no voiced frame of the performance under it has no pitch to key it on, and is dropped.
 //! [`BasicPitchRead`] counts each, for the caller to state.
+//!
+//! A note starts at the take's onset nearest its start, when one is within
+//! `ONSET_GRACE_SECS` (50 ms) of it, as the note HMM starts its notes: Basic Pitch's own
+//! frames fall up to a hop either side of the onset the performance hears, and the same-key
+//! rejoin keeps a split only where an onset falls at it. Then the same-key rejoin
+//! ([`rejoin`](crate::rejoin)) runs over the notes, as it does over the other readers':
+//! [`BasicPitch::read_as_decoded`] is the reading before it.
 
 use basic_pitch::model::TractBackend;
 use basic_pitch::{BasicPitch as Model, NoteEvent, NoteParams};
 
 use crate::error::{Error, Result};
-use crate::notes::{level_strength, median};
+use crate::event::Event;
+use crate::notes::{ONSET_GRACE_SECS, level_strength, median};
 use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, tuning_of};
+use crate::rejoin::rejoin;
 use crate::residual::residual;
 
 /// Spotify's Basic Pitch note model, `nmp.onnx` from basic-pitch v0.4.0, unmodified.
@@ -71,16 +80,39 @@ impl BasicPitch {
 
     /// Reads `samples`, the take's mono audio from its first frame at duet's analysis rate, over
     /// `frames`, its performance, on `given`, A4 in absolute cents, or on the tuning estimated
-    /// from the frames.
+    /// from the frames. Then the same-key rejoin runs over the notes, with `onsets`, the take's
+    /// (other events are ignored).
+    ///
+    /// # Errors
+    ///
+    /// As [`BasicPitch::read_as_decoded`].
+    pub fn read(
+        &self,
+        samples: &[f32],
+        frames: &PerformanceFrames,
+        onsets: &[Event],
+        given: Option<f64>,
+    ) -> Result<BasicPitchRead> {
+        let read = self.read_as_decoded(samples, frames, onsets, given)?;
+        Ok(BasicPitchRead {
+            reading: rejoin(read.reading, frames, onsets),
+            ..read
+        })
+    }
+
+    /// [`BasicPitch::read`], before the same-key rejoin: the notes as Basic Pitch decodes them,
+    /// one at a time, each started at an onset within `ONSET_GRACE_SECS` (50 ms) of its
+    /// start, and keyed on the take's tuning.
     ///
     /// # Errors
     ///
     /// [`Error::Invalid`] if the frames are not at Basic Pitch's rate, or Basic Pitch refuses
     /// the samples (a sample that is not finite).
-    pub fn read(
+    pub fn read_as_decoded(
         &self,
         samples: &[f32],
         frames: &PerformanceFrames,
+        onsets: &[Event],
         given: Option<f64>,
     ) -> Result<BasicPitchRead> {
         if frames.rate != RATE {
@@ -96,6 +128,15 @@ impl BasicPitch {
         let found = transcription.notes.len();
         let spans = spans_of(&transcription.notes, frames.rate);
         let (spans, trimmed, overlapped) = monophonic(spans);
+        let onsets: Vec<u64> = onsets
+            .iter()
+            .filter_map(|e| match *e {
+                Event::Onset { frame, .. } => Some(frame),
+                _ => None,
+            })
+            .collect();
+        let grace = (ONSET_GRACE_SECS * f64::from(frames.rate)).round() as u64;
+        let spans = at_onsets(spans, &onsets, grace);
 
         let tuning = tuning_of(frames, given);
         let offset = tuning.offset_cents();
@@ -165,6 +206,28 @@ fn spans_of(notes: &[NoteEvent], rate: u32) -> Vec<Span> {
         })
         .filter(|s| s.end > s.start)
         .collect()
+}
+
+/// `spans`, in order of time and apart, each started at the onset nearest its start when one is
+/// within `grace` frames of it and inside the span, and the note before ended there if it ran
+/// past it. A start never moves to before the note before starts.
+fn at_onsets(mut spans: Vec<Span>, onsets: &[u64], grace: u64) -> Vec<Span> {
+    for i in 0..spans.len() {
+        let span = spans[i];
+        let floor = if i > 0 { spans[i - 1].start + 1 } else { 0 };
+        let nearest = onsets
+            .iter()
+            .copied()
+            .filter(|&f| f.abs_diff(span.start) <= grace && f < span.end && f >= floor)
+            .min_by_key(|&f| f.abs_diff(span.start));
+        if let Some(onset) = nearest {
+            spans[i].start = onset;
+            if i > 0 && spans[i - 1].end > onset {
+                spans[i - 1].end = onset;
+            }
+        }
+    }
+    spans
 }
 
 /// One note at a time, from Basic Pitch's overlapping notes, in order of time, with how many
@@ -260,8 +323,8 @@ mod tests {
         tune_scattered(cents, [0.0; 9])
     }
 
-    /// The take's performance, as `duet capture` keeps it.
-    fn performance(signal: &[f32]) -> PerformanceFrames {
+    /// The take's performance, as `duet capture` keeps it, and its onsets.
+    fn performance(signal: &[f32]) -> (PerformanceFrames, Vec<Event>) {
         let mut stage = Performance::new(RATE);
         let mut out = Vec::new();
         for (i, piece) in signal.chunks(4096).enumerate() {
@@ -273,15 +336,15 @@ mod tests {
             stage.push(mono, &mut out).unwrap();
         }
         stage.finish(&mut out).unwrap();
-        let mut frames = None;
+        let (mut frames, mut onsets) = (None, Vec::new());
         for layer in out {
             match layer {
                 Layer1::Head(head) => frames = Some(PerformanceFrames::new(&head)),
                 Layer1::Frames(block) => frames.as_mut().unwrap().push(&block).unwrap(),
-                Layer1::Onset { .. } => {}
+                Layer1::Onset { frame, strength } => onsets.push(Event::Onset { frame, strength }),
             }
         }
-        frames.unwrap()
+        (frames.unwrap(), onsets)
     }
 
     fn keys(reading: &Reading) -> Vec<u8> {
@@ -308,10 +371,10 @@ mod tests {
     #[test]
     fn a_synthetic_melody_reads_its_keys_one_note_at_a_time() {
         let signal = tune(0.0);
-        let frames = performance(&signal);
+        let (frames, onsets) = performance(&signal);
         let read = BasicPitch::new()
             .unwrap()
-            .read(&signal, &frames, None)
+            .read(&signal, &frames, &onsets, None)
             .unwrap();
         assert_eq!(keys(&read.reading), TUNE.map(|t| t.0));
         assert_eq!(
@@ -331,11 +394,13 @@ mod tests {
         // singer is: on A440, a note 44 + 12 cents sharp is keyed a key up. The take's tuning,
         // estimated, keys it as the in-tune melody.
         let signal = tune_scattered(44.0, [0.0, 12.0, -12.0, 12.0, 0.0, -12.0, 12.0, 0.0, -12.0]);
-        let frames = performance(&signal);
+        let (frames, onsets) = performance(&signal);
         let model = BasicPitch::new().unwrap();
-        let on_tuning = model.read(&signal, &frames, None).unwrap();
+        let on_tuning = model.read(&signal, &frames, &onsets, None).unwrap();
         assert_eq!(keys(&on_tuning.reading), TUNE.map(|t| t.0));
-        let on_a440 = model.read(&signal, &frames, Some(A440_CENTS)).unwrap();
+        let on_a440 = model
+            .read(&signal, &frames, &onsets, Some(A440_CENTS))
+            .unwrap();
         assert_ne!(keys(&on_a440.reading), TUNE.map(|t| t.0));
     }
 
@@ -356,12 +421,25 @@ mod tests {
     }
 
     #[test]
+    fn a_note_starts_at_an_onset_within_the_grace_and_never_overlaps_the_note_before() {
+        // An onset 300 frames after the second note's start (14 ms): it starts there, and the
+        // first keeps the end Basic Pitch gave it. One 3000 frames off (136 ms) is too far.
+        let spans = vec![span(0, 5000, 0.9), span(5000, 9000, 0.9)];
+        let moved = at_onsets(spans.clone(), &[5300], 1103);
+        assert_eq!(moved, vec![span(0, 5000, 0.9), span(5300, 9000, 0.9)]);
+        assert_eq!(at_onsets(spans.clone(), &[8000], 1103), spans);
+        // An onset before the note's start moves it earlier, cutting the note before short.
+        let moved = at_onsets(spans, &[4700], 1103);
+        assert_eq!(moved, vec![span(0, 4700, 0.9), span(4700, 9000, 0.9)]);
+    }
+
+    #[test]
     fn frames_at_another_rate_are_refused() {
-        let mut frames = performance(&tune(0.0));
+        let (mut frames, _) = performance(&tune(0.0));
         frames.rate = 44_100;
         let err = BasicPitch::new()
             .unwrap()
-            .read(&[], &frames, None)
+            .read_as_decoded(&[], &frames, &[], None)
             .unwrap_err();
         assert!(err.to_string().contains("22050 Hz"), "{err}");
     }

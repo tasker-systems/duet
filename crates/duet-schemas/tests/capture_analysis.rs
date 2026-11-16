@@ -19,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.7 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.8 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -29,7 +29,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.7.json"))
+        .build(&read_json("schemas/capture-analysis/1.8.json"))
         .unwrap()
 }
 
@@ -59,6 +59,20 @@ fn take_with_a_turn() -> Vec<f32> {
         t if t <= ramp + held => 200.0,
         t if t < 2.0 * ramp + held => up(2.0 * ramp + held - t),
         _ => 0.0,
+    })
+}
+
+/// The scale, its fifth note (B-flat) dipping 170 cents and back over 0.1 s from 0.2 s in: the
+/// shape of the dip the same-key rejoin reads as one note (`duet-dsp`'s
+/// `a_dip_of_170_cents_with_no_onset_is_rejoined_into_one_note`).
+fn take_with_a_dip() -> Vec<f32> {
+    sung(|note, t| {
+        let into = (t - 0.2) / 0.05;
+        if note == 4 && (0.0..2.0).contains(&into) {
+            -170.0 * (1.0 - (into - 1.0).abs())
+        } else {
+            0.0
+        }
     })
 }
 
@@ -238,6 +252,28 @@ fn a_notes_excursion_round_trips_exactly_and_validates() {
 }
 
 #[test]
+fn a_readings_rejoin_round_trips_exactly_and_validates() {
+    // The HMM splits the B-flat at its dip, and the pass rejoins it, stating so (1.7).
+    let analysis = analysis_of(&take_with_a_dip(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let reading = &value["body"]["reading"];
+    assert_eq!(reading["notes"].as_array().unwrap().len(), 16, "{reading}");
+    let rejoins = reading["rejoins"].as_array().expect("a rejoin is stated");
+    assert_eq!(rejoins.len(), 1, "{rejoins:?}");
+    let decoded = rejoins[0]["decoded"].as_array().unwrap();
+    assert_eq!(decoded.len(), 2, "{decoded:?}");
+    assert!(
+        decoded
+            .iter()
+            .all(|n| n["key"] == 70 && n.get("residual").is_none())
+    );
+    assert!(rejoins[0]["loss_change"].is_f64(), "{rejoins:?}");
+    // A scale sung plain has nothing to rejoin, and writes no `rejoins`.
+    let (_, plain) = round_trip(analysis_of(&take(), &Given::default(), Reader::Hmm));
+    assert!(plain["body"]["reading"].get("rejoins").is_none());
+}
+
+#[test]
 fn a_given_tempo_has_no_alternatives_and_an_absent_key_and_grid_are_left_out() {
     let given = Given {
         tempo_bpm: Some(120.0),
@@ -301,7 +337,7 @@ fn the_schema_and_the_reader_refuse_what_capture_never_writes() {
 }
 
 #[test]
-fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_7() {
+fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_8() {
     let mut analysis = analysis(&Given::default());
     let reading = analysis.reading.as_mut().unwrap();
     reading.reader = Some(ReadingReader::basic_pitch());
@@ -310,7 +346,7 @@ fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_7() {
         value["body"]["reading"]["reader"]["name"],
         json!("basic-pitch")
     );
-    // capture-analysis 1.6 has no basic-pitch reader: a 1.6 reader refuses the name.
+    // capture-analysis 1.7 has no basic-pitch reader: a 1.7 reader refuses the name.
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
         .add(envelope["$id"].as_str().unwrap(), &envelope)
@@ -319,15 +355,15 @@ fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_7() {
         .unwrap();
     let older = jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.6.json"))
+        .build(&read_json("schemas/capture-analysis/1.7.json"))
         .unwrap();
-    let mut as_1_6 = value.clone();
-    as_1_6["$schema"] = json!(
-        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.6.json"
+    let mut as_1_7 = value.clone();
+    as_1_7["$schema"] = json!(
+        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.7.json"
     );
-    as_1_6["duet"]["version"] = json!("1.6");
-    assert!(!older.is_valid(&as_1_6), "1.6 accepts basic-pitch");
-    // The same document read by the rules is a valid 1.6 one: only the reader's name differs.
-    as_1_6["body"]["reading"]["reader"]["name"] = json!("rules");
-    assert!(older.is_valid(&as_1_6), "the 1.6 control is not valid");
+    as_1_7["duet"]["version"] = json!("1.7");
+    assert!(!older.is_valid(&as_1_7), "1.7 accepts basic-pitch");
+    // The same document read by the rules is a valid 1.7 one: only the reader's name differs.
+    as_1_7["body"]["reading"]["reader"]["name"] = json!("rules");
+    assert!(older.is_valid(&as_1_7), "the 1.7 control is not valid");
 }

@@ -233,7 +233,41 @@
           "unread": 3.0,
           "notes": 8.0
         }
-      }
+      },
+      "rejoins": [
+        {
+          "decoded": [
+            {
+              "start": 11100,
+              "end": 16200,
+              "held_from": 11356,
+              "key": 63,
+              "centre": -2.0,
+              "between_keys": false,
+              "confidence": 0.9375,
+              "strength": 0.8125
+            },
+            {
+              "start": 16200,
+              "end": 21600,
+              "held_from": 17224,
+              "key": 63,
+              "centre": -3.5,
+              "between_keys": false,
+              "confidence": 0.921875,
+              "strength": 0.0625
+            }
+          ],
+          "dips": [
+            {
+              "start": 16200,
+              "end": 17224,
+              "cents": -172.5
+            }
+          ],
+          "loss_change": 6.375
+        }
+      ]
     }
   }
 }

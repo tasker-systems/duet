@@ -114,6 +114,35 @@
       ],
       "type": "object"
     },
+    "Dip": {
+      "additionalProperties": false,
+      "description": "A dip between two decoded notes on one key: the frames from where the first ends to where\nthe second's held pitch begins.",
+      "properties": {
+        "cents": {
+          "description": "Its frame furthest from the key, in cents from it: below zero for a dip, above for a\nrise.",
+          "format": "float",
+          "type": "number"
+        },
+        "end": {
+          "description": "Where it ends: the second note's `held_from`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "description": "Where it starts, on the take's timeline: the first note's end.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "cents"
+      ],
+      "type": "object"
+    },
     "Drift": {
       "additionalProperties": false,
       "description": "A slow move across a note's held span: a least-squares line through its held residual.",
@@ -241,7 +270,7 @@
     },
     "Excursion": {
       "additionalProperties": false,
-      "description": "A run of frames inside a note held somewhere other than where the note is held: a measured\nornament. It is never named: whether it is a grace, a mordent, a turn, a trill or a wobble is\nworked out from where it sits whenever something is written, so that the naming can change\nwithout a format change.\n\nIts frames hold at least [`SHORTEST_EXCURSION_FRAMES`], each at least [`EXCURSION_CENTS`]\nfrom where the note is held, and spread no wider than a slide's frames may when they have\narrived (35 cents over 50 ms, and in proportion over fewer frames), so a slide passing\nthrough is none.",
+      "description": "A run of frames inside a note held somewhere other than where the note is held: a measured\nornament. It is never named: whether it is a grace, a mordent, a turn, a trill or a wobble is\nworked out from where it sits whenever something is written, so that the naming can change\nwithout a format change.\n\nIts frames hold at least [`SHORTEST_EXCURSION_FRAMES`], each at least [`EXCURSION_CENTS`]\nfrom where the note is held, and spread no wider than a slide's frames may when they have\narrived (35 cents over 50 ms, and in proportion over fewer frames), so a slide passing\nthrough is none.\n\nOne more is stated by the same-key rejoin ([`rejoin`](crate::rejoin)): a rejoined dip that\nturns at its bottom, as a V does, holds nowhere, so it is none of those; the rejoin states\nthe run of frames about its bottom, each at least [`EXCURSION_CENTS`] from the note's centre,\nas its excursion.",
       "properties": {
         "cents": {
           "description": "Where it is held, in cents from the note's key: its frames' median residual.",
@@ -756,11 +785,6 @@
           "const": "hmm",
           "description": "The note HMM ([`NoteModel`](crate::NoteModel)).",
           "type": "string"
-        },
-        {
-          "const": "basic-pitch",
-          "description": "Spotify's Basic Pitch, an outside model: it chooses where notes start and end, and the\ntake's performance gives each its key, centre and residual. Added in `capture-analysis`\n1.7. A build without the `basic-pitch` feature still reads it.",
-          "type": "string"
         }
       ]
     },
@@ -778,6 +802,13 @@
           "$ref": "#/$defs/Reader",
           "description": "Which reader chose the notes, and its cost per note. Added in `capture-analysis` 1.3;\nabsent before, when the rules were the only reader."
         },
+        "rejoins": {
+          "description": "Each same-key split the reading's pass rejoined into one note, with the notes as its\nreader decoded them, in order. Added in `capture-analysis` 1.7; omitted\nwhen there is none, and absent before, when no reading was rejoined.",
+          "items": {
+            "$ref": "#/$defs/Rejoin"
+          },
+          "type": "array"
+        },
         "residual": {
           "$ref": "#/$defs/TakeResidual",
           "description": "What the notes leave of the take as a whole, with the loss as its terms. Added in\n`capture-analysis` 1.2; absent before."
@@ -789,6 +820,37 @@
       "required": [
         "tuning",
         "notes"
+      ],
+      "type": "object"
+    },
+    "Rejoin": {
+      "additionalProperties": false,
+      "description": "One rejoin the pass made: the notes the reader decoded on one key, which it read as one.",
+      "properties": {
+        "decoded": {
+          "description": "The notes as the reader decoded them, in order, their residuals left out: the rejoined\nnote starts where the first does and ends where the last does.",
+          "items": {
+            "$ref": "#/$defs/ReadNote"
+          },
+          "type": "array"
+        },
+        "dips": {
+          "description": "Each dip between them, in order: one fewer than the notes.",
+          "items": {
+            "$ref": "#/$defs/Dip"
+          },
+          "type": "array"
+        },
+        "loss_change": {
+          "description": "What the rejoin changes the loss's total by, in nats: the rejoined note's loss less the\ndecoded notes'. One note's cost fewer, and the dip's frames priced as held rather than\nas the second note's slide, so it can be above zero: a rejoin that raises the loss.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "decoded",
+        "dips",
+        "loss_change"
       ],
       "type": "object"
     },

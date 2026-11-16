@@ -153,9 +153,10 @@ fn a_slide_between_two_notes_belongs_to_the_one_it_arrives_at() {
 }
 
 #[test]
-fn a_dip_that_leaves_a_pitch_and_comes_back_is_two_notes() {
+fn a_dip_that_leaves_a_pitch_and_comes_back_is_decoded_as_two_notes() {
     // Held 0.5 s, a V-shaped dip two semitones down and back over 0.16 s, then held 0.5 s,
-    // voiced throughout: a voiced consonant between two syllables.
+    // voiced throughout. The decoder reads two notes, as #28 ruled a dip; the same-key rejoin
+    // then reads them as one, since the dip stays within a whole tone (rejoin.rs's witnesses).
     let dip = |t: f64| {
         let into = (t - 0.5) / 0.08;
         if (0.0..2.0).contains(&into) {
@@ -164,7 +165,8 @@ fn a_dip_that_leaves_a_pitch_and_comes_back_is_two_notes() {
             0.0
         }
     };
-    let reading = hmm(&sung(1.16, dip), NOTE_COST);
+    let (frames, onsets) = performance(&sung(1.16, dip));
+    let reading = NoteModel::default().read_as_decoded(&frames, &onsets, Some(A440_CENTS));
     assert_eq!(keys(&reading), [KEY, KEY], "{:?}", reading.notes);
     let (first, second) = (&reading.notes[0], &reading.notes[1]);
     assert_eq!(first.end, second.start, "legato through the dip");

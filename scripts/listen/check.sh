@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Witness for scripts/duet-listen.sh: captures the synthetic corpus melody with both readers,
 # builds its clips from scripts/listen/synthetic-melody.moments, and checks that every clip,
-# bridged, legato and gapped, for each reader, lasts exactly its window (the whole take for `full`).
-# A clip at the wrong window, or a stale clip left in place of a new one, fails it.
+# bridged, legato, gapped, steps and bends, for each reader, lasts exactly its window (the whole
+# take for `full`). A clip at the wrong window, or a stale clip left in place of a new one, fails
+# it. It also checks that each reader's steps and bends clips of the whole take are built from
+# their own renderings: steps is the bridged clip with each excursion's frames changed, so it
+# differs from it exactly when the reading states an excursion, and bends differs from it always.
 #
 #   scripts/listen/check.sh
 #
@@ -43,7 +46,7 @@ failed=0 checked=0
 for e in "${expect[@]}"; do
   read -r key want <<<"$e"
   for reader in rules hmm; do
-    for suffix in "" -legato -gap; do
+    for suffix in "" -legato -gap -steps -bends; do
       clip="$work/clips/$key-$reader$suffix.wav"
       if [[ ! -f "$clip" ]]; then echo "FAIL $key-$reader$suffix: missing" >&2; failed=1; continue; fi
       got=$(seconds "$clip")
@@ -57,5 +60,18 @@ for e in "${expect[@]}"; do
     done
   done
 done
+for reader in rules hmm; do
+  cap="$work/$reader.capture.duet"
+  count=$(python3 -I -c 'import json, sys
+notes = json.load(open(sys.argv[1]))["body"]["reading"]["notes"]
+print(sum(len(n.get("residual", {}).get("excursions", [])) for n in notes))' "$cap")
+  same() { cmp -s "$work/clips/full-$reader.wav" "$work/clips/full-$reader$1.wav"; }
+  if ((count == 0)) && ! same -steps; then
+    echo "FAIL full-$reader-steps: no excursion is read, and it differs from the melody" >&2; failed=1
+  elif ((count > 0)) && same -steps; then
+    echo "FAIL full-$reader-steps: $count excursions are read, and it is the melody" >&2; failed=1
+  fi
+  if same -bends; then echo "FAIL full-$reader-bends: it is the melody" >&2; failed=1; fi
+done
 ((failed == 0)) || exit 1
-echo "duet-listen: $checked clips at their windows (${#expect[@]} windows, two readers, bridged, legato and gapped)"
+echo "duet-listen: $checked clips at their windows (${#expect[@]} windows, two readers, bridged, legato, gapped, steps and bends)"

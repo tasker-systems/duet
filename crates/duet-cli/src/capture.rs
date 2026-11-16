@@ -163,7 +163,8 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
                         ReaderArg::Hmm => NoteModel::default().read(&frames, &events, given),
                         #[cfg(feature = "basic-pitch")]
                         ReaderArg::BasicPitch => {
-                            let read = BasicPitch::new()?.read(&samples, &frames, given)?;
+                            let read =
+                                BasicPitch::new()?.read(&samples, &frames, &events, given)?;
                             read_said.push(statement::basic_pitch(&read));
                             read.reading
                         }
@@ -229,6 +230,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         said.extend(statement::reader(reading));
         said.append(&mut read_said);
         said.push(statement::notes_read(reading));
+        said.extend(statement::rejoined(reading));
     }
     said.extend(statement::key(captured.analysis.key.as_ref()));
     captured.analysis.reading = reading;

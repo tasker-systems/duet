@@ -1271,9 +1271,9 @@ fn excursions_in(text: &str) -> Vec<Option<serde_json::Value>> {
 
 #[test]
 fn a_basic_pitch_reader_round_trips_exactly_through_json() {
-    // capture-analysis 1.7: a reading by Basic Pitch names its reader `basic-pitch`, and the
+    // capture-analysis 1.8: a reading by Basic Pitch names its reader `basic-pitch`, and the
     // document writes back as the text it was read from.
-    let text = analysis_example("1.7").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
+    let text = analysis_example("1.8").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
     assert!(
         text.contains(r#""name": "basic-pitch""#),
         "the example has no hmm reader"
@@ -1292,10 +1292,9 @@ fn a_basic_pitch_reader_round_trips_exactly_through_json() {
 
 #[test]
 fn a_notes_excursions_round_trip_exactly_through_json() {
-    // capture-analysis 1.6 added excursions: every excursion's start, end and cents read back
-    // to the bit, and the document writes back as the text it was read from. The current
-    // example carries them, since a document is written at the current version.
-    let text = analysis_example("1.7");
+    // capture-analysis 1.6, at the current version's example: every excursion's start, end and
+    // cents read back to the bit, and the document writes back as the text it was read from.
+    let text = analysis_example("1.8");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1329,6 +1328,57 @@ fn a_document_before_excursions_reads_as_one_with_none_and_writes_none() {
     );
     let written = doc.write().unwrap();
     assert_eq!(excursions_in(&written), [None, None]);
+    let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(again, doc);
+}
+
+/// The reading's `rejoins` in a capture-analysis document's text, `None` where it has none.
+fn rejoins_in(text: &str) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(text).unwrap();
+    value["body"]["reading"].get("rejoins").cloned()
+}
+
+#[test]
+fn a_readings_rejoins_round_trip_exactly_through_json() {
+    // capture-analysis 1.7: every decoded note, dip and loss change a rejoin states reads back
+    // to the bit, and the document writes back as the text it was read from.
+    let text = analysis_example("1.8");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(doc.write().unwrap(), text);
+    let reading = doc.body.reading.as_ref().unwrap();
+    assert_eq!(reading.rejoins.len(), 1);
+    let rejoin = &reading.rejoins[0];
+    assert_eq!(rejoin.decoded.len(), 2);
+    assert!(rejoin.decoded.iter().all(|n| n.residual.is_none()));
+    assert_eq!(rejoin.decoded[1].held_from, 17224);
+    assert_eq!(
+        (rejoin.dips[0].start, rejoin.dips[0].cents),
+        (16200, -172.5)
+    );
+    assert_eq!(rejoin.loss_change.to_bits(), 6.375f64.to_bits());
+    assert!(
+        rejoins_in(&text).unwrap()[0]["decoded"][0]
+            .get("residual")
+            .is_none(),
+        "a decoded note is written without its residual"
+    );
+}
+
+#[test]
+fn a_document_before_rejoins_reads_as_one_with_none_and_writes_none() {
+    // A 1.6 document's notes are as decoded: read today, its reading states no rejoin, and
+    // writing it states none, rather than an empty list.
+    let text = analysis_example("1.6");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert!(doc.body.reading.as_ref().unwrap().rejoins.is_empty());
+    let written = doc.write().unwrap();
+    assert_eq!(rejoins_in(&written), None);
     let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
         panic!("read as another kind");
     };

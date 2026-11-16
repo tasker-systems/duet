@@ -310,7 +310,7 @@ fn analyse(
         #[cfg(feature = "basic-pitch")]
         ReaderName::BasicPitch => {
             duet_capture::BasicPitch::new()
-                .and_then(|bp| bp.read(&samples, &frames, None))
+                .and_then(|bp| bp.read(&samples, &frames, &events, None))
                 .map_err(|e| fail(e.into()))?
                 .reading
         }

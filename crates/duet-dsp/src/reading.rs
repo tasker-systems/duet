@@ -27,6 +27,7 @@ use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::notes::{Segment, Segmenter};
 use crate::performance::{FrameBlock, PerformanceHead, absolute_cents};
+use crate::rejoin::{Rejoin, rejoin};
 use crate::residual::{NOTE_COST, NoteResidual, TakeResidual, residual};
 use crate::timing::Origin;
 
@@ -331,7 +332,7 @@ pub enum ReaderName {
     Hmm,
     /// Spotify's Basic Pitch, an outside model: it chooses where notes start and end, and the
     /// take's performance gives each its key, centre and residual. Added in `capture-analysis`
-    /// 1.7. A build without the `basic-pitch` feature still reads it.
+    /// 1.8. A build without the `basic-pitch` feature still reads it.
     #[serde(rename = "basic-pitch")]
     BasicPitch,
 }
@@ -392,6 +393,11 @@ pub struct Reading {
     /// `capture-analysis` 1.2; absent before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub residual: Option<TakeResidual>,
+    /// Each same-key split the reading's pass rejoined into one note, with the notes as its
+    /// reader decoded them, in order. Added in `capture-analysis` 1.7; omitted
+    /// when there is none, and absent before, when no reading was rejoined.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rejoins: Vec<Rejoin>,
 }
 
 impl Reading {
@@ -407,9 +413,21 @@ impl Reading {
 ///
 /// The notes are segmented by the rules [`Melody`](crate::Melody) segments by, over the
 /// performance's pitch: its refined pitch, written to 0.1 cent. `Melody` segments the 10-cent
-/// pitch track, so a boundary or a median can differ from its by a frame or a few cents.
+/// pitch track, so a boundary or a median can differ from its by a frame or a few cents. Then
+/// the same-key rejoin ([`rejoin`](crate::rejoin)) is run over them: [`read_as_decoded`] is the
+/// reading before it.
 #[must_use]
 pub fn read(frames: &PerformanceFrames, onsets: &[Event], given: Option<f64>) -> Reading {
+    rejoin(read_as_decoded(frames, onsets, given), frames, onsets)
+}
+
+/// [`read`], before the same-key rejoin: the notes as the rules segment them.
+#[must_use]
+pub fn read_as_decoded(
+    frames: &PerformanceFrames,
+    onsets: &[Event],
+    given: Option<f64>,
+) -> Reading {
     let tuning = tuning_of(frames, given);
     let offset = tuning.offset_cents();
     let mut segmenter = Segmenter::new(frames.rate, u64::from(frames.hop));
@@ -453,6 +471,7 @@ impl Reading {
             reader: Some(reader),
             notes,
             residual: Some(take),
+            rejoins: Vec::new(),
         }
     }
 }
