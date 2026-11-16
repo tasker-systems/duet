@@ -16,10 +16,13 @@
 #   --rebuild  rebuild clips that already exist
 #   --no-play  build the clips, then stop
 #
-# Every clip comes three ways, each as `duet capture compare` renders it: bridged, its default (the
-# sine holds through a gap under 0.2 s and is silent at a longer one, so a dropped note is heard as
-# silence); legato (--legato: held through every gap); and gapped (--gapped: silent wherever the
-# reading has no note). In the menu, N plays clip N bridged, Nl legato, Ng gapped, q quits; while a
+# Every clip comes five ways, each as `duet capture compare` renders it. Three play the melody
+# (the keys) with a different gap rule: bridged, its default (the sine holds through a gap under
+# 0.2 s and is silent at a longer one, so a dropped note is heard as silence); legato (--legato:
+# held through every gap); and gapped (--gapped: silent wherever the reading has no note). Two play
+# more than the keys, bridged: steps (--render steps: each excursion held at its key plus its
+# offset) and bends (--render bends: the keys plus the residual, the performance's own pitch).
+# In the menu, N plays clip N bridged, Nl legato, Ng gapped, Ns steps, Nb bends, q quits; while a
 # clip plays, scripts/listen/play.py shows where it is in the clip and the take, and the note read.
 #
 # duet is DUET_BIN, else this checkout's target/release/duet, else duet on PATH. Needs ffmpeg,
@@ -30,7 +33,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 
 die() { echo "duet-listen: $*" >&2; exit 1; }
-usage() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 take="" stem="" moments="" out="" gain="2.0" rebuild=0 play=1
 labels=() analyses=()
@@ -93,7 +96,7 @@ fi
 
 # Each rendering is made in a directory of its own: compare never overwrites a file, so one made
 # beside an older one would fail and leave the older one in its place.
-renderings=("" -legato -gap) flags=("" --legato --gapped)
+renderings=("" -legato -gap -steps -bends) flags=("" --legato --gapped "--render steps" "--render bends")
 items=() item_from=() item_cap=() item_label=()
 for w in "${!win_key[@]}"; do
   for r in "${!labels[@]}"; do
@@ -101,8 +104,9 @@ for w in "${!win_key[@]}"; do
     cap="${analyses[$r]:-$stem.capture.duet}"
     items+=("$name") item_from+=("${win_from[$w]:-0}") item_cap+=("$cap")
     item_label[${#items[@]}]="${win_label[$w]} · ${labels[$r]}"
-    if ((rebuild == 0)) && [[ -f "$out/$name.wav" && -f "$out/$name-legato.wav" \
-      && -f "$out/$name-gap.wav" ]]; then continue; fi
+    built=1
+    for k in "${renderings[@]}"; do [[ -f "$out/$name$k.wav" ]] || built=0; done
+    if ((rebuild == 0 && built)); then continue; fi
     printf 'building %-40s\r' "$name" >&2
     for k in "${!renderings[@]}"; do
       work=$(mktemp -d "${TMPDIR:-/tmp}/duet-listen.XXXXXX")
@@ -113,7 +117,8 @@ for w in "${!win_key[@]}"; do
         cmd+=(--reading "$work/reading.capture.duet")
       fi
       [[ -n "${win_from[$w]}" ]] && cmd+=(--from "${win_from[$w]}" --to "${win_to[$w]}")
-      [[ -n "${flags[$k]}" ]] && cmd+=("${flags[$k]}")
+      # A flag and its value, split on the space: "--render steps" is two words.
+      [[ -n "${flags[$k]}" ]] && read -r -a flag <<<"${flags[$k]}" && cmd+=("${flag[@]}")
       "${cmd[@]}" >/dev/null || die "duet capture compare failed for $name${renderings[$k]}"
       wav=("$work"/*.compare*.wav) svg=("$work"/*.compare*.svg)
       ((${#wav[@]} == 1)) && [[ -f "${wav[0]}" ]] || die "compare wrote no one WAV for $name"
@@ -136,6 +141,8 @@ while true; do
   echo "  N  = bridged (compare's default: held through a gap under 0.2 s, silent at a rest)"
   echo "  Nl = legato (the sine holds through every gap)"
   echo "  Ng = gapped (the sine is silent wherever the reading has no note)"
+  echo "  Ns = steps (bridged, each excursion held at its key plus its offset)"
+  echo "  Nb = bends (bridged, the keys plus the residual: the performance's own pitch)"
   echo "  q  = quit · Ctrl-C stops a clip"
   echo
   for i in "${!items[@]}"; do printf '  %2d) %s\n' $((i + 1)) "${item_label[$((i + 1))]}"; done
@@ -144,6 +151,8 @@ while true; do
   [[ "$choice" == q ]] && exit 0
   suffix="" shown=""
   if [[ "$choice" == *g ]]; then suffix="-gap" shown=" [gapped]"; choice="${choice%g}"
+  elif [[ "$choice" == *s ]]; then suffix="-steps" shown=" [steps]"; choice="${choice%s}"
+  elif [[ "$choice" == *b ]]; then suffix="-bends" shown=" [bends]"; choice="${choice%b}"
   elif [[ "$choice" == *l ]]; then suffix="-legato" shown=" [legato]"; choice="${choice%l}"; fi
   [[ "$choice" =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= ${#items[@]})) || continue
   i=$((choice - 1))

@@ -25,10 +25,15 @@
 //!   through a gap between notes shorter than [`wav::BRIDGE_SECS`] and is silent through a
 //!   longer one, so a dropped note is heard as silence; `--legato` holds it through every gap
 //!   and `--gapped` silences it in every gap;
+//!   `--render` chooses what it plays inside a note ([`wav::Render`]): `melody`, the keys only (the
+//!   default); `steps`, the keys with each excursion held at its key plus its offset; `bends`,
+//!   the keys plus the residual, the performance's own pitch. A `steps` or `bends` run's outputs
+//!   carry its name after the window's (`STEM.compare.33.0-34.3.steps.wav`), so the three never
+//!   collide, and the plot draws the sine's pitch as it plays;
 //! - **on standard output:** one line per note (its time, key, centre and whether it is between
-//!   keys), with its residual's parts (held centre, drift, vibrato, scoop, fall and rest) when
-//!   the reading has them, then the take's loss as its terms. A 1.1 reading has neither,
-//!   and the output says so.
+//!   keys), with its residual's parts (held centre, drift, vibrato, scoop, fall, rest and
+//!   excursions) when the reading has them, then the take's loss as its terms. A 1.1 reading has
+//!   neither, and the output says so.
 //!
 //! `--from` and `--to` window all three to a stretch of the take, in seconds.
 //!
@@ -44,8 +49,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use duet_capture::{
-    Analysis, Event, FileSource, Origin, PerformanceFrames, PerformanceHead, Prepare, Reading,
-    Source, Stage,
+    Analysis, Event, FileSource, Origin, PerformanceFrames, PerformanceHead, Prepare, ReadNote,
+    Reading, Source, Stage,
 };
 use duet_schemas::{Document, Stream};
 
@@ -85,6 +90,12 @@ pub struct CompareArgs {
     /// inside a note. By default it is silent only through a gap of 0.2 s or more.
     #[arg(long)]
     gapped: bool,
+    /// What the sine plays inside a note: `melody`, the keys only; `steps`, the keys with each
+    /// excursion held at its key plus its offset over its frames; `bends`, the keys plus the
+    /// residual, following the performance's pitch. The outputs of `steps` and `bends` are
+    /// named after it: STEM.compare.steps.svg and .wav.
+    #[arg(long, value_enum, default_value_t, value_name = "RENDERING")]
+    render: wav::Render,
 }
 
 pub fn run(args: &CompareArgs) -> Result<()> {
@@ -115,7 +126,14 @@ pub fn run(args: &CompareArgs) -> Result<()> {
     } else {
         wav::Gaps::Bridged
     };
-    let out_stem = with_suffix(&stem_of(&compared_path), &window_name(args.from, args.to));
+    let out_stem = with_suffix(
+        &stem_of(&compared_path),
+        &format!(
+            "{}{}",
+            window_name(args.from, args.to),
+            args.render.suffix()
+        ),
+    );
     let (svg_path, wav_path) = (
         with_suffix(&out_stem, ".svg"),
         with_suffix(&out_stem, ".wav"),
@@ -193,9 +211,14 @@ pub fn run(args: &CompareArgs) -> Result<()> {
     }
 
     let title = format!(
-        "{}: {} on A4 = {:.1} Hz ({:+.0} cents{}), {} to {}",
+        "{}: {}{} on A4 = {:.1} Hz ({:+.0} cents{}), {} to {}",
         args.input.display(),
         compared_path.display(),
+        match args.render {
+            wav::Render::Melody => "",
+            wav::Render::Steps => ", its excursions as steps,",
+            wav::Render::Bends => ", its residual as bends,",
+        },
         reading.tuning.a4_hz(),
         reading.tuning.offset_cents(),
         if matches!(reading.tuning.a4, Origin::Given(_)) {
@@ -206,6 +229,7 @@ pub fn run(args: &CompareArgs) -> Result<()> {
         seconds(from as f64 / rate),
         seconds(to as f64 / rate)
     );
+    let voice = wav::Voice::new(reading, &frames, gaps, args.render);
     let plot = svg::render(&svg::Plot {
         title: &title,
         frames: &frames,
@@ -214,8 +238,9 @@ pub fn run(args: &CompareArgs) -> Result<()> {
         reading,
         beside,
         onsets: &onsets,
+        voice: &voice,
     });
-    let right = wav::sine(reading, frames.rate, gaps, from, to);
+    let right = wav::sine(&voice, from, to);
     let audio = wav::stereo(frames.rate, &take[from as usize..to as usize], &right);
 
     write_new(&svg_path, &plot)?;
@@ -238,7 +263,7 @@ fn notes_table(title: &str, reading: &Reading, from: u64, to: u64, rate: f64) ->
     let mut out = format!("# {title}\n#     time  key    centre");
     if parts {
         out.push_str(&format!(
-            "  {:>7}  {:>8}   {:<13}  {:<13}  {:<13}  {:>6}",
+            "  {:>7}  {:>8}   {:<13}  {:<13}  {:<13}  {:>6}  excursions",
             "held", "drift/s", "vibrato", "scoop", "fall", "rest"
         ));
     }
@@ -266,6 +291,8 @@ fn notes_table(title: &str, reading: &Reading, from: u64, to: u64, rate: f64) ->
                 transition(r.fall.map(|t| (t.cents, t.ms))),
                 r.rest_cents,
             ));
+            line.push_str("  ");
+            line.push_str(&excursions(note, rate));
         }
         if note.between_keys {
             line.push_str("  between keys");
@@ -290,6 +317,27 @@ fn notes_table(title: &str, reading: &Reading, from: u64, to: u64, rate: f64) ->
         ),
     }
     out
+}
+
+/// A note's excursions (capture-analysis 1.6) as the table gives them, in order: each its offset from the key, how
+/// long it holds and where it starts on the take, `+200c 60 ms @ 0.290 s`, joined by `; `, or
+/// `-` when there is none.
+fn excursions(note: &ReadNote, rate: f64) -> String {
+    let all: Vec<_> = note.residual.iter().flat_map(|r| &r.excursions).collect();
+    if all.is_empty() {
+        return "-".to_owned();
+    }
+    all.iter()
+        .map(|e| {
+            format!(
+                "{:+.0}c {:.0} ms @ {:.3} s",
+                e.cents,
+                (e.end - e.start) as f64 / rate * 1000.0,
+                e.start as f64 / rate
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// The performance stream's frames.
