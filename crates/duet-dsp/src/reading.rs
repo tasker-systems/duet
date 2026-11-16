@@ -348,6 +348,39 @@ pub struct Reader {
     /// probability of leaving its stable state. The rules have no cost of their own, so theirs
     /// is the loss's [`NOTE_COST`].
     pub note_cost: f64,
+    /// The thresholds Basic Pitch decoded its notes with. Only the basic-pitch reader writes
+    /// them. Added in `capture-analysis` 1.9: a 1.8 basic-pitch reading has none, and was
+    /// decoded with [`Thresholds::BASIC_PITCH`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thresholds: Option<Thresholds>,
+}
+
+/// Where Basic Pitch decodes a note from its model's output, under Basic Pitch's own names.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Thresholds {
+    /// The onset activation at which a note starts.
+    pub onset_threshold: f64,
+    /// The note activation below which a note ends, once it has stayed below for Basic
+    /// Pitch's energy tolerance (11 frames).
+    pub frame_threshold: f64,
+    /// A note lasts strictly longer than this, in milliseconds.
+    pub minimum_note_length_ms: f64,
+}
+
+impl Thresholds {
+    /// Basic Pitch's own defaults, as Spotify's basic-pitch v0.4.0 sets them.
+    pub const BASIC_PITCH: Thresholds = Thresholds {
+        onset_threshold: 0.5,
+        frame_threshold: 0.3,
+        minimum_note_length_ms: 127.70,
+    };
+}
+
+impl Default for Thresholds {
+    fn default() -> Thresholds {
+        Thresholds::BASIC_PITCH
+    }
 }
 
 impl Reader {
@@ -357,6 +390,7 @@ impl Reader {
         Reader {
             name: ReaderName::Rules,
             note_cost: NOTE_COST,
+            thresholds: None,
         }
     }
 
@@ -366,14 +400,18 @@ impl Reader {
         Reader {
             name: ReaderName::Hmm,
             note_cost,
+            thresholds: None,
         }
     }
-    /// Basic Pitch, with the loss's cost per note: like the rules, it has no cost of its own.
+
+    /// Basic Pitch, decoding with `thresholds`, and the loss's cost per note: like the rules,
+    /// it has no cost of its own.
     #[must_use]
-    pub const fn basic_pitch() -> Reader {
+    pub const fn basic_pitch(thresholds: Thresholds) -> Reader {
         Reader {
             name: ReaderName::BasicPitch,
             note_cost: NOTE_COST,
+            thresholds: Some(thresholds),
         }
     }
 }

@@ -23,6 +23,16 @@
 //! attack, which costs a flat [`ATTACK_COST`](crate::ATTACK_COST) a frame, so a rejoin can
 //! raise the loss: that is stated, with each rejoin, and never hidden.
 //!
+//! **What it asks of a reader:** that it start each note at the take's onset, when one is
+//! within `ONSET_GRACE_SECS` (50 ms) of where the note would start, as the rules, the note HMM
+//! and the basic-pitch reader each do. The pass looks for an onset only from the first note's
+//! last held frame to the second's `held_from` (or its first frame, when that is later), so a
+//! reader that starts and holds the second note more than a hop before the onset that split
+//! the two hides that onset, and the two are rejoined across the consonant. The tests'
+//! `a_split_held_from_more_than_a_hop_before_its_onset_is_rejoined_across_it` shows it, and
+//! duet-capture's `basic_pitch_keeps_the_consonant_at_16_39_s_two_f_sharp_3` fails without the
+//! basic-pitch reader's onset starts: Basic Pitch splits 13 ms before the onset there.
+//!
 //! **Each rejoin is stated** in the reading's `rejoins`, with the notes as the reader decoded
 //! them, so the capture keeps what was read and a later choice can undo the pass (the decision
 //! "intent is recorded beside the capture, never over it").

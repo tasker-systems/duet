@@ -79,7 +79,7 @@ pub use duet_dsp::{
     HitLane, Hits, KeyEstimate, LaneMode, Layer1, Loss, MAX_GAP_SECS, Melody, Mono, NOTE_COST,
     NoteModel, Onsets, Origin, Performance, PerformanceFrames, PerformanceHead, PitchFrame,
     PitchTrack, PitchUnit, Prepare, ReadNote, Reader, ReaderName, Reading, Stage,
-    TempoAlternatives, Timing, Tuning, WEAK_CONFIDENCE, a4_cents_of_hz, absolute_cents,
+    TempoAlternatives, Thresholds, Timing, Tuning, WEAK_CONFIDENCE, a4_cents_of_hz, absolute_cents,
     beat_series, estimate, estimate_key, estimate_tuning, felt_quarters, is_compound, read,
 };
 #[cfg(feature = "basic-pitch")]

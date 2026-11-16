@@ -48,7 +48,12 @@ use crate::{Kind, Version};
 /// Pitch, an outside model, chose where the notes start and end, and the take's performance
 /// gave each its key, centre and residual on the take's tuning. Every 1.7 document reads as it
 /// did.
+///
+/// **1.9** adds the reading's optional `reader.thresholds`, also additive: the onset threshold,
+/// frame threshold and minimum note length, in Basic Pitch's own names, that a basic-pitch
+/// reading's notes were decoded with. Only a basic-pitch reader has them. A 1.8 basic-pitch
+/// reading has none, and was decoded with Basic Pitch's defaults (0.5, 0.3 and 127.7 ms).
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 8);
+    const VERSION: Version = Version::new(1, 9);
 }
