@@ -1,9 +1,11 @@
 //! The comparison's audio: the take beside the reading, as a two-channel WAV, and the reading
-//! rendered as a sine that bridges short gaps and falls silent at rests ([`Gaps`]). Hand-written, with no dependency.
+//! rendered as a sine that bridges short gaps and falls silent at rests ([`Gaps`]), playing the
+//! melody alone or with what the residual measured ([`Render`]). Hand-written, with no
+//! dependency.
 
 use std::f64::consts::TAU;
 
-use duet_capture::{ReadNote, Reading};
+use duet_capture::{PerformanceFrames, ReadNote, Reading};
 
 /// How loud the reading's sine is: below a full-scale take, so the two sit together.
 const SINE_LEVEL: f64 = 0.3;
@@ -114,24 +116,143 @@ fn sine_cents(reading: &Reading, rate: u32, phrases: &[(usize, u64, u64)], at: u
     Some(before + (here - before) * along)
 }
 
-/// The reading as a sine at `rate`, one sample for each frame of `from..to`, silent in each gap
-/// `gaps` does not bridge. Each phrase fades in at its start and out at its end.
-pub fn sine(reading: &Reading, rate: u32, gaps: Gaps, from: u64, to: u64) -> Vec<f32> {
-    let fade = FADE_SECS * f64::from(rate);
-    let phrases = phrases(reading, rate, gaps);
+/// What the sine plays inside a note, beyond its key: each a way to hear what the reading holds.
+/// In a gap it bridges, it plays as [`Render::Melody`] does, whichever is chosen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Render {
+    /// The keys only, gliding through each note's slide in: the score the reading makes.
+    #[default]
+    Melody,
+    /// The keys, with each excursion (capture-analysis 1.6) held at its key plus its offset over
+    /// its frames, as a step: so an ornament is heard as the reading states it, a held pitch
+    /// with its start and end, and nothing in between.
+    Steps,
+    /// The keys plus the whole residual: inside a note the sine follows the performance's own
+    /// pitch, interpolated between its voiced frames, so slide, drift, vibrato and excursions are
+    /// all heard. Where a note has no voiced frame, the melody's pitch.
+    Bends,
+}
+
+impl Render {
+    /// What a rendering adds to the outputs' names: nothing for the melody, so its files keep
+    /// the names they had before there was a choice, and `.steps` or `.bends` for the others.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Render::Melody => "",
+            Render::Steps => ".steps",
+            Render::Bends => ".bends",
+        }
+    }
+}
+
+/// The reading's sine, as `gaps` and `render` make it: where it sounds, and at what pitch.
+pub struct Voice<'a> {
+    reading: &'a Reading,
+    frames: &'a PerformanceFrames,
+    rate: u32,
+    render: Render,
+    phrases: Vec<(usize, u64, u64)>,
+}
+
+impl<'a> Voice<'a> {
+    pub fn new(
+        reading: &'a Reading,
+        frames: &'a PerformanceFrames,
+        gaps: Gaps,
+        render: Render,
+    ) -> Voice<'a> {
+        let rate = frames.rate;
+        Voice {
+            reading,
+            frames,
+            rate,
+            render,
+            phrases: phrases(reading, rate, gaps),
+        }
+    }
+
+    /// The phrase sounding at sample frame `at`, as `(start, end)`, if any.
+    fn phrase(&self, at: u64) -> Option<(u64, u64)> {
+        let p = self
+            .phrases
+            .partition_point(|&(_, start, _)| start <= at)
+            .checked_sub(1)?;
+        let (_, start, end) = self.phrases[p];
+        (at < end).then_some((start, end))
+    }
+
+    /// The pitch the sine is at on sample frame `at`, in absolute cents, or `None` where it is
+    /// silent: the melody's ([`sine_cents`]) outside every note and for [`Render::Melody`];
+    /// inside a note, each excursion's key plus offset over its frames for [`Render::Steps`],
+    /// and the performance's pitch for [`Render::Bends`].
+    pub fn cents(&self, at: u64) -> Option<f64> {
+        let melody = sine_cents(self.reading, self.rate, &self.phrases, at)?;
+        let notes = &self.reading.notes;
+        let i = notes.partition_point(|n| n.start <= at).checked_sub(1);
+        let Some(note) = i.map(|i| &notes[i]).filter(|n| at < n.end) else {
+            return Some(melody);
+        };
+        match self.render {
+            Render::Melody => Some(melody),
+            Render::Steps => Some(
+                note.residual
+                    .iter()
+                    .flat_map(|r| &r.excursions)
+                    .find(|e| (e.start..e.end).contains(&at))
+                    .map_or(melody, |e| {
+                        key_cents(self.reading, note.key) + f64::from(e.cents)
+                    }),
+            ),
+            Render::Bends => Some(performance_cents(self.frames, note, at).unwrap_or(melody)),
+        }
+    }
+}
+
+/// The performance's pitch at sample frame `at`, inside `note`, in absolute cents: a straight
+/// line between the voiced frames either side of it within the note, or the nearer one's pitch
+/// before its first voiced frame and after its last. `None` when the note has no voiced frame.
+fn performance_cents(frames: &PerformanceFrames, note: &ReadNote, at: u64) -> Option<f64> {
+    let hop = u64::from(frames.hop);
+    let index = |frame: u64| frame.saturating_sub(frames.first_frame).div_ceil(hop) as usize;
+    // The note's frames, `first..last`, and the first of them after `at`.
+    let first = index(note.start).min(frames.len());
+    let last = index(note.end).min(frames.len());
+    let next = at
+        .checked_sub(frames.first_frame)
+        .map_or(0, |since| (since / hop + 1) as usize)
+        .clamp(first, last);
+    let voiced = |k: &usize| !frames.cents[*k].is_nan();
+    let before = (first..next).rev().find(voiced);
+    let after = (next..last).find(voiced);
+    let pitch = |k: usize| f64::from(frames.cents[k]);
+    match (before, after) {
+        (Some(b), Some(a)) => {
+            let (tb, ta) = (frames.frame(b) as f64, frames.frame(a) as f64);
+            let along = ((at as f64 - tb) / (ta - tb)).clamp(0.0, 1.0);
+            Some(pitch(b) + (pitch(a) - pitch(b)) * along)
+        }
+        (Some(k), None) | (None, Some(k)) => Some(pitch(k)),
+        (None, None) => None,
+    }
+}
+
+/// The reading as `voice` sings it, one sample for each frame of `from..to`, silent in each gap
+/// it does not bridge. Each phrase fades in at its start and out at its end. The phase runs on
+/// through a change of pitch, so a step is heard as a step and not as a click.
+pub fn sine(voice: &Voice, from: u64, to: u64) -> Vec<f32> {
+    let rate = f64::from(voice.rate);
+    let fade = FADE_SECS * rate;
     let mut phase = 0.0_f64;
     (from..to)
         .map(|at| {
-            let Some(cents) = sine_cents(reading, rate, &phrases, at) else {
+            let (Some(cents), Some((start, end))) = (voice.cents(at), voice.phrase(at)) else {
                 return 0.0;
             };
-            let p = phrases.partition_point(|&(_, start, _)| start <= at) - 1;
-            let (_, start, end) = phrases[p];
             let envelope = ((at - start) as f64 / fade)
                 .min((end - at) as f64 / fade)
                 .min(1.0);
             let sample = SINE_LEVEL * envelope * phase.sin();
-            phase = (phase + TAU * hz(cents) / f64::from(rate)) % TAU;
+            phase = (phase + TAU * hz(cents) / rate) % TAU;
             sample as f32
         })
         .collect()

@@ -753,11 +753,13 @@ duet capture compare idea.m4a                       # idea.compare.svg and idea.
 duet capture compare idea.m4a --from 33 --to 38     # five seconds of it: idea.compare.33.0-38.0.svg, .wav
 duet capture compare idea.m4a -o scratch/idea       # the stem it was captured to
 duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of the take
+duet capture compare idea.m4a --render steps        # the ornaments as steps: idea.compare.steps.svg, .wav
 ```
 
 - `STEM.compare.svg`: the performance's pitch in cents over time; the reading's notes as bars
   at their keys on the take's tuning (orange when between keys); the residual, the gap between
-  them, shaded; and the onsets as ticks under it.
+  them, shaded; each excursion (an ornament the residual measured) as an amber bar where it is
+  held; the sine's pitch, dotted, as the WAV plays it; and the onsets as ticks under it.
 - `STEM.compare.wav`: the take in the left channel, as the analysis heard it (one channel at
   22 050 Hz, so it lines up with the reading sample for sample), and the reading in the right as
   a sine at the take's own tuning, gliding only through each note's slide in (its scoop, where
@@ -765,16 +767,22 @@ duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of 
   than 0.2 s, about a consonant or a catch-breath, so a phrase plays as one tone. It is silent
   through a gap of 0.2 s or more, a breath or a rest, so a note the reading drops is heard as
   silence, not as the note before held on. `--legato` holds it through every gap; `--gapped`
-  silences it in every gap.
+  silences it in every gap. `--render` chooses what the sine plays inside a note, with any of
+  those: `melody`, the keys only (the default); `steps`, the keys with each excursion held at its
+  key plus its offset over its frames, so an ornament is heard as the reading states it; `bends`,
+  the keys plus the whole residual, so the sine follows the performance's own pitch.
 - On standard output, one line per note: when it starts, its key, its `centre` in cents, its
   residual's parts (where it is held, its drift in cents a second, its vibrato, scoop and fall,
-  and the rest), and whether it is between keys; then the take's loss as its three terms (pitch,
+  the rest, and its excursions, each its offset, length and start, `+200c 60 ms @ 0.290 s`), and
+  whether it is between keys; then the take's loss as its three terms (pitch,
   unread and notes). A reading written before `capture-analysis` 1.2 has no residual, and the
   output says so.
 
 `--from` and `--to` (seconds) window all three, and name the files after the window
 (`STEM.compare.FROM-TO.svg`, with `0.0` or `end` for a side not given), so a window never
-collides with the whole take's files. `--reading` compares another analysis of the same
+collides with the whole take's files. A `steps` or `bends` rendering adds its name after the
+window's (`STEM.compare.33.0-38.0.steps.wav`), so the three renderings sit side by side.
+`--reading` compares another analysis of the same
 take: its reading is the bars and the sine, the stem's own is drawn beside it dashed, and the
 outputs are named after it (`hmm.compare.svg`). Nothing is overwritten. Neither file the stem
 holds names the recording it was read from, so the recording is checked only by its length
@@ -889,13 +897,16 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
   - **What it builds:** clips of the whole take and of each named moment, for the stem's
     reading and for any `--reading` beside it. Each clip has the take on the left and the
     reading's sine on the right, raised 6 dB.
-  - **Three versions of each clip,** each as `duet capture compare` renders it:
+  - **Five versions of each clip,** each as `duet capture compare` renders it:
     - bridged, its default: the sine held through a gap under 0.2 s and silent at a longer one,
       so a dropped note is heard as a gap;
     - legato (`--legato`), with the sine held through every gap;
-    - gapped (`--gapped`), with the sine silent wherever the reading has no note.
+    - gapped (`--gapped`), with the sine silent wherever the reading has no note;
+    - steps (`--render steps`), bridged, with each excursion held at its key plus its offset;
+    - bends (`--render bends`), bridged, with the keys plus the residual: the performance's own
+      pitch.
   - **Playing them:** a menu plays one clip at a time. `N` plays clip N bridged, `Nl` legato,
-    `Ng` gapped, and `q` quits. While a clip plays, it shows where the clip is in the take and
+    `Ng` gapped, `Ns` steps, `Nb` bends, and `q` quits. While a clip plays, it shows where the clip is in the take and
     which note is being read.
   - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
     the start of the take, with a free-text label. A line starting with `#` is a comment.
@@ -903,7 +914,8 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
   - **Clips of a licence-restricted take are copies of it.** Keep them, and its moments
     file, out of git.
   - **`scripts/listen/check.sh`** builds the synthetic corpus melody's clips and checks each
-    one's length against its window. CI does not run it.
+    one's length against its window, and that the steps and bends clips are their own renderings.
+    CI does not run it.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.
