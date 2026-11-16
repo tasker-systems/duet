@@ -66,7 +66,7 @@ downbeat = 0.25
 
 [[listened]]
 file = "wayfaring-stranger.flac"
-provenance = "The owner's recording of the traditional song Wayfaring Stranger, sung by Pete Taylor, recorded 2026-11-15 with `duet record` (48 kHz 24-bit) and resampled to 22.05 kHz 16-bit mono"
+provenance = "The owner's recording of the traditional song Wayfaring Stranger, sung by James (Pete) Taylor, recorded 2026-11-15 with `duet record` (48 kHz 24-bit) and resampled to 22.05 kHz 16-bit mono"
 licence = "CC-BY-4.0"
 licence_file = "wayfaring-stranger.flac.license"
 key = "Eb"
