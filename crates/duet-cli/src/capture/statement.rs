@@ -133,6 +133,23 @@ pub fn rejoined(reading: &Reading) -> Option<String> {
     ))
 }
 
+/// How many notes the reading's breathy pass carried on over the weakly voiced frames after them,
+/// for how long in all, and what it did to the loss, in nats: stated only when it carried any
+/// on, so that reading frames #48 would leave out is never hidden.
+pub fn breathy(reading: &Reading, rate: u32) -> Option<String> {
+    let n = reading.breathy.len();
+    if n == 0 {
+        return None;
+    }
+    let samples: u64 = reading.breathy.iter().map(|b| b.end - b.decoded.end).sum();
+    let ms = samples as f64 * 1000.0 / f64::from(rate);
+    let change: f64 = reading.breathy.iter().map(|b| b.loss_change).sum();
+    Some(format!(
+        "breathy: {n} note{} carried on over {ms:.0} ms of weakly voiced frames whose pitch goes on, the loss {change:+.1} nats",
+        if n == 1 { "" } else { "s" }
+    ))
+}
+
 /// The key, stated only when it was estimated, with its relative major or minor.
 pub fn key(key: Option<&KeyEstimate>) -> Option<String> {
     let estimate = key?;

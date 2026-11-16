@@ -212,7 +212,7 @@ fn the_fixed_lag_decodes_as_the_whole_take_does() {
     for signal in &signals {
         let (frames, onsets) = performance(signal);
         let model = NoteModel::default();
-        let lagged = model.read(&frames, &onsets, Some(A440_CENTS));
+        let lagged = model.read_as_decoded(&frames, &onsets, Some(A440_CENTS));
         let whole = model.read_with_lag(&frames, &onsets, Some(A440_CENTS), frames.len());
         assert_eq!(lagged.notes, whole.notes);
     }

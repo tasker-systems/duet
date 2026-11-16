@@ -59,6 +59,7 @@
 
 #[cfg(feature = "basic-pitch")]
 mod basic_pitch;
+mod breathy;
 mod error;
 mod event;
 mod hits;
@@ -79,6 +80,7 @@ mod timing;
 
 #[cfg(feature = "basic-pitch")]
 pub use basic_pitch::{BasicPitch, BasicPitchRead, MODEL_SHA256};
+pub use breathy::{BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, breathe};
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
 pub use hits::{Hits, LaneMode};
@@ -95,7 +97,7 @@ pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use reading::{
     A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reader, ReaderName, Reading,
-    Tuning, a4_cents_of_hz, estimate_tuning, read, read_as_decoded,
+    Tuning, a4_cents_of_hz, estimate_tuning, interpret, read, read_as_decoded,
 };
 pub use rejoin::{Dip, REJOIN_CENTS, REJOIN_TOLERANCE_CENTS, Rejoin, rejoin};
 pub use residual::{

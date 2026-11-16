@@ -16,9 +16,10 @@
 //! A note starts at the take's onset nearest its start, when one is within
 //! `ONSET_GRACE_SECS` (50 ms) of it, as the note HMM starts its notes: Basic Pitch's own
 //! frames fall up to a hop either side of the onset the performance hears, and the same-key
-//! rejoin keeps a split only where an onset falls at it. Then the same-key rejoin
-//! ([`rejoin`](crate::rejoin)) runs over the notes, as it does over the other readers':
-//! [`BasicPitch::read_as_decoded`] is the reading before it.
+//! rejoin keeps a split only where an onset falls at it. Then the reading's interpretive passes
+//! ([`interpret`](crate::interpret)), the breathy ornament and the same-key rejoin, run over
+//! the notes, as they do over the other readers': [`BasicPitch::read_as_decoded`] is the
+//! reading before them.
 
 use basic_pitch::model::TractBackend;
 use basic_pitch::{BasicPitch as Model, NoteEvent, NoteParams};
@@ -26,8 +27,7 @@ use basic_pitch::{BasicPitch as Model, NoteEvent, NoteParams};
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::notes::{ONSET_GRACE_SECS, level_strength, median};
-use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, tuning_of};
-use crate::rejoin::rejoin;
+use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, interpret, tuning_of};
 use crate::residual::residual;
 
 /// Spotify's Basic Pitch note model, `nmp.onnx` from basic-pitch v0.4.0, unmodified.
@@ -80,8 +80,9 @@ impl BasicPitch {
 
     /// Reads `samples`, the take's mono audio from its first frame at duet's analysis rate, over
     /// `frames`, its performance, on `given`, A4 in absolute cents, or on the tuning estimated
-    /// from the frames. Then the same-key rejoin runs over the notes, with `onsets`, the take's
-    /// (other events are ignored).
+    /// from the frames. Then the reading's interpretive passes ([`interpret`](crate::interpret)),
+    /// the breathy ornament and the same-key rejoin, run over the notes, with `onsets`, the
+    /// take's (other events are ignored).
     ///
     /// # Errors
     ///
@@ -95,12 +96,12 @@ impl BasicPitch {
     ) -> Result<BasicPitchRead> {
         let read = self.read_as_decoded(samples, frames, onsets, given)?;
         Ok(BasicPitchRead {
-            reading: rejoin(read.reading, frames, onsets),
+            reading: interpret(read.reading, frames, onsets),
             ..read
         })
     }
 
-    /// [`BasicPitch::read`], before the same-key rejoin: the notes as Basic Pitch decodes them,
+    /// [`BasicPitch::read`], before its interpretive passes: the notes as Basic Pitch decodes them,
     /// one at a time, each started at an onset within `ONSET_GRACE_SECS` (50 ms) of its
     /// start, and keyed on the take's tuning.
     ///
