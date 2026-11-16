@@ -67,6 +67,12 @@ fn row(loss: &Loss) -> String {
     )
 }
 
+/// The readers whose losses are reported: Basic Pitch's too when it is built.
+#[cfg(feature = "basic-pitch")]
+const READERS: [ReaderName; 3] = [ReaderName::Rules, ReaderName::Hmm, ReaderName::BasicPitch];
+#[cfg(not(feature = "basic-pitch"))]
+const READERS: [ReaderName; 2] = [ReaderName::Rules, ReaderName::Hmm];
+
 /// The note HMM must match every melody take's transcription as the rules do, and both
 /// readings' losses are reported per take, as their terms, with each term the HMM is
 /// worse on named.
@@ -77,7 +83,7 @@ fn the_note_hmm_matches_every_melody_transcription_and_both_losses_are_reported(
     for take in manifest.take.iter().filter(|t| t.kind == TakeKind::Melody) {
         let name = &take.file;
         let mut losses = Vec::new();
-        for reader in [ReaderName::Rules, ReaderName::Hmm] {
+        for reader in READERS {
             let (reading, read) = match read_by(take, reader) {
                 Ok(both) => both,
                 Err(e) => {
@@ -103,8 +109,11 @@ fn the_note_hmm_matches_every_melody_transcription_and_both_losses_are_reported(
         }
         for (reader, (loss, read, unread)) in &losses {
             eprintln!(
-                "loss: {name:<24} {:<5}  {}  (frames read {read}, unread {unread})",
-                format!("{reader:?}").to_lowercase(),
+                "loss: {name:<24} {:<11}  {}  (frames read {read}, unread {unread})",
+                serde_json::to_value(reader)
+                    .expect("a reader's name")
+                    .as_str()
+                    .unwrap_or("?"),
                 row(loss)
             );
         }

@@ -32,3 +32,7 @@ flacenc = { version = "0.5.1", default-features = false }
 rustfft = "6.4.1"
 serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"
+
+[features]
+# The basic-pitch reader, with its model embedded (duet-dsp's `basic-pitch`).
+basic-pitch = ["duet-dsp/basic-pitch"]

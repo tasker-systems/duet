@@ -467,6 +467,63 @@ fn the_reader_is_chosen_stated_and_written() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
+/// `--reader basic-pitch` reads the scale with Spotify's Basic Pitch: stated, counted and
+/// written in the analysis, which reads back as capture-analysis 1.7, with the HMM's keys. Its
+/// reading compares against the HMM's.
+#[test]
+fn basic_pitch_reads_a_scale_stated_and_written() {
+    let dir = scratch("capture-basic-pitch");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    let hmm = capture(&dir, &["melody", s(&wav), "-o", s(&dir.join("hmm"))]);
+    ok(&hmm, "capture");
+    let bp = capture(
+        &dir,
+        &[
+            "melody",
+            s(&wav),
+            "--reader",
+            "basic-pitch",
+            "-o",
+            s(&dir.join("bp")),
+        ],
+    );
+    ok(&bp, "capture --reader basic-pitch");
+    let err = stderr(&bp);
+    assert!(
+        err.lines()
+            .any(|l| l.starts_with("reader: Spotify's Basic Pitch")),
+        "{err}"
+    );
+    assert!(
+        err.lines()
+            .any(|l| l.starts_with("basic-pitch: ") && l.contains(" notes found")),
+        "{err}"
+    );
+    assert_eq!(
+        keys(&song_of(&dir.join("bp.duet"))),
+        keys(&song_of(&dir.join("hmm.duet")))
+    );
+    let reading = &analysis_of(&dir.join("bp.capture.duet"))["reading"];
+    assert_eq!(
+        reading["reader"],
+        serde_json::json!({ "name": "basic-pitch", "note_cost": 4.0 })
+    );
+    let compared = duet(
+        &dir,
+        &[
+            "capture",
+            "compare",
+            s(&wav),
+            "-o",
+            s(&dir.join("hmm")),
+            "--reading",
+            s(&dir.join("bp.capture.duet")),
+        ],
+    );
+    ok(&compared, "capture compare --reading bp.capture.duet");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
 /// Every file a melody capture writes is refused, rather than overwritten, when it exists.
 #[test]
 fn melody_refuses_to_overwrite_each_of_its_outputs() {

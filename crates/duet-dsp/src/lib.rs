@@ -40,10 +40,14 @@
 //! ([`Stage::latency_frames`]). [`estimate`] and [`estimate_key`] are functions over the
 //! settled events, not stages: like assembly, they keep the whole take only as events.
 //!
-//! # Where a model fits later
+//! # Where a model fits
 //!
-//! This version has no model, no model runtime and no model download. A model such as
-//! basic-pitch (Apache-2.0, with an ONNX export, run through `ort`) would be one more
+//! With the `basic-pitch` feature, Spotify's Basic Pitch is a reader (`BasicPitch`): it reads a
+//! monophonic take's samples, chooses where its notes start and end, and the performance keys
+//! them, as for the other readers. Its model is embedded and nothing is downloaded. Without the
+//! feature there is no model and no model runtime.
+//!
+//! A model that replaces the melody stage, for a polyphonic take, would be one more
 //! implementation of [`Stage`] with `In = Mono` and `Out = Event`: it owns whatever buffering
 //! the model's window needs, reports it as its `latency_frames`, and emits [`Event::Note`]s as
 //! they settle. It would replace [`Melody`] for polyphonic takes, and [`estimate`] and
@@ -53,6 +57,8 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "basic-pitch")]
+mod basic_pitch;
 mod error;
 mod event;
 mod hits;
@@ -71,6 +77,8 @@ mod stage;
 mod synth;
 mod timing;
 
+#[cfg(feature = "basic-pitch")]
+pub use basic_pitch::{BasicPitch, BasicPitchRead, MODEL_SHA256};
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
 pub use hits::{Hits, LaneMode};

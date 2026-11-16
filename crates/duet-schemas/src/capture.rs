@@ -43,7 +43,12 @@ use crate::{Kind, Version};
 /// them (its `start`, `end` and furthest `cents` from the key), and the `loss_change` the rejoin
 /// made, in nats, above zero where it raised the loss. Omitted when nothing was rejoined, so a
 /// 1.6 document reads as one whose notes are as decoded.
+///
+/// **1.8** adds `basic-pitch` to the reading's `reader.name`, also additive: Spotify's Basic
+/// Pitch, an outside model, chose where the notes start and end, and the take's performance
+/// gave each its key, centre and residual on the take's tuning. Every 1.7 document reads as it
+/// did.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 7);
+    const VERSION: Version = Version::new(1, 8);
 }

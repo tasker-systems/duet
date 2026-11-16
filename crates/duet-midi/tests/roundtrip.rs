@@ -1270,10 +1270,31 @@ fn excursions_in(text: &str) -> Vec<Option<serde_json::Value>> {
 }
 
 #[test]
+fn a_basic_pitch_reader_round_trips_exactly_through_json() {
+    // capture-analysis 1.8: a reading by Basic Pitch names its reader `basic-pitch`, and the
+    // document writes back as the text it was read from.
+    let text = analysis_example("1.8").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
+    assert!(
+        text.contains(r#""name": "basic-pitch""#),
+        "the example has no hmm reader"
+    );
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    let written = doc.write().unwrap();
+    assert_eq!(written, text);
+    let value: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(
+        value["body"]["reading"]["reader"]["name"],
+        serde_json::json!("basic-pitch")
+    );
+}
+
+#[test]
 fn a_notes_excursions_round_trip_exactly_through_json() {
     // capture-analysis 1.6, at the current version's example: every excursion's start, end and
     // cents read back to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.7");
+    let text = analysis_example("1.8");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1323,7 +1344,7 @@ fn rejoins_in(text: &str) -> Option<serde_json::Value> {
 fn a_readings_rejoins_round_trip_exactly_through_json() {
     // capture-analysis 1.7: every decoded note, dip and loss change a rejoin states reads back
     // to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.7");
+    let text = analysis_example("1.8");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };

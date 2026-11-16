@@ -93,3 +93,33 @@ fn the_held_approach_at_18_56_s_is_the_f_sharp_3_it_arrives_at() {
     let keys: Vec<u8> = notes.iter().map(|n| n.key).collect();
     assert_eq!(keys, [F_SHARP_3], "{notes:?}");
 }
+
+#[cfg(feature = "basic-pitch")]
+#[test]
+fn basic_pitch_reads_the_dip_at_9_54_s_as_one_d_sharp_3_once_rejoined() {
+    // Basic Pitch splits the D#3 in three (9.24, 9.64 and 9.78 s), as decoded. The rejoin runs
+    // after it as after the other readers, and reads one D#3, as the owner hears it.
+    let reading = reading(ReaderName::BasicPitch);
+    let notes = during(&reading, 9.3, 9.9);
+    let keys: Vec<u8> = notes.iter().map(|n| n.key).collect();
+    assert_eq!(keys, [D_SHARP_3], "{notes:?}");
+    let rejoin = reading
+        .rejoins
+        .iter()
+        .find(|r| r.decoded[0].start == notes[0].start)
+        .unwrap_or_else(|| panic!("no rejoin stated: {:?}", reading.rejoins));
+    assert_eq!(rejoin.decoded.len(), 3, "{rejoin:?}");
+}
+
+#[cfg(feature = "basic-pitch")]
+#[test]
+fn basic_pitch_keeps_the_consonant_at_16_39_s_two_f_sharp_3() {
+    // Basic Pitch splits the F#3 at 16.380 s, 13 ms before the onset at 16.393 s. Started at
+    // the onset, as the HMM starts its notes, the second F#3 keeps its split through the
+    // rejoin; the split inside it at 16.554 s has no onset, and is rejoined.
+    let reading = reading(ReaderName::BasicPitch);
+    let notes = during(&reading, 16.2, 16.7);
+    let keys: Vec<u8> = notes.iter().map(|n| n.key).collect();
+    assert_eq!(keys, [F_SHARP_3, F_SHARP_3], "{notes:?}");
+    assert!((16.38..16.40).contains(&secs(notes[1].start)), "{notes:?}");
+}
