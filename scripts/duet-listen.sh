@@ -16,9 +16,10 @@
 #   --rebuild  rebuild clips that already exist
 #   --no-play  build the clips, then stop
 #
-# Every clip comes twice: legato, as `duet capture compare` plays it (its sine holds each key until
-# the next note, through any gap), and gapped (silent wherever the reading has no note, from
-# scripts/listen/render_gapped.py). In the menu, N plays clip N legato, Ng gapped, q quits; while a
+# Every clip comes three ways, each as `duet capture compare` renders it: bridged, its default (the
+# sine holds through a gap under 0.2 s and is silent at a longer one, so a dropped note is heard as
+# silence); legato (--legato: held through every gap); and gapped (--gapped: silent wherever the
+# reading has no note). In the menu, N plays clip N bridged, Nl legato, Ng gapped, q quits; while a
 # clip plays, scripts/listen/play.py shows where it is in the clip and the take, and the note read.
 #
 # duet is DUET_BIN, else this checkout's target/release/duet, else duet on PATH. Needs ffmpeg,
@@ -29,7 +30,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 
 die() { echo "duet-listen: $*" >&2; exit 1; }
-usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 take="" stem="" moments="" out="" gain="2.0" rebuild=0 play=1
 labels=() analyses=()
@@ -90,8 +91,9 @@ if [[ -n "$moments" ]]; then
   done <"$moments"
 fi
 
-# Each clip is made in a directory of its own: compare never overwrites a file, so a clip made
+# Each rendering is made in a directory of its own: compare never overwrites a file, so one made
 # beside an older one would fail and leave the older one in its place.
+renderings=("" -legato -gap) flags=("" --legato --gapped)
 items=() item_from=() item_cap=() item_label=()
 for w in "${!win_key[@]}"; do
   for r in "${!labels[@]}"; do
@@ -99,24 +101,27 @@ for w in "${!win_key[@]}"; do
     cap="${analyses[$r]:-$stem.capture.duet}"
     items+=("$name") item_from+=("${win_from[$w]:-0}") item_cap+=("$cap")
     item_label[${#items[@]}]="${win_label[$w]} · ${labels[$r]}"
-    if ((rebuild == 0)) && [[ -f "$out/$name.wav" && -f "$out/$name-gap.wav" ]]; then continue; fi
-    work=$(mktemp -d "${TMPDIR:-/tmp}/duet-listen.XXXXXX")
-    cp "$stem.capture.duet" "$stem.performance.duet.jsonl" "$work/"
-    cmd=("$duet" capture compare "$take_path" -o "$work/$(basename "$stem")")
-    if [[ -n "${analyses[$r]}" ]]; then
-      cp "${analyses[$r]}" "$work/reading.capture.duet"
-      cmd+=(--reading "$work/reading.capture.duet")
-    fi
-    [[ -n "${win_from[$w]}" ]] && cmd+=(--from "${win_from[$w]}" --to "${win_to[$w]}")
+    if ((rebuild == 0)) && [[ -f "$out/$name.wav" && -f "$out/$name-legato.wav" \
+      && -f "$out/$name-gap.wav" ]]; then continue; fi
     printf 'building %-40s\r' "$name" >&2
-    "${cmd[@]}" >/dev/null || die "duet capture compare failed for $name"
-    wav=("$work"/*.compare.wav) svg=("$work"/*.compare.svg)
-    ffmpeg -v error -y -i "${wav[0]}" -af "pan=stereo|c0=c0|c1=${gain}*c1" -c:a pcm_s16le "$out/$name.wav"
-    ffmpeg -v error -y -i "${wav[0]}" -c:a pcm_s16le "$work/s16.wav"
-    python3 -I "$here/listen/render_gapped.py" "$work/s16.wav" "$cap" "$out/$name-gap.wav" \
-      "${win_from[$w]:-0}" "$gain"
-    cp "${svg[0]}" "$out/$name.svg"
-    rm -rf "$work"
+    for k in "${!renderings[@]}"; do
+      work=$(mktemp -d "${TMPDIR:-/tmp}/duet-listen.XXXXXX")
+      cp "$stem.capture.duet" "$stem.performance.duet.jsonl" "$work/"
+      cmd=("$duet" capture compare "$take_path" -o "$work/$(basename "$stem")")
+      if [[ -n "${analyses[$r]}" ]]; then
+        cp "${analyses[$r]}" "$work/reading.capture.duet"
+        cmd+=(--reading "$work/reading.capture.duet")
+      fi
+      [[ -n "${win_from[$w]}" ]] && cmd+=(--from "${win_from[$w]}" --to "${win_to[$w]}")
+      [[ -n "${flags[$k]}" ]] && cmd+=("${flags[$k]}")
+      "${cmd[@]}" >/dev/null || die "duet capture compare failed for $name${renderings[$k]}"
+      wav=("$work"/*.compare*.wav) svg=("$work"/*.compare*.svg)
+      ((${#wav[@]} == 1)) && [[ -f "${wav[0]}" ]] || die "compare wrote no one WAV for $name"
+      ffmpeg -v error -y -i "${wav[0]}" -af "pan=stereo|c0=c0|c1=${gain}*c1" -c:a pcm_s16le \
+        "$out/$name${renderings[$k]}.wav"
+      [[ -z "${renderings[$k]}" ]] && cp "${svg[0]}" "$out/$name.svg"
+      rm -rf "$work"
+    done
   done
 done
 printf '%-60s\r' "" >&2
@@ -128,7 +133,8 @@ while true; do
   clear
   echo "duet-listen — $(basename "$take")"
   echo "the take LEFT · the reading's sine RIGHT (×$gain)"
-  echo "  N  = legato (as compare plays it: the sine holds through gaps)"
+  echo "  N  = bridged (compare's default: held through a gap under 0.2 s, silent at a rest)"
+  echo "  Nl = legato (the sine holds through every gap)"
   echo "  Ng = gapped (the sine is silent wherever the reading has no note)"
   echo "  q  = quit · Ctrl-C stops a clip"
   echo
@@ -136,12 +142,13 @@ while true; do
   echo
   read -r -p "> " choice || exit 0
   [[ "$choice" == q ]] && exit 0
-  suffix=""
-  if [[ "$choice" == *g ]]; then suffix="-gap"; choice="${choice%g}"; fi
+  suffix="" shown=""
+  if [[ "$choice" == *g ]]; then suffix="-gap" shown=" [gapped]"; choice="${choice%g}"
+  elif [[ "$choice" == *l ]]; then suffix="-legato" shown=" [legato]"; choice="${choice%l}"; fi
   [[ "$choice" =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= ${#items[@]})) || continue
   i=$((choice - 1))
   echo
-  echo "▶ ${item_label[$choice]}${suffix:+ [gapped]}"
+  echo "▶ ${item_label[$choice]}${shown}"
   python3 -I "$here/listen/play.py" "$out/${items[$i]}$suffix.wav" "${item_from[$i]}" "$take_secs" \
     "${item_cap[$i]}" || true
 done
