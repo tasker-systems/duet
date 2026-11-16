@@ -601,6 +601,48 @@ fn estimates_are_stated_on_stderr_and_in_both_files() {
 }
 
 #[test]
+fn a_rejoined_dip_is_stated_and_written_in_the_analysis() {
+    // A held B-flat dipping 170 cents and back over 0.1 s with no onset, among plain notes:
+    // the note HMM splits it at the dip, and the reading's pass rejoins it, saying so.
+    let dir = scratch("capture-rejoined");
+    let notes = [(63, 0.5), (67, 0.5), (70, 1.0), (67, 0.5), (63, 1.0)];
+    let dip = |note: usize, t: f64| {
+        let into = (t - 0.45) / 0.05;
+        if note == 2 && (0.0..2.0).contains(&into) {
+            -170.0 * (1.0 - (into - 1.0).abs())
+        } else {
+            0.0
+        }
+    };
+    let wav = take(&dir, "dip.wav", &audio::notes_bent(0.5, &notes, dip));
+    let out = capture(&dir, &["melody", s(&wav), "--tempo", "120"]);
+    ok(&out, "capture melody");
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("rejoined: 1 same-key split "))
+        .unwrap_or_else(|| panic!("no rejoin statement: {err}"));
+    assert!(line.contains(" nats"), "{line}");
+    let stated = document_of(&dir.join("dip.duet")).statements;
+    assert!(stated.iter().any(|l| l == line), "{stated:?}");
+    let analysis = analysis_of(&dir.join("dip.capture.duet"));
+    let reading = &analysis["reading"];
+    let keys: Vec<u64> = reading["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["key"].as_u64().unwrap())
+        .collect();
+    assert_eq!(keys, [63, 67, 70, 67, 63], "{reading}");
+    let rejoins = reading["rejoins"]
+        .as_array()
+        .expect("the rejoin is written");
+    assert_eq!(rejoins.len(), 1, "{rejoins:?}");
+    assert_eq!(rejoins[0]["decoded"].as_array().unwrap().len(), 2);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
 fn a_given_tempo_is_not_reported_as_an_estimate() {
     let dir = scratch("capture-given");
     let wav = take(&dir, "tune.wav", &eb_major());

@@ -64,6 +64,7 @@ mod performance;
 mod pitch;
 mod prepare;
 mod reading;
+mod rejoin;
 mod residual;
 mod stage;
 #[cfg(test)]
@@ -86,8 +87,9 @@ pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use reading::{
     A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reader, ReaderName, Reading,
-    Tuning, a4_cents_of_hz, estimate_tuning, read,
+    Tuning, a4_cents_of_hz, estimate_tuning, read, read_as_decoded,
 };
+pub use rejoin::{Dip, REJOIN_CENTS, REJOIN_TOLERANCE_CENTS, Rejoin, rejoin};
 pub use residual::{
     CentreHistogram, Drift, EXCURSION_CENTS, Excursion, LOSS_SIGMA_CENTS, Loss, Modulation,
     NOTE_COST, NoteResidual, SHORTEST_EXCURSION_FRAMES, TakeResidual, Transition, held_cost,

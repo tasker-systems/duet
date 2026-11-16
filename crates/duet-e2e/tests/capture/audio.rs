@@ -80,6 +80,30 @@ pub fn notes_each_off(lead: f64, notes: &[(u8, f64, f64)]) -> Vec<f32> {
     out
 }
 
+/// [`notes`], each bent `bend(note, t)` cents off its key at `t` seconds into it, its phase
+/// unbroken, so a bend is never attacked afresh.
+pub fn notes_bent(lead: f64, notes: &[(u8, f64)], bend: impl Fn(usize, f64) -> f64) -> Vec<f32> {
+    let mut out = silence(lead);
+    for (note, &(midi, secs)) in notes.iter().enumerate() {
+        let len = frames(secs);
+        let (attack, release) = (frames(0.005) as f64, frames(0.02) as f64);
+        let mut phase = 0.0;
+        for i in 0..len {
+            let t = i as f64 / f64::from(RATE);
+            let freq = 440.0 * ((f64::from(midi) - 69.0 + bend(note, t) / 100.0) / 12.0).exp2();
+            phase += TAU * freq / f64::from(RATE);
+            let tone: f64 = (1..=4)
+                .map(|n| (phase * f64::from(n)).sin() / f64::from(n))
+                .sum::<f64>()
+                / (1.0 + 1.0 / 2.0 + 1.0 / 3.0 + 1.0 / 4.0);
+            let envelope = (i as f64 / attack).min((len - i) as f64 / release).min(1.0);
+            out.push((tone * envelope * 0.5) as f32);
+        }
+    }
+    out.extend(silence(1.0));
+    out
+}
+
 /// `secs` of silence with a burst of noise limited to `low..high` Hz at each `(start, length)`,
 /// with a 2 ms attack and a 30 ms decay.
 pub fn bursts(secs: f64, bursts: &[(f64, f64)], low: f64, high: f64) -> Vec<f32> {
