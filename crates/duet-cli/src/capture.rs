@@ -52,8 +52,10 @@ pub enum CaptureCommand {
     /// Compare a melody take's reading against its performance: STEM.compare.svg plots the
     /// performance's pitch with the reading's notes at their keys on the take's tuning, and the
     /// residual between them; STEM.compare.wav holds the take on the left and the reading on the
-    /// right as a sine; standard output lists each note. Reads the take's recording and what
-    /// `duet capture melody` wrote at STEM; nothing is overwritten.
+    /// right as a sine, held through a gap under 0.2 s and silent through a longer one; standard
+    /// output lists each note. A window (--from, --to) is named after it, as
+    /// STEM.compare.FROM-TO.svg and .wav. Reads the take's recording and what `duet capture
+    /// melody` wrote at STEM; nothing is overwritten.
     Compare(compare::CompareArgs),
 }
 

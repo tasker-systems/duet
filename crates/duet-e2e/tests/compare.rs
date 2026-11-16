@@ -211,7 +211,7 @@ fn a_window_cuts_the_plot_the_audio_and_the_notes() {
         ],
     );
     ok(&out, "capture compare --from --to");
-    let (rate, left, right) = read_wav(&dir.join("take.compare.wav"));
+    let (rate, left, right) = read_wav(&dir.join("take.compare.1.0-2.0.wav"));
     assert_eq!(left.len(), rate as usize, "one second");
     assert_eq!(right.len(), left.len());
     let input = take_samples(&take);
@@ -231,7 +231,7 @@ fn a_window_cuts_the_plot_the_audio_and_the_notes() {
         })
         .count();
     assert!(shown < notes.len(), "the window leaves a note out");
-    let svg = std::fs::read_to_string(dir.join("take.compare.svg")).expect("svg");
+    let svg = std::fs::read_to_string(dir.join("take.compare.1.0-2.0.svg")).expect("svg");
     assert_eq!(bars(&svg, "note"), shown);
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     assert_eq!(
@@ -250,15 +250,20 @@ fn compare_never_overwrites_and_refuses_what_it_cannot_compare() {
     );
     let svg = std::fs::read(dir.join("take.compare.svg")).expect("svg");
     let wav = std::fs::read(dir.join("take.compare.wav")).expect("wav");
-    let refused = |args: &[&str], says: &str| {
+    // Every refusal exits non-zero and names the file it refuses.
+    let refused = |args: &[&str], names: &Path, says: &str| {
         let out = duet(&dir, args);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
-            !out.status.success() && err.contains(says),
+            !out.status.success() && err.contains(says) && err.contains(s(names)),
             "{args:?}: {err}"
         );
     };
-    refused(&["capture", "compare", s(&take)], "never overwrites");
+    refused(
+        &["capture", "compare", s(&take)],
+        &dir.join("take.compare.svg"),
+        "never overwrites",
+    );
     assert_eq!(
         std::fs::read(dir.join("take.compare.svg")).expect("svg"),
         svg
@@ -275,7 +280,20 @@ fn compare_never_overwrites_and_refuses_what_it_cannot_compare() {
     audio::write_wav(&short, &audio::silence(1.0));
     refused(
         &["capture", "compare", s(&short), "-o", s(&dir.join("take"))],
+        &short,
         "it is not the take",
+    );
+    let missing = dir.join("missing.wav");
+    refused(
+        &[
+            "capture",
+            "compare",
+            s(&missing),
+            "-o",
+            s(&dir.join("take")),
+        ],
+        &missing,
+        "cannot open",
     );
     // An analysis with no reading: a rhythm take's, or one older than 1.1.
     let mut doc = json(&dir.join("take.capture.duet"));
@@ -284,12 +302,30 @@ fn compare_never_overwrites_and_refuses_what_it_cannot_compare() {
     std::fs::write(&bare, doc.to_string()).expect("write");
     refused(
         &["capture", "compare", s(&take), "--reading", s(&bare)],
+        &bare,
         "holds no reading",
     );
     assert!(!dir.join("bare.compare.svg").exists());
     refused(
         &["capture", "compare", s(&take), "--from", "9"],
+        &take,
         "the window holds nothing",
+    );
+    // A window's outputs are refused as the whole take's are.
+    let window = ["capture", "compare", s(&take), "--from", "1", "--to", "2"];
+    ok(&duet(&dir, &window), "a window");
+    refused(
+        &window,
+        &dir.join("take.compare.1.0-2.0.svg"),
+        "never overwrites",
+    );
+    let both = duet(
+        &dir,
+        &["capture", "compare", s(&take), "--legato", "--gapped"],
+    );
+    assert!(
+        !both.status.success(),
+        "--legato and --gapped are one or the other"
     );
 }
 
@@ -374,4 +410,185 @@ fn a_reading_with_no_residual_compares() {
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     assert!(stdout.contains("no residual or loss"), "{stdout}");
     assert!(!stdout.contains("# loss:"), "{stdout}");
+}
+
+/// The longest gap the sine bridges: `BRIDGE_SECS` in `wav.rs`.
+const BRIDGE_SECS: f64 = 0.2;
+
+/// C4, then E4 after a short gap (a consonant's), then G4 after a rest (a breath's), sung 20 cents
+/// sharp from half a second in, captured at `dir/take`.
+fn captured_with_gaps(dir: &Path) -> PathBuf {
+    let tone = |key: u8, secs: f64| {
+        let mut t = audio::notes_off(0.0, &[(key, secs)], SHARP_CENTS);
+        t.truncate((secs * f64::from(audio::RATE)).round() as usize);
+        t
+    };
+    let mut samples = audio::silence(0.5);
+    samples.extend(tone(60, 0.6));
+    samples.extend(audio::silence(0.12));
+    samples.extend(tone(64, 0.6));
+    samples.extend(audio::silence(0.5));
+    samples.extend(tone(67, 0.6));
+    samples.extend(audio::silence(1.0));
+    let take = dir.join("take.wav");
+    audio::write_wav(&take, &samples);
+    ok(
+        &duet(dir, &["capture", "melody", s(&take), "--tempo", "120"]),
+        "capture melody",
+    );
+    take
+}
+
+/// The right channel of a compare run with `flags`, moved aside so the next run can write.
+fn right_channel(dir: &Path, take: &Path, flags: &[&str]) -> Vec<f32> {
+    let mut args = vec!["capture", "compare", s(take)];
+    args.extend(flags);
+    ok(&duet(dir, &args), &format!("capture compare {flags:?}"));
+    let (_, _, right) = read_wav(&dir.join("take.compare.wav"));
+    std::fs::remove_file(dir.join("take.compare.wav")).expect("remove");
+    std::fs::remove_file(dir.join("take.compare.svg")).expect("remove");
+    right
+}
+
+/// The interior of the gap after note `i`: from 20 ms after it ends to 20 ms before the next
+/// starts, past each phrase's 10 ms fade.
+fn gap_after(notes: &[Value], i: usize, rate: u32) -> std::ops::Range<usize> {
+    let margin = (0.02 * f64::from(rate)) as usize;
+    let end = notes[i]["end"].as_u64().expect("end") as usize;
+    let next = notes[i + 1]["start"].as_u64().expect("start") as usize;
+    assert!(
+        next > end + 2 * margin,
+        "a gap after note {i}: {end}..{next}"
+    );
+    end + margin..next - margin
+}
+
+fn silent(samples: &[f32]) -> bool {
+    samples.iter().all(|x| *x == 0.0)
+}
+
+/// The sine holds through a gap shorter than the threshold, at the key of the note before, and is
+/// silent through one at or above it; `--legato` holds through both and `--gapped` silences both.
+#[test]
+fn the_sine_bridges_a_short_gap_and_falls_silent_at_a_rest() {
+    let dir = scratch("compare-gaps");
+    let take = captured_with_gaps(&dir);
+    let (notes, a4) = reading(&dir.join("take.capture.duet"));
+    assert_eq!(notes.len(), 3, "{notes:?}");
+    let rate = audio::RATE;
+    let gap = |i: usize| {
+        (notes[i + 1]["start"].as_u64().unwrap() - notes[i]["end"].as_u64().unwrap()) as f64
+            / f64::from(rate)
+    };
+    assert!(
+        gap(0) < BRIDGE_SECS,
+        "the short gap is read short: {} s",
+        gap(0)
+    );
+    assert!(gap(1) >= BRIDGE_SECS, "the rest is read long: {} s", gap(1));
+    let (short, rest) = (gap_after(&notes, 0, rate), gap_after(&notes, 1, rate));
+    let held = |right: &[f32], range: std::ops::Range<usize>, i: usize| {
+        let measured = frequency(&right[range], rate);
+        let want = hz(a4 + 100.0 * (notes[i]["key"].as_f64().unwrap() - 69.0));
+        let off = cents_between(measured, want);
+        assert!(
+            off.abs() < 1.0,
+            "held at note {i}'s key: {off:+.2} cents off"
+        );
+    };
+
+    let bridged = right_channel(&dir, &take, &[]);
+    held(&bridged, short.clone(), 0);
+    assert!(silent(&bridged[rest.clone()]), "silent at the rest");
+
+    let legato = right_channel(&dir, &take, &["--legato"]);
+    held(&legato, short.clone(), 0);
+    held(&legato, rest.clone(), 1);
+
+    let gapped = right_channel(&dir, &take, &["--gapped"]);
+    assert!(silent(&gapped[short]), "--gapped: silent in the short gap");
+    assert!(silent(&gapped[rest]), "--gapped: silent at the rest");
+}
+
+/// A note the reading drops leaves a gap as long as the note, and is heard as silence, not as the
+/// note before held on; `--legato` holds the note before through it.
+#[test]
+fn a_dropped_note_is_heard_as_silence() {
+    let dir = scratch("compare-dropped");
+    let take = captured(&dir);
+    let mut doc = json(&dir.join("take.capture.duet"));
+    doc["body"]["reading"]["notes"]
+        .as_array_mut()
+        .expect("notes")
+        .remove(1);
+    let dropped = dir.join("dropped.capture.duet");
+    std::fs::write(&dropped, doc.to_string()).expect("write");
+    let (notes, a4) = reading(&dropped);
+    let rate = audio::RATE;
+    let range = gap_after(&notes, 0, rate);
+    assert!(range.len() as f64 / f64::from(rate) >= BRIDGE_SECS);
+
+    let run = |flags: &[&str]| {
+        let mut args = vec!["capture", "compare", s(&take), "--reading", s(&dropped)];
+        args.extend(flags);
+        ok(&duet(&dir, &args), &format!("capture compare {flags:?}"));
+        let (_, _, right) = read_wav(&dir.join("dropped.compare.wav"));
+        std::fs::remove_file(dir.join("dropped.compare.wav")).expect("remove");
+        std::fs::remove_file(dir.join("dropped.compare.svg")).expect("remove");
+        right
+    };
+    assert!(
+        silent(&run(&[])[range.clone()]),
+        "the dropped note is silence"
+    );
+    let legato = run(&["--legato"]);
+    let measured = frequency(&legato[range], rate);
+    let want = hz(a4 + 100.0 * (notes[0]["key"].as_f64().unwrap() - 69.0));
+    assert!(cents_between(measured, want).abs() < 1.0, "{measured} Hz");
+}
+
+/// A windowed run beside a run of the whole take writes both: the window's outputs are named after
+/// it, and the whole take's are left as they were.
+#[test]
+fn a_window_is_named_after_it_beside_the_whole_take() {
+    let dir = scratch("compare-window-names");
+    let take = captured(&dir);
+    ok(
+        &duet(&dir, &["capture", "compare", s(&take)]),
+        "the whole take",
+    );
+    let whole = std::fs::read(dir.join("take.compare.wav")).expect("wav");
+    let svg = std::fs::read(dir.join("take.compare.svg")).expect("svg");
+    ok(
+        &duet(
+            &dir,
+            &["capture", "compare", s(&take), "--from", "1", "--to", "2.5"],
+        ),
+        "a window after the whole take",
+    );
+    ok(
+        &duet(&dir, &["capture", "compare", s(&take), "--from", "1"]),
+        "a window to the end",
+    );
+    ok(
+        &duet(&dir, &["capture", "compare", s(&take), "--to", "1"]),
+        "a window from the start",
+    );
+    assert_eq!(
+        std::fs::read(dir.join("take.compare.wav")).expect("wav"),
+        whole
+    );
+    assert_eq!(
+        std::fs::read(dir.join("take.compare.svg")).expect("svg"),
+        svg
+    );
+    let rate = audio::RATE as usize;
+    let (_, left, _) = read_wav(&dir.join("take.compare.1.0-2.5.wav"));
+    assert_eq!(left.len(), rate * 3 / 2, "1.0 to 2.5 s");
+    assert!(dir.join("take.compare.1.0-2.5.svg").exists());
+    let (_, left, _) = read_wav(&dir.join("take.compare.0.0-1.0.wav"));
+    assert_eq!(left.len(), rate, "0 to 1 s");
+    let (_, left, _) = read_wav(&dir.join("take.compare.1.0-end.wav"));
+    let (_, all, _) = read_wav(&dir.join("take.compare.wav"));
+    assert_eq!(left.len(), all.len() - rate, "1 s to the end");
 }

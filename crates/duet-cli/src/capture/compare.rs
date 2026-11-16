@@ -12,16 +12,19 @@
 //!
 //! It writes, each refused rather than overwritten, named after the analysis whose reading it
 //! shows (`STEM.compare.svg` and `STEM.compare.wav`, or the other analysis's name with
-//! `.compare.svg` and `.compare.wav` in place of `.capture.duet`):
+//! `.compare.svg` and `.compare.wav` in place of `.capture.duet`), and a window's after its
+//! window too (`STEM.compare.33.0-34.3.svg`), so it never collides with the whole take's:
 //!
 //! - **the plot** ([`svg`]): the performance's pitch in cents, the reading's notes as bars at
 //!   `tuning + 100·key`, the residual shaded between them, between-keys notes marked, and the
 //!   onsets as ticks;
 //! - **the audio** ([`wav`]): the take on the left, as the analysis heard it (one channel, at
 //!   the analysis rate, so it lines up with the frames sample for sample), and the reading on
-//!   the right as one legato sine at the take's own tuning, gliding only through each note's
-//!   slide in: its scoop where the residual measured one, else up to where its held pitch
-//!   begins;
+//!   the right as a sine at the take's own tuning, gliding only through each note's slide in:
+//!   its scoop where the residual measured one, else up to where its held pitch begins. It holds
+//!   through a gap between notes shorter than [`wav::BRIDGE_SECS`] and is silent through a
+//!   longer one, so a dropped note is heard as silence; `--legato` holds it through every gap
+//!   and `--gapped` silences it in every gap;
 //! - **on standard output:** one line per note (its time, key, centre and whether it is between
 //!   keys), with its residual's parts (held centre, drift, vibrato, scoop, fall and rest) when
 //!   the reading has them, then the take's loss as its terms. A 1.1 reading has neither,
@@ -67,12 +70,21 @@ pub struct CompareArgs {
     /// the stem's, which is drawn beside it. The outputs are named after it.
     #[arg(long, value_name = "ANALYSIS")]
     reading: Option<PathBuf>,
-    /// Where the window starts, in seconds from the start of the take.
+    /// Where the window starts, in seconds from the start of the take. A window's outputs are
+    /// named after it: STEM.compare.FROM-TO.svg and .wav.
     #[arg(long, value_name = "SECS")]
     from: Option<f64>,
     /// Where the window ends, in seconds from the start of the take.
     #[arg(long, value_name = "SECS")]
     to: Option<f64>,
+    /// Hold the sine through every gap between notes, however long: one tone from the first
+    /// note to the last. By default it holds only through a gap shorter than 0.2 s.
+    #[arg(long, conflicts_with = "gapped")]
+    legato: bool,
+    /// Silence the sine through every gap between notes, however short, so it sounds only
+    /// inside a note. By default it is silent only through a gap of 0.2 s or more.
+    #[arg(long)]
+    gapped: bool,
 }
 
 pub fn run(args: &CompareArgs) -> Result<()> {
@@ -96,10 +108,17 @@ pub fn run(args: &CompareArgs) -> Result<()> {
         .reading
         .clone()
         .unwrap_or_else(|| analysis_path.clone());
-    let out_stem = stem_of(&compared_path);
+    let gaps = if args.legato {
+        wav::Gaps::Legato
+    } else if args.gapped {
+        wav::Gaps::Gapped
+    } else {
+        wav::Gaps::Bridged
+    };
+    let out_stem = with_suffix(&stem_of(&compared_path), &window_name(args.from, args.to));
     let (svg_path, wav_path) = (
-        with_suffix(&out_stem, ".compare.svg"),
-        with_suffix(&out_stem, ".compare.wav"),
+        with_suffix(&out_stem, ".svg"),
+        with_suffix(&out_stem, ".wav"),
     );
     // Refused before anything is read, as capture refuses: nothing is overwritten.
     for path in [&svg_path, &wav_path] {
@@ -196,7 +215,7 @@ pub fn run(args: &CompareArgs) -> Result<()> {
         beside,
         onsets: &onsets,
     });
-    let right = wav::sine(reading, frames.rate, from, to);
+    let right = wav::sine(reading, frames.rate, gaps, from, to);
     let audio = wav::stereo(frames.rate, &take[from as usize..to as usize], &right);
 
     write_new(&svg_path, &plot)?;
@@ -317,7 +336,7 @@ fn take(path: &Path, rate: u32) -> Result<Vec<f32>> {
     let mut source = FileSource::open(path)?;
     let mut prepare = Prepare::new(rate);
     let mut mono = Vec::new();
-    while let Some(chunk) = source.next_chunk()? {
+    while let Some(chunk) = source.next_chunk().with_context(named)? {
         prepare.push(chunk, &mut mono).with_context(named)?;
     }
     prepare.finish(&mut mono).with_context(named)?;
@@ -331,6 +350,20 @@ fn take(path: &Path, rate: u32) -> Result<Vec<f32>> {
         samples.extend_from_slice(&m.samples);
     }
     Ok(samples)
+}
+
+/// The outputs' name after their stem: `.compare` for the whole take, and for a window
+/// `.compare.FROM-TO`, each in seconds as given (`.compare.33.0-34.3`), with `end` for a window
+/// with no `--to` and `0.0` for one with no `--from`. So a window never takes the whole take's
+/// names, nor another window's.
+fn window_name(from: Option<f64>, to: Option<f64>) -> String {
+    if from.is_none() && to.is_none() {
+        return ".compare".to_owned();
+    }
+    // Debug is the shortest form that reads back as the same number, with a point always.
+    let from = format!("{:?}", from.unwrap_or(0.0));
+    let to = to.map_or_else(|| "end".to_owned(), |t| format!("{t:?}"));
+    format!(".compare.{from}-{to}")
 }
 
 /// `stem` with `suffix` added to its name.
