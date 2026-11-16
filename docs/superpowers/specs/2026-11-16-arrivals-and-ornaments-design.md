@@ -1,13 +1,15 @@
-# `duet capture`: a gesture read where it arrives, and an ornament shorter than any note
+# `duet capture`: a gesture read where it arrives, an ornament shorter than any note, and a note rejoined across its dip
 
 **Date:** 2026-11-16. **Status:** **Ruled (owner, 2026-11-16).** Questions 1 to 5 are ruled, as
 recorded in the owner's Claude Doc "duet: ornament and tuning rulings".
 
-Two things are not ruled:
-- **Four checks by ear** that the owner still owes (temper task
-  `01a1e4a5-ce43-7159-86d5-9ea18dc5731f`). Each gates a build step, as *Gates* below says.
-- **One question:** an ornament in the middle of a held note, against "a dip is two notes"
-  (question 2). It is marked **Open** where it falls.
+The owner has answered the four checks by ear (temper task
+`01a1e4a5-ce43-7159-86d5-9ea18dc5731f`). Answer 1 removed the arrival merge pass that the earlier
+draft proposed; answer 3 adds a same-key rejoin (question 2).
+
+Two questions are still open, each marked **Open** in question 2:
+- how deep a rejoined dip may be;
+- how a reader tells a breathy ornament from a breath.
 
 **Task:** temper `01a1e0bc-6af4-73b7-8b86-fee8db27a620`. It comes from the Blood Sport listening
 (temper `01a1e077-f1cc-7252-87f9-2601aacf5356`).
@@ -53,9 +55,9 @@ overshoots, then settles. This happens eight times.
 | 14.87 | F#3, 0.07 s; overshoots to A3 −25 | G#3 | F#3 (between keys), G#3 | G#3 |
 | **18.56** | **F3 −35, 0.1 s** | **F#3, held 0.12 s** | **F3, F#3** | **F#3** |
 
-- **18.56 s has the shape of Blood Sport's opening.** A flat F3 is held about as long as the F#3 it
-  arrives at. At Blood Sport's opening the owner hears one F#3. Nobody has listened to 18.56 s yet
-  (task D).
+- **18.56 s looks like Blood Sport's opening:** a flat F3 held about as long as the F#3 it arrives
+  at. The owner hears the opening's F3 as a sung note of its own (question 2). Nobody has listened to
+  18.56 s yet (task D).
 - **The HMM names the arrival every time.** It states the approach only as a long scoop, or as drift
   and rest. That is also how it states Blood Sport's turn at 33.3 s.
 
@@ -64,8 +66,8 @@ overshoots, then settles. This happens eight times.
 | time (s) | what the voice does | rules | HMM |
 |---|---|---|---|
 | 1.42–1.61 | turns on D#3: down to D3 +30, up to E3 −30, back | adds an E3 (between keys) | one D#3, rest 41c |
-| 9.55–9.79 | dips from D#3 to C#3 +40 and back | two D#3 | two D#3 |
-| 16.40–16.55 | rises from F#3 to G3 −25 and back | two F#3 | two F#3 |
+| 9.55–9.79 | dips from D#3 to C#3 +40 and back | two D#3 | two D#3 (the owner hears one, question 2) |
+| 16.40–16.55 | a new word on F#3, then rises to G3 −25 and back | two F#3 | two F#3 (right, question 2) |
 | 19.27, 20.05 | leans up to E3 on D#3 | none | none |
 
 **3. What the formats carry today:**
@@ -101,7 +103,7 @@ Excursion {
 
 **Blood Sport's "-eak" wobble is an ornament under this rule.** Its rise toward G#3 and its dip
 toward F3 each hold longer than the floor (temper research `01a1e1fa-bcba-70db-82e7-4e6d4a4f1e94`).
-Whether it is worth keeping is by-ear check 2, which gates the floor.
+The owner heard it as an ornament (check 2), so the floor stands.
 
 The constants are set when task A is built, on the synthetic witnesses, and named in `residual.rs`.
 
@@ -127,69 +129,106 @@ Taking the excursions out of it would change an existing value's meaning, which 
 - A performance render writes the excursions that are kept as bends. They are residual, so they
   round-trip exactly through the bend witness that task already names.
 
-## 2. Which key a gesture takes
+## 2. Which key a gesture takes, and when one note's split is rejoined
 
-**Ruled: the arrival's.** #28 extends to this:
+**Ruled: the arrival's key.** #28 extends to this:
 
 > **An approach belongs to the note it arrives at, held or not.**
 
 - The held approach is kept as a grace excursion (question 1), so nothing sung is lost.
+- **The note HMM already does this, and nothing new is built for it.** Its attack takes in all eight
+  approaches in table 1, so this design states that behaviour and witnesses it there.
+- **No merge pass, and no bound to set.** The owner's checks by ear (temper task
+  `01a1e4a5-ce43-7159-86d5-9ea18dc5731f`) showed that Blood Sport's opening is three sung notes, F3,
+  F#3 and G#3, as the HMM reads them.
+  - A pass joining a held approach to its arrival would have fused that F3 into the F#3: it is short,
+    moves toward the F#3, and stays strongly voiced across the join.
+  - So where the HMM's own prices make a held pitch a note, it stays a note. The opening is a "stays
+    separate" witness.
+- **The rules are unchanged.** They are the baseline and read a held approach as a note. That is a
+  stated limit, written on the `Segmenter`.
 
-**The direction is ruled.** An approach is pitch that moves toward the note it reaches:
-- from a step below or above;
-- with no onset and no voicing dip between the two.
+**Ruled by the owner's ear: a same-key split inside a phrase is one note.** The owner heard two
+"Wayfaring Stranger" splits where both readers read two notes on one key:
 
-**The bound is not ruled, and is a named open parameter.** That parameter decides how long, or in
-what shape, an approach may be held before it is a note of its own.
-- **Time alone cannot set it.** Blood Sport's opening has an approach about as long as a sixteenth
-  note at the take's tempo (temper research `01a1e1fa-bcba-70db-82e7-4e6d4a4f1e94`). A sung
-  sixteenth is a real note, and has the same length.
-- **The candidates:**
-  - **the glide:** the approach keeps moving toward the arrival while it is held, where a sung note
-    settles;
-  - **a flat arrival:** the arrival is held below or above its key, toward the approach, as a reached
-    pitch is;
-  - **the length relative to the arrival,** rather than an absolute length.
-- **The parameter is set after by-ear check 1,** and the set value is stated with its reason in the
-  code.
+| time (s) | what is sung | both readers | the owner hears |
+|---|---|---|---|
+| 9.54 | a dip to about D3 and back, inside one phrase | D#3, D#3 | **one D#3**, the dip an excursion |
+| 16.39 | a consonant starting a new word on the same F#3 | F#3, F#3 | **two F#3**, as read |
 
-**It is built as a merge pass over the reading, after decoding, not inside the HMM.**
-- The pass takes two adjacent notes that the direction and the bound join. It makes them one note,
-  on the later note's key, with `held_from` at the arrival. The earlier note's held span becomes a
-  grace excursion.
-- So the pass can be witnessed on its own, against any reading, and the decoder's prices are
-  unchanged.
-- It runs for both readers. The rules' held approaches (table 1) are its widest test.
-- **Why it is needed:** the HMM, as of `d0fd967`, already takes in all eight approaches in table 1 as
-  attack. But it reads Blood Sport's opening as two notes, F3 then F#3, with no voicing break between
-  them (the temper research above).
-- **What the loss does with it:** the merged note's grace frames count as slide in the loss, priced
-  at `ATTACK_COST`, as the decoder prices an attack. The loss still scores any reading, merged or
-  not. A merge that raises the loss is stated by the pass, not hidden.
+Blood Sport's opening F3 is the same case as 9.54 s: the HMM splits it around an intentional drop
+that the owner hears inside one F3. It is a witness for local listening only.
+
+So the rule the design needs is a **same-key rejoin**:
+- Two adjacent notes on one key, split across a dip within a phrase, are rejoined into one note.
+- The dip's frames become an excursion of that note.
+- A split at a consonant or an onset stays two notes.
+
+**This narrows #28's "a dip is two notes"** to a dip that a consonant or an onset marks.
+
+**What separates the two moments in "Wayfaring Stranger"**, measured on `d0fd967`:
+
+| evidence | 9.54 s (one note) | 16.39 s (two notes) |
+|---|---|---|
+| an onset at the split | none | one, at 16.393 s (weak, like every onset on this take) |
+| voicing | stays at 0.83 or above | stays at 0.83 or above |
+| level | falls by about half, smoothly, with the pitch, and comes back | flat across the split |
+| pitch | a smooth V, 170 cents down and back over 0.1 s | continuous; a few cents' step, then a rise toward G3 |
+
+- **On this take the onset is the separator.**
+- Voicing does not separate them: each dips to 0.83 for a frame or two.
+- Level separates them only in the wrong sense for a consonant: the dip loses level, and the
+  consonant does not.
+
+**The rule rejoins two adjacent notes on one key** when:
+- no onset falls between the first note's last held frame and the second note's `held_from`;
+- every frame between them is voiced: no silent frame, no frame the pitch track decoded unvoiced;
+- the dip stays within a neighbour's depth (the open parameter below).
+
+**Open, for the owner: how deep may a rejoined dip be?** Two witnesses in `notes.rs` from the #28
+ruling pin a dip with no onset and no silence as two notes:
+- `a_dip_between_two_syllables_is_two_notes_and_the_dip_none`: 8 semitones down and back, "a voiced
+  consonant between two syllables on one pitch";
+- `a_slower_dip_is_still_no_note_at_its_bottom`: 3 semitones down and back.
+
+Neither has an onset. So "no onset" alone would rejoin both and overturn that ruling's witnesses.
+- **Options:**
+  - **(a)** rejoin only a dip within a whole tone (200 cents) of the note. Both existing witnesses
+    stay two notes;
+  - **(b)** rejoin any dip with no onset. Both existing witnesses are rewritten as one note with an
+    excursion, and #28's dip case then needs an onset to be two notes;
+  - **(c)** a depth set between the two, after the owner listens to a synthetic 3-semitone dip.
+- **Recommended: (a).** A neighbour ornament moves a step. 9.54 s moves 170 cents, and Blood Sport's
+  turn moves a whole tone. A voiced consonant's dip, as the #28 witness models it, falls much
+  further. (a) leaves the existing ruling's witnesses as they are.
+
+**Built as a pass over the reading, after decoding,** so it can be witnessed on its own against
+either reader's reading:
+- The pass states each rejoin.
+- The rejoined note's dip frames count as held frames in the loss, priced by their pitch as any held
+  frame is. A rejoin that raises the loss is stated, not hidden.
 
 **A real step stays two notes.** This clause comes from the held contour task. Its witness is set
-where the bound is tight: two sixteenth notes at 108 bpm, a semitone apart and each on its key.
+where a pass could most easily go wrong: two sixteenth notes at 108 bpm, a semitone apart, each on
+its key. The rejoin never joins notes on two keys.
 
-**Open: an ornament in the middle of a held note, against "a dip is two notes".** This needs a
-ruling, which by-ear check 3 informs.
-- On `main`, the HMM reads a synthetic turn as two notes, the same way it reads a dip: a held G#3
-  that turns up to A#3 for 0.14 s, with no onset and no voicing dip.
-  - The second G#3's attack takes in the turn.
-  - Holding the turn's frames on G#3 costs about 8 nats a frame, against `c` = 4 once for a new note.
-  - The rules read three notes: G#3, A#3, G#3.
-- Blood Sport's turn read as one G#3 only because it sits at the note's start, where the attack takes
-  it in.
-- In "Wayfaring Stranger", both readers split the notes at 9.55 s and 16.40 s.
-- The owner's ruling "a dip is two notes" covers a pitch that goes away and comes back. A turn does
-  exactly that.
-- **Options:**
-  - **(a)** keep the ruling: an ornament in the middle of a note re-attacks it. Its excursion is then
-    measured in the second note's slide, and is a grace there;
-  - **(b)** narrow it: a departure that returns, with no onset and no voicing dip and held less than
-    about 0.15 s, stays inside the note as an excursion. This changes the decoder, and is task E.
-- **Recommended: (b).** The dip the ruling came from had a voiced consonant between two syllables,
-  so a voicing drop or an onset marks it. A turn has neither.
-- By-ear check 3, at 9.55 s and 16.40 s, tests the choice on a real take.
+**Open, for the owner: how does a reader tell a breathy ornament from a breath?**
+- The owner hears Blood Sport's "-eak" (34.66–34.93 s) as one F#3 with ornaments. That includes the
+  fall after it, where voicing drops to about 0.01–0.11. The take's capture (a laptop mic, a voice
+  memo) and breathiness explain the low voicing.
+- **This is in tension with #48.** #48 prices a frame left unread by its voicing, so a breath
+  (voicing about 0.02) is free to leave out, and the HMM ends a note there.
+- **The evidence available beyond voicing:**
+  - **level:** a breath's level falls toward the noise floor; a breathy sung frame keeps some of the
+    note's;
+  - **pitch continuity:** a sung frame's pitch, where the tracker gives one, continues the note's
+    line; a breath has none, or jumps;
+  - **position:** low voicing between two notes on one key, or at the end of a note, against low
+    voicing at the start of a phrase or between phrases;
+  - **onsets:** a breath before a new phrase usually precedes an onset; an ornament inside a note
+    does not.
+- Ruling how these combine is the owner's call, not this design's. No task is filed until it is
+  ruled (task F).
 
 ## 3. What each output writes
 
@@ -213,7 +252,8 @@ ruling, which by-ear check 3 informs.
 
 ## 4. How it is judged by ear
 
-**Ruled, with two additions** (the Blood Sport moments and the sixteenth-note step).
+**Ruled, with two additions:** the Blood Sport moments, and the sixteenth-note step as task B's
+witness.
 
 **Moments:**
 - **`crates/duet-capture/corpus/wayfaring-stranger.moments`** names the moments in both tables, with
@@ -257,22 +297,26 @@ notes, not one ornament.
 
 ## Gates: the owner's checks by ear
 
-These checks are tracked in temper task `01a1e4a5-ce43-7159-86d5-9ea18dc5731f`.
+The owner has answered all four checks (temper task `01a1e4a5-ce43-7159-86d5-9ea18dc5731f`,
+"## Answers").
 
-| check | what the owner listens for | what it gates |
+| check | the answer | what it decides |
 |---|---|---|
-| 1 | Blood Sport 0.56–0.82 s: one F#3? And is the G#3 after it a sung note? | task B's bound, and its opening-shape witness |
-| 2 | Blood Sport "-eak", 34.66–34.93 s: an ornament worth keeping, or roughness? | task A's floor, which is 3 frames until then |
-| 3 | "Wayfaring Stranger" 9.55 s and 16.40 s: does a new syllable start where both readers split the note? | the open question in question 2, and task E |
-| 4 | Blood Sport's tuning | the tuning task, not this design |
+| 1. Blood Sport 0.56–0.82 s | three sung notes, F3, F#3 and G#3; the F3 is one note with its drop inside it | no merge pass and no bound (question 2); the opening is a "stays separate" witness, and its F3 a rejoin witness, both for local listening |
+| 2. Blood Sport "-eak", 34.66–34.93 s | an ornament, including the low-voicing fall after it | the 3-frame floor stands (task A); the breath question opens (task F) |
+| 3. "Wayfaring Stranger" 9.55 s and 16.40 s | 9.54 s is one D#3 with a dip; 16.39 s is two F#3, at a new word | the same-key rejoin (task B) |
+| 4. Blood Sport's tuning | goes to the tuning task | nothing here |
+
+**Still to rule:**
+- the depth of a rejoined dip (question 2), which gates task B;
+- a breathy ornament against a breath (question 2), which gates task F.
 
 ## Build tasks
 
 Each task is filed by the control plane. None is built before the one it needs.
 
 **A. Excursions in the residual.**
-- **Needs:** nothing. **Gate:** check 2 may move the floor after the build. The floor is a named
-  constant, so moving it is a one-line change.
+- **Needs:** nothing. **Gate:** none. Check 2 confirmed the 3-frame floor.
 - **Witnesses:**
   - A synthetic G#3 that turns up to A#3 for 0.14 s at its start (the shape of Blood Sport's turn)
     reads as one note, with one excursion at +200 ± 10 cents, its frames within one of where it was
@@ -283,33 +327,34 @@ Each task is filed by the control plane. None is built before the one it needs.
   - A pitch held 2 frames, under the floor, is no excursion. One held 3 frames is.
   - A note with no ornament has none.
   - The loss is unchanged by the new part.
-  - Every 1.4 example still reads.
+  - Every example of the minor before still reads.
 - **Then:** once the owner has listened (task D), the "Wayfaring Stranger" listened entry gains an
   excursion count, with a tolerance.
 
-**B. The arrival merge pass.**
-- **Needs:** A, since the merged approach becomes a grace excursion.
-- **Gate:** check 1. The pass and its direction witnesses are built first. The bound is set after the
-  check.
-- **Witnesses:**
-  - **Direction.** Read the rules' reading of a synthetic approach: held 0.1 s, 35 cents flat, a
-    semitone below, then the arrival held 0.12 s. On `main` it is two notes. After the pass it is one
-    note on the arrival, with `held_from` at the arrival and one grace excursion.
-  - **Only toward the arrival.** Two held notes whose pitch, between them, moves away from the
-    second before it reaches it are not merged.
-  - **Not across a break.** The same approach with an onset, or with a voicing dip, between it and
-    the arrival is not merged.
-  - **The bound is tight: the sixteenth-note step.** Two sixteenths at 108 bpm, G3 then G#3, each
-    0.139 s on its key, then a held A#3, read as three notes. On `main` both readers read three, so
-    this guards against the pass.
-  - **The opening's shape,** once check 1 has ruled. An F3 held a sixteenth on its key, an F#3 held
-    35 cents flat, then a G#3, reads as F#3 then G#3. No voicing break.
-    - On `main` both readers read F3 then G#3: the short, flat F#3 goes into the G#3's attack. So
-      this witness fails on `main`.
-    - A pass can merge only notes the reader produced. So the witness's F#3 is held long enough that
-      the HMM reads it, as it reads the real opening's (the temper research above).
-  - **"Wayfaring Stranger" at 18.56 s** reads F#3 under both readers.
-- **The pass states each merge,** on stderr and in the reading, as other statements are stated.
+**B. The same-key rejoin.**
+- **Needs:** A, since the dip becomes an excursion. **Gate:** the ruling on a rejoined dip's depth
+  (question 2).
+- **Witnesses that fail on `main`:**
+  - "Wayfaring Stranger" at 9.54 s reads one D#3, with one excursion for the dip. On `main` both
+    readers read D#3, D#3.
+  - A synthetic held D#3 that dips 170 cents and back over 0.1 s, with no onset, reads one note. On
+    `main` the HMM reads two notes. The rules read one, since the dip is too short for them to leave
+    the note.
+  - A synthetic held G#3 that turns up to A#3 for 0.14 s in its middle, with no onset, reads one note
+    with one excursion under the HMM. On `main` the HMM reads two G#3. The rules read G#3, A#3, G#3,
+    which is no same-key pair, so that reading stays as the rules' stated limit.
+- **Witnesses that pass on `main` and must keep passing:**
+  - "Wayfaring Stranger" at 16.39 s reads two F#3: an onset falls at the split.
+  - The synthetic dip above, with an onset at its bottom, reads two notes.
+  - The sixteenth-note step: two sixteenths at 108 bpm, G3 then G#3, each 0.139 s on its key, then
+    a held A#3, read as three notes under both readers.
+  - A synthetic approach held 0.1 s, 35 cents flat a semitone below, then its arrival, reads one
+    note on the arrival under the HMM. This is the arrival rule, witnessed.
+  - "Wayfaring Stranger" at 18.56 s reads F#3 under the HMM.
+  - Under depth option (a): both #28 dip witnesses in `notes.rs`, run through the pass, still read
+    two notes.
+- **For local listening only, never committed:** Blood Sport's opening reads F3, F#3, G#3, with the
+  F3 rejoined across its drop. On `main` the HMM splits the F3.
 
 **C. `compare` shows and plays excursions.**
 - **Needs:** A. **Gate:** none.
@@ -319,16 +364,17 @@ Each task is filed by the control plane. None is built before the one it needs.
   offset.
 
 **D. The moments, and the owner's listen.**
-- **Needs:** C. **Gate:** none to build it. Checks 1 to 3 run on it.
+- **Needs:** C. **Gate:** none.
 - It commits the "Wayfaring Stranger" moments file. A draft is kept in the build notes.
-- **Witness:** the owner's ruling on each moment, by ear.
+- **Witness:** the owner's ruling on each moment, by ear, through the three renderings.
 
-**E. An ornament in the middle of a held note stays in the note.**
-- **Not filed** until the open question in question 2 is ruled (b).
-- **Gate:** check 3.
-- **Witness:** a held G#3 that turns up to A#3 for 0.14 s in its middle, with no onset and no voicing
-  dip, reads as one note with one excursion. On `main` the HMM reads two notes and the rules read
-  three.
+**F. A breathy ornament is read as part of its note.**
+- **Not filed** until the breath question in question 2 is ruled.
+- **Witness, once ruled:** Blood Sport's "-eak", for local listening only, reads one F#3 with its
+  excursions. A synthetic breath between two phrases is still left unread.
+
+(Task E, from the earlier draft, is now part of B: a turn in the middle of a note is a same-key
+split.)
 
 **Transformations task (temper `01a1df08-2b63-7658-8812-7823c97c6147`):** this design amends it in
 two ways, and adds no task:
@@ -340,11 +386,11 @@ two ways, and adds no task:
 - **`capture-analysis`, additive (a minor): the minor after the tuning change's.** The tuning task
   takes the next minor first.
   - `NoteResidual.excursions` is a new optional field, omitted when empty. Its absence means what the
-    minor before meant: no ornament stated.
-  - The merge pass's statements are a new optional field of the reading in the same minor.
-  - Task A adds the field; task B adds the statements.
-- **`song`, `performance`, the envelope:** no change in tasks A to E.
-- **The notes and grid views:** no change in tasks A to E.
+    minor before meant: no ornament stated. Task A adds it.
+  - The rejoin's statements are a new optional field of the reading in the same minor, omitted when
+    there is none. Task B adds it.
+- **`song`, `performance`, the envelope:** no change in any task here.
+- **The notes and grid views:** no change in any task here.
 - **The later ornaments-in-the-score work would add:**
   - `song` 1.1, additive: `Note.ornament`, optional;
   - a new notes-view syntax version in its header, `notes v2`;
@@ -354,5 +400,5 @@ two ways, and adds no task:
 ## Not decided here
 
 - **Whether ornaments go into the score:** named above for later, and not filed until the owner asks.
-- **The arrival bound:** a named open parameter, set after check 1 (question 2).
-- **An ornament in the middle of a held note:** open (question 2), informed by check 3.
+- **How deep a rejoined dip may be:** open (question 2). It gates task B.
+- **A breathy ornament against a breath:** open (question 2). It gates task F.
