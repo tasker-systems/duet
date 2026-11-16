@@ -1,8 +1,12 @@
 # `duet capture`: a gesture read where it arrives, and an ornament shorter than any note
 
 **Date:** 2026-11-16. **Status:** **Ruled (owner, 2026-11-16):** the owner adopted every
-recommendation below as proposed. One measurement is still open: question 2 asks for it, and build
-task B depends on it.
+recommendation below as proposed. Two questions came up after that, and each is marked **Open**
+where it falls, in question 2:
+- Blood Sport's opening, which the HMM reads as two notes;
+- an ornament in the middle of a held note, against "a dip is two notes".
+
+Build task B, and the second witness of task A, wait on them.
 
 **Task:** temper `01a1e0bc-6af4-73b7-8b86-fee8db27a620`. It comes from the Blood Sport listening
 (temper `01a1e077-f1cc-7252-87f9-2601aacf5356`).
@@ -143,12 +147,29 @@ notes. This clause comes from the held contour task.
 - The rules are the baseline, and they are unchanged: they read a held approach as a note. That is a
   stated limit, written on the `Segmenter`.
 
-**Open: Blood Sport's opening on the HMM since #48.**
-- There, the approach (F3, about 0.11 s) is as long as the arrival (F#3, about 0.1 s, held flat).
-- The listening study measured the HMM before #48. Its later note does not cover the opening.
-- This is a measurement asked of the owner's local session.
-- **If the HMM reads F#3 there,** task B is witnesses only. **If it reads F3,** task B changes the
-  decoder: the arrival is the pitch held last before the voice leaves, not the one held longest.
+**Open: Blood Sport's opening. The HMM since #48 reads it as two notes, F3 then F#3.** This needs a
+ruling.
+- **Source:** temper research `01a1e1fa-bcba-70db-82e7-4e6d4a4f1e94`, measured on `d0fd967`. The
+  take's licence keeps its figures out of git.
+- It is the one approach the HMM does not take in:
+  - the approach is held about as long as the arrival;
+  - it reaches the bound from the decoder's prices;
+  - the F#3 that follows is held flat.
+- In the same window, the voice goes on to two G#3 notes. So "one F#3" may name the F3-to-F#3
+  gesture only, and the owner listened to a shorter span.
+- **Options:**
+  - **(a) Change the decoder.** An approach a step below that rises into the next pitch, with no onset
+    and no voicing dip between them, belongs to that pitch whatever its length.
+    - This needs a bound that still keeps a real step as two notes (the 0.25 s witness).
+    - It risks merging a slow, deliberate rising line.
+  - **(b) Raise the bound** by pricing a held approach as attack for longer.
+    - This is a constant, not a rule. Tuning it until the opening reads right is the trap the task
+      names.
+  - **(c) Keep two notes at the opening.** The approach is kept as the F#3's grace, so the ear can
+    still be served by how the reading is rendered. This goes against the owner's ear as it stands.
+- **Recommended: listen again first.** Does the owner hear one F#3 across both measured notes, or
+  over a shorter span? If the owner hears it across both, choose (a), witnessed by a synthetic shape
+  of the opening that fails on `main`.
 
 **Open: an ornament in the middle of a held note, against "a dip is two notes".** This needs a
 ruling.
@@ -246,15 +267,16 @@ Each task is filed by the control plane. None is built before the one it needs.
   with a tolerance.
 
 **B. The arrival rule, witnessed.**
-- It needs measurement 1 (question 2).
+- It needs the owner's ruling on the opening (question 2). Measurement 1 shows the HMM reading two
+  notes there.
 - Witnesses:
   - A synthetic approach held 0.1 s, 35 cents flat a semitone below, then the arrival held 0.12 s,
     reads one note on the arrival, with `held_from` at the arrival.
   - A step held 0.25 s each side reads as two notes.
   - Both fail if the attack stops absorbing a held approach.
   - "Wayfaring Stranger" at 18.56 s reads F#3.
-- If the measurement shows the HMM reading F3 at Blood Sport's opening, the decoder change and a
-  synthetic witness of that shape join this task. That witness must fail on `main`.
+- If the owner rules (a) on the opening, the decoder change and a synthetic witness of the opening's
+  shape join this task. That witness must fail on `main`, where the HMM reads two notes.
 
 **C. `compare` shows and plays excursions.**
 - It needs A.
@@ -288,6 +310,10 @@ two ways, and adds no task:
 ## Not decided here
 
 - **Whether ornaments go into the score:** named above for later, and not filed until the owner asks.
-- **Blood Sport's trill (9.4–10.9 s) and "-eak" wobble on the HMM since #48:** measurements 2 and 3
-  are asked for with measurement 1. They test the excursion constants of task A on a real take. They
-  are not witnesses in git.
+- **Blood Sport's trill (9.4–10.9 s) and "-eak" wobble:** the HMM since #48 reads both as notes
+  (temper `01a1e1fa-bcba-70db-82e7-4e6d4a4f1e94`).
+  - The trill reads as five notes.
+  - The wobble reads as two F#3s. Its peak falls between them, and its dip becomes the second F#3's
+    scoop.
+  - So a trill is notes, not one ornament. These moments test task A's excursions on a real take.
+    They are not witnesses in git.
