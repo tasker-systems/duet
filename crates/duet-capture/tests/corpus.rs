@@ -136,6 +136,70 @@ fn the_note_hmm_matches_every_melody_transcription_and_both_losses_are_reported(
     );
 }
 
+/// Every listened take reads, by the note HMM with nothing given, in the key the owner
+/// agreed, on the tuning they agreed, with about the number of notes they heard. Nothing
+/// about any one note is held: the owner judged the melody's shape, not each note.
+#[test]
+fn every_listened_take_reads_as_the_owner_judged_it() {
+    let manifest = manifest();
+    assert!(
+        !manifest.listened.is_empty(),
+        "the manifest has no [[listened]] take"
+    );
+    let mut failures = Vec::new();
+    for take in &manifest.listened {
+        let name = &take.file;
+        let dir = support::corpus_dir();
+        let licence = dir.join(&take.licence_file);
+        if !licence.is_file() {
+            failures.push(format!(
+                "{name}: no licence notice at {}",
+                licence.display()
+            ));
+        }
+        let (captured, read) = match support::capture_melody(&dir.join(name), ReaderName::Hmm) {
+            Ok(both) => both,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        let want = match duet_abc::key_from_name(&take.key) {
+            Ok(key) => key,
+            Err(e) => {
+                failures.push(format!("{name}: key {}: {e}", take.key));
+                continue;
+            }
+        };
+        match captured.analysis.key.as_ref().map(|k| *k.key.value()) {
+            Some(key) if key == want => {}
+            Some(key) => failures.push(format!("{name}: key: expected {want}, found {key}")),
+            None => failures.push(format!("{name}: key: expected {want}, found none")),
+        }
+        let cents = read.tuning.offset_cents();
+        if (cents - take.tuning_cents).abs() > take.tuning_within {
+            failures.push(format!(
+                "{name}: tuning: expected {:+.1} ± {} cents, found {cents:+.1}",
+                take.tuning_cents, take.tuning_within
+            ));
+        }
+        let notes = read.notes.len();
+        if notes.abs_diff(take.notes) > take.notes_within {
+            failures.push(format!(
+                "{name}: notes: expected {} ± {}, found {notes}",
+                take.notes, take.notes_within
+            ));
+        }
+        eprintln!("listened: {name}: key {want}, tuning {cents:+.1} cents, {notes} notes");
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failure(s):\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 #[test]
 #[ignore = "awaiting the owner's reference takes: melody, tapped, beatboxed"]
 fn every_kind_has_a_reference_take() {

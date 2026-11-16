@@ -24,6 +24,31 @@ const EIGHTH_BEATS: f64 = 0.5;
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub take: Vec<Take>,
+    /// Takes the owner has listened to and judged, but has not transcribed note by note.
+    #[serde(default)]
+    pub listened: Vec<Listened>,
+}
+
+/// A recorded melody whose reading the owner judged by ear: only what they agreed is held,
+/// each within its stated tolerance. It has no transcription, so it witnesses no goal clause
+/// and is not a [`Take`].
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Listened {
+    /// The recording, beside the manifest.
+    pub file: String,
+    pub provenance: String,
+    pub licence: String,
+    /// The licence's text or notice, beside the recording.
+    pub licence_file: String,
+    /// The key the HMM reading must estimate, as ABC names it in `K:`.
+    pub key: String,
+    /// The estimated tuning: A4's offset from 440 Hz, in cents, and how far it may move.
+    pub tuning_cents: f64,
+    pub tuning_within: f64,
+    /// How many notes the HMM reads, and how far that may move.
+    pub notes: usize,
+    pub notes_within: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,6 +225,20 @@ fn capture(
     assemble(&events, ANALYSIS_RATE, &timing, key, &kind)
         .map(|captured| (captured.song, read))
         .map_err(|e| e.to_string())
+}
+
+/// A melody recording as `duet capture melody` reads it with nothing given: its notes read by
+/// `reader`, the timing and key estimated. The capture, with the melody's reading.
+pub fn capture_melody(
+    path: &Path,
+    reader: ReaderName,
+) -> Result<(duet_capture::Captured, duet_capture::Reading), String> {
+    let (events, read) = analyse(path, true, LaneMode::Beatbox, reader)?;
+    let read = read.ok_or("a melody has a reading")?;
+    let timing = estimate(&events, ANALYSIS_RATE, &Given::default()).map_err(|e| e.to_string())?;
+    let captured = assemble(&events, ANALYSIS_RATE, &timing, None, &Kind::Melody)
+        .map_err(|e| e.to_string())?;
+    Ok((captured, read))
 }
 
 /// The take's events, as `duet capture` finds them: a rhythm's from [`Hits`]; a melody's onsets
