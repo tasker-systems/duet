@@ -941,12 +941,16 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
     which note is being read.
   - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
     the start of the take, with a free-text label. A line starting with `#` is a comment.
-    `scripts/listen/synthetic-melody.moments` is an example.
+    `scripts/listen/synthetic-melody.moments` is an example, and
+    `crates/duet-capture/corpus/wayfaring-stranger.moments` names the moments of "Wayfaring
+    Stranger" that the owner rules on by ear.
   - **Clips of a licence-restricted take are copies of it.** Keep them, and its moments
-    file, out of git.
-  - **`scripts/listen/check.sh`** builds the synthetic corpus melody's clips and checks each
-    one's length against its window, and that the steps and bends clips are their own renderings.
-    CI does not run it.
+    file, out of git. "Wayfaring Stranger" is CC BY 4.0, so its moments file is committed; its
+    clips are still copies, and stay out of git.
+  - **`scripts/listen/check.sh`** builds the clips of the synthetic corpus melody and of
+    "Wayfaring Stranger", checks that each moment lies inside its take, each clip's length
+    against its window, and that the steps and bends clips are their own renderings. CI does
+    not run it.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.
