@@ -1,6 +1,6 @@
 [package]
 name = "duet-drums"
-version = "0.2.0"
+version.workspace = true
 description = "The duet drum grid: a lanes × steps velocity matrix, its text form, lane maps, and conversion to and from a duet Song."
 edition.workspace = true
 license.workspace = true
@@ -15,7 +15,7 @@ include = ["src/**", "lanes.toml", "Cargo.toml"]
 workspace = true
 
 [dependencies]
-duet-core = { path = "../duet-core", version = "0.2.0" }
+duet-core.workspace = true
 schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
@@ -25,5 +25,5 @@ toml = { version = "1", features = ["preserve_order"] }
 
 [dev-dependencies]
 duet-schemas = { path = "../duet-schemas" }
-duet-midi = { path = "../duet-midi", version = "0.2.0" }
+duet-midi.workspace = true
 serde_json = { version = "1", features = ["float_roundtrip"] }
