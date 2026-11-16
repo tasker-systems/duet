@@ -150,6 +150,27 @@ notes. This clause comes from the held contour task.
 - **If the HMM reads F#3 there,** task B is witnesses only. **If it reads F3,** task B changes the
   decoder: the arrival is the pitch held last before the voice leaves, not the one held longest.
 
+**Open: an ornament in the middle of a held note, against "a dip is two notes".** This needs a
+ruling.
+- On `main`, the HMM reads a synthetic turn as two notes, the same way it reads a dip: a held G#3
+  that turns up to A#3 for 0.14 s, with no onset and no voicing dip.
+  - The second G#3's attack takes in the turn.
+  - Holding the turn's frames on G#3 costs about 8 nats a frame, against `c` = 4 once for a new note.
+  - The rules read three notes: G#3, A#3, G#3.
+- Blood Sport's turn read as one G#3 only because it sits at the note's start, where the attack takes
+  it in.
+- In "Wayfaring Stranger", both readers split the notes at 9.55 s and 16.40 s.
+- The owner's ruling "a dip is two notes" covers a pitch that goes away and comes back. A turn does
+  exactly that.
+- **Options:**
+  - **(a)** keep the ruling: an ornament in the middle of a note re-attacks it. Its excursion is then
+    measured in the second note's slide, and is a grace there;
+  - **(b)** narrow it: a departure that returns, with no onset and no voicing dip and held less than
+    about 0.15 s, stays inside the note as an excursion. This changes the decoder, and is a new task.
+- **Recommended: (b).** The dip the ruling came from had a voiced consonant between two syllables,
+  so a voicing drop or an onset marks it. A turn has neither.
+- The owner's listen of 9.55 s and 16.40 s (task D) tests the choice on a real take.
+
 ## 3. What each output writes
 
 **Ruled: the score stays the melody, for now.**
@@ -209,8 +230,12 @@ Each task is filed by the control plane. None is built before the one it needs.
 
 **A. Excursions in the residual.**
 - Witnesses:
-  - A synthetic held G#3 with a 0.2 s turn up to A#3 and back reads as one note, with one excursion
-    at +200 ± 10 cents, its frames within one of where it was synthesized.
+  - A synthetic G#3 that turns up to A#3 for 0.14 s at its start (the shape of Blood Sport's turn)
+    reads as one note, with one excursion at +200 ± 10 cents, its frames within one of where it was
+    synthesized.
+  - If the owner rules (b) on the open question in question 2: the same turn in the middle of a held
+    note also reads as one note, with one excursion. On `main` it reads as two notes under the HMM
+    and three under the rules. That witness, and the decoder change it needs, are their own task.
   - A held approach of 0.1 s a semitone below reads as one excursion before `held_from`.
   - A vibrato of ±40 cents at 6 Hz has no excursion.
   - A wobble of 2 frames per pitch has no excursion.
