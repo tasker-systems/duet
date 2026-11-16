@@ -1248,3 +1248,67 @@ fn modes_are_named_on_their_first_three_letters() {
     assert!("D# lydian".parse::<Key>().is_err());
     assert!("D blues".parse::<Key>().is_err());
 }
+
+/// A committed `capture-analysis` example, by its version.
+fn analysis_example(version: &str) -> String {
+    let path = format!(
+        "{}/../duet-schemas/schemas/capture-analysis/examples/{version}.duet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::read_to_string(path).unwrap()
+}
+
+/// Each note's `excursions` in a capture-analysis document's text, `None` where it has none.
+fn excursions_in(text: &str) -> Vec<Option<serde_json::Value>> {
+    let value: serde_json::Value = serde_json::from_str(text).unwrap();
+    value["body"]["reading"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["residual"].get("excursions").cloned())
+        .collect()
+}
+
+#[test]
+fn a_notes_excursions_round_trip_exactly_through_json() {
+    // capture-analysis 1.6: every excursion's start, end and cents read back to the bit, and
+    // the document writes back as the text it was read from.
+    let text = analysis_example("1.6");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(doc.write().unwrap(), text);
+    assert_eq!(
+        excursions_in(&text),
+        [
+            Some(serde_json::json!([
+                { "start": 11100, "end": 11868, "cents": -96.5 },
+                { "start": 14428, "end": 15452, "cents": 198.0 }
+            ])),
+            None
+        ]
+    );
+}
+
+#[test]
+fn a_document_before_excursions_reads_as_one_with_none_and_writes_none() {
+    // A 1.5 document states no ornament: read today, it holds none, and writing it states none,
+    // rather than an empty list.
+    let text = analysis_example("1.5");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    let reading = doc.body.reading.as_ref().unwrap();
+    assert!(
+        reading
+            .notes
+            .iter()
+            .all(|n| n.residual.as_ref().unwrap().excursions.is_empty())
+    );
+    let written = doc.write().unwrap();
+    assert_eq!(excursions_in(&written), [None, None]);
+    let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(again, doc);
+}

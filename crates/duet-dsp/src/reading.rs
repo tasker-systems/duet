@@ -276,7 +276,7 @@ pub fn estimate_tuning(frames: &PerformanceFrames) -> Tuning {
 }
 
 /// A note as the reading reads it.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ReadNote {

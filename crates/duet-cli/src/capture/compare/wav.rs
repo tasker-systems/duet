@@ -27,6 +27,7 @@ pub fn hz(cents: f64) -> f64 {
 /// else where its held pitch begins (`held_from`). Never past the note's end.
 pub fn slide_end(note: &ReadNote, rate: u32) -> u64 {
     note.residual
+        .as_ref()
         .and_then(|r| r.scoop)
         .map_or(note.held_from, |scoop| {
             note.start + (f64::from(scoop.ms) / 1000.0 * f64::from(rate)).round() as u64

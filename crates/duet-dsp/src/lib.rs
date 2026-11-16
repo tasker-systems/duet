@@ -89,9 +89,9 @@ pub use reading::{
     Tuning, a4_cents_of_hz, estimate_tuning, read,
 };
 pub use residual::{
-    CentreHistogram, Drift, LOSS_SIGMA_CENTS, Loss, Modulation, NOTE_COST, NoteResidual,
-    TakeResidual, Transition, held_cost, residual, residual_with_cost, silent_cost, sounding_cost,
-    unread_cost,
+    CentreHistogram, Drift, EXCURSION_CENTS, Excursion, LOSS_SIGMA_CENTS, Loss, Modulation,
+    NOTE_COST, NoteResidual, SHORTEST_EXCURSION_FRAMES, TakeResidual, Transition, held_cost,
+    residual, residual_with_cost, silent_cost, sounding_cost, unread_cost,
 };
 pub use stage::{Chunk, Mono, Stage};
 pub use timing::{
