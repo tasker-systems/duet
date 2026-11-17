@@ -325,6 +325,12 @@ that is stale the moment it is read.
 `/.duet/state/` are ignored. `journal.duet.jsonl` is committed with the authored half. This spec
 needs nothing more ignored.
 
+**Since overtaken** (owner, 2026-11-17, the project design's decisions 3 and 7, temper
+`01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`): a project has no sharing status and git is not duet's
+concern, so duet writes no ignore rules and has no "authored half". `.duet/run/` and `.duet/state/`
+stay machine-local by what they hold, and the paths are unchanged. Decision 12 is amended to match:
+`init` writes no `.gitattributes`. What follows describes a project that someone keeps in git.
+
 A cloud session without the folder attach, or CI, sees a project's clone:
 - **the journal, and every authored document.** So they see every act, every ask and its answers,
   every verdict and comp, and can run `duet asks`, `duet journal show` and `duet watch --from 0`;
@@ -740,14 +746,19 @@ design the layout:
 2. **A stale lock is left for the next server to overwrite, not cleared by the CLI.** The `flock`
    says the lock is stale, so the file is harmless. A CLI that deleted it could race a server that
    is just starting.
-3. **`duet init` writes `journal.duet.jsonl merge=union` into `.gitattributes`.** Two clones that
-   each appended merge without a conflict: git's union driver keeps both sides' lines. Order after a
+3. ~~**`duet init` writes `journal.duet.jsonl merge=union` into `.gitattributes`.**~~
+   **Amended (owner, 2026-11-17, temper `01a1eb60`): init writes no .gitattributes; git isn't
+   duet's concern.** The journal still tolerates a union merge, being append-only, one event per line; someone who
+   keeps a project in git may add the line themselves, and duet doesn't write it. Two clones that
+   each appended then merge without a conflict: git's union driver keeps both sides' lines. Order after a
    merge is the file's order, `id`s stay unique, and a subscriber whose cursor no longer matches
    gets `resync` (§1). Projections already tolerate an answer that appears before its ask. Cloud
    sessions reach the bus through the folder attach, so this is rare, and it is not worth a
    conflict.
 4. **The journal is one file, never rotated, in v1.** At a few hundred bytes an event, a year of
    sessions is a few megabytes. Rotation, if ever needed, is a later minor of the project's layout.
+   **Superseded (owner, 2026-11-17, temper 01a1eb60): the journal is an index plus timestamped
+   segments; the bus design will propose the details.**
 
 ## Build tasks
 
@@ -891,7 +902,9 @@ first, then 1–9 and 11–13 "agreed on all", then 10 after discussion. Each wa
     store is its own crate later** ([§6](#6-crate-boundaries)). **Ruled: yes.**
 12. **`.gitattributes` gives the journal `merge=union`** ([What this asks of the project
     layout](#what-this-asks-of-the-project-layout)), written by `duet init`. **Ruled: yes,** to
-    carry into the project design.
+    carry into the project design. 
+    **Amended (owner, 2026-11-17, temper `01a1eb60`): init writes no .gitattributes; git isn't
+    duet's concern.** The journal's tolerance of a union merge stays, as a property of the journal.
 13. **The transition check and the append happen as one step, under the journal lock**
     ([§1](#lifecycles-as-state-machines)), so two processes can't both answer one ask. **Ruled:
     yes.**

@@ -1,23 +1,30 @@
-# duet projects: `duet init`, a project document, and a layout sorted by what each file is
+# duet projects: `duet init`, a project document, and a layout of takes and songs
 
 **Date:** 2026-11-17. **Task:** temper `01a1e007-8747-77ee-8333-dd462d6d01eb`.
 
-**Status: Proposed. Nothing here is built, and nothing is built before the owner rules.** Each
-point is marked **Ruled** (with where it was ruled) or **Proposed**. The questions for the owner
-are numbered decisions at the end ([Decisions for the owner](#decisions-for-the-owner)).
+**Status: Ruled (owner, 2026-11-17).** The owner ruled the design's eleven decisions ("yes, those
+stand"), with two dropped and two changed, and added one: temper
+`01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, read together with the domain model, temper
+`01a1eb48-6b7a-7797-bb2b-68f335de87e9`. The rulings are listed in
+[Decisions (ruled 2026-11-17)](#decisions-ruled-2026-11-17). Decisions 12 and 13, taken in from the
+bus design's layout asks after the eleven were set out, were ruled by the owner the same day,
+decision 12 changed. What is still marked **Proposed** is
+the design those rulings rest on: the owner ruled its decisions, not each line. Nothing here is
+built.
 
 **Builds on:**
 - [duet documents](2026-11-15-duet-documents-design.md): the `.duet` envelope, kinds, the version
   policy, and the constraint that the project kind lives inside `.duet/` (its "Project, deferred").
 - [Variants and comps](2026-11-17-variants-and-comps-design.md): the take digest over decoded
   samples, readings named as variants by annotation, comps that never name a path.
+- [Songs and composition](2026-11-17-songs-and-composition-design.md) (**Proposed**): what a song
+  folder holds, the composition, and how a take is placed on a song's bars. It takes over the
+  composition task (temper `01a1dc62-9d9f-73ae-b4ec-03b07a08e407`), folded in by decision 10.
 - The config decision (temper `01a1daa7-5cea-7301-80a6-7d3f1905f3a7`) and its build: `duet.toml`
   and `duet.local.toml` in the user's config directory and a project's `.duet/`, found by walking
   up from the working directory (`crates/duet-cli/src/config.rs`).
 - The jobs-and-boundaries note (temper `01a1e57c-f9c8-72e5-8a9b-6a4e5874bfdc`): section 4, the
   owner's rulings on what duet is, and section 8, the layout by what each thing is.
-- The composition task (temper `01a1dc62-9d9f-73ae-b4ec-03b07a08e407`): layered song, project, or
-  both. This spec names the choice it forces and does not design composition.
 - The workbench task (temper `01a1e563-22e6-70e6-a7ce-8b38e93b3091`), and the owner's ruling on it:
   a server loop is duet's event bus, built bus-and-CLI first, and the CLI always stands alone
   (temper `01a1e9ff-33f4-7123-85d9-7323abead248`, 2026-11-17). The bus is designed, and its fifteen
@@ -31,11 +38,12 @@ of the variants design (its build task 1) has since merged (#73): `capture-analy
 ## The problem
 
 Every take, reading, review sheet and verdict today sits in scratch space or in the duet checkout's
-`fixtures/`, named on the spot. That fails three jobs from the jobs note:
+`fixtures/`, named on the spot. That fails two jobs from the jobs note:
 - **J8:** coming back next week and finding a song's takes, readings, rulings and drafts.
 - **C6:** the next session, local or cloud, finding what this one found.
-- **The licence boundary:** the owner's takes stay out of git only because `fixtures/` is ignored
-  (now in `.gitignore`, before that `.git/info/exclude`), which someone has to remember.
+
+And the owner works on several songs at once, each with takes that may serve more than one of them.
+A project is where all of that lives on the owner's machine.
 
 ## What is already settled
 
@@ -46,14 +54,19 @@ Every take, reading, review sheet and verdict today sits in scratch space or in 
   config decision) **and built** (`config.rs`, witnessed in `crates/duet-e2e/tests/cli.rs`).
 - **A given flag always wins** over any file's default, as `--tempo` does today. **Ruled** (the
   config decision's precedence; the `duet init` task, question 3).
-- **The project document cannot be a file named `.duet` at the root,** because that name is the
-  directory. The documents design suggests `.duet/project.duet`. That is stated there as a
-  constraint, not among its seven rulings.
+- **The project document is `.duet/project.duet`.** **Ruled** (decision 2).
 - **The capture is never altered.** Every change is stated beside it. **Ruled** (owner,
   2026-11-16, the jobs note section 4).
 - **A take is identified by a digest of its decoded samples,** with its rate, channels and frames.
   Readings are variants of a take by that digest, and a comp names variants by annotation, never by
   path. **Ruled** (owner, 2026-11-17, the variants design, rulings 1 and 4).
+- **A project is a workspace that holds songs,** one folder each, and **a take belongs to the
+  project,** linked to a song and a part, able to serve several. **Ruled** (decision 1, the new
+  decision, and the domain model's rulings 3 and 6).
+- **A session is not a duet entity.** Continuity is the journal plus the project's files. **Ruled**
+  (the domain model, ruling 1).
+- **There is no sharing status in a project,** and **git is not duet's concern.** **Ruled**
+  (decisions 3 and 7; [§6](#6-no-sharing-status-and-no-git)).
 - **No Temper dependency.** A project is files in a directory. **Ruled** (the charter's
   `no-temper-dependency` constraint).
 - **Model weights live in a per-user cache, never in a project.** **Ruled** (owner, 2026-11-16,
@@ -65,120 +78,140 @@ Secondary sources, read 2026-11-17, listed at the end. What was not verified is 
 
 | Tool | What it does | Taken | Left |
 |---|---|---|---|
-| **Logic Pro** | A project is a package or a folder. "Copy audio files into project" decides whether imported audio is copied in or referenced where it is. Apple notes a folder lets several project versions share one set of audio. | The choice between copying a source in and naming it where it is, made per source and stated. A plain folder, never a package: a package hides files from the CLI and from Claude, and sync tools have broken packages into folders. | The package. |
-| **Ardour** | A session is a folder with a fixed layout: `interchange/` for recorded and imported audio, `peaks/` and `analysis/` that are safe to delete and are rebuilt, `export/`, and the session file with its `.bak` and `.history`. Its manual says to move the whole folder, never the session file alone. | Fixed, named directories by what a file is. Rebuildable data marked as rebuildable. The record of actions (Ardour's `.history`) kept beside the state, not in place of it. | Undo history as a separate file per save: duet's journal is one append-only stream. |
-| **REAPER** | Media is referenced by path unless "copy all media into project directory" is ticked. A relative media path keeps a project portable; an absolute one breaks it. `.reapeaks` are rebuilt if missing. A shared media folder cleaned by one project can delete another's media. | Paths inside a project are always relative. A source outside the project is found by a machine-local map, never by a path written into a shared file. One project's cleanup never touches anything outside it. | |
-| **DVC** | A small `.dvc` file, committed to git, names a large file by its hash, size and relative path; the content lives in a cache and is kept out of git. | **The core idea:** the shared half names a source by its content digest, and the content lives somewhere git does not see. duet's digest is already ruled. | A content-addressed cache directory of duet's own. A take is few and large, and its name is the owner's, not a hash. |
-| **git-annex** | Locked files are symlinks to content named by a key (`SHA256E` by default: a SHA-256 of the content and the extension). Unlocked files are pointer files behind git's clean and smudge filters, because symlinks get in the way of tools that edit files. | Identity by digest, and the lesson of its unlocked mode: **no symlinks.** They fail on Windows, in sync tools and in cloud sessions, and an audio app that follows one may write through it. | Any git integration. duet never runs git hooks or filters. |
-| **cargo** | `cargo new PATH` makes a directory; `cargo init` adopts the current one and refuses where `Cargo.toml` exists. It runs `git init` unless already inside a repository, and `--vcs none` turns that off. | **`init` works in an existing, non-empty directory and never overwrites.** One command for a new and an existing directory, as `uv init [PATH]` does. A refusal names what already exists. | Running git by default ([decision 7](#decisions-for-the-owner)). |
-| **uv** | `uv init` writes `pyproject.toml`, a `.gitignore`, a `.python-version` pin and a README; `--bare` writes only the manifest. | A minimal default: the project document and the ignore rules, and nothing that has to be deleted. The tool version is pinned in the document, as `.python-version` pins Python. | A README and a source tree written by default. |
+| **Logic Pro** | A project is a package or a folder. "Copy audio files into project" decides whether imported audio is copied in or referenced where it is. Apple notes a folder lets several project versions share one set of audio. | The choice between copying a source in and naming it where it is, made per source and stated. A plain folder, never a package: a package hides files from the CLI and from Claude, and sync tools have broken packages into folders. One set of takes shared by several songs. | The package. |
+| **Ardour** | A session is a folder with a fixed layout: `interchange/` for recorded and imported audio, `peaks/` and `analysis/` that are safe to delete and are rebuilt, `export/`, and the session file with its `.bak` and `.history`. Its manual says to move the whole folder, never the session file alone. | Fixed, named directories by what a file is. Rebuildable data in a place of its own. The record of actions (Ardour's `.history`) kept beside the state, not in place of it. | Undo history as a separate file per save: duet's journal is append-only segments behind one index. |
+| **REAPER** | Media is referenced by path unless "copy all media into project directory" is ticked. A relative media path keeps a project portable; an absolute one breaks it. `.reapeaks` are rebuilt if missing. A shared media folder cleaned by one project can delete another's media. | Paths inside a project are always relative. A source outside the project is found by a machine-local map, never by a path written into the project document. One project's cleanup never touches anything outside it. | |
+| **DVC** | A small `.dvc` file names a large file by its hash, size and relative path; the content lives in a cache. | **The core idea:** the project document names a source by its content digest, and finds its content separately. duet's digest is already ruled. | A content-addressed cache directory of duet's own. A take is few and large, and its name is the owner's, not a hash. |
+| **git-annex** | Locked files are symlinks to content named by a key (`SHA256E` by default: a SHA-256 of the content and the extension). Unlocked files are pointer files behind git's clean and smudge filters, because symlinks get in the way of tools that edit files. | Identity by digest, and the lesson of its unlocked mode: **no symlinks.** They fail on Windows, in sync tools and in cloud sessions, and an audio app that follows one may write through it. | Any git integration. duet never runs git, hooks or filters. |
+| **cargo** | `cargo new PATH` makes a directory; `cargo init` adopts the current one and refuses where `Cargo.toml` exists. It runs `git init` unless already inside a repository, and `--vcs none` turns that off. | **`init` works in an existing, non-empty directory and never overwrites.** One command for a new and an existing directory, as `uv init [PATH]` does. A refusal names what already exists. | Running git (ruled out, decision 7). |
+| **uv** | `uv init` writes `pyproject.toml`, a `.gitignore`, a `.python-version` pin and a README; `--bare` writes only the manifest. | A minimal default: the project document and a commented config, and nothing that has to be deleted. The tool version is recorded in the document, as `.python-version` pins Python. | A README, a `.gitignore` and a source tree written by default. |
 | **`temper init`** | A config wizard for the machine, and a separate project-setup flow in which an agent writes the project's prose in conversation. Temper ruled against scaffolding prose inside the binary, because an agent would still have to fill it. | **The split:** `duet init` writes structure and metadata only. Anything that needs words (the title is the one exception, and it defaults to the directory's name) is written by the owner or by Claude afterwards, through ordinary commands. | Creating a Temper context. That stays out of duet ([§9](#9-the-boundary-with-temper)). |
 
 **Not verified first-hand:** Logic's internal package layout (Apple does not document it; only the
-copy setting and the package-or-folder choice are from Apple), DVC's exact `.gitignore` handling
-(its docs site was out of reach from this session), and git-annex's repository-version details.
-None of the proposals rests on them.
+copy setting and the package-or-folder choice are from Apple), DVC's file details (its docs site was
+out of reach from this session), and git-annex's repository-version details. None of the proposals
+rests on them.
 
 ## 1. The layout
 
-**Proposed.** The jobs note's section 8 sorts a project's contents by what each thing is. This
-keeps that sorting and changes three things in its illustrative tree:
-1. **Sources and their derived files share one directory per take,** under `takes/`, so one
-   ignore rule covers both. The jobs note's tree had `takes/` and `derived/` apart, which needs
-   two rules and lets a clip end up in the wrong one. A clip of a take *is* the take.
-2. **The project document sits in `.duet/`,** as the documents design proposed, so one marker
-   (`.duet/`) finds a project and the root holds only the owner's work
-   ([decision 2](#decisions-for-the-owner)).
-3. **Comps get a directory of their own,** since they did not exist when the note was written.
+**Ruled:** takes in `takes/` at the project root (decision 8), the project document in `.duet/`
+(decision 2), one folder per song under `songs/` (the new decision), and rebuildable renders in
+`renders/` (decision 9). **Proposed:** the rest of the tree.
+
+The jobs note's section 8 sorts a project's contents by what each thing is. This keeps that sorting
+and changes its illustrative tree in four ways:
+1. **Sources and the files derived from them share one directory per take,** under `takes/`. A
+   clip of a take *is* the take, and a reading is rebuilt from it.
+2. **The project document sits in `.duet/`,** so one marker (`.duet/`) finds a project and the
+   root holds only the owner's work.
+3. **Each song has a folder,** `songs/<song>/`, holding its song document (with its composition),
+   its parts, its comps and its snapshots. A take stays at the root because it can serve several
+   songs.
+4. **Comps live in their song,** since a comp builds one of that song's parts from its takes.
 
 ```text
-wayfaring/                          the project: any directory, outside the duet checkout
+porch/                              the project: any directory, outside the duet checkout
   .duet/
     project.duet                    the project document (kind: project)        authored
     duet.toml                       project config, as today                    authored
-    duet.local.toml                 this machine's config, as today             ignored
-    takes.local.toml                where named takes live on this machine      ignored
-    run/                            the server's socket and lock, when running  ignored
-    state/                          the state store, its kind still to be ruled ignored
-  .gitignore                        written by init, its duet block kept by duet
-  journal.duet.jsonl                the domain-event journal                    the journal
-  takes/                            THE LICENCE BOUNDARY: ignored by one rule
+    duet.local.toml                 this machine's config, as today             machine-local
+    takes.local.toml                where named takes live on this machine      machine-local
+    run/                            the server's socket and lock, when running  machine-local
+    state/                          the view-state store, when a face needs it  machine-local
+  journal.duet.jsonl                the journal's index: segments and their ranges   the journal
+  journal.<timestamp>.duet.jsonl    one segment of events, open or closed            the journal
+  takes/
     wayfaring/                      one take: its source and everything from it
       wayfaring.flac                the source, when copied in (absent when named)
-      wayfaring.license             its licence notice, when it has one
       wayfaring.performance.duet.jsonl
       wayfaring.hmm.capture.duet    a reading (a variant)
-      wayfaring.hmm.duet            its song
+      wayfaring.hmm.duet            its notes, as a part
       wayfaring.hmm.abc             its score
       wayfaring.rules.capture.duet  another variant
-      wayfaring.comped.capture.duet the comp applied, and its .duet and .abc
       compare/                      compare's SVGs and WAVs
       review/                       a review sheet and its clips
   review/
     wayfaring.moments               moments: times and labels, no audio         authored
-  comps/
-    wayfaring.comp.duet             picks and marks over the variants           authored
-  parts/                            songs and grids the owner keeps             authored
-  renders/                          MIDI and audio rendered from parts          ignored, rebuildable
+  songs/
+    wayfaring-stranger/             one song
+      song.duet                     the song and its composition (kind: song)   authored
+      parts/
+        melody.duet                 a part (kind: part), with its source        authored
+        bass.duet
+        kit.duet                    a drum part (kind: drum-grid)
+      comps/
+        melody.comp.duet            picks across takes, on the song's bars      authored
+      snapshots/
+        2026-11-20-first-verse/     a checkpoint: copies, never changed         authored
+  renders/                          MIDI and audio rendered from parts and songs rebuildable
 ```
 
 ### What each thing is
 
-| What | Where | Kept how | Shared? |
-|---|---|---|---|
-| **Sources** | `takes/<name>/<file>`, or named where they are ([§4](#4-sources-named-without-copying)) | Never modified. Identified by digest | Restricted by default |
-| **Derived from a source** | `takes/<name>/` | Rebuilt from the source and the tool's version. A reading names its reader and passes, so variants sit side by side | Inherits its take's restriction |
-| **Authored** | `.duet/project.duet`, `.duet/duet.toml`, `review/`, `comps/`, `parts/` | Small and precious. Versioned like code | Shareable even when the audio is not |
-| **The journal** | `journal.duet.jsonl` | Append-only | As authored |
-| **Rebuildable, not restricted** | `renders/` | Rebuilt from parts | Ignored by default, as build output is |
-| **Machine-local** | `.duet/*.local.toml`, `.duet/run/`, `.duet/state/` | This machine only | Never |
-| **Outside the project** | the user's config directory, the weights cache, soundfonts | Per user | Not applicable |
+| What | Where | Kept how |
+|---|---|---|
+| **Sources** | `takes/<take>/<file>`, or named where they are ([§4](#4-sources-named-without-copying)) | Never modified. Identified by digest |
+| **Derived from a source** | `takes/<take>/` | Rebuilt from the source and the tool's version. A reading names its reader and passes, so variants sit side by side |
+| **Songs** | `songs/<song>/song.duet` | The song and its composition. Changed in place, every change in the journal |
+| **Parts, comps** | `songs/<song>/parts/`, `songs/<song>/comps/` | The song's working files. Every change in the journal |
+| **Snapshots** | `songs/<song>/snapshots/<name>/` | Copies, written once and never changed |
+| **Other authored files** | `.duet/project.duet`, `.duet/duet.toml`, `review/` | Small and precious |
+| **The journal** | `journal.duet.jsonl` (the index) and `journal.<timestamp>.duet.jsonl` (segments) | Append-only |
+| **Rebuildable** | `renders/` | Rebuilt from parts and songs. No special status |
+| **Machine-local** | `.duet/*.local.toml`, `.duet/run/`, `.duet/state/` | This machine only |
+| **Outside the project** | the user's config directory, the weights cache, soundfonts | Per user |
+
+Every file in a project is the owner's. None has a sharing status ([§6](#6-no-sharing-status-and-no-git)).
 
 ### Rules the layout keeps
 
-- **Every path a shared file writes is relative to the project root.** An absolute path appears
-  only in `.duet/takes.local.toml`. (REAPER's lesson.)
+- **Every path a project file writes is relative to the project root** (or, inside a song, to the
+  song's folder). An absolute path appears only in `.duet/takes.local.toml`. (REAPER's lesson.)
 - **A take's name is the owner's,** a short lowercase name with hyphens (`wayfaring`,
   `blood-sport-v2`), unique in the project, and the directory and file stems under `takes/` use
   it. Nothing reads a file's name to learn what it is: the envelope says that, as today.
+- **A song's name follows the same rule,** unique in the project, and is its folder's name. Its
+  title for people is in `song.duet`.
+- **A part's name is its stem,** unique in its song.
 - **A reading's stem is `<take>.<label>`,** where the label is its reader (`hmm`, `rules`,
-  `basic-pitch`), or `comped`. This is the variants design's own example
-  (`wayfaring.hmm.capture.duet`), made the project's default. A second reading with the same label
-  is refused, as every capture output is today; `-o` names another.
-- **The performance is written once per take,** at `takes/<name>/<name>.performance.duet.jsonl`, if,
+  `basic-pitch`). This is the variants design's own example (`wayfaring.hmm.capture.duet`), made
+  the project's default. A second reading with the same label is refused, as every capture output
+  is today; `-o` names another.
+- **The performance is written once per take,** at `takes/<take>/<take>.performance.duet.jsonl`, if,
   as appears from the code, it does not depend on the reader. A capture that finds one already
   there checks it is of the same take (`performance` 1.1's `take`, ruled in the variants design) and
   the same duet version, and reuses it; otherwise it refuses, naming both. *To verify when built.*
-- **Directories are made when first written,** not by `init`. Git keeps no empty directory, and a
-  project with no comps has no `comps/`. The names are fixed by this spec, not by what exists.
-- **Projects live outside the duet checkout.** The duet repository is not a project, and its
-  `fixtures/` stays what it is until the owner's work there is adopted
-  ([§7](#7-adopting-scratch-work)).
+- **Directories are made when first written,** not by `init`. A project with no songs has no
+  `songs/`. The names are fixed by this spec, not by what exists.
+- **Projects live outside the duet checkout.** The duet repository is not a project. Its
+  `fixtures/` rule (the owner's takes are never committed there) is a rule for developing duet, not
+  a property of a project ([§6](#6-no-sharing-status-and-no-git)).
 
 ### Where review sets, verdicts and comps go
 
 The `duet init` task asks this for the workbench (its "Added 2026-11-16").
-- **A moments file** is authored (times and labels, no audio): `review/<take>.moments`.
-- **A review sheet** is HTML with clips cut from the take, so it is the take:
+- **A moments file** is authored (times and labels, no audio) and belongs to a take:
+  `review/<take>.moments`.
+- **A review sheet** is HTML with clips cut from the take, so it is the take's:
   `takes/<take>/review/`. Today `duet capture review` writes `STEM.review/`; in a project its
   default `--dir` becomes this.
-- **A verdict that picks or marks** is a comp entry (variants design §8, ruled):
-  `comps/<take>.comp.duet`.
+- **A verdict that picks or marks** is a comp entry (variants design §8, ruled), in the comp of the
+  song and part it builds: `songs/<song>/comps/<part>.comp.duet`.
 - **A verdict that picks nothing** ("no audible difference") lives in the journal, as the variants
   design says. Whether the review task also keeps answers beside the moments file
   (`review/<take>.answers`, say) is that task's call; `review/` is where it would go.
 
 ## 2. The project document: `project` 1.0
 
-**Proposed. A new kind, `project` 1.0,** a `.duet` document at `.duet/project.duet`, with its schema
-and example committed under `crates/duet-schemas/schemas/project/`.
+**Proposed. A new kind, `project` 1.0,** a `.duet` document at `.duet/project.duet` (ruled,
+decision 2), with its schema and example committed under `crates/duet-schemas/schemas/project/`.
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/project/1.0.json",
   "duet": { "kind": "project", "version": "1.0", "tool": { "name": "duet", "version": "0.5.0" } },
   "body": {
-    "title": "Wayfaring Stranger",
+    "title": "Porch",
     "created": "2026-11-17",
     "duet": "0.5",
     "defaults": { "tempo_bpm": 92.0, "meter": "3/4", "key": "Ab", "tuning": "+0c", "grid": "1/16" },
@@ -187,17 +220,13 @@ and example committed under `crates/duet-schemas/schemas/project/`.
         "name": "wayfaring",
         "take": { "digest": "sha256:9f2c…", "rate": 44100, "channels": 1, "frames": 976080 },
         "file": "wayfaring-stranger.flac",
-        "kept": "copied",
-        "restriction": "open",
-        "licence": "CC-BY-4.0",
-        "added": "2026-11-17"
+        "added": "2026-11-17",
+        "given": { "tempo_bpm": 92.0 }
       },
       {
         "name": "blood-sport",
         "take": { "digest": "sha256:41ab…", "rate": 48000, "channels": 1, "frames": 1203200 },
         "file": "Blood Sport 3.m4a",
-        "kept": "named",
-        "restriction": "restricted",
         "added": "2026-11-17"
       }
     ]
@@ -214,7 +243,8 @@ and example committed under `crates/duet-schemas/schemas/project/`.
   the tool version the task asks for. The envelope's `tool` says who last wrote the file; this says
   who made the project. Neither is ever checked.
 - **`defaults`**, optional, every field optional: tempo, meter, key, tuning and grid, spelled as
-  their flags spell them. What they apply to is [§5](#5-how-commands-find-and-use-a-project).
+  their flags spell them. A new song's composition starts from them; renders take `tuning`; a new
+  grid takes `grid` ([§5](#5-how-commands-find-and-use-a-project)). Capture never takes them.
   - **The lane map is not here.** Lanes are config, in `.duet/duet.toml`, as ruled in the
     documents design ("Lane maps and config are not kinds"). One place for each thing.
 - **`takes`**, required, possibly empty: the project's sources
@@ -223,24 +253,27 @@ and example committed under `crates/duet-schemas/schemas/project/`.
   - `take`: the variants design's `take` object, the same type. The digest is the identity.
   - `file`: the source's own file name when added, without its directory. Information, for people
     and for finding it again; never a path.
-  - `kept`: `copied` (the source is at `takes/<name>/<file>`) or `named` (it is found through
-    `.duet/takes.local.toml`).
-  - `restriction`: `restricted` (the default) or `open` ([§6](#6-the-licence-boundary)).
-  - `licence`, optional: an SPDX identifier when the take has a known licence, as the corpus
-    manifest's `licence` does. The notice itself stays in `takes/<name>/<name>.license`, as the
-    corpus and `duet capture review` already keep it.
   - `added`: the date it was added.
-- **No `parts`, `pieces` or `tracks` in 1.0.** See [§8](#8-the-choice-composition-forces).
+  - `given`, optional: values the owner gave this take (`tempo_bpm`, `meter`, `key`), remembered so
+    every later capture of it uses them, stated as given. **Ruled** (decision 6: "a value the owner
+    gives a take is remembered for that take"); its shape is proposed.
+  - **No `kept` field.** Whether a take was copied in or named is found, not stored: a file at
+    `takes/<take>/<file>`, else an entry in `.duet/takes.local.toml`. **No `restriction` and no
+    `licence`.** There is no sharing status (ruled, decision 3), and licensing for release is a
+    later question. A take's licence notice, when it has one, is a file in its directory like any
+    other.
+- **No `songs` list.** A song is a folder in `songs/` holding a `song.duet`. Listing them here too
+  would be a second place for one fact. Which songs use a take is read from the songs, which link
+  to their takes ([the songs design](2026-11-17-songs-and-composition-design.md#the-song)).
 
 ### The version
 
 - **1.0, new.** The version policy is ruled; nothing about it changes here.
-- **Expected minors:** a take's optional provenance (`from: "duet record" | "logic tap" | …`), an
-  optional list of pieces once composition is designed
-  ([§8](#8-the-choice-composition-forces)), and new `defaults` fields. Each is an optional field
-  whose absence means what 1.0 meant.
-- **Why `defaults` is a closed object** and not a free table: unknown fields are refused at every
-  version (ruled), so a typo in a default is caught, not silently ignored.
+- **Expected minors:** a take's optional provenance (`from: "duet record" | "logic tap" | …`), more
+  `given` fields, and new `defaults` fields. Each is an optional field whose absence means what 1.0
+  meant.
+- **Why `defaults` and `given` are closed objects** and not free tables: unknown fields are refused
+  at every version (ruled), so a typo in one is caught, not silently ignored.
 
 ### The Rust type
 
@@ -254,8 +287,8 @@ document). `Take` is the variants design's type, shared, not copied.
 
 ```sh
 duet init                      # the working directory becomes a project
-duet init ~/Music/wayfaring    # makes the directory if it is missing
-duet init --title "Wayfaring Stranger"
+duet init ~/Music/porch        # makes the directory if it is missing
+duet init --title "Porch"
 ```
 
 It writes, and prints each path it wrote:
@@ -264,20 +297,19 @@ It writes, and prints each path it wrote:
 2. **`.duet/duet.toml`**, only if absent: every line a comment, naming what may be set here
    (`[song] end`, `[play] soundfont`, `[lanes.*]`), so it changes nothing until edited. An existing
    one is left alone and named.
-3. **`.gitignore`**: the duet block ([§6](#6-the-licence-boundary)). Appended between marker lines
-   to an existing file, never rewritten around the owner's own lines.
-4. **`.gitattributes`**: `journal.duet.jsonl merge=union`, appended the same way, so two clones that
-   each appended to the journal merge without a conflict. **Ruled** (owner, 2026-11-17, the bus
-   design's decision 12).
 
 It does not:
 - **overwrite.** A directory that already holds `.duet/project.duet` is refused, naming it. A
   `.duet/` with only config in it is adopted: it gains a project document and keeps its config.
 - **move, copy or delete anything.** Adopting files is a separate, explicit step
   ([§7](#7-adopting-scratch-work)).
-- **run git** ([decision 7](#decisions-for-the-owner)). It prints one line: `git init` to version
-  the authored half.
+- **write a `.gitignore` or a `.gitattributes`, run git, or print a git line.** **Ruled** (decision
+  7, and its amendment of the bus design's decision 12). The journal's files are append-only, one
+  entry per line, so they tolerate a union merge; someone who keeps a project in git may add
+  `merge=union` for them themselves, and duet doesn't write it.
 - **make directories** beyond `.duet/`.
+- **make a song.** `duet song new <name>` does that
+  ([the songs design](2026-11-17-songs-and-composition-design.md)).
 - **touch the network or Temper.**
 - **write prose,** beyond a title it can derive. (`temper init`'s split.)
 
@@ -290,7 +322,8 @@ project for config. `init` refuses to make one in the home directory itself.
 
 ## 4. Sources named without copying
 
-**Proposed.** A take is added to the project explicitly, copied in or named where it is.
+**Ruled:** `duet take add` copies by default, and `--named` leaves the file where it is (decision
+4). **Proposed:** the rest. A take is added to the project explicitly.
 
 ```sh
 duet take add ~/Downloads/idea.m4a --name idea              # copied into takes/idea/
@@ -301,31 +334,32 @@ duet take list                                              # every take, where 
 
 - **Adding decodes the whole file once** and computes the take digest (the variants design's
   digester), its rate, channels and frames.
-- **Copied:** the file is copied byte for byte to `takes/<name>/<file>`. Never transcoded: the
+- **Copied:** the file is copied byte for byte to `takes/<take>/<file>`. Never transcoded: the
   capture is never altered (ruled), and a byte copy needs no argument about whether a re-encode is
-  the same take.
+  the same take. Copying makes a project whole and survives a phone being unplugged.
 - **Named:** nothing is copied. The absolute path goes into `.duet/takes.local.toml`, which is
-  machine-local and ignored:
+  machine-local:
 
   ```toml
   [blood-sport]
   path = "/Volumes/Phone/Blood Sport 3.m4a"
   ```
 
-  The shared document holds only the digest and the file's name. (DVC's pointer file, with
+  The project document holds only the digest and the file's name. (DVC's pointer file, with
   REAPER's lesson that a path is the machine's, not the project's.)
-- **Finding a take** for any command: `takes/<name>/<file>` first, then `takes.local.toml`. A file
+- **Finding a take** for any command: `takes/<take>/<file>` first, then `takes.local.toml`. A file
   found is checked against the digest before use, once per command. A missing or changed file is
   refused, naming the take, its digest, where duet looked, and `duet take locate`.
 - **No symlinks, ever** (git-annex's lesson). A take is a file in the project or a path in the
   local map.
-- **`duet record` in a project** records straight into `takes/<name>/<name>.flac`, adds the take as
-  `copied`, and records it in the journal. It is the owner's own recording, so it is copied by
-  definition.
-- **A take is never removed by a command.** `duet take forget <name>` drops the entry and its
-  local path, and leaves every file in `takes/<name>/` for the owner to delete.
-
-Whether `add` copies by default is [decision 4](#decisions-for-the-owner).
+- **`duet record` in a project** records straight into `takes/<take>/<take>.flac`, adds the take,
+  and records it in the journal. With `--song`, it plays the song's click and places the take on
+  its bars ([the songs design, §4](2026-11-17-songs-and-composition-design.md#4-how-a-take-maps-onto-the-bars)).
+- **Linking a take to a song and a part** is the song's: the song document names its takes
+  ([the songs design, §1](2026-11-17-songs-and-composition-design.md#the-song)).
+- **A take is never removed by a command.** `duet take forget <take>` drops the entry and its
+  local path, and leaves every file in `takes/<take>/` for the owner to delete. A song that still
+  links it says so.
 
 ## 5. How commands find and use a project
 
@@ -338,97 +372,79 @@ Whether `add` copies by default is [decision 4](#decisions-for-the-owner).
   working directory means nothing. It mirrors `DUET_CONFIG_DIR`. duet-e2e clears it, as it already
   isolates config.
 - **`duet project path`** prints the project found and how; **`duet project show`** prints the
-  project document as text, every take with where it was found (or that it was not), and the
-  ignore block's state. They mirror `duet config path | show`.
+  project document as text, every take with where it was found (or that it was not), and every
+  song. They mirror `duet config path | show`.
 
 **What changes inside a project:**
 - **A take can be given by name.** `duet capture melody wayfaring` reads the take named
   `wayfaring`. A path still works.
 - **Default output locations.** Without `-o`, a capture of a project take writes to
-  `takes/<name>/<name>.<reader>.*`. `compare`, `review` and `comp apply` default the same way, and
-  `comp apply` looks in `takes/<name>/` for its variants when given no files (its `--in DIR`,
-  ruled, defaulted).
+  `takes/<take>/<take>.<reader>.*`. `compare` and `review` default the same way. `comp apply`
+  writes the part its comp names into the song's `parts/`.
 - **A capture of a path that is not a project take** is refused inside a project, with the
-  `duet take add` line to run, so that nothing derived lands outside the boundary by accident.
-  `-o` still wins: given outside `takes/`, the outputs go there, and duet says the take is not in
-  the project ([decision 5](#decisions-for-the-owner)).
+  `duet take add` line to run. **Ruled** (decision 5). `-o` still wins: given outside `takes/`, the
+  outputs go there, and duet says the take is not in the project.
 - **Defaults.** Commands that make or render music without a recording use `defaults`, each
-  stated: `duet play` and renders take `tuning`; a new song or grid takes tempo, meter, key and
-  grid. Each says "tempo 92, from the project".
-- **Capture does not take tempo, meter or key from the project.** Estimating them is what capture
-  is for, and a hummed idea is rarely at the song's tempo. Capture states where its estimate
-  disagrees with a project default, and `--tempo` gives one, as today. A later Logic tap stamps
-  the host's tempo on the take, which is the case where a given tempo is real
-  ([decision 6](#decisions-for-the-owner)).
+  stated: `duet play` and renders take `tuning`; a new song's composition and a new grid take
+  tempo, meter, key and grid. Each says "tempo 92, from the project".
+- **Capture estimates, then compares.** **Ruled** (decision 6). Capture always estimates tempo,
+  meter and key from the take. When the take is linked to a song, it states where its estimate
+  disagrees with that song's composition. A take is placed on the song's bars by the song's tempo
+  map plus an offset (the click case). A value the owner gives a take (`--tempo`) is remembered on
+  the take's `given`, and used by every later capture of it, stated as given. A take recorded
+  without a click is placed by its estimated tempo by default, until the owner sets one (ruled,
+  temper `01a1eb48`, ruling 8; [the songs design](2026-11-17-songs-and-composition-design.md#takes-without-a-click)).
 
 **What never changes:** a given flag wins, every file still says what it is by its envelope, and
 no command needs a project. Outside one, every command works exactly as today.
 
-## 6. The licence boundary
+## 6. No sharing status, and no git
 
-**Proposed. The boundary is the `takes/` directory, and duet keeps the rule.**
+**Ruled** (owner, 2026-11-17, decisions 3, 7 and 9, temper `01a1eb60`).
 
-`init` writes, and `duet take add` and `duet project show` keep, this block in `.gitignore`:
-
-```gitignore
-# duet: begin (kept by duet from .duet/project.duet; edit outside these lines)
-/takes/*
-!/takes/wayfaring/
-/renders/
-/.duet/*.local.toml
-/.duet/run/
-/.duet/state/
-# duet: end
-```
-
-- **`/takes/*`, not `/takes/`,** so that an `open` take can be re-included by name: git cannot
-  re-include a path below a directory it has excluded, but can below an excluded directory's
-  *contents*.
-- **A take is `restricted` by default.** `duet take add --open --licence CC-BY-4.0` marks it open,
-  and the block gains its `!` line. Restriction is the take's, so everything derived from it in
-  its directory follows it.
-- **The block is derived from the project document.** duet rewrites only what is between its
-  markers, and only when the document's takes change. The owner's own lines are never touched.
-- **`duet project check`** reports, and exits non-zero, when the block does not match the document,
-  or when a restricted take's directory is not ignored by it. It reads the files only: it does not
-  run git, so it cannot see a file already committed. That limit is stated in its output.
-- **A part made from a restricted take.** A song captured from the owner's take is in
-  `takes/<name>/`, restricted. Copying it into `parts/` (for example
-  `duet apply wayfaring.hmm.notes -o parts/melody.duet`) is the owner's act of keeping it as
-  authored, and the boundary does not follow it there. Whether a reading's *notes* should stay
-  restricted with their take is [decision 3](#decisions-for-the-owner).
-- **The authored half can be a repository of its own.** With the block in place, `git init` in the
-  project commits only what is shareable. That is how a cloud session could ever see a project: it
-  sees the moments, comps, parts and journal, and none of the audio, exactly as today's cloud
-  sessions work from what the owner chose to share.
-- **The journal names takes by name and digest, never by path,** so a shared journal leaks no
-  machine path.
+- **There is no "private", "restricted" or sharing status in a project.** The owner asked: "private
+  to whom?" A project is on the user's own machine, and every file in it is theirs. No field, no
+  directory and no command marks a file as shareable or not.
+- **Licensing for release is a later question,** not a project concept now.
+- **The duet repository's `fixtures/` rule stays a rule for developing duet.** The owner's takes are
+  never committed to the duet repository. That is the repository's concern, kept by its own
+  `.gitignore`, and never a property of a project.
+- **Git is not duet's concern.** Someone may keep a project in git, but duet neither assumes nor
+  manages that: `init` writes no `.gitignore`, runs no git and prints no git line, and no command
+  reads git's state. That includes `.gitattributes`: the owner amended the bus design's decision 12
+  so that `init` no longer writes `merge=union` for the journal ([§10](#10-what-the-layout-holds-for-the-bus)).
+- **Renders are rebuildable files in `renders/`,** with no special status. Deleting `renders/`
+  loses nothing that cannot be made again.
+- **The journal names takes by name and digest, never by path,** so it holds no machine's path and
+  stays true when the project moves.
 
 ## 7. Adopting scratch work
 
 **Proposed. Adoption is a plan, then an explicit apply. It copies; it never moves.**
 
 ```sh
-cd ~/Music/wayfaring && duet init
-duet project adopt ~/duet/fixtures/wayfaring          # prints a plan, writes nothing
-duet project adopt ~/duet/fixtures/wayfaring --apply  # copies as planned
+cd ~/Music/porch && duet init
+duet project adopt ~/duet/fixtures/wayfaring --song wayfaring-stranger          # prints a plan, writes nothing
+duet project adopt ~/duet/fixtures/wayfaring --song wayfaring-stranger --apply  # copies as planned
 ```
 
 The plan reads every file in the directory given and sorts it:
-- **Audio** becomes a take, added as `copied` (or `--named`), its name from its stem.
+- **Audio** becomes a take, added as copied (or `--named`), its name from its stem.
 - **A `.duet` or `.duet.jsonl`** is sorted by its envelope's kind:
-  - `capture-analysis`, `performance`, and a song or grid written beside a capture with the same
+  - `capture-analysis`, `performance`, and a part or grid written beside a capture with the same
     stem: derived. It goes to the take whose digest it states. A document from before the take
     digest (`capture-analysis` below 1.13, `performance` 1.0) states none, so it is
     matched by rate and length, as `compare` matches today, and the plan says so. Such a reading is
     not a variant (ruled, the variants design): the plan lists it, and suggests capturing again
     when a comp is wanted.
-  - `comp`: authored, to `comps/`.
-  - any other song or grid: authored, to `parts/`.
+  - `comp`: to the song's `comps/`.
+  - any other part or grid: to the song's `parts/`.
 - **A `.moments` file** goes to `review/`.
-- **A `STEM.review/` directory** goes to `takes/<name>/review/`.
-- **`.notes`, `.drums` and `.abc` text** goes to `parts/` unless it sits beside a capture of the
-  same stem, which makes it derived.
+- **A `STEM.review/` directory** goes to `takes/<take>/review/`.
+- **`.notes`, `.drums` and `.abc` text** goes to the song's `parts/` unless it sits beside a capture
+  of the same stem, which makes it derived.
+- **Without `--song`,** takes and derived files are planned as usual, and every part and comp is
+  listed as needing a song. `--song` names one, made if it does not exist.
 - **Anything else** is listed as left behind, never guessed at.
 
 Then:
@@ -436,36 +452,22 @@ Then:
   writes one act per take to the journal. The scratch directory is untouched: deleting it is the
   owner's.
 - **Nothing is rewritten.** An adopted document's bytes are the same; its new path is the only
-  change. That keeps every digest a comp or view header holds.
-- **The duet checkout's `fixtures/`** is the first thing to adopt. Once its work is in projects,
-  the `/fixtures/` ignore line can stay as a guard for test output, or go.
+  change. That keeps every digest a comp or view header holds. A part adopted from before the
+  `part` rename states no `source`; the plan says so.
+- **The duet checkout's `fixtures/`** is the first thing to adopt.
 
-## 8. The choice composition forces
+## 8. A workspace, and composition as its own spec
 
-The composition task is open: parts layered in one song document, a project-kind document that
-orchestrates them, or both. The owner has broader compositions and a richer song layer in mind.
-This design must leave room for either, so it names the one choice that cannot be deferred:
+**Ruled** (decisions 1 and 10). **A project is a workspace that holds songs,** not one piece, and
+each song holds its composition. **Composition is folded into the domain model** and is its own spec,
+[songs and composition](2026-11-17-songs-and-composition-design.md), which this layout uses.
 
-> **Is a project one piece, or a workspace that may hold several?**
-
-- **If a project is one piece,** the project document is the natural place for the composition: its
-  parts, their order, tracks, alignment and sections. Then `project` 1.0's shape is a guess at the
-  composition design, and getting it wrong costs a major.
-- **If a project is a workspace,** composition is its own kind (an `arrangement`, say, or a richer
-  `song`), and a project may hold several. The project document stays a registry: identity,
-  defaults, takes. It gains an optional `pieces` list as a minor once that kind exists.
-
-**Recommendation: a workspace, and composition as its own kind.**
-- A song's life already spans several takes and several attempts at one piece. A remix (the Later
-  goal) holds stems of one track and several mixes of them.
-- It keeps `project` 1.0 small and stable now, which the owner wants soon, and lets the composition
-  design take whatever shape the richer song layer needs, without a project major.
-- **Room left either way:** if the owner rules "one piece", the composition design adds its fields
-  to `project` as a minor (optional, absent meaning "no composition yet"). Nothing in 1.0 is in the
-  way. What 1.0 must not do is put parts in it now.
-
-This decides nothing about layered against orchestrated, or how takes with different tempos and
-downbeats align. Those stay the composition task's. It is [decision 1](#decisions-for-the-owner).
+- **`project` 1.0 holds no parts and no composition.** It is a registry: identity, defaults and
+  takes.
+- **A song's composition is in its `song.duet`**: sections, the tempo, meter and key maps, and where
+  each part sits on the timeline. A song that changes tempo and key is still one song.
+- **A take can serve several songs,** placed on each song's bars by that song's tempo map plus an
+  offset.
 
 ## 9. The boundary with Temper
 
@@ -486,34 +488,46 @@ paths this section reserved and asked for four things more (its
 ["What this asks of the project layout"](2026-11-17-bus-design.md#what-this-asks-of-the-project-layout)).
 What the layout holds:
 
-1. **The journal is `journal.duet.jsonl` at the project root,** one stream per project, kind
-   `journal` 1.0, read with `duet journal show | check`. **Ruled** (owner, 2026-11-17, the bus
-   design's decision 15): it was `log.duet.jsonl`, but it is more than a log, and many things are
-   logs. It is the durable record: a restarted server replays it, and a CLI with no server appends
-   to it under the journal lock. It is authored-tier, so it is committed with the authored half and
-   names takes by name and digest, never by path ([§6](#6-the-licence-boundary)).
-   - **Git merges it by union** (`.gitattributes`, written by `init`,
-     [§3](#3-what-duet-init-writes)). **Ruled** (the bus design's decision 12).
-   - **One file, never rotated, in v1.** A year of sessions is a few megabytes. Rotation, if ever
-     needed, is a later change to the layout. **Proposed** (the bus design's layout ask 4;
-     [decision 12](#decisions-for-the-owner)).
-2. **The server is found through a lock at a fixed path, `.duet/run/bus.lock`,** git-ignored and
-   machine-local. It is a small TOML file naming the server's pid and **its socket's path**. The
-   socket is usually in `.duet/run/` too, and falls back to `$TMPDIR` when the project's path is too
-   long for a Unix socket (macOS allows 104 bytes). A CLI reads only the lock. **Ruled** (the bus
-   design's decision 6), refining this section's earlier "a fixed path for the socket".
+1. **The journal is one per project, at the project root,** kind `journal` 1.0, read with
+   `duet journal show | check`. **Ruled** (owner, 2026-11-17, the bus design's decision 15): it was
+   `log.duet.jsonl`, but it is more than a log, and many things are logs. It is the durable record: a restarted server replays it, and a CLI with no server appends
+   to it under the journal lock. It carries each song's history, since a session is not a duet
+   entity (the domain model, ruling 1). It names takes by name and digest, never by path
+   ([§6](#6-no-sharing-status-and-no-git)).
+   - **An index plus timestamped segments.** **Ruled (owner, 2026-11-17, temper `01a1eb60`,
+     decision 12):**
+     - `journal.duet.jsonl` is the **index**. Each entry maps a segment file to the date range it
+       covers and to the project-level elements it concerns.
+     - Events live in **segments**, `journal.<timestamp>.duet.jsonl`.
+     - **The current segment** is the index entry with no end of range, matched to the file on disk
+       by its timestamp.
+   - **Left to the bus design to propose,** for the owner to rule: when a new segment starts (by
+     size, by date or on an event); which project-level elements the index names (songs, takes,
+     parts, say); the timestamp format in the file name; how replay and a subscriber's cursor move
+     across segments; how the index and the segments are written under the journal lock; and how an
+     index entry is closed. This supersedes the bus design's layout ask 4, "one file, never
+     rotated, in v1".
+   - **`init` writes no `.gitattributes`.** The journal's files are append-only, one entry per line,
+     so they tolerate a union merge; someone who keeps a project in git may add `merge=union` for
+     them themselves, and duet doesn't write it. **Ruled** (owner, 2026-11-17, temper `01a1eb60`,
+     amending the bus design's decision 12).
+2. **The server is found through a lock at a fixed path, `.duet/run/bus.lock`,** machine-local. It is
+   a small TOML file naming the server's pid and **its socket's path**. The socket is usually in
+   `.duet/run/` too, and falls back to `$TMPDIR` when the project's path is too long for a Unix
+   socket (macOS allows 104 bytes). A CLI reads only the lock. **Ruled** (the bus design's decision
+   6), refining this section's earlier "a fixed path for the socket".
    - **A stale lock is left for the next server to overwrite.** The CLI does not clear it: the
      `flock` already says it is stale, and a CLI that deleted it could race a server that is just
-     starting. **Proposed** (the bus design's layout ask 2;
-     [decision 13](#decisions-for-the-owner)). This replaces this section's earlier "a stale lock
-     is the CLI's to clear".
-3. **The state store is `.duet/state/state.sqlite`,** git-ignored and machine-local, holding only
-   view state (open take and moment, layout, each face's last-read cursor) and caches. It is **not
-   built until a face needs it**, so the CLI-first build has none. Anything a person or Claude acts
-   on (open asks, a review in progress, the current comp) is a projection of the journal and the
-   documents, never store-only, so deleting `.duet/state/` loses where the windows were and nothing
-   else. A cloud session or a fresh clone loses nothing it needs. **Ruled** (the bus design's
-   decision 1), which also rules [decision 11](#decisions-for-the-owner).
+     starting. **Ruled (owner, 2026-11-17, temper `01a1eb60`,
+     [decision 13](#from-the-bus-design)).** This replaces this section's earlier "a stale lock is
+     the CLI's to clear".
+3. **The state store is `.duet/state/state.sqlite`,** machine-local, holding only view state (open
+   take and moment, layout, each face's last-read cursor) and caches. It is **not built until a face
+   needs it**, so the CLI-first build has none. Anything a person or Claude acts on (open asks, a
+   review in progress, the current comp) is a projection of the journal and the documents, never
+   store-only, so deleting `.duet/state/` loses where the windows were and nothing else. A cloud
+   session or a fresh copy of the project loses nothing it needs. **Ruled** (the bus design's
+   decision 1, and decision 11).
 4. **A plugin** (the Later goal's tap and play-in) finds its project by `DUET_PROJECT` or a path set
    in its own UI, since a DAW's working directory means nothing, then finds the server through the
    lock as the CLI does. Whether a sandboxed AUv3 can reach a project directory at all is the plugin
@@ -524,102 +538,117 @@ What the layout holds:
 For the build tasks below, each in the crate CLAUDE.md names:
 - **`crates/duet-schemas/tests/`:** a `project` document round-trips exactly through its reader,
   and validates against `project/1.0.json`; its committed example reads; an unknown field, a
-  duplicate take name and an unknown `kept` or `restriction` are each refused by name.
+  duplicate take name and an unknown `given` field are each refused by name.
 - **`crates/duet-e2e`:**
-  - `init` in an empty directory writes exactly the four files, and `init` again is refused
-    naming `.duet/project.duet`.
+  - `init` in an empty directory writes exactly the files [§3](#3-what-duet-init-writes) lists, and
+    `init` again is refused naming `.duet/project.duet`.
+  - `init` writes no `.gitignore` and prints no git line.
   - `init` in a directory with `.duet/duet.toml` keeps that file byte for byte.
-  - `init` appends its block to an existing `.gitignore` and leaves every other line as it was.
-  - `take add` a copied and a named take: the copy is byte-identical, the named one is found by the
-    local map, and a changed file at that path is refused naming the digest.
-  - In a project, `capture melody <name>` writes under `takes/<name>/`, and a capture of a path not
+  - `take add` with no flag copies, byte-identical; `--named` copies nothing and the take is found
+    by the local map; a changed file at that path is refused naming the digest.
+  - A capture of a take with `--tempo 92` records `given`, and the next capture of it with no flag
+    states tempo 92 as given.
+  - In a project, `capture melody <take>` writes under `takes/<take>/`, and a capture of a path not
     in the project is refused with the `take add` line.
   - A `.duet/` with no project document behaves exactly as today (the config precedence witness
     still passes unchanged).
-  - `project check` fails when a restricted take's directory is re-included by hand.
   - `project adopt` without `--apply` writes nothing; with it, every adopted document's bytes are
     unchanged and the scratch directory is untouched.
 
 ## Build tasks this design names
 
-Each names its witness. None is built before the owner rules.
+Each names its witness. The decisions are ruled, so each can be filed once the songs design is
+ruled for the parts that need it.
 
 1. **`project` 1.0** in duet-schemas: the type, `Kind`, schema and example. **Needs:** the variants
    design's task 1 (the take digest and `Take` type), merged in #73. **Witnesses:** the
    duet-schemas ones above.
 2. **`duet init` and project discovery:** `init`, the `project.duet` marker, `DUET_PROJECT`,
-   `duet project path | show`, the `.gitignore` block. **Needs:** 1. **Witnesses:** the `init`,
-   discovery and unchanged-config e2e tests.
-3. **Takes in a project:** `duet take add | locate | list | forget`, `takes.local.toml`,
-   `duet record` into a project, `duet project check`. **Needs:** 2. **Witnesses:** the `take add`
-   and `project check` tests.
-4. **Commands that default into a project:** capture, compare, review, `comp apply` and renders take
-   a take name and write under `takes/<name>/`; defaults applied and stated. **Needs:** 3, and for
-   `comp apply` the variants design's task 2. **Witnesses:** the capture-in-a-project tests.
-5. **Adoption:** `duet project adopt` and `--apply`. **Needs:** 3. **Witness:** the adopt test, and
-   the owner's `fixtures/` adopted into a project on the owner's machine.
+   `duet project path | show`. **Needs:** 1. **Witnesses:** the `init`, discovery and
+   unchanged-config e2e tests.
+3. **Takes in a project:** `duet take add | locate | list | forget`, `takes.local.toml`, `given`,
+   `duet record` into a project. **Needs:** 2. **Witnesses:** the `take add` and `given` tests.
+4. **Commands that default into a project:** capture, compare, review and renders take a take name
+   and write under `takes/<take>/`; defaults applied and stated. **Needs:** 3. **Witnesses:** the
+   capture-in-a-project tests. Capture's comparison with a song's composition is the songs design's
+   task 3.
+5. **Adoption:** `duet project adopt`, `--song` and `--apply`. **Needs:** 3, and the songs design's
+   task 2 for `--song`. **Witness:** the adopt test, and the owner's `fixtures/` adopted into a
+   project on the owner's machine.
 
-The journal's kind, and the server's lock, socket and state store under `.duet/`, are the bus
-design's build tasks. This design reserves their paths and ignores them, and its `init` writes the
-`.gitattributes` line.
+Songs, their composition, parts, comps and snapshots are the
+[songs design](2026-11-17-songs-and-composition-design.md#build-tasks-this-design-names)'s and the
+[variants design](2026-11-17-variants-and-comps-design.md)'s tasks. The journal's kind, and the
+server's lock, socket and state store under `.duet/`, are the bus design's build tasks.
 
-## Decisions for the owner
+## Decisions (ruled 2026-11-17)
 
-Decision 11 is ruled. Decisions 1 to 10, 12 and 13 are open.
+**Ruled (owner, 2026-11-17, temper `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`):** "yes, those stand",
+read with the domain model (temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`).
 
-1. **A project is a workspace, not one piece** ([§8](#8-the-choice-composition-forces)), so
-   composition becomes its own kind later and `project` 1.0 holds no parts. *Recommended: yes.*
-2. **The project document lives at `.duet/project.duet`** ([§1](#1-the-layout)), as the documents
-   design proposed, rather than `project.duet` at the root as the jobs note drew it. One marker,
-   and a clean root, against a document hidden in Finder. *Recommended: `.duet/project.duet`.*
-3. **A reading's notes stay restricted with their take** ([§6](#6-the-licence-boundary)) until the
-   owner copies them into `parts/`. The alternative is to treat notes as shareable and only audio
-   (the take, the performance's pitch, clips, renders of the take) as restricted, which would let a
-   cloud session see readings of restricted takes. *Recommended: restricted with the take; copying
-   to `parts/` is the explicit release.*
-4. **`duet take add` copies by default** ([§4](#4-sources-named-without-copying)), with `--named`
-   to leave a file where it is. Copying makes a project whole and survives a phone being unplugged;
-   naming saves space and leaves a file that may not be the owner's to copy where it is.
-   *Recommended: copy by default.*
-5. **Inside a project, capturing a file that is not a take is refused** with the `take add` line,
-   rather than adding it silently ([§5](#5-how-commands-find-and-use-a-project)). *Recommended:
-   refuse.*
-6. **Capture never takes tempo, meter or key from the project's defaults**; it estimates, states,
-   and says where it disagrees ([§5](#5-how-commands-find-and-use-a-project)). Commands that make
-   or render music without a recording do use them. *Recommended: yes.*
-7. **`duet init` does not run `git init`** ([§3](#3-what-duet-init-writes)); it writes the
-   `.gitignore` block and says to. cargo and uv run git by default; duet would then depend on a git
-   binary, and the owner may keep the authored half in a repository elsewhere.
-   *Recommended: no git, a printed line instead.*
-8. **The boundary directory is named `takes/`** ([§1](#1-the-layout)), for what it holds, rather
-   than for the rule it carries (`private/`, `restricted/`). *Recommended: `takes/`.*
-9. **`renders/` is ignored by default** ([§6](#6-the-licence-boundary)), as build output, though a
-   render of an authored part is shareable. *Recommended: ignored; commit a render by hand when one
-   matters.*
-10. **The composition task does not fold into this one.** It stays its own task, constrained by
-    decision 1. *Recommended: keep it separate.*
-11. **The state store is never the only copy of authored work**
-    ([§10](#10-what-the-layout-holds-for-the-bus)). **Ruled** (owner, 2026-11-17, through the bus
-    design's decision 1): the store holds only view state and caches, and is built only when a face
-    needs it.
-12. **The journal is one file, never rotated, in v1**
-    ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
+1. **A project is a workspace, not one piece.** **Yes.** A project holds songs, and each song holds
+   its composition ([§8](#8-a-workspace-and-composition-as-its-own-spec)).
+2. **The project document is `.duet/project.duet`.** **Yes** ([§1](#1-the-layout)).
+3. **A reading's notes stay "restricted" with their take.** **Dropped.** There is no sharing status
+   in a project ([§6](#6-no-sharing-status-and-no-git)).
+4. **`duet take add` copies by default, and `--named` leaves the file where it is.** **Yes**
+   ([§4](#4-sources-named-without-copying)).
+5. **Inside a project, capturing a file that is not a take is refused,** with the `take add` line.
+   **Yes** ([§5](#5-how-commands-find-and-use-a-project)).
+6. **Capture and the project's tempo, meter and key.** **Estimate, then compare.** Capture always
+   estimates from the take and states where it disagrees with the linked song's composition. A take
+   is placed on the song's bars by the song's tempo map plus an offset (the click case). A value the
+   owner gives a take is remembered for that take ([§5](#5-how-commands-find-and-use-a-project)).
+7. **`duet init` and git.** **Dropped.** `init` writes no `.gitignore` and no `.gitattributes`,
+   and prints no git line. This amends the bus design's decision 12, which had `init` write
+   `journal.duet.jsonl merge=union`
+   ([§3](#3-what-duet-init-writes), [§6](#6-no-sharing-status-and-no-git)).
+8. **The takes directory is `takes/`.** **Yes.** Named for what it holds, and kept at the project
+   root because a take belongs to the project and can serve several songs ([§1](#1-the-layout)).
+9. **`renders/` is git-ignored.** **Becomes:** renders are rebuildable files in `renders/`, with no
+   special status ([§6](#6-no-sharing-status-and-no-git)).
+10. **Composition stays its own task.** **Folded into the domain model.** It becomes the
+    [composition spec](2026-11-17-songs-and-composition-design.md), which the songs layout uses.
+11. **The state store is never the only copy of authored work.** **Yes**
+    ([§10](#10-what-the-layout-holds-for-the-bus)).
+- **New: where a song's files live.** **One folder per song:** `songs/<song>/` holds `song.duet`
+  (the song and its composition), `parts/`, `comps/` and `snapshots/` ([§1](#1-the-layout)).
+
+**What fell out of the design:** `duet project check`, the `.gitignore` block and the
+`.gitattributes` line, the `kept` and `restriction` fields, the idea of "the authored half as its
+own repository", §6 as a licence boundary, and the "Shared?" column of the layout table.
+
+### From the bus design
+
+Taken in from the bus design's "What this asks of the project layout" (items 4 and 2) after the
+eleven were set out. They were not among the bus design's fifteen ruled decisions.
+
+12. **The journal is one file, never rotated, in v1.** **Changed: an index plus segments. Ruled
+    (owner, 2026-11-17, temper `01a1eb60`).** `journal.duet.jsonl` is the index; events live in
+    segments `journal.<timestamp>.duet.jsonl`; the current segment is the index entry with no end
+    of range. The details are the bus design's to propose
+    ([§10](#10-what-the-layout-holds-for-the-bus)). In the owner's words: "we should have a
+    `journal.duet.jsonl` that is the index file for other journal files like
+    `journal.<timestamp>.duet.jsonl`".
 13. **A stale `.duet/run/bus.lock` is left for the next server to overwrite,** not cleared by the
-    CLI ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
+    CLI ([§10](#10-what-the-layout-holds-for-the-bus)). **Ruled (owner, 2026-11-17, temper
+    `01a1eb60`).**
 
 ## Not decided here
 
 - **The journal's kind and events, the bus and the wire:**
   [the bus design](2026-11-17-bus-design.md)'s.
-- **Composition:** layered or orchestrated, and alignment across takes: the composition task's.
+- **Songs, their composition, parts, snapshots and operations:**
+  [the songs design](2026-11-17-songs-and-composition-design.md)'s, with its open questions.
 - **A take kind of its own**, listing a take's variants (the variants design left it to "the project
   and session record"): the project document's `takes` entry carries the take's identity, and the
-  readings in `takes/<name>/` are its variants. A separate kind is not needed until a take carries
+  readings in `takes/<take>/` are its variants. A separate kind is not needed until a take carries
   more than that.
+- **Licensing for release:** later.
 - **Converting a take** (a phone's M4A to FLAC) on adding: not proposed, since a byte copy is never
   in question.
-- **Moving or renaming a take,** and a project-wide cleanup of stale derived files: later, once
-  there are projects to clean.
+- **Moving or renaming a take or a song,** and a project-wide cleanup of stale derived files: later,
+  once there are projects to clean.
 
 ## Sources
 
