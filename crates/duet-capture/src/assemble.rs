@@ -11,7 +11,7 @@ use duet_core::time::beats_from_ticks;
 use duet_core::{Grid, Key, Note, Pitch, Position, Song, TimeChange, TimeSig, Track};
 use duet_drums::LaneMap;
 use duet_dsp::{
-    BeatTempo, Event, HitLane, KeyEstimate, Reading, Timing, beat_series, estimate_key,
+    BeatTempo, Event, HitLane, KeyEstimate, Reading, Take, Timing, beat_series, estimate_key,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,12 @@ pub struct Captured {
 pub struct Analysis {
     /// The rate the events' frames count at.
     pub rate: u32,
+    /// The audio the analysis was read from: its decoded samples' digest, with their own rate,
+    /// channel count and length ([`Take`]). Two readings with one `take` are variants of one
+    /// take, whatever their files are named. Added in `capture-analysis` 1.13; absent before,
+    /// meaning not stated. Assembly leaves it absent: the capture command fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take: Option<Take>,
     pub events: Vec<Event>,
     pub timing: Timing,
     /// The melody's key, given or estimated; absent for a rhythm take.
@@ -232,6 +238,7 @@ pub fn assemble(
 
     let analysis = Analysis {
         rate,
+        take: None,
         events: events.to_vec(),
         timing: timing.clone(),
         key: estimate,

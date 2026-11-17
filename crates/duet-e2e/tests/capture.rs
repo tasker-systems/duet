@@ -648,9 +648,32 @@ fn melody_writes_its_performance_beside_its_other_outputs_and_never_overwrites_i
     let mut lines = text.lines();
     let first: serde_json::Value = serde_json::from_str(lines.next().expect("a head")).unwrap();
     assert_eq!(first["duet"]["kind"], "performance", "{first}");
-    assert_eq!(first["duet"]["version"], "1.0", "{first}");
+    assert_eq!(first["duet"]["version"], "1.1", "{first}");
     assert_eq!(first["duet"]["tool"]["name"], "duet", "{first}");
     assert_eq!(first["head"]["unit"], "absolute-cents", "{first}");
+    // The head states the take it was read from (1.1), as the analysis does (1.13): the WAV's
+    // samples, by digest, at their own rate, channels and length.
+    let analysis: serde_json::Value =
+        serde_json::from_str(&read(&dir.join("tune.capture.duet"))).unwrap();
+    let stated = &analysis["body"]["take"];
+    assert_eq!(&first["head"]["take"], stated, "{first}");
+    let digest = stated["digest"].as_str().expect("a digest");
+    assert!(
+        digest.len() == 71
+            && digest.starts_with("sha256:")
+            && digest[7..]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{digest}"
+    );
+    assert_eq!(stated["rate"], 22_050, "{stated}");
+    assert_eq!(stated["channels"], 1, "{stated}");
+    assert_eq!(stated["frames"], eb_major().len(), "{stated}");
+    // The reading lists every pass, in the order it ran.
+    assert_eq!(
+        analysis["body"]["reading"]["passes"],
+        serde_json::json!(["breathy", "rejoin", "held-pitch"])
+    );
     let hop = first["head"]["hop"].as_u64().expect("hop");
     let mut next = first["head"]["first_frame"].as_u64().expect("first_frame");
     let mut pitches = Vec::new();
@@ -699,7 +722,17 @@ fn rhythm_writes_a_song_a_grid_and_the_analysis() {
     ok(&out, "capture rhythm");
     song_of(&dir.join("out.duet"));
     grid_of(&dir.join("out.grid.duet"));
-    analysis_of(&dir.join("out.capture.duet"));
+    let body = analysis_of(&dir.join("out.capture.duet"));
+    // A rhythm take has no reading, and still states its take (1.13).
+    assert!(body.get("reading").is_none(), "{body}");
+    assert_eq!(body["take"]["frames"], kick_and_hat().len(), "{body}");
+    assert!(
+        body["take"]["digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"),
+        "{body}"
+    );
     assert_eq!(
         files(&dir),
         ["beat.wav", "out.capture.duet", "out.duet", "out.grid.duet"]

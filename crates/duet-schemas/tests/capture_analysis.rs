@@ -1,12 +1,12 @@
 //! capture-analysis: a real take's analysis, as `duet capture` makes it, its reading and
-//! residual included, written as a document, read back exactly, and validated against the
+//! residual, the take it was read from and the passes that ran included, written as a document, read back exactly, and validated against the
 //! committed schema at the current version.
 
 use std::path::Path;
 
 use duet_capture::{
-    ANALYSIS_RATE, Analysis, Event, Given, Kind, Layer1, Mono, NoteModel, Performance,
-    PerformanceFrames, Reader as ReadingReader, Stage, Thresholds, assemble, estimate,
+    ANALYSIS_RATE, Analysis, Chunk, Digester, Event, Given, Kind, Layer1, Mono, NoteModel,
+    Performance, PerformanceFrames, Reader as ReadingReader, Stage, Thresholds, assemble, estimate,
     quantize_apart, quantize_offsets, read,
 };
 use duet_schemas::{AnyDocument, Document, Tool};
@@ -19,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.12 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.13 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -29,7 +29,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.12.json"))
+        .build(&read_json("schemas/capture-analysis/1.13.json"))
         .unwrap()
 }
 
@@ -50,11 +50,20 @@ fn validator_at(version: &str) -> jsonschema::Validator {
 }
 
 /// `document`, restamped as a capture-analysis document at `version`. Before 1.12 the key states
-/// no profile, so its `profile` is left out, as every analysis now has one; any other field
-/// newer than `version` is the caller's to remove.
+/// no profile, and before 1.13 the analysis states no take and the reading no passes, so those
+/// are left out, as every analysis now has them; any other field newer than `version` is the
+/// caller's to remove.
 fn as_version(document: &Value, version: &str) -> Value {
     let mut older = document.clone();
     let minor: u32 = version.strip_prefix("1.").unwrap().parse().unwrap();
+    if minor < 13 {
+        if let Some(body) = older["body"].as_object_mut() {
+            body.remove("take");
+        }
+        if let Some(reading) = older["body"]["reading"].as_object_mut() {
+            reading.remove("passes");
+        }
+    }
     if minor < 12
         && let Some(key) = older["body"]["key"].as_object_mut()
     {
@@ -166,8 +175,17 @@ enum Reader {
 /// sixteenths.
 fn analysis_of(take: &[f32], given: &Given, reader: Reader) -> Analysis {
     let mut performance = Performance::new(RATE);
+    let mut digester = Digester::new();
     let mut layers = Vec::new();
     for (i, piece) in take.chunks(4096).enumerate() {
+        digester
+            .push(&Chunk {
+                rate: RATE,
+                channels: 1,
+                start_frame: (i * 4096) as u64,
+                samples: piece.to_vec(),
+            })
+            .unwrap();
         let mono = Mono {
             rate: RATE,
             start_frame: (i * 4096) as u64,
@@ -204,6 +222,7 @@ fn analysis_of(take: &[f32], given: &Given, reader: Reader) -> Analysis {
         quantize_offsets(&captured.song, &q.song, q.grid, ms_per_quarter).unwrap();
     captured.analysis.grid = Some(q.grid);
     captured.analysis.reading = Some(reading);
+    captured.analysis.take = digester.finish();
     captured.analysis
 }
 
@@ -279,6 +298,24 @@ fn an_estimated_analysis_round_trips_exactly_and_validates() {
     assert!(body["key"]["key"]["estimated"].is_object(), "{body}");
     // The key's profile, since 1.12.
     assert_eq!(body["key"]["profile"], json!("aarden-essen"), "{body}");
+    // The take and the passes, since 1.13: a scale sung plain is changed by no pass, and every
+    // pass is still listed, in the order it ran.
+    assert_eq!(
+        reading["passes"],
+        json!(["breathy", "rejoin", "held-pitch"])
+    );
+    for what in ["rejoins", "breathy", "held", "suggestions"] {
+        assert!(reading.get(what).is_none(), "{what}: {reading}");
+    }
+    let take = &body["take"];
+    assert!(
+        take["digest"].as_str().unwrap().starts_with("sha256:"),
+        "{take}"
+    );
+    assert_eq!(
+        (&take["rate"], &take["channels"], &take["frames"]),
+        (&json!(RATE), &json!(1), &json!(self::take().len()))
+    );
 }
 
 #[test]
@@ -569,4 +606,95 @@ fn a_keys_profile_round_trips_exactly_and_validates_only_from_1_12() {
         older.is_valid(&as_version(&value, "1.11")),
         "the 1.11 control is not valid"
     );
+}
+
+#[test]
+fn the_variant_annotation_round_trips_exactly_and_validates_only_from_1_13() {
+    let (_, rules) = round_trip(analysis_of(
+        &take_with_an_approach(),
+        &Given::default(),
+        Reader::Rules,
+    ));
+    let (_, hmm) = round_trip(analysis_of(
+        &take_with_an_approach(),
+        &Given::default(),
+        Reader::Hmm,
+    ));
+    // Two readings of one take: one take, stated alike; every pass listed under each reader.
+    assert_eq!(rules["body"]["take"], hmm["body"]["take"]);
+    for value in [&rules, &hmm] {
+        assert_eq!(
+            value["body"]["reading"]["passes"],
+            json!(["breathy", "rejoin", "held-pitch"])
+        );
+    }
+    // Another take states another digest.
+    let (_, other) = round_trip(analysis_of(&take(), &Given::default(), Reader::Hmm));
+    assert_ne!(
+        other["body"]["take"]["digest"],
+        hmm["body"]["take"]["digest"]
+    );
+    // An unknown pass, and a digest spelled otherwise, are refused.
+    let mut unknown = hmm.clone();
+    unknown["body"]["reading"]["passes"] = json!(["breathy", "smooth"]);
+    assert!(
+        !validator().is_valid(&unknown),
+        "an unknown pass is accepted"
+    );
+    assert!(AnyDocument::read(&unknown.to_string()).is_err());
+    let mut short = hmm.clone();
+    short["body"]["take"]["digest"] = json!("sha256:9f2c");
+    assert!(!validator().is_valid(&short), "a short digest is accepted");
+    assert!(AnyDocument::read(&short.to_string()).is_err());
+    // capture-analysis 1.12 has neither: a 1.12 reader refuses each, and takes the document
+    // without them.
+    let older = validator_at("1.12");
+    for (field, remove) in [
+        ("take", &["body", "take"][..]),
+        ("passes", &["body", "reading", "passes"][..]),
+    ] {
+        let mut as_1_12 = as_version(&hmm, "1.12");
+        let (last, path) = remove.split_last().unwrap();
+        let mut at = &mut as_1_12;
+        for step in path {
+            at = &mut at[*step];
+        }
+        let mut source = &hmm;
+        for step in remove {
+            source = &source[*step];
+        }
+        at[*last] = source.clone();
+        assert!(!older.is_valid(&as_1_12), "1.12 accepts {field}");
+    }
+    assert!(
+        older.is_valid(&as_version(&hmm, "1.12")),
+        "the 1.12 control is not valid"
+    );
+}
+
+#[test]
+fn every_older_example_reads_as_stating_no_take_and_no_passes() {
+    for minor in 0..13 {
+        let text = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("schemas/capture-analysis/examples/1.{minor}.duet")),
+        )
+        .unwrap();
+        let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+            panic!("1.{minor} read as another kind");
+        };
+        assert_eq!(doc.body.take, None, "1.{minor}");
+        assert_eq!(
+            doc.body.reading.as_ref().and_then(|r| r.passes.as_ref()),
+            None,
+            "1.{minor}"
+        );
+        // Written today, it states neither, rather than a default.
+        let written: Value = serde_json::from_str(&doc.write().unwrap()).unwrap();
+        assert!(written["body"].get("take").is_none(), "1.{minor}");
+        assert!(
+            written["body"]["reading"].get("passes").is_none(),
+            "1.{minor}"
+        );
+    }
 }

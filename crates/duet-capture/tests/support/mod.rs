@@ -41,6 +41,9 @@ pub struct Listened {
     pub licence: String,
     /// The licence's text or notice, beside the recording.
     pub licence_file: String,
+    /// The take's digest: the SHA-256 of its decoded samples, as `duet capture` states it in
+    /// `take.digest`, so a file that is not this take fails by name.
+    pub digest: String,
     /// The key the HMM reading must estimate, as ABC names it in `K:`.
     pub key: String,
     /// The estimated tuning: A4's offset from 440 Hz, in cents, and how far it may move.
