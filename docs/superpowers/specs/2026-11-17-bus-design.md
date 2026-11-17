@@ -787,9 +787,12 @@ and two events the domain model assumes ([decisions 16–23](#decisions-for-the-
 
 - **A segment is a `journal` stream,** exactly as [sketched](#the-journal-stream-10): an envelope
   and head on line 1, then one entry per line. Its head gains `segment`, the timestamp in its own
-  file name, so a file read alone still says which segment it is. The events and their versions
-  are unchanged.
-- **The index is its own kind, `journal-index` 1.0,** a `.duet.jsonl` stream. Its head is
+  file name, so a file read alone still says which segment it is.
+  - **This changes `journal` 1.0 in place, not as a 1.1.** Before a first release a format changes
+    in place (owner, 2026-11-17, temper `01a1eb48` ruling 12). The version policy applies from the
+    first release or the first real file, whichever comes first.
+  - The events and their versions are unchanged.
+- **The index is its own kind, `journal-index`,** a `.duet.jsonl` stream starting at 1.0. Its head is
   `{project, id}`, the journal's id. Every later line **opens** a segment, and, after the first,
   **closes** the one before it:
 
@@ -924,7 +927,7 @@ their kinds, and none is built with the journal:
 
 - **`duet-schemas`:**
   - adds `journal-index` 1.0;
-  - the `journal` head gains `segment`;
+  - the `journal` head gains `segment`, in place at 1.0 (ruling 12);
   - the events are unchanged. The kinds, the event schemas and the line reader of
     tasker-systems/duet#79 stand.
 - **`duet-bus`:** #79's writer becomes the segment writer. It gains the index, the roll, the adopt
@@ -1121,7 +1124,8 @@ design, in [The journal's index and segments](#the-journals-index-and-segments).
 21. **An index entry is closed only by the line that opens the next segment, in the same write,** so
     the index is append-only and has exactly one open entry, the last line. **Proposed.**
 22. **The index is its own kind, `journal-index` 1.0. A segment stays a `journal` stream, whose head
-    gains `segment`.** **Proposed.**
+    gains `segment`, changed in place at 1.0 since no release has been cut** (temper `01a1eb48`
+    ruling 12). **Proposed.**
 23. **Two durable events the domain model assumes are added:** `song.status-set`, which makes the
     song's status a second lifecycle in the journal, and `snapshot.taken`. Their kinds are owned
     by the songs-and-composition spec. **Proposed.**
