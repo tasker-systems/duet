@@ -76,11 +76,12 @@ mod take;
 pub use assemble::{Analysis, Captured, Kind, LeadIn, QuantizeOffset, assemble, quantize_offsets};
 pub use duet_dsp::{
     A440_CENTS, ANALYSIS_RATE, BETWEEN_KEYS_CENTS, BeatTempo, Chunk, Event, FrameBlock, Given,
-    HitLane, Hits, KeyEstimate, LaneMode, Layer1, Loss, MAX_GAP_SECS, Melody, Mono, NOTE_COST,
-    NoteModel, Onsets, Origin, Performance, PerformanceFrames, PerformanceHead, PitchFrame,
-    PitchTrack, PitchUnit, Prepare, ReadNote, Reader, ReaderName, Reading, Stage,
+    HitLane, Hits, KeyEstimate, KeyProfile, LaneMode, Layer1, Loss, MAX_GAP_SECS, Melody, Mono,
+    NOTE_COST, NoteModel, Onsets, Origin, Performance, PerformanceFrames, PerformanceHead,
+    PitchFrame, PitchTrack, PitchUnit, Prepare, ReadNote, Reader, ReaderName, Reading, Stage,
     TempoAlternatives, Thresholds, Timing, Tuning, WEAK_CONFIDENCE, a4_cents_of_hz, absolute_cents,
-    beat_series, estimate, estimate_key, estimate_tuning, felt_quarters, is_compound, read,
+    beat_series, estimate, estimate_key, estimate_key_with, estimate_tuning, felt_quarters,
+    is_compound, read,
 };
 pub use duet_dsp::{
     APPROACH_DRIFT_CENTS, BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, Dip, HELD_PITCH_SECS,

@@ -491,8 +491,8 @@ fn example_grid() -> duet_drums::DrumGrid {
 /// its half and double, a given meter, an estimated downbeat, a key with its evidence, the tempo
 /// beat by beat, the grid, the quantize offsets, and the reading (1.1) with a note between keys
 /// and a note with excursions (1.6), rejoined from two decoded notes (1.7), a note carried
-/// on over its breathy fall (1.9), and a note made from a pitch held before the note it reaches,
-/// suggested a likely approach to it (1.11).
+/// on over its breathy fall (1.9), a note made from a pitch held before the note it reaches,
+/// suggested a likely approach to it (1.11), and the key's profile (1.12).
 pub fn example_analysis() -> Analysis {
     serde_json::from_value(json!({
         "rate": 22050,
@@ -516,7 +516,8 @@ pub fn example_analysis() -> Analysis {
             "key": { "estimated": { "value": "Eb major", "confidence": 0.71 } },
             "alternative": "C minor",
             "histogram": [0.0, 0.0, 0.125, 0.25, 0.0, 0.0, 0.0, 0.375, 0.125, 0.0, 0.125, 0.0],
-            "scores": [["Eb major", 0.71], ["C minor", 0.64], ["Bb major", 0.52]]
+            "scores": [["Eb major", 0.71], ["C minor", 0.64], ["Bb major", 0.52]],
+            "profile": "aarden-essen"
         },
         "beats": [
             { "beat": 0, "secs": 0.5, "bpm": 119.5 },

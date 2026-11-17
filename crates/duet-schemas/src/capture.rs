@@ -70,7 +70,12 @@ use crate::{Kind, Version};
 /// the `rule` that fired (`semitone-with-drift`). A suggestion changes no note. Both are omitted
 /// when there are none, so a 1.10 document reads as one whose held pitches are as its reader
 /// read them, with nothing suggested.
+///
+/// **1.12** adds the key estimate's optional `profile`, also additive: the key profile its
+/// `scores` were correlated with, `aarden-essen` (duet's default since 1.12) or
+/// `krumhansl-kessler`. Omitted when none is stated, so a 1.11 document reads as one stating no
+/// profile; duet wrote those with Krumhansl–Kessler.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 11);
+    const VERSION: Version = Version::new(1, 12);
 }
