@@ -92,7 +92,7 @@ pub use hits::{Hits, LaneMode};
 pub use hmm::{
     ATTACK_COST, DROPOUT, LAG_SECS, NoteModel, ONSET_LEAVE, STABLE_SIGMA_SEMITONES, VOICING_FLOOR,
 };
-pub use key::{KeyEstimate, estimate_key};
+pub use key::{KeyEstimate, KeyProfile, estimate_key, estimate_key_with};
 pub use notes::Melody;
 pub use onset::Onsets;
 pub use performance::{

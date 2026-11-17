@@ -785,7 +785,8 @@ mod tests {
 
     #[test]
     fn a_given_key_is_the_songs_key() {
-        // A C major scale, which would be estimated as C major.
+        // A C major scale, which would be estimated with C major's signature (as A minor, its
+        // relative: Aarden–Essen reads an evenly walked scale so).
         let events: Vec<Event> = [60, 62, 64, 65, 67, 69, 71, 72]
             .iter()
             .enumerate()
@@ -799,12 +800,13 @@ mod tests {
         assert_eq!(estimate.key, Origin::Given(eb));
 
         let unasked = assemble(&events, RATE, &timing, None, &Kind::Melody).unwrap();
-        assert_eq!(unasked.song.key, Some(key("C major")));
+        assert_eq!(unasked.song.key.map(|k| k.sharps), Some(0));
     }
 
     #[test]
     fn the_key_changes_spelling_never_pitch() {
-        // Eb F G Ab Bb C D Eb.
+        // Eb F G Ab Bb C D Eb, estimated with E-flat's signature: as C minor, its relative, by
+        // Aarden–Essen, which spells it the same.
         let midi = [63, 65, 67, 68, 70, 72, 74, 75];
         let events: Vec<Event> = midi
             .iter()
@@ -819,7 +821,7 @@ mod tests {
             &Kind::Melody,
         )
         .unwrap();
-        assert_eq!(captured.song.key, Some(Key::new(-3, false).unwrap()));
+        assert_eq!(captured.song.key.map(|k| k.sharps), Some(-3));
         let notes = &captured.song.tracks[0].notes;
         let got: Vec<u8> = notes.iter().map(|n| n.pitch.midi()).collect();
         assert_eq!(got, midi);

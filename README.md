@@ -676,6 +676,9 @@ cannot be, that is reported after them, and they stay:
   lists them. A suggestion changes no note: folding an approach into its note is a choice made
   per note. The pass runs after the rejoin, so the rejoin never joins a held pitch back into a
   note before it on its key, and a dip the rejoin settled stays inside one note. A reading with none writes none.
+  Since 1.12 the key states the `profile` its scores were correlated with: `aarden-essen`, the
+  default, or `krumhansl-kessler`. A document without one states no profile; duet wrote those
+  with Krumhansl–Kessler.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -706,7 +709,7 @@ meter: estimated 4/4, confidence 0.14, weak
 downbeat: estimated at 0.255 s, confidence 0.14, weak
 tuning: estimated A4 = 440.2 Hz (+1 cent), spread 2 cents, confidence 1.00
 notes: 8 read, 0 between keys
-key: estimated C major (relative A minor), confidence 0.88
+key: estimated C major (relative A minor), confidence 0.72
 lead-in: none
 velocities: 8 snapped to the nearest dynamic's level in the .abc; the .duet keeps them exact
 ```
@@ -731,7 +734,11 @@ pitch wanders evenly, 1 when all of it is that near. Below 0.5 it is stated weak
 suggests giving the tuning with `--tuning`. Its spread is how widely the take strays from it. Each note is the key nearest its held pitch on that tuning; one
 held more than 35 cents from its key is **between keys**, counted on the `notes:` line and
 marked in the analysis's `reading`, with every note's `centre`, its distance from its key in
-cents. The key is estimated after, from those notes, and never changes one.
+cents. The key is estimated after, from those notes, and never changes one: each note's
+pitch class weighted by its length, correlated with the 24 major and minor keys of the
+Aarden–Essen profile, which was counted from the Essen collection's folk melodies (Aarden,
+2003). It reads a sung tune by its tonic and third, where Krumhansl–Kessler, duet's profile
+before `capture-analysis` 1.12, can take the degree held longest for the tonic.
 
 **Readers.** Three readers choose a melody's notes from its performance, on its tuning, and all
 are judged by the same loss. The **rules** (`--reader rules`) segment the pitch where it leaves a

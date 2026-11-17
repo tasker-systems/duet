@@ -1,0 +1,1239 @@
+{
+  "$defs": {
+    "Analysis": {
+      "additionalProperties": false,
+      "description": "Everything the analysis found: the body of `<stem>.capture.duet`, a `capture-analysis`\ndocument. A value that is absent is left out, never written `null`.",
+      "properties": {
+        "beats": {
+          "description": "The tempo from each beat to the next.",
+          "items": {
+            "$ref": "#/$defs/BeatTempo"
+          },
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "type": "array"
+        },
+        "grid": {
+          "$ref": "#/$defs/Grid",
+          "description": "The grid the score was quantized to, which `offsets` count steps of: the one asked for,\nor the finer one it was refined to ([`quantize_apart`](crate::quantize_apart)).\nAssembly leaves it absent, since the grid is chosen later, and it stays absent when the\nscore could not be quantized."
+        },
+        "key": {
+          "$ref": "#/$defs/KeyEstimate",
+          "description": "The melody's key, given or estimated; absent for a rhythm take."
+        },
+        "offsets": {
+          "description": "How far quantizing moved each note. Assembly leaves it empty: the grid is chosen\nlater, and [`quantize_offsets`] fills it once the song is quantized.",
+          "items": {
+            "$ref": "#/$defs/QuantizeOffset"
+          },
+          "type": "array"
+        },
+        "rate": {
+          "description": "The rate the events' frames count at.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reading": {
+          "$ref": "#/$defs/Reading",
+          "description": "A melody's reading: the tuning its notes were read on, and each note's key, its held\npitch's distance from that key, and whether it is between keys. Added in\n`capture-analysis` 1.1; absent for a rhythm take, and in a 1.0 document. Assembly\nleaves it absent: the capture command fills it."
+        },
+        "timing": {
+          "$ref": "#/$defs/Timing"
+        }
+      },
+      "required": [
+        "rate",
+        "events",
+        "timing",
+        "beats",
+        "offsets"
+      ],
+      "type": "object"
+    },
+    "BeatTempo": {
+      "additionalProperties": false,
+      "description": "The local tempo from one beat to the next.",
+      "properties": {
+        "beat": {
+          "description": "The beat the interval starts on, counted from 0 at the downbeat.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "bpm": {
+          "description": "Quarter notes per minute.",
+          "format": "double",
+          "type": "number"
+        },
+        "secs": {
+          "description": "Where that beat is, in seconds on the input timeline.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "beat",
+        "secs",
+        "bpm"
+      ],
+      "type": "object"
+    },
+    "Breathy": {
+      "additionalProperties": false,
+      "description": "One note the pass carried on over the weakly voiced frames after it.",
+      "properties": {
+        "decoded": {
+          "$ref": "#/$defs/ReadNote",
+          "description": "The note as its reader decoded it, its residual left out: the frames from its `end` to\nthe `end` below are the ones the pass kept."
+        },
+        "end": {
+          "description": "Where the note ends now, on the take's timeline.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "loss_change": {
+          "description": "What carrying the note on changes the loss's total by, in nats: the kept frames priced\nas read, by their pitch and voicing, less their unread cost. Above zero where reading\nthem raised the loss, as reading a weakly voiced frame does.",
+          "format": "double",
+          "type": "number"
+        },
+        "lowest_db": {
+          "description": "The quietest kept frame's level against the note's held level, in decibels: at least\n[`BREATHY_LEVEL_DB`].",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "decoded",
+        "end",
+        "lowest_db",
+        "loss_change"
+      ],
+      "type": "object"
+    },
+    "CentreHistogram": {
+      "additionalProperties": false,
+      "description": "How the take's notes' centres spread: a histogram in 10-cent bins from -50.",
+      "properties": {
+        "bin_cents": {
+          "description": "How wide each bin is, in cents.",
+          "format": "float",
+          "type": "number"
+        },
+        "counts": {
+          "description": "How many notes' centres fall in each bin; one beyond the ends counts in the end bin.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "from_cents": {
+          "description": "Where the first bin starts, in cents.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "from_cents",
+        "bin_cents",
+        "counts"
+      ],
+      "type": "object"
+    },
+    "Dip": {
+      "additionalProperties": false,
+      "description": "A dip between two decoded notes on one key: the frames from where the first ends to where\nthe second's held pitch begins.",
+      "properties": {
+        "cents": {
+          "description": "Its frame furthest from the key, in cents from it: below zero for a dip, above for a\nrise.",
+          "format": "float",
+          "type": "number"
+        },
+        "end": {
+          "description": "Where it ends: the second note's `held_from`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "description": "Where it starts, on the take's timeline: the first note's end.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "cents"
+      ],
+      "type": "object"
+    },
+    "Drift": {
+      "additionalProperties": false,
+      "description": "A slow move across a note's held span: a least-squares line through its held residual.",
+      "properties": {
+        "cents_per_sec": {
+          "description": "The line's slope, in cents a second.",
+          "format": "float",
+          "type": "number"
+        },
+        "range_cents": {
+          "description": "How far the line moves over the held span, in cents.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "cents_per_sec",
+        "range_cents"
+      ],
+      "type": "object"
+    },
+    "Event": {
+      "description": "What the analysis stages say about a take. Times are sample frames at the analysis rate.\n\nThis is the payload of `<stem>.capture.duet`'s `events`, and later of the MCP stream.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Something started at `frame`, with the given strength.",
+          "properties": {
+            "frame": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "strength": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": {
+              "const": "onset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame",
+            "strength"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A pitched note from `start` to `end`, as a MIDI key number.",
+          "properties": {
+            "confidence": {
+              "format": "float",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "end": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "midi": {
+              "format": "uint8",
+              "maximum": 127,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "strength": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": {
+              "const": "note",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "start",
+            "end",
+            "midi",
+            "confidence",
+            "strength"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A drum hit on a lane.",
+          "properties": {
+            "frame": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "lane": {
+              "$ref": "#/$defs/HitLane"
+            },
+            "strength": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": {
+              "const": "hit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame",
+            "lane",
+            "strength"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Excursion": {
+      "additionalProperties": false,
+      "description": "A run of frames inside a note held somewhere other than where the note is held: a measured\nornament. It is never named: whether it is a grace, a mordent, a turn, a trill or a wobble is\nworked out from where it sits whenever something is written, so that the naming can change\nwithout a format change.\n\nIts frames hold at least [`SHORTEST_EXCURSION_FRAMES`], each at least [`EXCURSION_CENTS`]\nfrom where the note is held, and spread no wider than a slide's frames may when they have\narrived (35 cents over 50 ms, and in proportion over fewer frames), so a slide passing\nthrough is none.\n\nOne more is stated by the same-key rejoin ([`rejoin`](crate::rejoin)): a rejoined dip that\nturns at its bottom, as a V does, holds nowhere, so it is none of those; the rejoin states\nthe run of frames about its bottom, each at least [`EXCURSION_CENTS`] from the note's centre,\nas its excursion.",
+      "properties": {
+        "cents": {
+          "description": "Where it is held, in cents from the note's key: its frames' median residual.",
+          "format": "float",
+          "type": "number"
+        },
+        "end": {
+          "description": "Where it ends: one hop after its last frame, at most the note's end, and at most its\n`held_from` for one before it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "description": "Its first frame, on the take's timeline, inside the note.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "cents"
+      ],
+      "type": "object"
+    },
+    "Grid": {
+      "description": "A quantize grid such as 1/16, or 1/8t for triplet eighths.",
+      "pattern": "^\\s*1/0*[1-9][0-9]*t?\\s*$",
+      "type": "string"
+    },
+    "Held": {
+      "additionalProperties": false,
+      "description": "The notes the pass made from the pitches held before one note, and that note.",
+      "properties": {
+        "decoded": {
+          "$ref": "#/$defs/ReadNote",
+          "description": "The note the held pitches reach, as its reader decoded it, its residual left out. A made\nnote that ends after its `start` was taken from it, before its `held_from`; one that ends\nat or before its `start` was read from frames its reader left unread before it."
+        },
+        "loss_change": {
+          "description": "What making them changes the loss's total by, in nats: the made notes and the note\nreached, less the note as decoded. A note's cost more for each, and its held frames\npriced as held rather than as slide or unread.",
+          "format": "double",
+          "type": "number"
+        },
+        "notes": {
+          "description": "The notes made, in order, as the pass made them, their residuals left out: the note\nreached now starts where the last of them ends, or where it did, whichever is later.",
+          "items": {
+            "$ref": "#/$defs/ReadNote"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "decoded",
+        "notes",
+        "loss_change"
+      ],
+      "type": "object"
+    },
+    "HitLane": {
+      "description": "The lane of a drum [`Event::Hit`].\n\n`Asked` is the lane the user asked for, when the take is not told apart by sound.",
+      "enum": [
+        "kick",
+        "snare",
+        "hat",
+        "asked"
+      ],
+      "type": "string"
+    },
+    "Key": {
+      "description": "A key such as D minor, Bb major or D dorian, with at most 7 sharps or flats.",
+      "pattern": "^\\s*[A-Ga-g][#b]*(\\s*([Mm]|([Mm][Aa][Jj]|[Ii][Oo][Nn]|[Mm][Ii][Nn]|[Aa][Ee][Oo]|[Dd][Oo][Rr]|[Pp][Hh][Rr]|[Ll][Yy][Dd]|[Mm][Ii][Xx]|[Ll][Oo][Cc]).*))?\\s*$",
+      "type": "string"
+    },
+    "KeyEstimate": {
+      "additionalProperties": false,
+      "description": "A take's key, given or estimated, with the evidence the estimate was read from.",
+      "properties": {
+        "alternative": {
+          "$ref": "#/$defs/Key",
+          "description": "The relative major or minor of `key`, which shares its signature: the likeliest other\nreading of the same notes."
+        },
+        "histogram": {
+          "description": "How much of the take's note length falls on each pitch class, C = 0, summing to 1.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 12,
+          "minItems": 12,
+          "type": "array"
+        },
+        "key": {
+          "$ref": "#/$defs/Origin_of_Key",
+          "description": "The key: the one given, or the best-scoring of the 24, with its confidence."
+        },
+        "profile": {
+          "$ref": "#/$defs/KeyProfile",
+          "description": "The profile the scores were correlated with. Added in `capture-analysis` 1.12. A\ndocument without it states no profile; duet wrote none before 1.12, when it always\nestimated with [`KeyProfile::KrumhanslKessler`]."
+        },
+        "scores": {
+          "description": "Every major and minor key with its correlation with the histogram, from C major and\nC minor up by semitones.",
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "$ref": "#/$defs/Key"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "alternative",
+        "histogram",
+        "scores"
+      ],
+      "type": "object"
+    },
+    "KeyProfile": {
+      "description": "The profiles a key is estimated with: for each pitch class, from the tonic up in semitones,\nhow strongly it belongs to a major key and to a minor key. Only their shape matters, since\nthe estimate is a correlation.",
+      "oneOf": [
+        {
+          "const": "aarden-essen",
+          "description": "Aarden–Essen: how often each scale degree sounds in the major and minor folk songs of\nthe Essen collection. Bret Aarden, *Dynamic Melodic Expectancy*\n(PhD dissertation, Ohio State University, 2003); the values are those of Craig Sapp's\nHumdrum Extras `keycor` (`majorKeyAarden`, `minorKeyAarden`), the same as music21's\n`analysis.discrete.AardenEssen` (BSD-3-Clause). Fitted to melodies, it weighs a missing\nthird heavily, so a sung minor tune whose fourth is held longest still reads minor on its\ntonic. The default since `capture-analysis` 1.12.",
+          "type": "string"
+        },
+        {
+          "const": "krumhansl-kessler",
+          "description": "Krumhansl–Kessler: how well listeners rated each pitch class to fit a key after a\ncadence. Carol L. Krumhansl and Edward J. Kessler, \"Tracing the dynamic changes in\nperceived tonal organization in a spatial representation of musical keys\",\n*Psychological Review* 89(4), 1982; also Krumhansl, *Cognitive Foundations of Musical\nPitch* (1990), p. 35. duet's profile before 1.12, kept for comparison.",
+          "type": "string"
+        }
+      ]
+    },
+    "Loss": {
+      "additionalProperties": false,
+      "description": "The loss of a reading, in nats, as its terms: `pitch`, `voicing`, `unread` and `notes`\n(the module's doc gives each frame's price). It is never reported as one number alone, so\nthat a reading that wins by adding notes, or by leaving singing out, shows it.\n\nIt is the note HMM's objective: for two readings of one take, the difference of their\ntotals is the difference of their paths' costs to the decoder, but for these, each named\nso that a reader of the loss knows where the two part:\n- **onsets:** the loss is the same whatever the onsets; the decoder leaves a held note at\n  an onset for `−ln 0.9` ([`ONSET_LEAVE`](crate::ONSET_LEAVE)) rather than `c`, and holds\n  one across an onset for `−ln 0.1`. The loss is reckoned from the frames and the notes\n  alone, so that any reading of a performance can be scored, with or without its onsets;\n- **staying held:** the decoder charges `−ln(1 − e^−c)` (0.018 at `c` = 4) for every frame\n  a note holds past the shortest note's; the loss leaves it out, as too small to move a\n  note;\n- **the decoder's notes the reading drops:** a decoded note shorter than the shortest note,\n  or less voiced than the rules allow one, is dropped from the reading, as the rules drop\n  it, and its frames are unread in the loss;\n- **a slide is what its reader says:** the frames before a note's `held_from` are its\n  slide. For the HMM that is its attack; for the rules it is until the pitch arrives and\n  holds for 50 ms.",
+      "properties": {
+        "notes": {
+          "description": "`c` for every note: [`NOTE_COST`] unless the reader was given another, the reading's\n`reader.note_cost`.",
+          "format": "double",
+          "type": "number"
+        },
+        "pitch": {
+          "description": "`Σ d²/2σ²` over every held frame a note covers, its fall included, with `σ`\n[`LOSS_SIGMA_CENTS`], and [`ATTACK_COST`](crate::ATTACK_COST) for every frame of its\nslide, before its `held_from`. Before `capture-analysis` 1.4 it was `Σ r²/σ²` over every\nframe, the slide's measured against the key as though held.",
+          "format": "double",
+          "type": "number"
+        },
+        "unread": {
+          "description": "[`unread_cost`] for every voiced frame no note covers: what leaving it out costs, by its\nvoicing. Before `capture-analysis` 1.4 it was 1 a frame, whatever the voicing.",
+          "format": "double",
+          "type": "number"
+        },
+        "voicing": {
+          "default": 0.0,
+          "description": "For every frame a note covers, what sounding it costs beyond leaving it out: nothing for\na voicing above about 0.56, and `−ln DROPOUT` for a frame the pitch track decoded\nunvoiced. Added in `capture-analysis` 1.4; absent, and taken as 0, before.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pitch",
+        "unread",
+        "notes"
+      ],
+      "type": "object"
+    },
+    "Modulation": {
+      "additionalProperties": false,
+      "description": "A vibrato: the held residual, less its drift, swinging at a steady rate.",
+      "properties": {
+        "depth_cents": {
+          "description": "Half its peak-to-peak swing, in cents: the amplitude of the sinusoid fitted at the rate.",
+          "format": "float",
+          "type": "number"
+        },
+        "rate_hz": {
+          "description": "Cycles a second, where the autocorrelation peaks between 3 and 9.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "rate_hz",
+        "depth_cents"
+      ],
+      "type": "object"
+    },
+    "NoteResidual": {
+      "additionalProperties": false,
+      "description": "One note's residual, split as Melodyne splits a note (a concept here, not code).",
+      "properties": {
+        "centre": {
+          "description": "Where the note is held, against its key, in cents: the mean held residual over a whole\nnumber of the vibrato's cycles, centred on the held span, or the plain mean without one.\nThe note's own `centre` is its held frames' median, as segmentation reads it.",
+          "format": "float",
+          "type": "number"
+        },
+        "drift": {
+          "$ref": "#/$defs/Drift"
+        },
+        "excursions": {
+          "description": "Its excursions, in order: the ornaments inside it, and a held approach before its\n`held_from`. `rest_cents` is still measured over every held frame, theirs included.\nAdded in `capture-analysis` 1.6; omitted when there are none, and absent before.",
+          "items": {
+            "$ref": "#/$defs/Excursion"
+          },
+          "type": "array"
+        },
+        "fall": {
+          "$ref": "#/$defs/Transition",
+          "description": "The fall off its end. Absent when it ends on its pitch."
+        },
+        "frames": {
+          "description": "The voiced frames the note covers, its slide and fall included.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "modulation": {
+          "$ref": "#/$defs/Modulation",
+          "description": "Absent when no vibrato is found."
+        },
+        "rest_cents": {
+          "description": "What is left: the root mean square of the held residual less centre, drift and\nmodulation, in cents.",
+          "format": "float",
+          "type": "number"
+        },
+        "scoop": {
+          "$ref": "#/$defs/Transition",
+          "description": "The slide in. Absent when the note starts on its pitch."
+        }
+      },
+      "required": [
+        "centre",
+        "drift",
+        "rest_cents",
+        "frames"
+      ],
+      "type": "object"
+    },
+    "Origin_of_Key": {
+      "description": "A value the user gave, used exactly, or one estimated from the take, with how sure the\nestimate is (0..=1; below [`WEAK_CONFIDENCE`] it is weak).\n\nDeliberately exhaustive: a value is given or it is estimated.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "given": {
+              "$ref": "#/$defs/Key"
+            }
+          },
+          "required": [
+            "given"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "estimated": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "format": "float",
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "value": {
+                  "$ref": "#/$defs/Key"
+                }
+              },
+              "required": [
+                "value",
+                "confidence"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "estimated"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Origin_of_TimeSig": {
+      "description": "A value the user gave, used exactly, or one estimated from the take, with how sure the\nestimate is (0..=1; below [`WEAK_CONFIDENCE`] it is weak).\n\nDeliberately exhaustive: a value is given or it is estimated.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "given": {
+              "$ref": "#/$defs/TimeSig"
+            }
+          },
+          "required": [
+            "given"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "estimated": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "format": "float",
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "value": {
+                  "$ref": "#/$defs/TimeSig"
+                }
+              },
+              "required": [
+                "value",
+                "confidence"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "estimated"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Origin_of_double": {
+      "description": "A value the user gave, used exactly, or one estimated from the take, with how sure the\nestimate is (0..=1; below [`WEAK_CONFIDENCE`] it is weak).\n\nDeliberately exhaustive: a value is given or it is estimated.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "given": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "given"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "estimated": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "format": "float",
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "value": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "value",
+                "confidence"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "estimated"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Origin_of_uint64": {
+      "description": "A value the user gave, used exactly, or one estimated from the take, with how sure the\nestimate is (0..=1; below [`WEAK_CONFIDENCE`] it is weak).\n\nDeliberately exhaustive: a value is given or it is estimated.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "given": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "given"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "estimated": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "format": "float",
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "value",
+                "confidence"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "estimated"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "QuantizeOffset": {
+      "additionalProperties": false,
+      "description": "How far quantizing moved one note.",
+      "properties": {
+        "moved_ms": {
+          "description": "How far its start moved, in milliseconds: negative is earlier.",
+          "format": "double",
+          "type": "number"
+        },
+        "moved_steps": {
+          "description": "The same in steps of the grid.",
+          "format": "double",
+          "type": "number"
+        },
+        "note": {
+          "description": "The note's index, counting through the tracks in order.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "note",
+        "moved_ms",
+        "moved_steps"
+      ],
+      "type": "object"
+    },
+    "ReadNote": {
+      "additionalProperties": false,
+      "description": "A note as the reading reads it.",
+      "properties": {
+        "between_keys": {
+          "description": "More than 35 cents from its key ([`BETWEEN_KEYS_CENTS`]).",
+          "type": "boolean"
+        },
+        "centre": {
+          "description": "How far its held pitch (the median of its held frames) sits from `key`, in cents.",
+          "format": "float",
+          "maximum": 50.0,
+          "minimum": -50.0,
+          "type": "number"
+        },
+        "confidence": {
+          "description": "Its frames' mean voicing.",
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "end": {
+          "description": "Where it ends.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "held_from": {
+          "description": "Where its held pitch begins, after any slide or scoop into it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "description": "The MIDI key nearest its held pitch, on the take's tuning.",
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "residual": {
+          "$ref": "#/$defs/NoteResidual",
+          "description": "What the note leaves of the performance: centre, drift, vibrato, slide, fall and rest.\nAdded in `capture-analysis` 1.2; absent before."
+        },
+        "start": {
+          "description": "Where the note starts, its slide or scoop in included, as a frame on the take's timeline.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "strength": {
+          "description": "As [`Event::Note`]'s.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "held_from",
+        "key",
+        "centre",
+        "between_keys",
+        "confidence",
+        "strength"
+      ],
+      "type": "object"
+    },
+    "Reader": {
+      "additionalProperties": false,
+      "description": "The reader that chose a reading's notes, and the cost per note it chose them with.",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ReaderName"
+        },
+        "note_cost": {
+          "description": "The cost of a note, `c`, which the loss's `notes` term counts per note. For the note HMM\nit is also the cost, in nats, of leaving a held note: the negative log of the\nprobability of leaving its stable state. The rules have no cost of their own, so theirs\nis the loss's [`NOTE_COST`].",
+          "format": "double",
+          "type": "number"
+        },
+        "thresholds": {
+          "$ref": "#/$defs/Thresholds",
+          "description": "The thresholds Basic Pitch decoded its notes with. Only the basic-pitch reader writes\nthem. Added in `capture-analysis` 1.10: a 1.9 basic-pitch reading has none, and was\ndecoded with [`Thresholds::BASIC_PITCH`]."
+        }
+      },
+      "required": [
+        "name",
+        "note_cost"
+      ],
+      "type": "object"
+    },
+    "ReaderName": {
+      "description": "Which reader chose a reading's notes.",
+      "oneOf": [
+        {
+          "const": "rules",
+          "description": "[`Melody`](crate::Melody)'s segmentation rules, over the performance ([`read`]): the\nbaseline.",
+          "type": "string"
+        },
+        {
+          "const": "hmm",
+          "description": "The note HMM ([`NoteModel`](crate::NoteModel)).",
+          "type": "string"
+        },
+        {
+          "const": "basic-pitch",
+          "description": "Spotify's Basic Pitch, an outside model: it chooses where notes start and end, and the\ntake's performance gives each its key, centre and residual. Added in `capture-analysis`\n1.8. A build without the `basic-pitch` feature still reads it.",
+          "type": "string"
+        }
+      ]
+    },
+    "Reading": {
+      "additionalProperties": false,
+      "description": "A take's notes, read on its tuning.",
+      "properties": {
+        "breathy": {
+          "description": "Each note the reading's breathy pass carried on over the weakly voiced frames after it,\nwith the note as its reader decoded it, in order ([`breathe`](crate::breathe)). Added in\n`capture-analysis` 1.9; omitted when there is none, and absent before, when no reading\nread a breathy frame.",
+          "items": {
+            "$ref": "#/$defs/Breathy"
+          },
+          "type": "array"
+        },
+        "held": {
+          "description": "Each note the reading's held-pitch pass made from a pitch held before the note it\nreaches, with that note as its reader decoded it, in order\n([`hold_apart`](crate::hold_apart)). Added in `capture-analysis` 1.11; omitted when there\nis none, and absent before, when no reading made one.",
+          "items": {
+            "$ref": "#/$defs/Held"
+          },
+          "type": "array"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/ReadNote"
+          },
+          "type": "array"
+        },
+        "reader": {
+          "$ref": "#/$defs/Reader",
+          "description": "Which reader chose the notes, and its cost per note. Added in `capture-analysis` 1.3;\nabsent before, when the rules were the only reader."
+        },
+        "rejoins": {
+          "description": "Each same-key split the reading's pass rejoined into one note, with the notes as its\nreader decoded them, in order. Added in `capture-analysis` 1.7; omitted\nwhen there is none, and absent before, when no reading was rejoined.",
+          "items": {
+            "$ref": "#/$defs/Rejoin"
+          },
+          "type": "array"
+        },
+        "residual": {
+          "$ref": "#/$defs/TakeResidual",
+          "description": "What the notes leave of the take as a whole, with the loss as its terms. Added in\n`capture-analysis` 1.2; absent before."
+        },
+        "suggestions": {
+          "description": "Each suggestion about a note, in order: a note held before the next that is likely an\napproach to it ([`hold_apart`](crate::hold_apart)). It changes no note. Added in\n`capture-analysis` 1.11; omitted when there is none, and absent before, when none was made.",
+          "items": {
+            "$ref": "#/$defs/Suggestion"
+          },
+          "type": "array"
+        },
+        "tuning": {
+          "$ref": "#/$defs/Tuning"
+        }
+      },
+      "required": [
+        "tuning",
+        "notes"
+      ],
+      "type": "object"
+    },
+    "Rejoin": {
+      "additionalProperties": false,
+      "description": "One rejoin the pass made: the notes the reader decoded on one key, which it read as one.",
+      "properties": {
+        "decoded": {
+          "description": "The notes as the reader decoded them, in order, their residuals left out: the rejoined\nnote starts where the first does and ends where the last does.",
+          "items": {
+            "$ref": "#/$defs/ReadNote"
+          },
+          "type": "array"
+        },
+        "dips": {
+          "description": "Each dip between them, in order: one fewer than the notes.",
+          "items": {
+            "$ref": "#/$defs/Dip"
+          },
+          "type": "array"
+        },
+        "loss_change": {
+          "description": "What the rejoin changes the loss's total by, in nats: the rejoined note's loss less the\ndecoded notes'. One note's cost fewer, and the dip's frames priced as held rather than\nas the second note's slide, so it can be above zero: a rejoin that raises the loss.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "decoded",
+        "dips",
+        "loss_change"
+      ],
+      "type": "object"
+    },
+    "Suggestion": {
+      "additionalProperties": false,
+      "description": "A suggestion about one note of the reading. It changes nothing: it is evidence a person or\nan agent may act on, per note.",
+      "properties": {
+        "drift_cents": {
+          "description": "Where the held pitch's last quarter sits on average, in cents from the note's key,\nabove zero toward the next note.",
+          "format": "float",
+          "type": "number"
+        },
+        "key": {
+          "description": "The note's key.",
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_key": {
+          "description": "The next note's key.",
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rule": {
+          "$ref": "#/$defs/SuggestionRule",
+          "description": "The rule that fired."
+        },
+        "start": {
+          "description": "The note's start, on the take's timeline: it names the note.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "step": {
+          "description": "The step from the note's key to the next note's, in semitones: above zero upward.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "suggests": {
+          "$ref": "#/$defs/Suggests"
+        }
+      },
+      "required": [
+        "start",
+        "key",
+        "suggests",
+        "rule",
+        "next_key",
+        "step",
+        "drift_cents"
+      ],
+      "type": "object"
+    },
+    "SuggestionRule": {
+      "description": "The rule that made a suggestion.",
+      "oneOf": [
+        {
+          "const": "semitone-with-drift",
+          "description": "A semitone step to the next note, with the held pitch drifting toward it by more than\n[`APPROACH_DRIFT_CENTS`] in its last quarter.",
+          "type": "string"
+        }
+      ]
+    },
+    "Suggests": {
+      "description": "What a suggestion suggests about a note. Only one is stated yet.",
+      "oneOf": [
+        {
+          "const": "likely-approach",
+          "description": "The note is likely an approach to the next note: a choice may fold it into that note.",
+          "type": "string"
+        }
+      ]
+    },
+    "TakeResidual": {
+      "additionalProperties": false,
+      "description": "What a reading's residual says about the take as a whole. The tuning and its spread are the\nreading's `tuning`.",
+      "properties": {
+        "between_keys": {
+          "description": "How many notes are between keys.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "centre_cents_per_sec": {
+          "description": "How the notes' centres move over the take, in cents a second: a least-squares line\nthrough each note's centre against the middle of its held span. Absent with fewer than\ntwo notes. A reference that drifts within the take shows here.",
+          "format": "float",
+          "type": "number"
+        },
+        "centres": {
+          "$ref": "#/$defs/CentreHistogram"
+        },
+        "loss": {
+          "$ref": "#/$defs/Loss"
+        },
+        "read_frames": {
+          "description": "The voiced frames the notes cover.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unread_frames": {
+          "description": "The voiced frames no note covers.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "centres",
+        "between_keys",
+        "read_frames",
+        "unread_frames",
+        "loss"
+      ],
+      "type": "object"
+    },
+    "TempoAlternatives": {
+      "additionalProperties": false,
+      "description": "Half and double an estimated tempo: the likeliest other readings of it.",
+      "properties": {
+        "double": {
+          "description": "Double the tempo, in quarter notes per minute.",
+          "format": "double",
+          "type": "number"
+        },
+        "half": {
+          "description": "Half the tempo, in quarter notes per minute.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "half",
+        "double"
+      ],
+      "type": "object"
+    },
+    "Thresholds": {
+      "additionalProperties": false,
+      "description": "Where Basic Pitch decodes a note from its model's output, under Basic Pitch's own names.",
+      "properties": {
+        "frame_threshold": {
+          "description": "The note activation below which a note ends, once it has stayed below for Basic\nPitch's energy tolerance (11 frames).",
+          "format": "double",
+          "type": "number"
+        },
+        "minimum_note_length_ms": {
+          "description": "A note lasts strictly longer than this, in milliseconds.",
+          "format": "double",
+          "type": "number"
+        },
+        "onset_threshold": {
+          "description": "The onset activation at which a note starts.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "onset_threshold",
+        "frame_threshold",
+        "minimum_note_length_ms"
+      ],
+      "type": "object"
+    },
+    "TimeSig": {
+      "description": "A time signature such as 4/4 or 6/8: the denominator is 1, 2, 4, 8, 16, 32 or 64.",
+      "pattern": "^\\s*0*[1-9][0-9]*\\s*/\\s*0*(1|2|4|8|16|32|64)\\s*$",
+      "type": "string"
+    },
+    "Timing": {
+      "additionalProperties": false,
+      "description": "A take's tempo, meter and downbeat, each marked given or estimated.",
+      "properties": {
+        "beat_period_frames": {
+          "description": "Frames per quarter note, the period notes are placed by. For an estimated tempo it is the\nperiod measured on the grid, not the rounded `tempo_bpm` (92.4 a minute is stated as 92\nbut placed at 92.4); for a given tempo it is exactly `60 * rate / tempo_bpm`.",
+          "format": "double",
+          "type": "number"
+        },
+        "downbeat_frame": {
+          "$ref": "#/$defs/Origin_of_uint64",
+          "description": "Where bar 1 starts, as a frame on the input timeline."
+        },
+        "meter": {
+          "$ref": "#/$defs/Origin_of_TimeSig"
+        },
+        "tempo_alternatives": {
+          "$ref": "#/$defs/TempoAlternatives",
+          "description": "Half and double an estimated tempo, the likeliest other readings of it. `None` for a\ngiven tempo, which is not reported as an estimate, so neither are its half and double,\nand the analysis leaves them out."
+        },
+        "tempo_bpm": {
+          "$ref": "#/$defs/Origin_of_double",
+          "description": "Quarter notes per minute. An estimate is a whole number."
+        }
+      },
+      "required": [
+        "tempo_bpm",
+        "beat_period_frames",
+        "meter",
+        "downbeat_frame"
+      ],
+      "type": "object"
+    },
+    "Transition": {
+      "additionalProperties": false,
+      "description": "A slide into a note, or a fall off its end.",
+      "properties": {
+        "cents": {
+          "description": "The residual where it is furthest from the note: at the note's first voiced frame for a\nslide in, its last for a fall, in cents from the key.",
+          "format": "float",
+          "type": "number"
+        },
+        "ms": {
+          "description": "How long it lasts, in milliseconds: from the note's start to where the pitch first\nreaches its centre, or from where it last leaves the centre to the note's end.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "cents",
+        "ms"
+      ],
+      "type": "object"
+    },
+    "Tuning": {
+      "additionalProperties": false,
+      "description": "Where a take's A4 sits: given, used exactly, or estimated from its frames.",
+      "properties": {
+        "a4": {
+          "$ref": "#/$defs/Origin_of_double",
+          "description": "A4, in absolute cents: 6900.0 is 440 Hz. An estimate's confidence is how far the share\nof the steady frames within 15 cents of it stands above the share a flat spread across\nthe hundred cents would give: 0 for a flat spread, 1 when every steady frame is that\nnear (since capture-analysis 1.5; before, it was the share itself)."
+        },
+        "spread_cents": {
+          "description": "How widely, in cents, the steady frames spread about an estimate: their root mean square\ndistance from it. Absent for a given tuning.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "a4"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.12.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A .duet document of kind capture-analysis, at schema version 1.12.",
+  "properties": {
+    "$schema": {
+      "const": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.12.json"
+    },
+    "body": {
+      "$ref": "#/$defs/Analysis"
+    },
+    "duet": {
+      "$ref": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",
+      "properties": {
+        "kind": {
+          "const": "capture-analysis"
+        },
+        "version": {
+          "const": "1.12"
+        }
+      }
+    }
+  },
+  "required": [
+    "duet",
+    "body"
+  ],
+  "title": "duet capture-analysis 1.12",
+  "type": "object"
+}
