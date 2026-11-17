@@ -13,11 +13,10 @@ tasks](#build-tasks), each with its witness. Nothing here is built.
   framing and the version policy. The log is a document of that crate.
 - [Variants and comps](2026-11-17-variants-and-comps-design.md), ruled: a verdict that picks or
   marks is a comp entry, and "the session record logs the act" (its ruling 5).
-- The project design, in draft at the same time (PR #74,
-  `docs/superpowers/specs/2026-11-17-project-design.md`, temper
-  `01a1e007-8747-77ee-8333-dd462d6d01eb`). Its §10 reserves the paths this spec uses. Where this
-  spec asks for more, it says so in [What this asks of the project
-  layout](#what-this-asks-of-the-project-layout).
+- [The project design](2026-11-17-project-design.md) (temper
+  `01a1e007-8747-77ee-8333-dd462d6d01eb`), merged as a proposal (#74) and not yet ruled. Its §10
+  reserves the paths this spec uses. Where this spec asks for more, it says so in [What this asks of
+  the project layout](#what-this-asks-of-the-project-layout).
 - The jobs-and-boundaries note (temper `01a1e57c-f9c8-72e5-8a9b-6a4e5874bfdc`), §7 "The bus": acts,
   facts and asks, and the usefulness test.
 - The ideation (temper `01a1e9eb-b8f0-724e-be60-0dbeb03137fc`) and the outside facts (temper
@@ -259,9 +258,9 @@ that is stale the moment it is read.
 
 ### What is git-ignored, and what a cloud session or CI sees
 
-**Ruled in part and proposed in part, by the project design** (PR #74 §6 and §10, proposed there):
-`/.duet/run/` and `/.duet/state/` are ignored. `log.duet.jsonl` is committed with the authored half.
-This spec needs nothing more ignored.
+**Proposed, by the project design** (its §6 and §10, not yet ruled): `/.duet/run/` and
+`/.duet/state/` are ignored. `log.duet.jsonl` is committed with the authored half. This spec needs
+nothing more ignored.
 
 A cloud session without the folder attach, or CI, sees a project's clone:
 - **the log, and every authored document.** So they see every act, every ask and its answers, every
@@ -285,8 +284,8 @@ exactly as at `main`.
    is absent, there is no server.
 2. Try a non-blocking shared `flock` on it. If that succeeds, the server that wrote the file is
    gone: the lock is stale, so there is no server. The CLI leaves the file for the next server to
-   overwrite. Clearing it isn't the CLI's job, which narrows PR #74 §10.2's "a stale lock is the
-   CLI's to clear".
+   overwrite. Clearing it isn't the CLI's job, which narrows §10.2 of the project design, "a stale
+   lock is the CLI's to clear".
 3. Connect to `socket` and send `hello`, with a 250 ms budget for both. If either fails, the CLI
    runs standalone and states why.
 
@@ -296,8 +295,8 @@ That is one stat, one `flock`, one connect and one round trip. sccache and Bazel
 a Unix socket path at 104 bytes. A project at a deep path would overflow
 `<root>/.duet/run/bus.sock`. When it would, the server binds `$TMPDIR/duet-<fnv1a of the
 root>/bus.sock` instead (the directory created `0700`) and writes that path into the lock. So the
-lock stays at the fixed path PR #74 reserves, and a CLI reads only that. The absolute path also
-survives a shell whose `$TMPDIR` differs, which may be the case under the folder attach
+lock stays at the fixed path the project design reserves, and a CLI reads only that. The absolute
+path also survives a shell whose `$TMPDIR` differs, which may be the case under the folder attach
 (unverified).
 
 ### The CLI joined, or standalone
@@ -349,7 +348,7 @@ survives a shell whose `$TMPDIR` differs, which may be the case under the folder
 An **ask's `--about`** is a reference into the project: `wayfaring@2.28` (a take at a time),
 `wayfaring@2.15-3.58` (a span), `review/wayfaring.moments#3` (a moment), or a document path relative
 to the root. It is never an absolute path, so a committed log leaks no machine path. That follows PR
-#74's rule that "the record names takes by name and digest, never by path".
+the project design's rule that "the record names takes by name and digest, never by path".
 
 ### The diagnostic: `duet server status`
 
@@ -604,13 +603,14 @@ constraints the bus must not close off. They are not designs.
 
 ## What this asks of the project layout
 
-PR #74's §10 already reserves `log.duet.jsonl` (committed), `.duet/run/` and `.duet/state/`
-(ignored), and `DUET_PROJECT`. This spec uses them as they stand. It asks for four things more.
-These are its view, for the owner to rule with that spec, since this spec doesn't design the layout:
+The project design's §10 already reserves `log.duet.jsonl` (committed), `.duet/run/` and
+`.duet/state/` (ignored), and `DUET_PROJECT`. This spec uses them as they stand. It asks for four
+things more. These are its view, for the owner to rule with that spec, since this spec doesn't
+design the layout:
 
 1. **The socket's path is read from the lock.** The lock's own path stays fixed. It isn't the
-   socket's, because of macOS's 104-byte limit (§3). That refines PR #74 §10.2's "a fixed path under
-   `.duet/run/`".
+   socket's, because of macOS's 104-byte limit (§3). That refines §10.2 of the project design, "a
+   fixed path under `.duet/run/`".
 2. **A stale lock is left for the next server to overwrite, not cleared by the CLI.** The `flock`
    says the lock is stale, so the file is harmless. A CLI that deleted it could race a server that
    is just starting.
@@ -729,8 +729,8 @@ proven (ruled), and the store comes with the first face that needs it (decision 
    ([§4](#what-it-owns)). *Recommended: transient. The act that matters is the next duet command
    that reads the file.*
 6. **The socket's path is in the lock, falling back to `$TMPDIR` when a project's path is too long**
-   ([§3](#finding-a-project-and-a-server)). This is a refinement to PR #74 §10.2. *Recommended:
-   yes.*
+   ([§3](#finding-a-project-and-a-server)). This is a refinement to the project design's §10.2.
+   *Recommended: yes.*
 7. **The CLI never starts a server; `[server] autostart` defaults to `false`**
    ([§3](#the-cli-joined-or-standalone)). The alternative is sccache's client-spawns-server.
    *Recommended: never, for v1. Revisit after build task 3's owner witness.*
@@ -746,7 +746,7 @@ proven (ruled), and the store comes with the first face that needs it (decision 
     store is its own crate later** ([§6](#6-crate-boundaries)). *Recommended: yes.*
 12. **`.gitattributes` gives the log `merge=union`** ([What this asks of the project
     layout](#what-this-asks-of-the-project-layout)), written by `duet init`. *Recommended: yes, to
-    rule with PR #74.*
+    rule with the project design.*
 
 ## Not decided here
 
@@ -763,10 +763,9 @@ proven (ruled), and the store comes with the first face that needs it (decision 
 
 ## Open questions
 
-- **The project design is still in draft.** This spec depends on its §5 (the marker and
+- **The project design is merged but not yet ruled.** This spec depends on its §5 (the marker and
   `DUET_PROJECT`) and §10 (the reserved paths). If the owner rules those differently, §3 and the
   layout asks above follow.
 - **The coordination message to the `duet init` session was not delivered.** The attempt was refused
   by this session's permission settings. This spec read PR #74 instead, and records its asks in
   [What this asks of the project layout](#what-this-asks-of-the-project-layout).
-
