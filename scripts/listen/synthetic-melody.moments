@@ -1,6 +1,0 @@
-# Moments of crates/duet-capture/corpus/synthetic-melody.flac (eight quarter-note sine tones at
-# 120 bpm), for scripts/duet-listen.sh and scripts/listen/check.sh. One moment per line:
-# FROM TO LABEL, in seconds from the start of the take; the label is free text naming it.
-0.0 1.0 the first two tones
-1.5 2.75 tones four to six
-3.2 3.6 inside the last tone

@@ -89,17 +89,17 @@ Statuses for **duet**:
 | DOC-2 | uncovered: no Markdown linter |
 | DOC-3 | uncovered: no Markdown linter; README.md fits 100 columns today |
 | DOC-4 | uncovered: no link checker |
-| PY-DEF-1 | practiced: no mutable defaults in scripts/listen/*.py; not gated |
-| PY-ERR-1 | practiced: scripts/listen/*.py catch only KeyboardInterrupt and pass the baseline's BLE selection, run by hand; not gated |
-| PY-ERR-2 | practiced: no assert in scripts/listen/*.py; not gated |
+| PY-DEF-1 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
+| PY-ERR-1 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
+| PY-ERR-2 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
 | PY-GEN-1 | n/a: no generated Python |
-| PY-LINT-1 | uncovered: scripts/listen/*.py are under no ruff in CI; they pass the baseline's python/ruff.toml, check and format, run by hand |
-| PY-LINT-2 | uncovered: no root ruff.toml; scripts/listen/*.py were checked against the baseline's python/ruff.toml directly |
-| PY-LINT-3 | practiced: scripts/listen/*.py carry no suppressions; not gated |
-| PY-LOG-1 | n/a: scripts/listen/*.py do not log |
-| PY-TYPE-1 | n/a: no published Python package; scripts/listen holds two developer scripts |
+| PY-LINT-1 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
+| PY-LINT-2 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
+| PY-LINT-3 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
+| PY-LOG-1 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
+| PY-TYPE-1 | n/a: no Python package |
 | PY-TYPE-2 | n/a: no native module |
-| PY-VER-1 | convention: scripts/listen/*.py run on Python 3.9 or later (macOS's own python3), stated once in scripts/duet-listen.sh's header; they are scripts, not a package, so there is no requires-python |
+| PY-VER-1 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
 | RUST-API-1 | convention: duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-dsp, duet-capture and duet-schemas are library crates, duet-cli is the application, and duet-e2e is an unpublished test crate; review applies the API rules to the libraries' public API |
 | RUST-API-2 | convention: the libraries are published to crates.io; the open sets are #[non_exhaustive] (the eight Error enums, Control, Song, Track, Note, DrumGrid, LaneDef, duet-dsp's Event, HitLane, LaneMode, PitchFrame, Timing, BeatTempo and KeyEstimate, duet-capture's Kind, Captured, Analysis, QuantizeOffset, Quantized and Merge, duet-core's Dtype, duet-abc's Refusal, Notice, Reading, ReadOptions, WriteOptions, Dynamics, and duet-schemas' Envelope, Tool, From, Notice, Document, Stream, AnyDocument, KindInfo and Framing) and the closed ones are exhaustive (duet-dsp's Chunk and Mono, deliberately, so other crates can build them for their own sources and stages; duet-dsp's Origin and Given and duet-capture's LeadIn, deliberately, since a value is given or estimated, the command line builds a Given, and a lead-in is none, a pickup or rest bars; Position, TimeSig, Key, Mode, the three *Change events, Lane, Levels, Span, duet-play's Event, and duet-schemas' Version); Book, Tune, duet-core's Tensor, and duet-play's Message, Schedule and Renderer have private fields; a new public type is judged in review |
 | RUST-API-3 | partial: should_implement_trait and derivable_impls gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
@@ -159,11 +159,11 @@ Statuses for **duet**:
 | SEC-TEST-1 | n/a: no test doors; nothing ships a server |
 | SH-1 | practiced: every script in scripts/ starts #!/usr/bin/env bash; not gated |
 | SH-2 | practiced: every script in scripts/ sets -euo pipefail first; not gated |
-| SH-3 | uncovered: ShellCheck is not in CI; scripts/*.sh and scripts/listen/*.sh pass shellcheck -S info --include=SC2006, run by hand |
+| SH-3 | uncovered: ShellCheck is not in CI; scripts/*.sh pass shellcheck -S info --include=SC2006, run by hand |
 | SH-4 | practiced: no backticks in scripts/; not gated |
-| SH-5 | practiced: no eval in scripts/, and scripts/duet-listen.sh builds its commands as arrays; not gated |
+| SH-5 | practiced: no eval in scripts/; not gated |
 | SH-6 | practiced: no sed -i, readlink -f, date -d, grep -P or mapfile in scripts/; capture-fixtures.sh and port-check.sh need macOS tools and say so; not gated |
-| SH-7 | convention: judged in review; scripts/duet-listen.sh keeps its parsing and rendering in scripts/listen/*.py |
+| SH-7 | convention: judged in review; the scripts in scripts/ orchestrate tools, and duet capture review, which replaced duet-listen.sh and its Python, is Rust |
 | TEST-1 | uncovered: no #[ignore] tests today, and nothing would catch an unregistered one |
 | TEST-2 | convention: judged in review |
 | TEST-3 | partial: CI runs every tier but one (.github/workflows/ci.yml#check). duet-abc's oracle feature runs abc2midi, which by the owner's decision runs only on a developer's machine: CI compiles and lints it (clippy --all-features) but never runs it, and gates drift against its committed recordings instead |
