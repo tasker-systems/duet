@@ -824,9 +824,12 @@ and two events the domain model assumes ([decisions 16–23](#decisions-for-the-
 
 **Songs, parts and takes, the domain's project-level elements.**
 - The closing record of each segment lists:
-  - the songs, by name;
-  - the parts, by `<song>/<part>`, since a part belongs to one song;
+  - the songs, and the parts by `<song>/<part>`, since a part belongs to one song;
   - the takes, by name and digest, since a take is named by both and never by path.
+- **Songs and parts by a stable id, if the songs-and-composition spec gives them one,** with the
+  name beside it for reading (owner, 2026-11-17). Until it does they are listed by name, accepting
+  that a rename loses per-song lookup of older segments. That spec gives a song no stable id today,
+  so the index names them, a dependency on that spec recorded here.
 - **What is not named:**
   - **a session:** it is not a duet entity (domain model, temper `01a1eb48`);
   - **comps, snapshots and renders:** each belongs to a song, so the song finds their segments.
@@ -866,7 +869,11 @@ and two events the domain model assumes ([decisions 16–23](#decisions-for-the-
   2. checks that the line at `seq` has that `id`;
   3. sends the rest of that segment, then each later segment in index order.
 - **When the check fails,** because a segment was merged into or rewritten, it sends `resync` and
-  starts again from the first segment. A reader is still never told it is up to date when it isn't.
+  starts again **from the start of the segment where it failed**, not from the first segment, since
+  earlier segments did not change (owner, 2026-11-17). Resyncing from the first stays correct. The
+  rule is the narrower one. A reader is still never told it is up to date when it isn't.
+- **A follower that sees an earlier segment grow,** which only a merge does, resyncs from the start
+  of the earliest segment that grew.
 - **Why not a global `seq`:** a merge that adds lines to an earlier segment would shift every
   `seq` after it. A per-segment one shifts only within the segment that was merged into.
 
@@ -905,6 +912,9 @@ same old segment, and two new segments, `S2a` (ours) and `S2b` (theirs). Then:
 - **Replay reads every segment in index order:** the old one (itself union-merged), `S2a`, `S2b`.
 - **`journal check` states the two differing closes as a merge, not as wrong.** It states a closing
   record that no longer matches its file the same way.
+- **The segment the other clone's line closed implicitly (`S2a`) has no summary:** no line's
+  `closes` names it, so it has no songs, parts or takes lists (owner, 2026-11-17). Per-song queries
+  read it whole, and `journal check` states it as **unsummarised**, not wrong.
 - **What it does report as wrong:** an index line whose file is missing, or a segment file with
   entries that no index line names.
 
@@ -920,6 +930,9 @@ their kinds, and none is built with the journal:
   same way, the first transition in order standing.
 - **`snapshot.taken`:** `song`, the snapshot's name, and the digest of what it froze. A snapshot is
   an event against the song, not a status, so it changes no state.
+- **Where a song's current status lives belongs to the songs-and-composition spec,** a dependency
+  recorded here, not ruled here. The recommendation going to it: `song.duet` holds the current
+  status, the journal records each change, and `journal check` reports a disagreement.
 - `comp.marked` and `comp.applied` are already listed. They wait on the comp document, as the comp
   events do in #79.
 
@@ -966,13 +979,15 @@ Each names its witness. None is built before the one it needs. Tests that run th
   - A union merge of two appended clones reads, and `journal check` reports nothing wrong. The
     merge is simulated in the test without git: the shared lines, then ours, then theirs, for the
     index and for each segment. That holds whether neither clone rolled, one did, or both did. When
-    both did, replay covers every entry of both new segments, and the two closes are stated as a
-    merge.
+    both did, replay covers every entry of both new segments, the two closes are stated as a
+    merge, and the segment closed implicitly is stated as unsummarised.
   - A journal holding two answers to one ask (a merge, written by hand in the test), in different
     segments: the first in index order and then file order stands, and `journal check` lists the
     second.
   - A cursor taken before a roll resumes after a restart, reading the rest of its segment and then
-    the next. A cursor into a segment that was merged into gets `resync`.
+    the next. A cursor into a segment that was merged into gets `resync` from the start of that
+    segment, not of the first. A follower whose earlier segment was merged into resyncs from the
+    start of that segment.
 
 **2. The action registry.**
 - **Needs:** 1.
@@ -1114,21 +1129,28 @@ to this design, in [The journal's index and segments](#the-journals-index-and-se
     append, never by date or on an event. **Ruled (owner, 2026-11-17).**
 17. **The index names songs, parts (`<song>/<part>`) and takes (by name and digest)** in each
     segment's closing record, and never a session. Each event kind states what it concerns, and
-    comps, snapshots and renders are found through their song. **Ruled (owner, 2026-11-17).**
+    comps, snapshots and renders are found through their song. **Ruled (owner, 2026-11-17),** with
+    songs and parts by a stable id, the name beside it, once the songs spec gives them one; by name
+    until then.
 18. **The file name's timestamp is UTC ISO 8601 basic to the millisecond:**
     `journal.20261117T150405123Z.duet.jsonl`, stepped a millisecond forward when taken. **Ruled (owner, 2026-11-17).**
 19. **Replay folds the segments in index order. `seq` is a position within a segment, and a cursor
-    is `(segment, seq, id)`.** A cursor that no longer matches gets `resync`. **Ruled (owner, 2026-11-17).**
+    is `(segment, seq, id)`.** A cursor that no longer matches gets `resync`. **Ruled (owner, 2026-11-17),**
+    refined: the resync starts at the start of the segment where the check failed.
 20. **One lock covers the index and the segments. A roll writes the new segment's head first and
     the index line second,** and the next writer adopts a segment with no index line. **Ruled (owner, 2026-11-17).**
 21. **An index entry is closed only by the line that opens the next segment, in the same write,** so
-    the index is append-only and has exactly one open entry, the last line. **Ruled (owner, 2026-11-17).**
+    the index is append-only and has exactly one open entry, the last line. **Ruled (owner, 2026-11-17),**
+    with an addition: after a merge where both clones rolled, a segment closed implicitly has no
+    summary, is read whole by per-song queries, and `journal check` states it as unsummarised.
 22. **The index is its own kind, `journal-index` 1.0. A segment stays a `journal` stream, whose head
     gains `segment`, changed in place at 1.0 since no release has been cut** (temper `01a1eb48`
     ruling 12). **Ruled (owner, 2026-11-17).**
 23. **Two durable events the domain model assumes are added:** `song.status-set`, which makes the
     song's status a second lifecycle in the journal, and `snapshot.taken`. Their kinds are owned
-    by the songs-and-composition spec. **Ruled (owner, 2026-11-17).**
+    by the songs-and-composition spec. **Ruled (owner, 2026-11-17).** Where a song's current status
+    lives is that spec's, recorded as a dependency: the recommendation is `song.duet` holds it, the
+    journal records each change, and `journal check` reports a disagreement.
 
 ## Not decided here
 
