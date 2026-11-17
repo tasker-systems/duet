@@ -24,8 +24,9 @@ are numbered decisions at the end ([Decisions for the owner](#decisions-for-the-
   this spec states only what the layout must hold for it
   ([§10](#10-what-the-layout-holds-for-the-bus)).
 
-**Grounding:** the code at `main` (`bb58d0f`, `capture-analysis` 1.12). The take digest of the
-variants design is not built yet; this design depends on it (build task 1 there).
+**Grounding:** the code at `main` (`bb58d0f`, `capture-analysis` 1.12) when written. The take digest
+of the variants design (its build task 1) has since merged (#73): `capture-analysis` 1.13 and
+`performance` 1.1 state the take, and `Take` lives in `crates/duet-dsp/src/take.rs`.
 
 ## The problem
 
@@ -414,7 +415,7 @@ The plan reads every file in the directory given and sorts it:
 - **A `.duet` or `.duet.jsonl`** is sorted by its envelope's kind:
   - `capture-analysis`, `performance`, and a song or grid written beside a capture with the same
     stem: derived. It goes to the take whose digest it states. A document from before the take
-    digest (`capture-analysis` below the variants minor, `performance` 1.0) states none, so it is
+    digest (`capture-analysis` below 1.13, `performance` 1.0) states none, so it is
     matched by rate and length, as `compare` matches today, and the plan says so. Such a reading is
     not a variant (ruled, the variants design): the plan lists it, and suggests capturing again
     when a comp is wanted.
@@ -534,7 +535,7 @@ For the build tasks below, each in the crate CLAUDE.md names:
 Each names its witness. None is built before the owner rules.
 
 1. **`project` 1.0** in duet-schemas: the type, `Kind`, schema and example. **Needs:** the variants
-   design's task 1 (the take digest and `Take` type). **Witnesses:** the duet-schemas ones above.
+   design's task 1 (the take digest and `Take` type), merged in #73. **Witnesses:** the duet-schemas ones above.
 2. **`duet init` and project discovery:** `init`, the `project.duet` marker, `DUET_PROJECT`,
    `duet project path | show`, the `.gitignore` block. **Needs:** 1. **Witnesses:** the `init`,
    discovery and unchanged-config e2e tests.
