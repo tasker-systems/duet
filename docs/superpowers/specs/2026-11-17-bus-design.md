@@ -169,6 +169,11 @@ Each action declares:
 - **Transient topics have no cursor.** A subscriber that joins late gets the latest value of each
   (where the playhead is, who is present), never their history.
 
+**Amended by the journal's layout** (owner, 2026-11-17, temper `01a1eb60`, decision 12): the
+journal is an index plus segments. The lock, the one write, `fdatasync` and the `id` stand as
+written. `seq` becomes a position within a segment, and the cursor names its segment, as proposed in
+[The journal's index and segments](#the-journals-index-and-segments).
+
 ### Lifecycles as state machines
 
 **Proposed**, after tasker-core's task and step state machines.
@@ -760,28 +765,189 @@ design the layout:
    **Superseded (owner, 2026-11-17, temper 01a1eb60): the journal is an index plus timestamped
    segments; the bus design will propose the details.**
 
+## The journal's index and segments
+
+**Ruled** (owner, 2026-11-17, the project design's decision 12, temper `01a1eb60`):
+`journal.duet.jsonl` is an **index**. Each entry maps a segment file to the date range it covers and
+the project-level elements it concerns. Events live in **segments**, `journal.<timestamp>.duet.jsonl`.
+The **current segment** is the index entry with no end of range, matched to the file on disk by its
+timestamp. This supersedes layout ask 4 above.
+
+**Proposed** below, for the owner to rule: the six questions that decision leaves to this design
+([decisions 16–22](#decisions-for-the-owner)). The design keeps every property §1 and §4 rely on:
+- one lock;
+- one write and `fdatasync` per line;
+- the torn-tail cut;
+- lenient replay;
+- tolerance of a union merge, with no git in duet;
+- a cursor that survives a restart.
+
+### Two kinds: `journal-index` and `journal`
+
+- **A segment is a `journal` stream,** exactly as [sketched](#the-journal-stream-10): an envelope
+  and head on line 1, then one entry per line. Its head gains `segment`, the timestamp in its own
+  file name, so a file read alone still says which segment it is. The events and their versions
+  are unchanged.
+- **The index is its own kind, `journal-index` 1.0,** a `.duet.jsonl` stream. Its head is
+  `{project, id}`, the journal's id. Every later line **opens** a segment, and, after the first,
+  **closes** the one before it:
+
+```jsonc
+{"opens": {"segment": "20261117T150405123Z", "id": "0196…", "from": "2026-11-17T15:04:05.123Z"},
+ "closes": {"segment": "20261110T091200004Z", "to": "2026-11-17T15:04:05.101Z",
+            "entries": 4096, "last": "0196…e1", "songs": ["wayfaring"], "takes": ["wayfaring"]}}
+```
+
+- **Why a kind of its own:** an index line is not an act, so it isn't an event. Its version can
+  then move without touching any segment.
+
+### 1. When a segment rolls (decision 16)
+
+**By size, checked before an append.**
+- When the current segment holds at least `[journal] segment-size` bytes (default `1MiB`, a few
+  thousand entries), the append that would grow it rolls first, and its entry is the new segment's
+  first.
+- **Never by date alone.** A quiet project would collect empty segments.
+- **Never on an event.** No event is special enough to start a file, and a rule that needs a
+  particular event can't be applied to a merged journal.
+- A roll only ever happens inside an append. So no segment is ever empty, and nothing rolls while
+  only reading.
+- *Alternatives:* by calendar month, which reads well in a file listing but gives an uneven replay
+  cost; on `take.added`, which ties the layout to one action's meaning.
+
+### 2. What the index names (decision 17)
+
+**Songs and takes, by name.**
+- The closing record of each segment lists the songs and the takes its events concern.
+- Each event kind states what it concerns, as a function beside its type in `duet-schemas`:
+  - `take.added`: its take;
+  - `doc.written`: the song whose folder holds the path (`songs/<song>/…`);
+  - `moment.played`, `verdict.given` and the asks: what their reference names, once the reference
+    grammar is ruled;
+  - an event that concerns neither concerns nothing.
+- **Parts and comps are not named:** each belongs to one song, so naming the song is enough to find
+  the segments.
+- **What it is for:** `duet journal show --song wayfaring` and a later face read only the segments
+  that concern a song.
+- **The open segment has no list yet.** It is read whole, as it is the one being written.
+- *Alternative:* name nothing until a face needs it. Recommended against, because a closing record
+  is written once, and can't gain a field later without a new minor of `journal-index`.
+
+### 3. The timestamp in the file name (decision 18)
+
+**UTC, ISO 8601 basic form, to the millisecond: `journal.20261117T150405123Z.duet.jsonl`.**
+- **No colons,** which are refused or rewritten on Windows and in Finder.
+- **It sorts as text in time order,** and it is the segment's first moment.
+- **If that name is taken** (two rolls in one millisecond on one machine), the writer, under the
+  lock, steps a millisecond forward until the name is free.
+- **Two clones rolling in the same millisecond** would give a file conflict on merge. That is
+  vanishingly rare, and it is loud, never silent. The segment's own `id` in the index still tells
+  the two apart.
+
+### 4. Replay and cursors across segments (decision 19)
+
+**The index orders the segments, and each segment orders its entries.**
+- **Replay** folds the segments in index order, and each segment in file order. Lenient replay
+  stands as written: the first transition in that order stands, and `journal check` lists the rest.
+- **`seq` is an entry's position within its segment:** a segment's line 2 is `seq` 1, never stored.
+- **A cursor is `(segment, seq, id)`.** It names durable things only, a file and a line, so it
+  survives a restart. To resume, the reader:
+  1. finds the segment in the index;
+  2. checks that the line at `seq` has that `id`;
+  3. sends the rest of that segment, then each later segment in index order.
+- **When the check fails,** because a segment was merged into or rewritten, it sends `resync` and
+  starts again from the first segment. A reader is still never told it is up to date when it isn't.
+- **Why not a global `seq`:** a merge that adds lines to an earlier segment would shift every
+  `seq` after it. A per-segment one shifts only within the segment that was merged into.
+
+### 5. Writing under the lock (decision 20)
+
+**One lock, `.duet/run/journal.lock`, covers the index and every segment.** An append, under it:
+1. cuts a torn last line of the index, then of the current segment;
+2. folds in what was appended since this writer last read;
+3. if the current segment is full, rolls, in this order:
+   1. write the new segment's head, `fdatasync` it, and `fsync` the directory;
+   2. append the index line that closes the old segment and opens the new one, then `fdatasync`;
+4. checks the entry's transition, appends it to the current segment, and calls `fdatasync`.
+
+**Why that order:** every crash leaves something the next writer can finish.
+- **A crash after step 3.1** leaves a segment with only its head and no index line. The next
+  writer, under the lock, **adopts** it by writing the missing index line, so the roll completes.
+  A segment can't hold entries before its index line exists, so nothing can be lost there.
+- **The other order,** index first, could leave the index naming a file that doesn't exist.
+
+A first append to a project with no journal writes the index head, the first segment's head and the
+index line that opens it, then the entry.
+
+### 6. How an index entry is closed (decision 21)
+
+**Only by the line that opens the next segment, in the same write.**
+- No index line is ever rewritten. The index is append-only like a segment, so it stays tolerant
+  of a union merge.
+- **There is always exactly one open entry:** the last line.
+- The closing record (`to`, `entries`, `last`, `songs`, `takes`) is a **summary of the segment
+  file, which stays the truth.** `journal check` compares the two and lists any difference.
+
+**After a union merge of two clones that both rolled,** the index has two lines that each close the
+same old segment, and two new segments, `S2a` (ours) and `S2b` (theirs). Then:
+- **The current segment is the last line in file order** (`S2b`). Each earlier opened segment is
+  closed by the line after it, whether or not that line names it.
+- **Replay reads every segment in index order:** the old one (itself union-merged), `S2a`, `S2b`.
+- **`journal check` states the two differing closes as a merge, not as wrong.** It states a closing
+  record that no longer matches its file the same way.
+- **What it does report as wrong:** an index line whose file is missing, or a segment file with
+  entries that no index line names.
+
+### What changes in the crates (decision 22)
+
+- **`duet-schemas`:**
+  - adds `journal-index` 1.0;
+  - the `journal` head gains `segment`;
+  - the events are unchanged. The kinds, the event schemas and the line reader of
+    tasker-systems/duet#79 stand.
+- **`duet-bus`:** #79's writer becomes the segment writer. It gains the index, the roll, the adopt
+  step, the segment-named cursor, and `check`'s index-against-segments comparison.
+- **`[journal] segment-size`** goes into the project's `duet.toml` (decision 16).
+
 ## Build tasks
 
 Each names its witness. None is built before the one it needs. Tests that run the binary go in
 `crates/duet-e2e`, per CLAUDE.md.
 
-**1. The `journal` kind, and the journal writer and reader.**
-- **What:** `journal` 1.0 and [the events](#the-events-10-each) in `duet-schemas`, with schemas,
-  examples and the gate. In `duet-bus`: append under the lock with fsync, the torn-tail cut, the
-  tail with a cursor, and `duet journal show | check`.
+**1. The journal: its index and segments, the writer and the reader.**
+- **What:** `journal` 1.0 (a segment), `journal-index` 1.0 and [the events](#the-events-10-each)
+  in `duet-schemas`, with schemas, examples and the gate. In `duet-bus`, as [The journal's index
+  and segments](#the-journals-index-and-segments) proposes:
+  - append under the lock with fsync;
+  - the torn-tail cut, of the index and of the segment;
+  - the roll by size, and adopting a segment that has no index line;
+  - the tail with a `(segment, seq, id)` cursor;
+  - `duet journal show | check`.
 - **Witnesses:**
-  - A journal round-trips exactly: read, then written, is byte-identical. Every event validates
-    against its schema.
-  - Two processes appending 1 000 events each, concurrently, leave 2 001 whole lines, every `id`
-    unique.
-  - A file cut mid-line is cut back to the last newline by the next append, and nothing before it
-    changes.
+  - The index and every segment round-trip exactly: read, then written, is byte-identical. Every
+    event validates against its schema, and every index line against `journal-index`'s.
+  - Two processes appending 1 000 events each, concurrently, with a `segment-size` small enough to
+    roll several times, leave 2 000 whole entries across the segments, every `id` unique. Each
+    segment's lines are whole. The index has exactly one open entry, and every segment it names
+    exists.
+  - A segment or the index cut mid-line is cut back to the last newline by the next append, and
+    nothing before the cut changes.
+  - A crash between writing a new segment's head and its index line (made in the test by writing
+    that head alone) is adopted by the next append: one index line is written, and the entry lands
+    in that segment.
   - An entry of an unknown event kind, and one of a newer event minor, stay byte for byte as they
-    were after later appends. `journal check` lists them, and an unknown *field* in a known event is
-    refused by name.
-  - A union merge of two appended clones reads, and `journal check` reports nothing wrong.
-  - A journal holding two answers to one ask (a merge, written by hand in the test) replays: the
-    first answer in file order stands, and `journal check` lists the second.
+    were after later appends and across a roll. `journal check` lists them, and an unknown *field*
+    in a known event is refused by name.
+  - A union merge of two appended clones reads, and `journal check` reports nothing wrong. The
+    merge is simulated in the test without git: the shared lines, then ours, then theirs, for the
+    index and for each segment. That holds whether neither clone rolled, one did, or both did. When
+    both did, replay covers every entry of both new segments, and the two closes are stated as a
+    merge.
+  - A journal holding two answers to one ask (a merge, written by hand in the test), in different
+    segments: the first in index order and then file order stands, and `journal check` lists the
+    second.
+  - A cursor taken before a roll resumes after a restart, reading the rest of its segment and then
+    the next. A cursor into a segment that was merged into gets `resync`.
 
 **2. The action registry.**
 - **Needs:** 1.
@@ -913,6 +1079,26 @@ first, then 1–9 and 11–13 "agreed on all", then 10 after discussion. Each wa
     2026-11-17).**
 15. **The stream is the journal:** `journal.duet.jsonl`, kind `journal`, `duet journal show | check`
     ([The `journal` stream](#the-journal-stream-10)). **Ruled (owner, 2026-11-17).**
+    **Amended** by the project design's decision 12 (owner, 2026-11-17, temper `01a1eb60`):
+    `journal.duet.jsonl` is the index, and the events live in segments.
+
+**Proposed, for the owner to rule:** the questions the project design's decision 12 leaves to this
+design, in [The journal's index and segments](#the-journals-index-and-segments).
+
+16. **A segment rolls by size,** at `[journal] segment-size` (default `1MiB`), checked before an
+    append, never by date or on an event. **Proposed.**
+17. **The index names songs and takes, by name,** in each segment's closing record. Each event kind
+    states what it concerns; parts and comps are found through their song. **Proposed.**
+18. **The file name's timestamp is UTC ISO 8601 basic to the millisecond:**
+    `journal.20261117T150405123Z.duet.jsonl`, stepped a millisecond forward when taken. **Proposed.**
+19. **Replay folds the segments in index order. `seq` is a position within a segment, and a cursor
+    is `(segment, seq, id)`.** A cursor that no longer matches gets `resync`. **Proposed.**
+20. **One lock covers the index and the segments. A roll writes the new segment's head first and
+    the index line second,** and the next writer adopts a segment with no index line. **Proposed.**
+21. **An index entry is closed only by the line that opens the next segment, in the same write,** so
+    the index is append-only and has exactly one open entry, the last line. **Proposed.**
+22. **The index is its own kind, `journal-index` 1.0. A segment stays a `journal` stream, whose head
+    gains `segment`.** **Proposed.**
 
 ## Not decided here
 
@@ -920,7 +1106,8 @@ first, then 1–9 and 11–13 "agreed on all", then 10 after discussion. Each wa
 - **The MCP tools face, the channel shim's details and the Tauri app:** later faces (ruled),
   sketched in §7.
 - **Windows:** the CLI is always standalone there in v1.
-- **Rotation of the journal:** not in v1.
+- **Rotation of the journal:** overtaken. The journal is an index plus segments (ruled), and the
+  roll is proposed as [decision 16](#decisions-for-the-owner).
 - **Which conventions statuses change, and when:** each build task records them as it lands.
   CONC-BOUND-2/3/4 and CONC-FAIL-1/2/3 apply with task 3, and SEC-TEST-1's "nothing ships a server"
   stops being true then. RUST-SQL-1, SEC-SQL-1 and CONC-DB-* apply with the store.
