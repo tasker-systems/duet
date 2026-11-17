@@ -23,6 +23,12 @@ tasks](#build-tasks), each with its witness. Nothing here is built.
   `01a1e9f1-4b5e-726c-9fe7-e1e91d2a7481`) of 2026-11-17.
 - The Next goal (temper `01a1da53-b539-76ed-8634-b921104ce3d3`), whose clauses this makes
   witnessable.
+- **Prior art in tasker-core** (`tasker-systems/tasker-core`, read at `2483e3a` on 2026-11-17), the
+  source the conventions' concurrency rules cite: ADR-002 and
+  `docs/development/mpsc-channel-guidelines.md` for bounded channels,
+  `docs/architecture/events-and-commands.md` and `actors.md` for the command processor, and
+  `docs/architecture/states-and-lifecycles.md` with `crates/tasker-shared/src/state_machine/` for
+  state machines.
 
 **Grounding:** the code at `main` (`bb58d0f`): `duet-schemas`' `Stream` and `StreamKind`, the CLI's
 project walk-up in `crates/duet-cli/src/config.rs`, and the canonical `clippy.toml` and `deny.toml`.
@@ -150,6 +156,54 @@ Each action declares:
 - **Transient topics have no cursor.** A subscriber that joins late gets the latest value of each
   (where the playhead is, who is present), never their history.
 
+### Lifecycles as state machines
+
+**Proposed**, after tasker-core's task and step state machines.
+
+**A word on names first.** tasker-core's state-machine "events" (`Start`, `Cancel`) are inputs. In
+this spec those are **commands**. duet's logged **events** are facts, closer to the transition rows
+tasker-core appends to `task_transitions`.
+
+**Each lifecycle is an enum and one function.** The function is `transition(state, event) ->
+Result<State, Refusal>`, a single `match` on the current state and the event. An arm that isn't
+listed refuses, naming why. A terminal state never changes. The lifecycles:
+
+| Lifecycle | States | Terminal |
+|---|---|---|
+| an ask | `open` → `answered` or `withdrawn` | `answered`, `withdrawn` |
+| the server | `starting` → `replaying` → `serving` → `draining` → `stopped` | `stopped` |
+| the player | `idle` ⇄ `playing` | none |
+| a CLI run in a project | `probing` → `joined` or `standalone` | both, for that run |
+
+Only the ask's lifecycle is in the log. The others are in-process and transient.
+
+**The check and the append are one step under the log lock** ([decision
+13](#decisions-for-the-owner)). This is duet's form of tasker-core's guard and write in one
+transaction, and of CONC-DB-1's compare-and-set. A writer:
+1. takes `.duet/run/log.lock`;
+2. folds in any lines appended since it last read;
+3. runs `transition` on the result;
+4. appends the event only if the transition is allowed;
+5. releases the lock.
+
+So when two processes answer one ask at once, the second to take the lock sees the first's answer
+and is refused `already-answered`. Without this, each would check, both would find the ask open, and
+both would append. A long action, such as a capture, runs outside the lock; only the check and the
+append are inside it.
+
+**Replay is lenient where a live command is strict.** **Ruled (owner, 2026-11-17,** in review of
+this spec). Replay folds the log through the same `transition`. A transition that fails there can
+only come from a union merge of two clones or a hand edit, such as two answers to one ask. It is
+skipped, the first in file order wins, and `duet log check` lists it. It is never fatal.
+
+**Who acted is recorded, never enforced.** `by` is an audit label. tasker-core learned this in
+TAS-54: it enforced which processor owned a task, which blocked crash recovery, and it now records
+the processor for audit only.
+
+**The machines stay small.** tasker-core's transition table has gathered legacy arms. duet's log is
+kept forever, so every transition ever written must still replay. A change to a lifecycle is a new
+event version, never an edit to an old arm.
+
 ### The wire
 
 **Proposed.** A Unix-domain stream socket carries newline-delimited JSON, one message per line, the
@@ -180,14 +234,10 @@ same shape as a `.duet.jsonl` line, so the same tools read both.
 - **`registry` is a digest of every action's name and input schema.** A CLI whose registry differs
   from the server's (a newer duet in the shell, an older server still running) does not submit. It
   runs standalone and says why. The server still sees what it wrote, by tailing the log.
-- **Backpressure** (CONC-BOUND-1 is gated here; -2, -3 and -4 apply once a channel exists). Each
-  subscriber has a bounded queue sized from `[server] subscriber-queue` (default 1024). When it is
-  full:
-  - for **durable events,** the subscriber is sent `lagged` and disconnected. It loses nothing,
-    because it resumes from the log;
-  - for **transient topics,** only the latest value per topic is kept.
-
-  `duet server status` reports each queue's depth and saturation count (CONC-BOUND-4).
+- **Backpressure:** a subscriber too slow for durable events is sent `lagged` and disconnected. It
+  loses nothing, because it resumes from the log. A slow subscriber to a transient topic only ever
+  sees that topic's latest value. Every channel behind this, its size and what happens when it is
+  full are in [The server's channels](#the-servers-channels).
 - **Authentication is the filesystem.** The socket sits in a directory the server creates `0700`,
   and the socket is `0600`, so only the owner's user connects. That covers a cloud session through
   the folder attach, which runs as the owner on the Mac. No secret is needed on the socket. A later
@@ -390,6 +440,55 @@ says `standalone`.
 - **Loaded models, later.** One example is Basic Pitch kept warm between captures. They are
   optional, and `no-model-is-required-for-the-loop` holds: the server starts and runs with none.
 
+### One command processor, three actors
+
+**Proposed**, after tasker-core's command processor (`events-and-commands.md`) and actors
+(`actors.md`, ADR-001), and temper-desktop's conversation actor.
+
+- **The sequencer is the command processor.** The wire's JSON messages become a typed
+  `ServerCommand` enum inside the server: `Submit`, `Subscribe`, `Status` and `Shutdown`. Each
+  carries a `oneshot` responder, which is tasker-core's `CommandResponder<T>`.
+- **The processor only routes.** tasker-core's command processor grew to 1,164 lines mixing routing,
+  validation and logic before actors cut it to about 120. duet starts from the end state: routing is
+  a lookup by action name, and the logic is the registry's actions, which are the services.
+- **Actors only for what the server owns:** the player, the file watcher and the log tailer. Each
+  has its own command enum, a bounded channel, and `started`/`stopped` hooks. tasker-core's generic
+  `Handler<M>` trait and `ActorRegistry` are not taken: with three actors, plain enums are simpler.
+- **Two paths in to one processor.** A `Submit` from the socket, and an `Appended` from the tailer
+  when it finds lines another process wrote. tasker-core takes a full message and a bare "a message
+  is available" signal the same way (`*FromMessage` and `*FromMessageEvent`).
+- **The watch has a polling fallback,** as tasker-core's notifications do. `notify` can miss events,
+  for instance on a network filesystem or across a sleep. So the tailer also checks the log's length
+  every `[server] log-poll` (default `2s`). A missed watch event is then a late event, never a lost
+  one.
+
+### The server's channels
+
+**Proposed**, after tasker-core's ADR-002 and its guidelines: every channel bounded, sized from
+configuration, monitored, and with a stated policy when full. CONC-BOUND-1 is gated here.
+CONC-BOUND-2, -3 and -4 apply once these exist.
+
+| Channel | Type | When full |
+|---|---|---|
+| commands into the sequencer | `mpsc` | the sender waits; past `[server.channels] command-timeout` (default `5s`), the client is answered `refused: busy`. A command is never dropped |
+| commands to the player | `mpsc` | the sender waits, as above |
+| file-watch notices into the tailer | `mpsc` | the notice is dropped: any number of "the log changed" means one re-read, and the poll catches up anyway |
+| durable events to subscribers | `broadcast` | a receiver that falls behind gets `RecvError::Lagged`, is sent `lagged` and disconnected, and resumes from the log |
+| each transient topic | `watch` | only the latest value is held, by construction |
+
+- **The types do the policy.** `broadcast`'s `Lagged` is the spec's `lagged`, and `watch` holding
+  one value is "keep the latest playhead". Both are bounded by construction, so the gated
+  `clippy.toml` allows them, and less queue code is written by hand.
+- **Every size is configured** under `[server.channels]` in `duet.toml`, with one field per channel.
+  tasker-core's per-environment overrides map onto duet's existing layers: the user's `duet.toml`,
+  then the project's. **The e2e tests write a project config with sizes of 4,** so the full paths
+  run, which is tasker-core's "test with small buffers".
+- **Every channel is counted** (after tasker-core's `ChannelMonitor`): sent, received, overflowed
+  and dropped. The server writes one line to `server.log` when a channel passes 80% full. `duet
+  server status` shows the counts.
+- **Not taken from tasker-core:** environment-specific config files, OpenTelemetry metrics and send
+  retries. A local server that can't make progress tells the client.
+
 ### Lifecycle
 
 **Proposed.**
@@ -421,9 +520,11 @@ says `standalone`.
   - **What is lost:** the playhead and presence, which is right, and a play in progress, which
     stops.
 - **Supervision** (CONC-FAIL-1, -2): each connection, the tailer, the watcher and the player is a
-  named tokio task under one supervisor that inspects every `JoinError`. A panic in a client's task
-  drops that client and is logged. A panic in the sequencer stops the server, which is restarted by
-  hand. Its state is the log, so a restart loses nothing.
+  named tokio task under one supervisor that inspects every `JoinError`. Tasks are spawned through a
+  small `spawn_named!`, after tasker-core's, so each has a name in a panic message and in `duet
+  server status`. A panic in a client's task drops that client and is logged. A panic in the
+  sequencer stops the server, which is restarted by hand. Its state is the log, so a restart loses
+  nothing.
 
 ### Where the prior art changes
 
@@ -433,6 +534,10 @@ says `standalone`.
 - the `AskBoard`'s rule that "any path that ends the asking resolves the outcome exactly once, and
   the cancellation of an unanswered ask is always recorded";
 - `EventSink` closures, so the sequencer is tested without sockets.
+
+**From tasker-core, kept:** bounded, configured and monitored channels; a command enum with oneshot
+responders; actors with lifecycle hooks around services; explicit state machines with one transition
+function; an audit-only actor id; a polling fallback beside notifications; named tasks.
 
 **Changed:**
 - **temper-desktop's command channels are `mpsc::unbounded_channel`.** That is refused here by the
@@ -643,6 +748,8 @@ Each names its witness. None is built before the one it needs. Tests that run th
     were after later appends. `log check` lists them, and an unknown *field* in a known event is
     refused by name.
   - A union merge of two appended clones reads, and `log check` reports nothing wrong.
+  - A log holding two answers to one ask (a merge, written by hand in the test) replays: the first
+    answer in file order stands, and `log check` lists the second.
 
 **2. The action registry.**
 - **Needs:** 1.
@@ -675,6 +782,11 @@ Each names its witness. None is built before the one it needs. Tests that run th
     registry and runs standalone. It says so, and the server's watcher still receives its event.
   - **`duet server status` exits** 0 joined, 1 standalone with the stale lock's pid named, and 2
     outside a project.
+  - **Two standalone CLIs answer one ask at the same moment,** 100 times over. Each time the log
+    holds exactly one `ask.answered`, and the other CLI is refused `already-answered`.
+  - **Every channel at size 4** (from the test project's `duet.toml`): a watcher that stops reading
+    is sent `lagged`, resumes from its cursor and misses nothing; a burst of 50 submissions all
+    complete, none dropped.
 - **The owner's witness, not automatable:** the owner reruns the 2026-11-16 review on four Wayfaring
   moments. Claude asks them from a session, the owner answers each with one command, and Claude is
   woken by its watch. **What feels missing is recorded** as the input to the next face, as ruled on
@@ -696,6 +808,8 @@ Each names its witness. None is built before the one it needs. Tests that run th
   - A background server with `idle = "2s"` and no clients exits, and releases the lock.
   - With a `watch` connected it stays up.
   - An edit to `comps/…` made outside duet publishes `file.changed` and logs nothing.
+  - With the watch turned off in the test, a line appended by another process still reaches a
+    watcher within `log-poll`.
 
 **6. The channel shim.**
 - **Needs:** 3. **Later, and optional:** it needs channels available and the shim's handshake
@@ -747,6 +861,12 @@ proven (ruled), and the store comes with the first face that needs it (decision 
 12. **`.gitattributes` gives the log `merge=union`** ([What this asks of the project
     layout](#what-this-asks-of-the-project-layout)), written by `duet init`. *Recommended: yes, to
     rule with the project design.*
+13. **The transition check and the append happen as one step, under the log lock**
+    ([§1](#lifecycles-as-state-machines)), so two processes can't both answer one ask. *Recommended:
+    yes.*
+14. **Replay is lenient:** a transition that fails on replay is skipped, the first in file order
+    wins, and `duet log check` lists it ([§1](#lifecycles-as-state-machines)). **Ruled (owner,
+    2026-11-17).**
 
 ## Not decided here
 
