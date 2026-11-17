@@ -226,6 +226,9 @@ Its rules, unchanged by the rename:
 - **Ranges are stated** with `#[schemars(range(…))]` where the reader holds one: `vel` 1 to 127,
   `channel` 1 to 16, `program` and `controller` 0 to 127, bend −8192 to 8191, `ticks_per_quarter` 1
   to 32767. The schema then says what the reader accepts.
+- **A part has a stable `id`.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): minted
+  once when the part is made, never changed by a rename, and folded into `part` 1.0 under ruling 12.
+  Its form and place are in [songs and composition](2026-11-17-songs-and-composition-design.md#ids).
 - **A written part always states its end.** Every writer already does this (`io::with_end`), so a
   part document's `end` is always present, though the type keeps it optional.
 
