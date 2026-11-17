@@ -14,9 +14,11 @@
 //! and removed again when the capture fails before then.
 //!
 //! `duet capture compare` ([`compare`]) reads a melody take's recording and those files back,
-//! and plots and plays its reading against its performance.
+//! and plots and plays its reading against its performance. `duet capture review` ([`review`])
+//! does it for each moment of a moments file, every reading side by side, on one page.
 
 mod compare;
+mod review;
 mod statement;
 
 use std::fs;
@@ -59,6 +61,12 @@ pub enum CaptureCommand {
     /// STEM.compare.FROM-TO.svg and .wav. Reads the take's recording and what `duet capture
     /// melody` wrote at STEM; nothing is overwritten.
     Compare(compare::CompareArgs),
+    /// Review a melody take moment by moment, on one page: STEM.review/index.html shows each
+    /// moment of --moments with every reading side by side (the notes each reads, compare's plot
+    /// inline, and its clips as melody, steps, bends, legato and gapped), a box for a verdict, and
+    /// a button that copies every verdict. The clips are in STEM.review/clips. Reads what `duet
+    /// capture melody` wrote at STEM and each --reading; a directory that exists is refused.
+    Review(review::ReviewArgs),
 }
 
 /// What both kinds of take are captured with. Anything about the timing left out is
@@ -142,6 +150,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         CaptureCommand::Melody(args) => (Take::Melody, args),
         CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
         CaptureCommand::Compare(args) => return compare::run(&args),
+        CaptureCommand::Review(args) => return review::run(&args),
     };
     let key = flags(take, &args)?;
     let grid = match args.grid {
