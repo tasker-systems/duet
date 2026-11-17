@@ -1,12 +1,18 @@
-# duet: one take read several ways, and a choice between the readings per moment
+# duet: one take read several ways, and a comp built from the readings
 
 **Date:** 2026-11-17. **Task:** temper `01a1e77f-3b11-72df-98a6-3414d95e3183`.
 
-**Status:** the direction is **Ruled (owner, 2026-11-17)**: five rulings, quoted in
-[The rulings this builds](#the-rulings-this-builds) and not reopened here. This spec designs how
-they are built. Everything else is **Proposed**. Where a question needs the owner, it is marked
-**Owner question**, with options and a recommendation, and all of them are listed in
-[Questions for the owner](#questions-for-the-owner).
+**Status: Ruled (owner, 2026-11-17).** The direction is five rulings, quoted in
+[The rulings this builds](#the-rulings-this-builds). This spec designs how they are built. Its
+nine questions were each ruled as recommended, with one change, the name
+([The name](#the-name)). Each is marked **Ruled** where it is answered, and all nine are listed
+in [The owner's rulings on this design](#the-owners-rulings-on-this-design). What is still marked
+**Proposed** is the design those answers rest on: the owner ruled its questions, not each line.
+
+**First written as "choices".** This spec was merged as
+`2026-11-17-variants-and-choices-design.md` (#67), naming the kind `choices`, the commands `duet
+choices`, and the reader `chosen`. The owner renamed them when ruling on it. The file and every
+name in it now use "comp".
 
 **Builds on:**
 - [duet documents](2026-11-15-duet-documents-design.md): the envelope, kinds, the version policy,
@@ -31,7 +37,8 @@ they are built. Everything else is **Proposed**. Where a question needs the owne
 
 ## The rulings this builds
 
-**Ruled (owner, 2026-11-17)**, from the task's `rulings`:
+**Ruled (owner, 2026-11-17)**, from the task's `rulings`, in this spec's names (the task says
+`choices`):
 
 1. **Each reading stays its own `capture-analysis` document,** with a variant annotation. That is
    additive. There is no new "take" kind yet: listing a take's variants belongs to the project or
@@ -40,13 +47,31 @@ they are built. Everything else is **Proposed**. Where a question needs the owne
 2. **The annotation lives in the body, not the envelope.** It holds the take's audio digest with
    its rate and length, since the filename is never authoritative; the reader, as `reader` does
    today, thresholds included; and the passes that ran, in order.
-3. **One way to state intent: a new `choices` kind, 1.0.** It holds span choices and the
+3. **One way to state intent: a new `comp` kind, 1.0.** It holds span picks and the
    transformations task's per-note keep-or-correct marks. Applying it writes a new reading that
    states every change. The variants stay untouched.
-4. **The score comes from the applied choices:** a base variant (the HMM by default) plus the
-   chosen spans. An unchosen moment takes the base, and that is stated.
-5. **The workbench:** the review sheet's verdicts write choice entries, the session record logs the
-   act, and the choices document is the durable state.
+4. **The score comes from the applied comp:** a base variant (the HMM by default) plus the
+   picked spans. An unpicked moment takes the base, and that is stated.
+5. **The workbench:** the review sheet's verdicts write comp entries, the session record logs the
+   act, and the comp document is the durable state.
+
+## The name
+
+**Ruled (owner, 2026-11-17).** "Choices" is too broad: almost anything in duet is a choice. The
+act is **comping**: building a composite from several readings of one take, stretch by stretch,
+with per-note touch-ups, as an engineer comps a vocal from several takes.
+
+| Thing | Name |
+|---|---|
+| the kind | `comp` 1.0 |
+| one stretch taken from a variant | a **pick**, stored as a span |
+| the commands | `duet comp new`, `pick`, `mark`, `unset`, `apply` |
+| the reading `apply` writes | the **comped reading**, whose reader is `comped` |
+| the reading's field stating what was applied | `comp` |
+| the view | `comp v1` |
+
+**"Comp" here means only this:** a composite of one take's readings. It is not a comp of songs,
+of drum grids, or of several takes, none of which is in scope.
 
 ## What the take shows
 
@@ -71,7 +96,7 @@ The smallest stretch between two seams around each moment the owner ruled on (ta
 | 18.56 | 16.771–18.884 | G#3, F#3 | G#3, F3, F#3 |
 | 20.05 | 19.644–20.114 | D#3 | D#3 |
 
-- **A choice at a moment can be cut at seams, with no note shortened or lengthened.** Inside a
+- **A pick at a moment can be cut at seams, with no note shortened or lengthened.** Inside a
   stretch, each reading's notes start and end inside it. Taking one reading's notes there in place
   of the other's moves no boundary.
 - **A small tolerance would not help much.** Letting a cut fall within 25 or 50 ms of a note's
@@ -132,11 +157,11 @@ The annotation is three things, two of them new:
     takes a parameter, it gains an optional field in a minor, as `reader.thresholds` did in 1.10.
 
 **What makes two readings variants of one take.** The same `take.digest`. Two readings are the
-**same variant** when their `take`, `reader` and `passes` are all equal. A choices document names a
-variant by these three, never by a path ([question 4](#4-the-choices-kind)).
+**same variant** when their `take`, `reader` and `passes` are all equal. A comp document names a
+variant by these three, never by a path ([question 4](#4-the-comp-kind)).
 
 **An older reading is not a variant.** A document from before this minor has no `take` and no
-`passes`. A choices document refuses to name it, saying to capture the take again. Guessing its
+`passes`. A comp document refuses to name it, saying to capture the take again. Guessing its
 passes from its version would be a guess.
 
 **Output names are conventions.** Two readings of one take written side by side need different
@@ -166,7 +191,7 @@ name.
 | Trimmed, resampled, gain changed, downmixed | no: another take |
 | A lossy file decoded by a later Symphonia that rounds differently | no: a stated limit |
 
-**Owner question 1: what the digest is over.**
+**Question 1: what the digest is over.** **Ruled (owner, 2026-11-17): (a), as recommended.**
 - **Options:**
   - (a) the decoded samples, as above;
   - (b) the file's bytes;
@@ -183,16 +208,17 @@ name.
     dev-dependency of duet-dsp. It becomes a normal dependency of the crate that holds the
     digester. Its licence is in `deny.toml`'s allow list.
   - **Checking that a file is a given take means decoding all of it.** Nothing in this design does
-    that on the way to applying choices: every check is between documents, which already hold the
+    that on the way to applying a comp: every check is between documents, which already hold the
     digest.
   - **A lossy take's digest depends on its decoder.** The owner's phone takes are AAC in M4A. If a
-    later Symphonia decodes one differently, its new readings are another take, and a choices
+    later Symphonia decodes one differently, its new readings are another take, and a comp
     document over the old ones is refused by name, not misapplied. Capturing again from the same
     file fixes it.
 
-**Owner question 2: whether the performance stream states its take too.** Applying choices
+**Question 2: whether the performance stream states its take too.** **Ruled (owner,
+2026-11-17): (a), as recommended.** Applying a comp
 recomputes a folded note's residual and the take's loss from the performance's frames
-([question 6](#6-applying-choices)). Today a performance stream does not say which take it is of,
+([question 6](#6-applying-a-comp)). Today a performance stream does not say which take it is of,
 and `compare` checks it by rate and length.
 - **Options:**
   - (a) `performance` 1.1, additive: the head gains the same optional `take`, written by the same
@@ -206,22 +232,22 @@ and `compare` checks it by rate and length.
 
 **Proposed.**
 
-- **A span** is a stretch of the take, `from` to `to`, and the variant chosen in it.
-- **Both edges are seams** of the base and the chosen variant: frames where no note of either is
+- **A span** is a stretch of the take, `from` to `to`, and the variant picked in it.
+- **Both edges are seams** of the base and the picked variant: frames where no note of either is
   sounding across. A seam is a note boundary of one of them, or a frame inside no note of either.
-- **So a span takes whole notes.** Inside it, every note of the chosen variant that starts there
+- **So a span takes whole notes.** Inside it, every note of the picked variant that starts there
   replaces every note of the base that starts there. No note crosses an edge, so nothing is
   shortened, lengthened or overlapped.
-- **A choice is asked for at a moment, and stored as its span.** "2.28 s: rules" finds the nearest
+- **A pick is asked for at a moment, and stored as its span.** "2.28 s: rules" finds the nearest
   seam at or before 2.28 and the nearest after it, and stores 2.154–3.582 with `at` 2.28. The span
   is what is applied. `at` records where it was asked.
-- **A span may choose the base.** "12.03 s: HMM", the base, is stored like any other span. It
-  differs from an unchosen moment only in what is stated: "chosen" against "the base, where nothing
-  was chosen".
-- **Spans never overlap.** A choice asked inside an existing span is refused, naming it, unless it
+- **A span may pick the base.** "12.03 s: HMM", the base, is stored like any other span. It
+  differs from an unpicked moment only in what is stated: "picked" against "the base, where nothing
+  was picked".
+- **Spans never overlap.** A pick asked inside an existing span is refused, naming it, unless it
   is asked to replace it.
 
-**Owner question 3: where a span may be cut.**
+**Question 3: where a span may be cut.** **Ruled (owner, 2026-11-17): (a), as recommended.**
 - **Options:**
   - (a) at seams only, exactly;
   - (b) within a tolerance of a seam, such as 25 ms, moving the boundary of whichever note crosses
@@ -229,17 +255,17 @@ and `compare` checks it by rate and length.
 - **Recommendation: (a).** On Wayfaring, (b) changes one moment of ten
   ([What the take shows](#what-the-take-shows)), and it would make every splice an edit of a
   measured boundary. A long stretch between seams is shown and stated, so the owner sees what a
-  choice covers before making it.
+  pick covers before making it.
 
-## 4. The choices kind
+## 4. The comp kind
 
-**Proposed. `choices` 1.0, new.** A `.duet` document. Its type lives beside the reading in
+**`comp` 1.0, new.** A `.duet` document. Its type lives beside the reading in
 duet-dsp, and its `Kind` impl in duet-schemas, as for every kind.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/choices/1.0.json",
-  "duet": { "kind": "choices", "version": "1.0", "tool": { "name": "duet", "version": "0.4.0" } },
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/comp/1.0.json",
+  "duet": { "kind": "comp", "version": "1.0", "tool": { "name": "duet", "version": "0.4.0" } },
   "body": {
     "take": { "digest": "sha256:9f2c…", "rate": 22050, "channels": 1, "frames": 488040 },
     "rate": 22050,
@@ -270,9 +296,9 @@ duet-dsp, and its `Kind` impl in duet-schemas, as for every kind.
   - **The label is a name inside this document only.** The writer uses the reader's name (`hmm`,
     `rules`, `basic-pitch`) and asks for one when two variants share a reader.
   - Two labels bound to the same annotation are refused: they are one variant.
-  - A chosen reading ([question 6](#6-applying-choices)) is refused as a variant in 1.0. Its notes
-    are already choices over variants, and a choice over choices is not needed yet.
-- **`base`:** the label of the variant every unchosen moment takes. The writer makes the HMM's
+  - A comped reading ([question 6](#6-applying-a-comp)) is refused as a variant in 1.0. Its notes
+    are already picked from variants, and a comp of comps is not needed yet.
+- **`base`:** the label of the variant every unpicked moment takes. The writer makes the HMM's
   reading the base unless told otherwise.
 - **`spans`:** in order of `from`, not overlapping, each edge a frame on the analysis timeline.
   `at` (where it was asked) and `said` (the verdict in the owner's words) are optional.
@@ -285,14 +311,14 @@ duet-dsp, and its `Kind` impl in duet-schemas, as for every kind.
 - **`variant`:** the variant the note comes from.
 - **`at`:** a frame in the note's held part, `held_from` up to `end`. The writer uses the frame of
   the moment asked at, when it falls in the held part, or else the middle of it.
-- **`key`:** the MIDI key the reading gave the note. It is the key as heard, never a chosen one.
+- **`key`:** the MIDI key the reading gave the note. It is the key as heard, never a marked one.
 - **It finds exactly one note,** of that variant, whose held part holds `at` and whose key is
   `key`. Anything else is refused, naming the mark and what that variant now reads at `at`.
 - **Stable across re-reading** means: a mark survives any re-read that keeps a note on that key
   sounding at that moment, which is what a person means by "the F#3 at 14.87". If a re-read moves
   the note off the moment or onto another key, the mark is refused, never moved to a neighbour.
 
-**Owner question 4: how a mark names a note.**
+**Question 4: how a mark names a note.** **Ruled (owner, 2026-11-17): (a), as recommended.**
 - **Options:**
   - (a) variant, a frame in the held part, and the heard key, as above;
   - (b) the note's index in its variant's reading;
@@ -306,7 +332,7 @@ duet-dsp, and its `Kind` impl in duet-schemas, as for every kind.
 
 From the transformations task's "Ruled" section, plus one this design adds:
 
-| Mark | JSON | What it chooses |
+| Mark | JSON | What it marks |
 |---|---|---|
 | `keep` | `{"mark":"keep"}` | the note as heard, residual and all. It states a verdict that would otherwise be silence |
 | `key` | `{"mark":"key","to":58}` | the key the note plays on. A corrected note plays with no bend |
@@ -314,7 +340,7 @@ From the transformations task's "Ruled" section, plus one this design adds:
 | `fold` | `{"mark":"fold"}` | **added:** the note folded into the note it reaches, as a held approach |
 
 - **`fold` is the held-approach ruling's "folding an approach into its target is a stated choice".**
-  The note after the marked one, in the chosen reading, becomes one note from the marked note's
+  The note after the marked one, in the comped reading, becomes one note from the marked note's
   start, with the target's key, centre and held part. The marked note's frames become part of its
   attack, and its residual is measured again (they show as an excursion or a slide).
 - **A note may carry several marks** unless they conflict. `keep` with any other mark, two `key`
@@ -332,7 +358,7 @@ The take and the annotation may stay the same while the notes change.
 
 **Proposed: refused loudly by default.**
 
-- **Each variant is found by its annotation** among the readings given ([question 6](#6-applying-choices)).
+- **Each variant is found by its annotation** among the readings given ([question 6](#6-applying-a-comp)).
   - None matches: refused, naming the label, the reader, the passes and the first 12 hex digits of
     the take digest.
   - Two match with different readings: refused, naming both files.
@@ -344,11 +370,12 @@ The take and the annotation may stay the same while the notes change.
   - a span whose edges are still seams, and a mark that still finds exactly one note, is applied,
     and stated as rechecked;
   - an entry that does not place is refused by name, and nothing is written;
-  - **no entry is ever dropped.** Removing one is an edit to the choices document, made on purpose.
+  - **no entry is ever dropped.** Removing one is an edit to the comp document, made on purpose.
 
-**Owner question 5: whether a successful `--recheck` updates the stored digests.**
+**Question 5: whether a successful `--recheck` updates the stored digests.** **Ruled (owner,
+2026-11-17): (a), as recommended.**
 - **Options:**
-  - (a) yes: it rewrites only the variants' `reading` digests in the choices document, says so, and
+  - (a) yes: it rewrites only the variants' `reading` digests in the comp document, says so, and
     logs it in the session record;
   - (b) no: the document is never written by applying it, so every later apply needs `--recheck`
     until the document is edited.
@@ -356,85 +383,85 @@ The take and the annotation may stay the same while the notes change.
   true. The entries are unchanged, and the act is recorded. Under (b), `--recheck` becomes a habit,
   and a habit stops being a check.
 
-## 6. Applying choices
+## 6. Applying a comp
 
-**Proposed: `duet choices apply`.** The command names are [owner question 7](#7-the-commands).
+**`duet comp apply`.** The command names are [question 7](#the-owners-rulings-on-this-design).
 
 ```text
-duet choices apply song.choices.duet wayfaring.hmm.capture.duet wayfaring.rules.capture.duet -o wayfaring.chosen
+duet comp apply song.comp.duet wayfaring.hmm.capture.duet wayfaring.rules.capture.duet -o wayfaring.comped
 ```
 
-- **It reads** the choices document, and the readings named after it. With `--in DIR` it looks in a
+- **It reads** the comp document, and the readings named after it. With `--in DIR` it looks in a
   directory instead. Either way, each file is matched by its annotation, never its name.
 - **It reads the performance** the variants were read from, for folds and the loss: by `take` when
-  the stream states it ([owner question 2](#2-the-take-digest)), otherwise by rate, hop and length.
+  the stream states it ([question 2](#2-the-take-digest), ruled (a)), otherwise by rate, hop and length.
 - **It writes,** each refused rather than overwritten, as capture and compare do:
-  - `STEM.capture.duet`: the **chosen reading**, in a `capture-analysis` document;
+  - `STEM.capture.duet`: the **comped reading**, in a `capture-analysis` document;
   - `STEM.duet`: the song, the notes view's source;
   - `STEM.abc`: the score.
-- **It never writes** a variant, the performance or the choices document (except under
-  [owner question 5](#5-when-a-variant-is-read-again) (a)).
+- **It never writes** a variant, the performance or the comp document (except under
+  [question 5](#5-when-a-variant-is-read-again), ruled (a)).
 
-### What the chosen reading holds
+### What the comped reading holds
 
 **`capture-analysis` 1.12, additive** (the same minor as the annotation):
 
 - **`notes`:** the base's notes outside every span, each span's variant's notes inside it, and each
   fold made. **Every other note is byte for byte its variant's,** residual included.
-- **`reader`:** a new reader name, `chosen`, with the loss's cost per note. An absent `reader`
-  already means "the rules, before 1.3", so the chosen reading cannot leave it absent.
-- **`passes`:** empty. No pass ran over the chosen notes. The passes that ran over each variant are
-  in `choices.variants`.
+- **`reader`:** a new reader name, `comped`, with the loss's cost per note. An absent `reader`
+  already means "the rules, before 1.3", so the comped reading cannot leave it absent.
+- **`passes`:** empty. No pass ran over the comped notes. The passes that ran over each variant are
+  in `comp.variants`.
 - **`rejoins`, `breathy` and the held-approach pass's statements:** carried from each variant for
-  the notes taken from it, so the chosen reading still says what each pass did to its notes.
-- **`residual`:** the take's residual and loss, measured again over the chosen notes.
-- **`choices`, new and optional:** what was applied.
-  - `document`: the FNV-1a digest of the choices body applied;
-  - `base`, and `variants` as the choices document gave them, so the reading describes itself;
-  - `spans`: **tiling the whole take**, each `{from, to, variant, chosen}`. `chosen: false` marks
-    where the base was taken because nothing was chosen. This is ruling 4, stated in the body;
+  the notes taken from it, so the comped reading still says what each pass did to its notes.
+- **`residual`:** the take's residual and loss, measured again over the comped notes.
+- **`comp`, new and optional:** what was applied.
+  - `document`: the FNV-1a digest of the comp body applied;
+  - `base`, and `variants` as the comp document gave them, so the reading describes itself;
+  - `spans`: **tiling the whole take**, each `{from, to, variant, picked}`. `picked: false` marks
+    where the base was taken because nothing was picked. This is ruling 4, stated in the body;
   - `folds`: each fold, with the two notes as their variant read them;
   - `marks`: each `keep`, `key` and `drop` mark, by the index of the note it lands on.
 - **Keys and drops stay marks.** A note's `key` stays the key as heard, and its residual stays as
-  measured. The song, the score and a performance render follow the marks. Writing a chosen key into
+  measured. The song, the score and a performance render follow the marks. Writing a marked key into
   `key` would change what `centre` measures (its distance from the key heard), and its range
   (−50 to 50 cents). That is a change of meaning, so a major.
-- **Owner question 9** asks to confirm this.
+- **Ruled (owner, 2026-11-17),** question 9: keys and drops stay marks.
 
-**The rest of the analysis is the base's:** `events`, `timing`, `key` and `beats`. So a choice never
+**The rest of the analysis is the base's:** `events`, `timing`, `key` and `beats`. So a pick never
 moves a bar line or re-estimates the tempo. That is stated.
 
 ### What it states
 
-Each is a statement in the envelope of the chosen reading and the song, and on stderr. The numbers
+Each is a statement in the envelope of the comped reading and the song, and on stderr. The numbers
 are the witness document's over today's readings:
 
-- `notes chosen by song.choices.duet (choices 1.0, 9c04e1b2a7d35f60), over hmm, the base`
-- `2.154–3.582 s: rules, chosen at 2.28 s: G#3, A#3 in place of A#3`
-- `11.952–13.357 s: hmm, chosen at 12.03 s`
-- `hmm, the base, where nothing was chosen: 10 stretches, 12.8 s of 22.1 s`
+- `notes comped by song.comp.duet (comp 1.0, 9c04e1b2a7d35f60), over hmm, the base`
+- `2.154–3.582 s: rules, picked at 2.28 s: G#3, A#3 in place of A#3`
+- `11.952–13.357 s: hmm, picked at 12.03 s`
+- `hmm, the base, where nothing was picked: 10 stretches, 12.8 s of 22.1 s`
 - `14.91 s: F#3 (hmm) folded into the G#3 after it`
-- `12.07 s: A3 (hmm) plays as A#3: key chosen`
+- `12.07 s: A3 (hmm) plays as A#3: key marked`
 - `timing, key and beats are hmm's, unchanged`
 
 ### Witnesses for applying
 
-In `crates/duet-dsp` for the splice and fold, `crates/duet-schemas/tests/choices.rs` for the
+In `crates/duet-dsp` for the splice and fold, `crates/duet-schemas/tests/comp.rs` for the
 document, and `crates/duet-e2e` for the command:
 
-- **No entries is the base.** A choices document with a base and no entries gives the base's notes
-  exactly. One span is stated, `chosen: false`, over the whole take.
+- **No entries is the base.** A comp document with a base and no entries gives the base's notes
+  exactly. One span is stated, `picked: false`, over the whole take.
 - **One span over the whole take is that variant.** Choosing rules from the first frame to the last
   gives the rules' notes exactly.
 - **A span takes whole notes.** On Wayfaring, "2.28 s: rules" over the HMM stores 2.154–3.582. The
-  chosen reading has a G#3 then an A#3 there. Every note outside it is byte for byte the HMM's.
+  comped reading has a G#3 then an A#3 there. Every note outside it is byte for byte the HMM's.
 - **An edge off a seam is refused,** naming the note that crosses it and the nearest seams either
   side.
 - **A fold makes one note.** A synthetic approach a semitone below its target, read as two notes,
   folded: one note from the approach's start, on the target's key, with an excursion or a slide
   over the approach's frames. The two notes as read are stated in `folds`.
 - **The variants are byte for byte unchanged.** The SHA-256 of every variant file, and of the
-  performance and the choices document, is the same before and after `apply`.
+  performance and the comp document, is the same before and after `apply`.
 - **A re-read is refused.** One note's `end` moved by a frame in the rules' reading: apply is
   refused naming `rules` and both digests, and nothing is written. With `--recheck`, a span whose
   edges are still seams applies and is stated as rechecked. A span whose edge now falls inside that
@@ -446,15 +473,15 @@ document, and `crates/duet-e2e` for the command:
 
 ## 7. Views
 
-**One way to state intent means one kind, not one surface.** The choices document is the only
+**One way to state intent means one kind, not one surface.** The comp document is the only
 store. Views are working surfaces over it, as the documents design rules for every kind.
 
-### The choices view, new
+### The comp view, new
 
-**Proposed: `choices v1`, a lossless view of `choices` 1.0.**
+**`comp v1`, a lossless view of `comp` 1.0.**
 
 ```text
-# duet choices v1 of choices 1.0 from 9c04e1b2a7d35f60
+# duet comp v1 of comp 1.0 from 9c04e1b2a7d35f60
 take sha256:9f2c…  22050 Hz  1 ch  488040 frames  read at 22050 Hz
 variant hmm    hmm   cost 4  passes breathy rejoin held-approach  reading 3f9a1c0d5e2b7a41
 variant rules  rules cost 4  passes breathy rejoin held-approach  reading 0b7e33c19a5d2f84
@@ -464,10 +491,10 @@ span 11.952 13.357 hmm  at 12.030
 mark hmm 14.915 F#3 fold  "a rise traced up to G#3, the real target"
 ```
 
-- **`duet view song.choices.duet`** renders it. Given the variants (`--with FILE…`), it adds each
+- **`duet view song.comp.duet`** renders it. Given the variants (`--with FILE…`), it adds each
   span's notes under each reading as `# ` comment lines, so a person sees what a span swaps. Those
   are comments, so they are not read back.
-- **`duet apply view --onto song.choices.duet`** reads it back, by the header's digest as for every
+- **`duet apply view --onto song.comp.duet`** reads it back, by the header's digest as for every
   view.
 - **Times are written in seconds to the millisecond.** On reading back, each resolves to the
   nearest seam (a span's edge) or held frame (a mark's `at`) within half a hop (5.8 ms). Two within
@@ -478,48 +505,48 @@ mark hmm 14.915 F#3 fold  "a rise traced up to G#3, the real target"
 
 ### The notes view: marks only, never spans
 
-**Proposed: the notes view can carry per-note marks, not span choices.**
+**The notes view can carry per-note marks, not spans.**
 
 - **Why no spans:** a song's notes view shows one reading's notes, in bars and beats. A span that
-  chooses another variant swaps in notes the view does not show, so it would be an edit made
+  picks another variant swaps in notes the view does not show, so it would be an edit made
   blind. Its edges are seams in frames, which bar positions cannot state exactly.
 - **Marks fit it.** The transformations ruling put them there: "Marks live in the notes view, per
   note … `duet apply` reads them back exactly. A new notes-view syntax is a new version in the
   view's header."
-- **What it is, then:** `notes v2` of a chosen song carries each melody note's marks after the note,
-  such as `; fold` or `; key=A#3 drop=slide`. Its header names the chosen reading's choices digest
-  as well as the song's. `duet apply view --onto song.choices.duet` writes the marks back as
-  `marks` entries: each note, through the chosen reading, by its variant, held frame and heard key.
+- **What it is, then:** `notes v2` of a comped song carries each melody note's marks after the note,
+  such as `; fold` or `; key=A#3 drop=slide`. Its header names the comped reading's comp digest
+  as well as the song's. `duet apply view --onto song.comp.duet` writes the marks back as
+  `marks` entries: each note, through the comped reading, by its variant, held frame and heard key.
   The marks are never stored in the song.
 
-**Owner question 6: where notes-view marks are built.**
+**Question 6: where notes-view marks are built.** **Ruled (owner, 2026-11-17): (a), as recommended.**
 - **Options:**
   - (a) in the transformations task, which renders `key` and `drop` anyway, as an amendment: its
-    marks are choices entries, and `notes v2` reads and writes them;
+    marks are comp entries, and `notes v2` reads and writes them;
   - (b) here, as its own task before the transformations task.
 - **Recommendation: (a).** A mark that nothing renders yet is a mark the owner cannot hear. The
-  choices view carries every mark from the start, so nothing waits for (a).
+  comp view carries every mark from the start, so nothing waits for (a).
 
 ## 8. The workbench
 
 The session record's design belongs to the workbench task. This states what that design needs from
-choices, and decides none of its shape:
+a comp, and decides none of its shape:
 
 - **A verdict on the review sheet writes one entry,** through the same action the CLI uses:
   - "rules" or "hmm" on a moment is a span asked at the moment's time, with the verdict as `said`;
   - "fold" or "key" on a note is a mark;
-  - "no audible difference" writes **no** entry. The moment stays unchosen and takes the base, and
+  - "no audible difference" writes **no** entry. The moment stays unpicked and takes the base, and
     the verdict lives in the record and the review set's answers.
-- **The session record logs each act:** which choices document, its body digest before and after,
+- **The session record logs each act:** which comp document, its body digest before and after,
   the entry, and who made it. It is a fact in the record, not the state.
-- **The choices document is the state.** Replaying the record is never needed to know what was
-  chosen.
-- **Before a choice is made, the sheet shows the stretch it will cover** between seams, and both
+- **The comp document is the state.** Replaying the record is never needed to know what was
+  picked.
+- **Before a pick is made, the sheet shows the stretch it will cover** between seams, and both
   readings' notes in it.
 
-## The witness document: the owner's task-D rulings
+## The witness document: the owner's task-D rulings as a comp
 
-`crates/duet-capture/corpus/wayfaring-stranger.choices.duet`, committed with task 2. It holds no
+`crates/duet-capture/corpus/wayfaring-stranger.comp.duet`, committed with task 2. It holds no
 audio, only frames and the owner's words. Base: the HMM. One entry per ruling:
 
 | Moment | Ruling (task D) | Entry |
@@ -538,25 +565,25 @@ audio, only frames and the owner's words. Base: the HMM. One entry per ruling:
 
 **After the held-approach pass,** the HMM reads the A3 at 12.03 and the F#3 at 14.87 as notes of
 their own, the first with a "likely approach" suggestion. "The HMM is closer" at 12.03 then means
-the A3 folded, not the HMM's span. **Owner question 8** asks to confirm it.
+the A3 folded, not the HMM's span. **Ruled (owner, 2026-11-17),** question 8: it is the A3 folded.
 
 **What applying it reads**, the witnesses of task 2:
 - one D#3 at 1.42 with its turn; G#3, A#3 at 2.28; G#3, A#3 at 3.77; C#3, D#3 at 5.17;
 - C3, D#3 at 9.07; one A#3 at 12.03; G#3, A#3 at 13.84; one G#3 at 14.87;
 - F3, F#3 at 18.56; and the D3 after the D#3 at 20.05;
 - every note outside a span, the HMM's, byte for byte;
-- the unchosen stretches stated.
+- the unpicked stretches stated.
 
 ## The version line
 
 | Format | Version | Change | Task |
 |---|---|---|---|
 | `capture-analysis` | 1.11 | the held-approach pass's suggestion (not this design's) | the held-approach task |
-| `capture-analysis` | **1.12**, or the next free minor | **additive:** optional `take` on the analysis; optional `passes` on the reading; the reader name `chosen`; optional `choices` on the reading | 1 and 2 |
-| `choices` | **1.0** | **new kind**, a `.duet` document | 2 |
-| `performance` | **1.1**, if owner question 2 is (a) | **additive:** the head's optional `take` | 1 |
-| the `choices` view | **v1** | **new view** | 4 |
-| the `notes` view | **v2** | **new syntax:** per-note marks | the transformations task, under owner question 6 (a) |
+| `capture-analysis` | **1.12**, or the next free minor | **additive:** optional `take` on the analysis; optional `passes` on the reading; the reader name `comped`; optional `comp` on the reading | 1 and 2 |
+| `comp` | **1.0** | **new kind**, a `.duet` document | 2 |
+| `performance` | **1.1** (question 2, ruled (a)) | **additive:** the head's optional `take` | 1 |
+| the `comp` view | **v1** | **new view** | 4 |
+| the `notes` view | **v2** | **new syntax:** per-note marks | the transformations task, under question 6, ruled (a) |
 | `song`, `drum-grid`, the envelope | none | | |
 
 Each minor follows the version policy's rule: a new optional field, omitted when absent, whose
@@ -568,7 +595,7 @@ example of each kind still reads (the gate's witnesses).
 Each names its witness. None is built before the one it needs.
 
 **1. The variant annotation.** `capture-analysis` 1.12 (`take`, `passes`), and `performance` 1.1
-under owner question 2 (a).
+under question 2, ruled (a).
 - **Needs:** the held-approach task merged, so its pass is listed and the minor is free.
 - **What:** a streamed SHA-256 digester fed every chunk the capture command reads; `take` on the
   analysis; `passes` written by `interpret` as each pass runs; schemas and examples committed.
@@ -583,31 +610,31 @@ under owner question 2 (a).
   - Whether a 24-bit re-encode of 16-bit samples keeps the digest is checked, and stated either
     way in the digester's docs.
 
-**2. `choices` 1.0, and applying it.**
+**2. `comp` 1.0, and applying it.**
 - **Needs:** 1.
 - **What:** the kind, its schema and example; the splice and fold in duet-dsp, beside `interpret`;
-  the re-read checks; `duet choices apply`; the chosen reading's `choices` and the reader `chosen`;
+  the re-read checks; `duet comp apply`; the comped reading's `comp` and the reader `comped`;
   the witness document committed.
 - **Witnesses:** [applying's](#witnesses-for-applying), and the witness document's.
-  - A choices document round-trips exactly, and validates against its schema.
-  - Overlapping spans, an unknown label, two labels for one annotation, and a chosen reading named as
+  - A comp document round-trips exactly, and validates against its schema.
+  - Overlapping spans, an unknown label, two labels for one annotation, and a comped reading named as
     a variant are each refused by name.
 
-**3. Writing choices from the CLI.**
+**3. Writing a comp from the CLI.**
 - **Needs:** 2.
-- **What:** `duet choices new` (from the base reading and the other variants), `duet choices choose
-  --at SECS LABEL [--said TEXT]`, `duet choices mark --at SECS [fold|keep|key=…|drop=…]`, and
-  `duet choices unset --at SECS`.
+- **What:** `duet comp new` (from the base reading and the other variants), `duet comp pick --at
+  SECS LABEL [--said TEXT]`, `duet comp mark --at SECS [fold|keep|key=…|drop=…]`, and
+  `duet comp unset --at SECS`.
 - **Witnesses** (in `crates/duet-e2e`):
-  - On Wayfaring, `choose --at 2.28 rules` stores 2.154–3.582 with `at` 2.28. Asked again inside
+  - On Wayfaring, `pick --at 2.28 rules` stores 2.154–3.582 with `at` 2.28. Asked again inside
     it, it is refused without `--replace`.
   - `mark --at 14.87 fold` on the HMM stores a mark on the note there, by its held frame and key.
   - `unset` removes exactly that entry, and the rest of the document is byte for byte unchanged.
   - The document written by the commands applies as the committed witness document does.
 
-**4. The choices view.**
+**4. The comp view.**
 - **Needs:** 2.
-- **What:** `choices v1`: `duet view` of a choices document, `--with` for context lines, and
+- **What:** `comp v1`: `duet view` of a comp document, `--with` for context lines, and
   `duet apply --onto`.
 - **Witnesses:**
   - document → view → document is equal, for the witness document; view → document → view is byte
@@ -618,44 +645,46 @@ under owner question 2 (a).
   - A view naming a newer view or schema version is refused by name.
 
 **5. Marks in the notes view, and renders that follow them.** An amendment to the transformations
-task (temper `01a1df08-2b63-7658-8812-7823c97c6147`) under owner question 6 (a), not a new task.
+task (temper `01a1df08-2b63-7658-8812-7823c97c6147`) under question 6, ruled (a), not a new task.
 - **Needs:** 2, 4, and that task's own needs.
-- **Witnesses:** that task's per-note witnesses. Plus: a `notes v2` view applied onto a choices
-  document writes `marks` entries, and the song is unchanged; and a `key` mark makes the chosen
-  song's and score's note that key, while the chosen reading's `key` stays the heard one.
+- **Witnesses:** that task's per-note witnesses. Plus: a `notes v2` view applied onto a comp
+  document writes `marks` entries, and the song is unchanged; and a `key` mark makes the comped
+  song's and score's note that key, while the comped reading's `key` stays the heard one.
 
 **6. The review sheet writes entries.** Part of the workbench design (temper
 `01a1e563-22e6-70e6-a7ce-8b38e93b3091`), not filed here.
 - **Witness:** the four-moment review the jobs-and-boundaries note proposes as its test, rerun with
-  verdicts that write entries through task 3's action. The choices document it leaves applies, and
+  verdicts that write entries through task 3's action. The comp document it leaves applies, and
   the record holds one act per verdict.
 
-## Questions for the owner
+## The owner's rulings on this design
 
-Each has a recommendation. Nothing is built on an answer before it is given.
+All nine **Ruled (owner, 2026-11-17)**, each as recommended: "I agree with all nine as recommended
+overall". The one change is the name, under question 7.
 
-1. **What the take digest is over** ([§2](#2-the-take-digest)): the decoded samples, the file's
-   bytes, or both. *Recommended: the decoded samples.*
-2. **Whether the performance stream states its take** ([§2](#2-the-take-digest)): `performance` 1.1
-   with the same `take`, or checked by rate and length as today. *Recommended: 1.1.*
-3. **Where a span may be cut** ([§3](#3-a-span-and-where-it-may-be-cut)): at seams exactly, or
-   within a tolerance with the boundary moved and stated. *Recommended: seams exactly.*
-4. **How a mark names a note** ([§4](#how-a-mark-names-a-note)): variant, held frame and heard key;
-   the note's index; or an id in every note. *Recommended: variant, held frame and heard key.*
-5. **Whether `--recheck` updates the stored digests** ([§5](#5-when-a-variant-is-read-again)).
-   *Recommended: yes, the digests only, stated and logged.*
-6. **Where notes-view marks are built** ([§7](#the-notes-view-marks-only-never-spans)): in the
-   transformations task, or here. *Recommended: in the transformations task.*
-7. **The command names** ([§6](#6-applying-choices)): `duet choices new|choose|mark|unset|apply`,
-   or the same verbs under `duet capture`. *Recommended: a `duet choices` group,* since a choices
-   document is not a capture, and `duet capture` already holds `melody`, `rhythm` and `compare`.
-   Applying is `duet choices apply`, not top-level `duet apply`, which reads views.
-8. **12.03 after the held-approach pass** ([the witness document](#the-witness-document-the-owners-task-d-rulings)):
-   "the HMM is closer" written as `fold` on the A3, once the HMM reads it as a note.
-   *Recommended: yes.*
-9. **A chosen key stays a mark** ([§6](#what-the-chosen-reading-holds)): the chosen reading keeps
-   the key as heard, and the song, score and renders play the chosen key. Rewriting `key` would
-   change what `centre` means, which is a major. *Recommended: it stays a mark.*
+1. **The take digest** ([§2](#2-the-take-digest)) is over the decoded samples, not the file's
+   bytes.
+2. **The performance stream states its take** ([§2](#2-the-take-digest)): `performance` 1.1, with
+   the same `take`.
+3. **A span is cut at seams exactly** ([§3](#3-a-span-and-where-it-may-be-cut)), never within a
+   tolerance.
+4. **A mark names a note** ([§4](#how-a-mark-names-a-note)) by its variant, a frame in its held
+   part, and its heard key.
+5. **A successful `--recheck` updates the stored digests** ([§5](#5-when-a-variant-is-read-again)):
+   the digests only, stated and logged.
+6. **Notes-view marks are built in the transformations task**
+   ([§7](#the-notes-view-marks-only-never-spans)).
+7. **The commands are a group of their own**, not under `duet capture`, since a comp is not a
+   capture, and `duet capture` already holds `melody`, `rhythm` and `compare`. **Renamed:** the
+   group is `duet comp new | pick | mark | unset | apply`, with `pick` in place of `choose`, so
+   `duet comp pick --at SECS LABEL [--said TEXT]`. The kind is `comp`, and the rest follows
+   ([The name](#the-name)). Applying is `duet comp apply`, not top-level `duet apply`, which reads
+   views.
+8. **12.03 after the held-approach pass**
+   ([the witness document](#the-witness-document-the-owners-task-d-rulings-as-a-comp)): "the HMM
+   is closer" is `fold` on the A3, once the HMM reads it as a note.
+9. **A marked key stays a mark** ([§6](#what-the-comped-reading-holds)): the comped reading keeps
+   the key as heard, and the song, score and renders play the marked key.
 
 ## Not decided here
 
@@ -663,7 +692,7 @@ Each has a recommendation. Nothing is built on an answer before it is given.
   (ruling 1).
 - **Capturing with a pass left out,** which would make variants that differ only in passes. The
   annotation can state it, and nothing asks for it yet.
-- **A choice over chosen readings:** refused in 1.0.
+- **A comp over comped readings:** refused in 1.0.
 - **`compare` checking a reading's take by digest,** in place of rate and length: a small follow-up
   once task 1 lands.
 - **The session record's shape:** the workbench design's.
