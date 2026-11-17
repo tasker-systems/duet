@@ -38,20 +38,35 @@ pub enum Polled {
     /// The entries after the cursor, in replay order. Empty when there are none yet.
     After(Vec<(Place, Line)>),
     /// The entry at the cursor is no longer the one it named: the journal was merged or rewritten
-    /// under it. The reader starts over, and these are every entry from the first.
+    /// under it. The reader starts over from the start of the segment where the check failed,
+    /// since earlier segments did not change (bus design decision 19), or from the first when
+    /// the cursor's segment is gone. These are every entry from there, the first item naming
+    /// where.
     Resync(Vec<(Place, Line)>),
 }
 
 fn all(journal: &ProjectJournal) -> Vec<(Place, Line)> {
+    from_segment(journal, 0)
+}
+
+/// Every entry from the start of the `i`th segment on, in replay order.
+fn from_segment(journal: &ProjectJournal, i: usize) -> Vec<(Place, Line)> {
     journal
-        .entries()
-        .map(|(place, line)| (place, line.clone()))
+        .segments
+        .iter()
+        .skip(i)
+        .flat_map(|segment| {
+            (1..)
+                .zip(&segment.journal.lines)
+                .map(move |(seq, line)| (Place::new(segment.stamp, seq), line.clone()))
+        })
         .collect()
 }
 
 /// The entries of `journal` after `cursor`: the rest of its segment, then every later segment in
-/// index order, when the line at `cursor` is still `cursor.id`; [`Polled::Resync`] with every
-/// entry when it is not. A reader is never told it is up to date when it is not.
+/// index order, when the line at `cursor` is still `cursor.id`. When it is not,
+/// [`Polled::Resync`] with every entry from the start of the cursor's segment, or from the first
+/// when that segment is gone. A reader is never told it is up to date when it is not.
 #[must_use]
 pub fn after(journal: &ProjectJournal, cursor: &Cursor) -> Polled {
     let Some(i) = journal
@@ -72,7 +87,7 @@ pub fn after(journal: &ProjectJournal, cursor: &Cursor) -> Polled {
         Err(_) => false,
     };
     if !holds {
-        return Polled::Resync(all(journal));
+        return Polled::Resync(from_segment(journal, i));
     }
     let mut out = Vec::new();
     for (j, segment) in journal.segments.iter().enumerate().skip(i) {
@@ -91,7 +106,7 @@ pub fn after(journal: &ProjectJournal, cursor: &Cursor) -> Polled {
 ///
 /// It reads the index on each poll and a segment only when its length changed. When a segment
 /// before the cursor's changes, a merge added entries the reader has passed, so it is sent
-/// [`Polled::Resync`]: nothing is lost. A change that happened while no tail ran is caught only
+/// [`Polled::Resync`] from the start of the earliest segment that grew: nothing is lost. A change that happened while no tail ran is caught only
 /// when it moves the line at the cursor.
 #[derive(Debug)]
 pub struct Tail {
@@ -143,19 +158,18 @@ impl Tail {
         let polled = match &self.cursor {
             None => Polled::After(all(&journal)),
             Some(cursor) => {
-                let before = journal
+                let grew = journal
                     .segments
                     .iter()
-                    .take_while(|s| s.stamp != cursor.segment);
-                let merged = before.into_iter().any(|s| {
-                    self.lengths
-                        .get(&s.stamp)
-                        .is_some_and(|l| lengths.get(&s.stamp) != Some(l))
-                });
-                if merged {
-                    Polled::Resync(all(&journal))
-                } else {
-                    after(&journal, cursor)
+                    .take_while(|s| s.stamp != cursor.segment)
+                    .position(|s| {
+                        self.lengths
+                            .get(&s.stamp)
+                            .is_some_and(|l| lengths.get(&s.stamp) != Some(l))
+                    });
+                match grew {
+                    Some(i) => Polled::Resync(from_segment(&journal, i)),
+                    None => after(&journal, cursor),
                 }
             }
         };

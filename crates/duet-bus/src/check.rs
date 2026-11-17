@@ -67,6 +67,10 @@ pub struct Report {
     pub closed_twice: Vec<SegmentStamp>,
     /// Closing summaries their segment no longer matches: stated, and not wrong.
     pub close_differs: Vec<CloseDiffers>,
+    /// Segments no index line's summary closes, other than the current one: after a merge where
+    /// both clones rolled, the one the other clone's line closed implicitly. They have no songs,
+    /// parts or takes lists, so per-song queries read them whole. Stated, and not wrong.
+    pub unsummarised: Vec<SegmentStamp>,
     /// Segment files with only a head and no index line: the next append adopts the newest.
     /// Stated, and not wrong.
     pub adoptable: Vec<SegmentStamp>,
@@ -149,6 +153,13 @@ impl Report {
                 }
             }
         }
+        let current = journal.index.current().map(|o| o.segment);
+        let unsummarised = journal
+            .segments
+            .iter()
+            .map(|s| s.stamp)
+            .filter(|s| Some(*s) != current && !closes.contains_key(s))
+            .collect();
         let (adoptable, unnamed) = journal
             .orphans
             .iter()
@@ -164,6 +175,7 @@ impl Report {
             torn,
             closed_twice,
             close_differs,
+            unsummarised,
             adoptable: adoptable.into_iter().map(|o| o.stamp).collect(),
             refused: replay.refused.clone(),
             duplicates,
@@ -240,6 +252,13 @@ impl fmt::Display for Report {
                     "entries"
                 ),
                 c.says
+            )?;
+        }
+        for s in &self.unsummarised {
+            writeln!(
+                f,
+                "segment {s} is unsummarised: no index line closes it by name, after a merge of \
+                 two clones that each rolled; it is read whole"
             )?;
         }
         for s in &self.adoptable {

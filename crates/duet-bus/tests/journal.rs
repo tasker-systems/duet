@@ -671,7 +671,11 @@ fn a_union_merge_where_neither_clone_rolled_reads_and_checks_clean() {
 
     // A cursor into the segment that was merged into gets resync: theirs' last line moved.
     let cursor = Cursor::at(theirs_place, b_last);
-    assert!(matches!(duet_bus::after(&read, &cursor), Polled::Resync(all) if all.len() == 6));
+    let Polled::Resync(again) = duet_bus::after(&read, &cursor) else {
+        panic!("a resync")
+    };
+    assert_eq!(again.len(), 6);
+    assert_eq!(again[0].0, Place::new(read.segments[0].stamp, 1));
 }
 
 #[test]
@@ -723,6 +727,15 @@ fn a_union_merge_where_both_clones_rolled_reads_every_segment_and_states_the_mer
             .contains("closed by more than one index line"),
         "{report}"
     );
+    // Ours was closed implicitly, by theirs' line: it has no summary, and is stated so.
+    assert_eq!(report.unsummarised, [current(&a)], "{report}");
+    assert!(report.to_string().contains("is unsummarised"), "{report}");
+    assert!(!read.index.lines.iter().any(|l| {
+        l.line
+            .closes
+            .as_ref()
+            .is_some_and(|c| c.segment == current(&a))
+    }));
 }
 
 // --- Two answers to one ask ---
@@ -877,12 +890,49 @@ fn a_cursor_taken_before_a_roll_resumes_after_a_restart() {
 }
 
 #[test]
+fn a_cursor_whose_line_moved_resyncs_from_the_start_of_its_segment() {
+    let root = scratch("cursor-moved");
+    let mut w = writer(&root, "claude", TINY);
+    for q in ["One?", "Two?", "Three?"] {
+        ask(&mut w, q);
+    }
+    let read = journal(&root);
+    let second = read.segments[1].stamp;
+    let cursor = Cursor::at(
+        Place::new(second, 1),
+        read.segments[1].journal.lines[0].id.clone(),
+    );
+    // A hand edit puts a line before the cursor's in its segment.
+    let late = Entry::new(
+        duet_bus::fresh_id().unwrap(),
+        At::from_unix_ms(1_795_446_245_000),
+        By::new("owner", "cli"),
+        Event::from(AskAsked::new("Earlier?")),
+    );
+    let text = segment_text(&root, second);
+    let (head, rest) = text.split_at(text.find('\n').unwrap() + 1);
+    let path = duet_bus::segment_path(&root, second);
+    fs::write(&path, format!("{head}{}{rest}", late.line().unwrap())).unwrap();
+    let read = journal(&root);
+    let Polled::Resync(again) = duet_bus::after(&read, &cursor) else {
+        panic!("a resync")
+    };
+    assert_eq!(
+        again[0].0,
+        Place::new(second, 1),
+        "from the start of its segment"
+    );
+    assert_eq!(again.len(), 3, "that segment's two, then the third's one");
+}
+
+#[test]
 fn a_tail_is_sent_resync_when_a_segment_before_its_cursor_is_merged_into() {
     let root = scratch("tail-merge");
     let mut w = writer(&root, "claude", TINY);
     ask(&mut w, "One?");
     ask(&mut w, "Two?");
-    let first = journal(&root).segments[0].stamp;
+    ask(&mut w, "Three?");
+    let first = journal(&root).segments[1].stamp;
     let (mut tail, _) = Tail::open(&root, None).unwrap();
     // Another clone's entry lands in the first segment, after it was closed: a merge.
     let late = Entry::new(
@@ -897,7 +947,15 @@ fn a_tail_is_sent_resync_when_a_segment_before_its_cursor_is_merged_into() {
         format!("{}{}", segment_text(&root, first), late.line().unwrap()),
     )
     .unwrap();
-    assert!(matches!(tail.poll().unwrap(), Polled::Resync(all) if all.len() == 3));
+    let Polled::Resync(again) = tail.poll().unwrap() else {
+        panic!("a resync")
+    };
+    assert_eq!(
+        again[0].0,
+        Place::new(first, 1),
+        "from the start of the segment that grew"
+    );
+    assert_eq!(again.len(), 3, "its two, then the third's one");
 }
 
 #[test]

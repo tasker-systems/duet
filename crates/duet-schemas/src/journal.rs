@@ -1394,7 +1394,9 @@ impl TakeRef {
 }
 
 /// The project-level elements some events concern (bus design decision 17): songs, parts as
-/// `<song>/<part>`, and takes by name and digest. Never a session, which is no duet entity.
+/// `<song>/<part>`, and takes by name and digest. Songs and parts are named by name until the
+/// songs-and-composition spec gives them a stable id, when the index names them by it, the name
+/// beside it; a rename until then loses per-song lookup of older segments. Never a session, which is no duet entity.
 /// Comps, snapshots and renders are found through their song.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
