@@ -57,4 +57,4 @@ is the first. Its test holds only what the owner agreed (the key, the tuning, an
 of notes, each within a tolerance), so it catches a reader change that moves the take a long
 way, and says nothing about any one note. It is licensed CC BY 4.0, not MIT; the notice is
 `wayfaring-stranger.flac.license`, beside it. `wayfaring-stranger.moments`, also beside it,
-names the moments the owner rules on by ear, for `scripts/duet-listen.sh --moments`.
+names the moments the owner rules on by ear, for `duet capture review --moments`.
