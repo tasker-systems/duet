@@ -535,7 +535,8 @@ For the build tasks below, each in the crate CLAUDE.md names:
 Each names its witness. None is built before the owner rules.
 
 1. **`project` 1.0** in duet-schemas: the type, `Kind`, schema and example. **Needs:** the variants
-   design's task 1 (the take digest and `Take` type), merged in #73. **Witnesses:** the duet-schemas ones above.
+   design's task 1 (the take digest and `Take` type), merged in #73. **Witnesses:** the
+   duet-schemas ones above.
 2. **`duet init` and project discovery:** `init`, the `project.duet` marker, `DUET_PROJECT`,
    `duet project path | show`, the `.gitignore` block. **Needs:** 1. **Witnesses:** the `init`,
    discovery and unchanged-config e2e tests.
