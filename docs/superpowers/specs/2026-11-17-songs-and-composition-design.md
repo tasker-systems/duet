@@ -5,8 +5,8 @@ folded into the domain model by the owner's ruling on the project design (temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, decision 10).
 
 **Status: Proposed. Nothing here is built.** The domain model under it is **Ruled** (owner,
-2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`), and each point taken from it is marked
-so. Everything else is **Proposed**. What the owner has not ruled is listed in
+2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 9), and each point taken
+from it is marked so. Everything else is **Proposed**. What the owner has not ruled is listed in
 [Open questions](#open-questions), and each place it touches says so.
 
 **Builds on:**
@@ -41,6 +41,14 @@ so. Everything else is **Proposed**. What the owner has not ruled is listed in
    that changes tempo and key is still one song; its composition records the changes.
 7. **The `song` document kind is renamed `part`, now.** Nothing has been captured, distributed or
    committed under the old name, so there is no migration.
+8. **A take with no click is placed by an estimated tempo by default.** The owner and an agent can
+   settle the tempo in a working session and set it, and the set mapping replaces the estimate. The
+   mapping records which it is: estimated or set.
+9. **A song's status is a closed, enumerated state machine:** `idea`, `sketch`, `developing`,
+   `arranged`. The only moves are idea → sketch, sketch → developing, developing → arranged, and
+   arranged → developing (reopen); duet refuses any other. The owner sets the status, or an agent
+   does with the owner; duet never infers it. A snapshot is an event recorded against the song, not
+   a status, so taking one doesn't change the song's state.
 
 **Agreed in the same discussion, as the model's working shape:**
 - **A part is one voice, line or groove** (notes, or a drum grid). It always states its source:
@@ -87,10 +95,11 @@ composition as two parts of one document.**
   "duet": { "kind": "song", "version": "2.0", "tool": { "name": "duet", "version": "0.6.0" } },
   "body": {
     "title": "Wayfaring Stranger",
+    "status": "sketch",
     "intent": "slow and bare; voice first, the bass enters in the second verse",
     "takes": [
       { "take": "wayfaring", "digest": "sha256:9f2c…", "for": ["melody"],
-        "placed": { "by": "click", "bar": "1.1.0", "at_secs": 1.057 } }
+        "placed": { "by": "estimated", "bpm": 88.6, "bar": "1.1.0", "at_secs": 1.057 } }
     ],
     "composition": {
       "ticks_per_quarter": 480,
@@ -127,9 +136,10 @@ composition as two parts of one document.**
     Absent means unplaced.
 - **No `parts` list.** A part is a file in `parts/`, named by its stem. What the song plays is the
   composition's placements; a part placed nowhere is still the song's, kept for later.
-- **No `state` field in 2.0.** Whether song states (idea, sketch, developing, arranged) are set by the
-  owner or inferred is **open** ([question 2](#open-questions)). Either answer is a minor: an optional
-  field set by the owner, or nothing stored at all.
+- **`status`**, required: one of `idea`, `sketch`, `developing`, `arranged`. **Ruled** (ruling 9):
+  a closed state machine, set by the owner or by an agent with the owner, never inferred
+  ([§7](#7-lifecycles)). `duet song new` writes `idea`. A new state is a new variant of a closed
+  enum: a minor, but the transitions change with it, so it comes back to the owner.
 - **History is the journal's,** not the song's. Every change to a song, its composition or its parts
   is an event in `journal.duet.jsonl` naming the song. The song document is the state now; the
   journal is how it got there; snapshots are the points the owner chose to keep.
@@ -188,7 +198,7 @@ They are separate fields of the body, so a later split into two kinds moves a fi
 part written before the rename, in a scratch directory or a test) is refused by the version policy's
 own rule, naming its major and pointing at `part`, rather than failing on its first unknown field.
 The alternative is a new name (`piece`), which avoids reusing `song` at all. **For the owner to
-confirm** ([question 5](#open-questions)).
+confirm** ([question 3](#open-questions)).
 
 ## 2. Parts
 
@@ -222,6 +232,8 @@ songs/wayfaring-stranger/snapshots/
 ```
 
 - **`duet song snapshot <song> <name> [--said TEXT]`** writes it, and an event in the journal.
+  **Ruled** (ruling 9): a snapshot is an event recorded against the song, not a status, and taking
+  one leaves the song's status as it was.
 - **It copies,** because parts are working files that change. A snapshot that named them by digest
   would name content that no longer exists.
 - **It holds what was placed,** not every file in `parts/`. A part kept for later and placed nowhere
@@ -240,6 +252,20 @@ songs/wayfaring-stranger/snapshots/
 **Ruled (project decision 6):** capture estimates, then compares. A take is placed by the song's tempo
 map plus an offset (the click case). A value the owner gives a take is remembered for that take.
 
+### A placement and how it was made
+
+**`placed`** says where the song's bars fall in the take: `bar` falls `at_secs` into it, and every
+other bar follows from a tempo. `by` says where that tempo came from, one of three:
+- **`click`:** the take was recorded against a click playing the song's tempo map, so the map is
+  the take's tempo exactly. **Ruled** (project decision 6: the song's tempo map plus an offset).
+- **`estimated`:** the take had no click, and `bpm` is capture's estimate of its tempo. **Ruled**
+  (ruling 8): the default for a take with no click.
+- **`set`:** the owner, or an agent with the owner, settled the tempo and set it. **Ruled** (ruling
+  8): a set mapping replaces the estimate, and says so.
+
+The `click` value beside ruling 8's `estimated` and `set` is **Proposed**: the ruling names the two
+for a take with no click, and a click take's mapping is neither estimated nor set by hand.
+
 ### Placed by the click
 
 The usual case: the take was recorded against a click playing the song's tempo map.
@@ -249,8 +275,8 @@ The usual case: the take was recorded against a click playing the song's tempo m
   bars.
 - **`duet record` in a song** (`--song wayfaring-stranger`) plays the click from the composition and
   writes the placement itself: the offset is known exactly, since duet started both.
-- **`duet song place <song> <take> --bar 9 --at 31.4`** places a take recorded elsewhere, against a
-  click of the same tempo map.
+- **`duet song place <song> <take> --click --bar 9 --at 31.4`** places a take recorded elsewhere,
+  against a click of the same tempo map.
 
 ### Estimate, then compare
 
@@ -271,9 +297,17 @@ The usual case: the take was recorded against a click playing the song's tempo m
 
 ### Takes without a click
 
-**Open** ([question 1](#open-questions)): whether such a take is placed by an estimate, set by hand,
-or left unplaced until the owner places it. Until ruled, nothing places it: `placed` is absent, a comp
-cannot pick from it, and its readings are read on their own estimated bars, as today.
+**Ruled (owner, 2026-11-17, ruling 8):** placed by an estimated tempo by default; a tempo the owner
+and an agent settle and set replaces the estimate; the mapping records which.
+- **Linking a take with no click to a song places it,** `by: estimated`, with capture's tempo and
+  its first downbeat as `bpm` and `at_secs`. Capture states the placement, and where its tempo
+  disagrees with the composition, as for any take.
+- **`duet song place <song> <take> --bpm 90 --bar 1 --at 1.20`** sets it, `by: set`. Every flag not
+  given keeps its estimated value, and the whole mapping is then `set`.
+- **A set mapping is never replaced by a later estimate.** Capturing the take again re-estimates and
+  states any disagreement with the set mapping; it does not move the placement.
+- **One tempo for the whole take, in 2.0.** A take that drifts is placed by its overall tempo, and the
+  drift is the capture's to state, as it is today. A tempo map of the take's own would be a minor.
 
 ## 5. Comps across takes
 
@@ -312,7 +346,7 @@ journal records the act.**
   does for a view.
 - **A generated part states its source** as `generated`, naming the operation and the digest of each
   input, so it can be made again.
-- **Where the change is stored** is **open** ([question 3](#open-questions)): a new part plus a step in
+- **Where the change is stored** is **open** ([question 1](#open-questions)): a new part plus a step in
   the song's history (the journal), or a chain of changes carried by the part. The transformations
   task (temper `01a1df08-2b63-7658-8812-7823c97c6147`) is to settle it. Until then, every operation
   above is designed to work under the first, which needs no new field.
@@ -327,10 +361,24 @@ Each is **Proposed** unless marked.
 - **A part:** written (by capture, a comp, an operation or by hand), then placed or not, then changed
   by operations. Its `source` is set when it is written and changes only when an operation writes it
   again.
-- **A song:** made by `duet song new`, then changed for as long as it is worked on, with snapshots
-  along the way. Its states (idea, sketch, developing, arranged) are **open**
-  ([question 2](#open-questions)).
-- **A comp:** **open** ([question 4](#open-questions)). The reading on the table is drafting (entries
+- **A song:** **Ruled** (ruling 9). A closed state machine, set by the owner or an agent with the
+  owner, never inferred:
+
+  ```text
+  idea ──▶ sketch ──▶ developing ──▶ arranged
+                          ▲              │
+                          └── reopen ────┘
+  ```
+
+  - `duet song new` makes it at `idea`. `duet song status <song> <state>` moves it, and any move not
+    drawn above (idea → developing, arranged → sketch, a state to itself) is refused, naming the
+    current state and the moves allowed from it.
+  - Each move is an event in the journal, with who made it.
+  - **A snapshot is an event recorded against the song, not a status.** Taking one never changes the
+    song's state, and no state requires one.
+  - **Proposed:** the status gates nothing. Every command works on a song in any state; the status is
+    the owner's record of where the song stands.
+- **A comp:** **open** ([question 2](#open-questions)). The reading on the table is drafting (entries
   being made), applied (its part written from it), stale (a variant read again, a take re-placed, or
   the composition changed under its bars since it was applied) and refused (it no longer places). The
   variants design's rules give stale and refused for a re-read; a change to the composition as a cause
@@ -341,16 +389,14 @@ Each is **Proposed** unless marked.
 
 Not ruled by the owner. Each is recorded here, not decided.
 
-1. **A take recorded without a click:** how is it placed on the song's bars? Estimated (capture's
-   downbeat and tempo, fitted to the composition), set by hand, or left unplaced until the owner
-   places it ([§4](#takes-without-a-click)).
-2. **Song states** (idea, sketch, developing, arranged): set by the owner, or inferred by duet? Claude
-   leans towards states the owner sets ([§1](#the-song), [§7](#7-lifecycles)).
-3. **Where an operation's change is stored:** a new part plus a step in the song's history, or a chain
+Ruled since first written, and no longer open: how a take with no click is placed (ruling 8,
+[§4](#takes-without-a-click)), and song states (ruling 9, [§7](#7-lifecycles)).
+
+1. **Where an operation's change is stored:** a new part plus a step in the song's history, or a chain
    of changes carried by the part. For the transformations task ([§6](#6-operations-are-stated-changes)).
-4. **The comp lifecycle** (drafting, applied, stale, refused, with stale also caused by a change to the
+2. **The comp lifecycle** (drafting, applied, stale, refused, with stale also caused by a change to the
    composition): Claude's reading of the comp design, not ruled ([§7](#7-lifecycles)).
-5. **The song kind's name and version:** `song` 2.0, so that an old `song` 1.x file is refused by the
+3. **The song kind's name and version:** `song` 2.0, so that an old `song` 1.x file is refused by the
    version policy, or a new name such as `piece` ([§1](#the-kinds-name-and-version)). Raised by this
    design, not by the rulings.
 
@@ -372,12 +418,16 @@ Not ruled by the owner. Each is recorded here, not decided.
 2. **`song` 2.0 and the composition:** the type, `Kind`, schema and example; `duet song new | show`.
    **Needs:** 1, and the project design's task 1. **Witnesses:** a song document round-trips exactly
    and validates; a meter change off a bar line, an unknown part in a placement, and two parts of one
-   name are each refused by name.
+   name are each refused by name; `duet song status` makes each of the four allowed moves, refuses
+   every other by name, and leaves the document unchanged when it refuses.
 3. **Placing takes:** `placed`, `duet song place`, `duet record --song`, and capture's comparison with
    the composition. **Needs:** 2. **Witnesses:** a take recorded with `--song` has its offset to the
-   frame; a capture of a placed take states a tempo that disagrees with the song, and changes neither.
+   frame; a take with no click is placed `estimated` with capture's tempo, and `duet song place`
+   with `--bpm` makes it `set`; a capture of a placed take states a tempo that disagrees with the
+   song, and changes neither.
 4. **Snapshots:** `duet song snapshot` and restore. **Needs:** 2. **Witnesses:** every copied file is
-   byte for byte its source; restore takes a snapshot first; a changed file in a snapshot is reported.
+   byte for byte its source; restore takes a snapshot first; a changed file in a snapshot is reported;
+   taking a snapshot leaves the song's status unchanged.
 5. **Playing a song:** `duet play` of a song, the parts at their placements on the composition's
    clock, with disagreements stated. **Needs:** 2. **Witness:** a part placed at bar 9 with
    `repeat: 2` renders its notes at bars 9 and following, at the composition's tempo.

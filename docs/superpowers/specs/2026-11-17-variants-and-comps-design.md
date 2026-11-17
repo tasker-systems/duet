@@ -121,11 +121,13 @@ placement are [songs and composition](2026-11-17-songs-and-composition-design.md
 - **The one-take comp is the simple case.** All its variants read one take, so every edge is a
   frame of that take, as §3 has it, and it needs no placement: there is nothing to align. Stored in
   positions when the take is placed, and in frames when it is not. So the witness document stands as
-  a one-take comp of Wayfaring, which was recorded without a click.
+  a one-take comp of Wayfaring. Wayfaring was recorded without a click, so once it is linked to a
+  song it is placed by its estimated tempo (ruled, owner, 2026-11-17, temper `01a1eb48`, ruling 8)
+  and its spans gain positions from that placement.
 - **A comp records what it was placed against:** each take's placement and a digest of the
   composition's tempo and meter maps. A change to either is refused when applying, as a re-read is,
   naming what moved; `--recheck` places every span again on the new bars. Whether this is the
-  comp's "stale" state is the comp lifecycle, which is **open** ([the songs design, question 4](2026-11-17-songs-and-composition-design.md#open-questions)).
+  comp's "stale" state is the comp lifecycle, which is **open** ([the songs design, question 2](2026-11-17-songs-and-composition-design.md#open-questions)).
 - **What `apply` writes for a comp across takes.** A one-take comp writes its comped reading as §6
   says. A comp across takes has no one take, timing or set of events, so its comped reading cannot be
   one take's `capture-analysis` as it stands. Task 2 decides between one comped reading per take
