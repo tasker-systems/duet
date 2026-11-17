@@ -2,10 +2,12 @@
 
 **Date:** 2026-11-17. **Task:** temper `01a1e563-22e6-70e6-a7ce-8b38e93b3091`.
 
-**Status: Proposed.** The direction is ruled (owner, 2026-11-17, temper
+**Status: Ruled (owner, 2026-11-17).** The direction is ruled (temper
 `01a1e9ff-33f4-7123-85d9-7323abead248`), quoted in [The rulings this
-builds](#the-rulings-this-builds). This spec designs the mechanism. Each point is marked **Ruled**
-(with where) or **Proposed**. It ends with [numbered decisions](#decisions-for-the-owner) and [build
+builds](#the-rulings-this-builds). This spec designs the mechanism. The owner walked through it in
+session the same day and ruled all fifteen of its [decisions](#decisions-for-the-owner), each as
+recommended, with 10 refined in discussion. What is still marked **Proposed** is the design those
+decisions rest on: the owner ruled the decisions, not each line. It ends with [build
 tasks](#build-tasks), each with its witness. Nothing here is built.
 
 **Builds on:**
@@ -49,7 +51,8 @@ temper-contrib `apps/desktop/src-tauri/src/acp.rs` and `present_server.rs`, read
 Control's folder attach, where it runs `duet` on the owner's Mac like any local CLI. No other path
 (a public URL, a proxied connector) is pursued.
 
-**Open, and proposed here:** [the durable/ephemeral line](#2-durable-and-ephemeral).
+**Open in that decision, ruled here:** [the durable/ephemeral line](#2-durable-and-ephemeral)
+(decision 1).
 
 **Carried over from 11-16, ruled there:** duet's functionality is built as actions that submit
 events, and events are what anything subscribes to. The session record is an append-only
@@ -130,10 +133,20 @@ Each action declares:
   files. The only difference is who appends the line. That contains the ideation's "two code paths"
   risk: there is one execution path and two sequencing paths, and the sequencing paths share the
   journal writer.
+- **The rule, in the owner's words (ruled, decision 10):** the point is that every face uses "the
+  same actions and event mechanisms and journal mechanics so that the same thing happens regardless,
+  not that we make the server do things for the CLI when the CLI can do it just fine".
+- **A long action publishes `progress`.** A joined CLI running a capture sends a transient
+  `progress` topic to the server, so Claude's watch and the app see a long action's progress too,
+  not only the terminal that started it.
 - **`runs: server` actions** are the ones that need what the server owns: playing to the owner's
   device while another face controls it (`play`, with `stop` and `seek`), and later, inference on a
-  model the server keeps loaded. Each one states what it does with no server. `play` plays in the
-  CLI's own process, as today. `wait` reads the journal ([§3](#the-commands-the-cli-adds)).
+  model the server keeps loaded. An action also moves to the server when it needs a control that
+  crosses faces, such as cancelling it from another window. Moving one is a change to its `runs`
+  field and to how its inputs and outputs cross the socket: its code is in `duet-actions` either
+  way, and the server calls the same `run`. Each one states what it does with no server. `play`
+  plays in the CLI's own process, as today. `wait` reads the journal
+  ([§3](#the-commands-the-cli-adds)).
 - **Every face is thin.** The CLI maps clap to an input, MCP maps a tool call, and the app maps a
   `#[tauri::command]`. "The same tools" then holds by construction, as the ideation proposed. A
   registry witness checks it: every registered action has a CLI path, and every CLI subcommand that
@@ -246,8 +259,8 @@ same shape as a `.duet.jsonl` line, so the same tools read both.
 
 ## 2. Durable and ephemeral
 
-**Open in the ruling. Proposed here:** the parent session's three tiers are **accepted, with three
-changes.** Each change is named after the tier it applies to.
+**Open in the ruling, then ruled here (owner, 2026-11-17, decision 1):** the parent session's three
+tiers are **accepted, with three changes.** Each change is named after the tier it applies to.
 
 ### The test
 
@@ -832,6 +845,10 @@ proven (ruled), and the store comes with the first face that needs it (decision 
 
 ## Decisions for the owner
 
+**All fifteen ruled (owner, 2026-11-17),** in a walk-through of this spec in session: 14 and 15
+first, then 1–9 and 11–13 "agreed on all", then 10 after discussion. Each was ruled as recommended;
+10 is ruled as framed in discussion, below.
+
 1. **The durable/ephemeral line** ([§2](#2-durable-and-ephemeral)). The proposal: three tiers, as
    the parent session proposed, with these changes:
    - anything a person or Claude acts on (open asks, a review in progress) is a projection of the
@@ -839,41 +856,45 @@ proven (ruled), and the store comes with the first face that needs it (decision 
    - the store holds only view state and caches;
    - the store, SQLite through rusqlite, is not built until a face needs it.
 
-   *Recommended: yes.*
+   **Ruled: yes.**
 2. **Event kinds version on their own, and a reader keeps an unknown event verbatim and states the
    skip** ([The `journal` stream](#the-journal-stream-10)), rather than refusing the whole journal.
    It is a stated departure from the version policy, justified by its own reason: nothing writes a
-   journal back. *Recommended: yes.*
+   journal back. **Ruled: yes.**
 3. **`seq` is the line's position, not a stored field. Lines carry a UUIDv7 `id`. A torn last line
    is cut back by the next writer** ([§1](#sequencing-and-resuming), [§4](#lifecycle)). The
-   alternative stores `seq`, which a union merge breaks. *Recommended: position, with the cut.*
+   alternative stores `seq`, which a union merge breaks. **Ruled: position, with the cut.**
 4. **A refusal is published but not journalled** ([§1](#commands-in-events-out)). The ideation had
-   refusals as events. *Recommended: not journalled, since it changes nothing.*
+   refusals as events. **Ruled: not journalled, since it changes nothing.**
 5. **An edit made outside duet is a transient `file.changed`, not a durable event**
-   ([§4](#what-it-owns)). *Recommended: transient. The act that matters is the next duet command
-   that reads the file.*
+   ([§4](#what-it-owns)). **Ruled: transient.** The act that matters is the next duet command that
+   reads the file.
 6. **The socket's path is in the lock, falling back to `$TMPDIR` when a project's path is too long**
    ([§3](#finding-a-project-and-a-server)). This is a refinement to the project design's §10.2.
-   *Recommended: yes.*
+   **Ruled: yes.**
 7. **The CLI never starts a server; `[server] autostart` defaults to `false`**
    ([§3](#the-cli-joined-or-standalone)). The alternative is sccache's client-spawns-server.
-   *Recommended: never, for v1. Revisit after build task 3's owner witness.*
+   **Ruled: never, for v1.** Revisited after build task 3's owner witness.
 8. **Who is acting:** `DUET_ACTOR`, else `claude` under `CLAUDECODE=1`, else `owner`. A label, not
-   authentication ([§3](#the-cli-joined-or-standalone)). *Recommended: yes.*
+   authentication ([§3](#the-cli-joined-or-standalone)). **Ruled: yes.**
 9. **The Tauri app is a client of `duet server`, starting it as a sidecar, not its host**
-   ([§7](#7-later-faces-sketched-only)). *Recommended: yes. One server implementation, and the bus
-   outlives the window.*
+   ([§7](#7-later-faces-sketched-only)). **Ruled: yes.** One server implementation, and the bus
+   outlives the window.
 10. **`runs: anywhere` actions run in the invoking process even when joined**
-    ([§1](#the-action-registry)). Only server-owned resources move work to the server. *Recommended:
-    yes. It keeps one execution path.*
+    ([§1](#the-action-registry)). **Ruled, as framed in discussion:** the default is `anywhere`; an
+    action moves to `server` when it needs a resource the server owns or a control that crosses
+    faces, such as cancelling; and a joined CLI publishes `progress` for long actions. The owner's
+    concern was "that we make use of the same actions and event mechanisms and journal mechanics so
+    that the same thing happens regardless, not that we make the server do things for the CLI when
+    the CLI can do it just fine".
 11. **The crates: `duet-actions` and `duet-bus` are new, events live in `duet-schemas`, and the
-    store is its own crate later** ([§6](#6-crate-boundaries)). *Recommended: yes.*
+    store is its own crate later** ([§6](#6-crate-boundaries)). **Ruled: yes.**
 12. **`.gitattributes` gives the journal `merge=union`** ([What this asks of the project
-    layout](#what-this-asks-of-the-project-layout)), written by `duet init`. *Recommended: yes, to
-    rule with the project design.*
+    layout](#what-this-asks-of-the-project-layout)), written by `duet init`. **Ruled: yes,** to
+    carry into the project design.
 13. **The transition check and the append happen as one step, under the journal lock**
-    ([§1](#lifecycles-as-state-machines)), so two processes can't both answer one ask. *Recommended:
-    yes.*
+    ([§1](#lifecycles-as-state-machines)), so two processes can't both answer one ask. **Ruled:
+    yes.**
 14. **Replay is lenient:** a transition that fails on replay is skipped, the first in file order
     wins, and `duet journal check` lists it ([§1](#lifecycles-as-state-machines)). **Ruled (owner,
     2026-11-17).**
