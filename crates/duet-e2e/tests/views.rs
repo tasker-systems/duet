@@ -42,8 +42,8 @@ fn under_header(view: &str) -> &str {
 fn an_old_notes_file_applies_and_views_back_identical_under_a_new_header() {
     let dir = scratch("views-old-notes");
     for (old, kind) in [
-        (root().join("samples/sketch.notes"), "notes v1 of song 1.0"),
-        (golden("sketch-from-midi.notes"), "notes v1 of song 1.0"),
+        (root().join("samples/sketch.notes"), "notes v1 of song 1.1"),
+        (golden("sketch-from-midi.notes"), "notes v1 of song 1.1"),
         (
             root().join("samples/groove.drums"),
             "grid v1 of drum-grid 1.0",
@@ -191,7 +191,7 @@ fn a_partial_grid_view_applied_unedited_leaves_the_song_equal() {
     let doc = band(&dir);
     let view = render_kit(&dir, &doc);
     assert!(
-        view.starts_with("# duet grid v1 of song 1.0 track \"Kit\" step 1/16 from "),
+        view.starts_with("# duet grid v1 of song 1.1 track \"Kit\" step 1/16 from "),
         "{view}"
     );
     assert!(
@@ -401,8 +401,8 @@ fn what_a_view_cannot_place_is_refused_by_name_and_nothing_changes() {
     );
     try_view(
         "schema.view",
-        &view.replacen("of song 1.0", "of song 1.3", 1),
-        &["view of song 1.3; this duet reads song up to 1.0"],
+        &view.replacen("of song 1.1", "of song 1.3", 1),
+        &["view of song 1.3; this duet reads song up to 1.1"],
     );
 
     // A document changed since the view was rendered is refused, naming both digests, unless

@@ -156,7 +156,7 @@ duet apply old.notes -o old.duet                          # a lossless view into
 
 | View | Of | Drops |
 |---|---|---|
-| `notes` | a song | nothing: every field of song 1.0, normalized, with its end stated |
+| `notes` | a song | nothing: every field of song 1.1, normalized, with its end stated |
 | `grid` | a drum grid | nothing, while every velocity is 0 or one of its three levels |
 | `grid` | one drum track of a song, at a step | everything but that track's starts and velocities |
 
@@ -165,7 +165,7 @@ under the header. Comments added to a view are not read back. A velocity off the
 refused, naming its lane, bar and step, unless `--snap-levels` shows it snapped.
 
 **The header line** names the view and the document it came from, so a view reads back without
-a file name: `# duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41`, or `# duet grid v1 of song 1.0
+a file name: `# duet notes v1 of song 1.1 from 3f9a1c0d5e2b7a41`, or `# duet grid v1 of song 1.1
 track "Drums" step 1/16 from …` for a partial view. The digest is a 64-bit FNV-1a of the source
 document's body: `apply --onto` refuses a document changed since the view was rendered, naming
 both digests, unless `--force`. A newer view version or a schema version this duet does not read
@@ -221,12 +221,12 @@ optionally the General MIDI program (0 to 127) at the start. Then one event per 
   eighth note after beat 2. `1.2` means `1.2.0`, and offsets past the end of a beat carry
   on (`1.1.960` in 4/4 is read as `1.3.0`).
 - **Pitches** are scientific pitch names with middle C (MIDI 60) as `C4`. Sharps and flats
-  both work (`F#3`, `Bb2`), as do `Cb`, `Fb`, `E#` and `B#`, which keep their spelling: `Cb5`
-  is MIDI 71, the octave being the letter's. When reading MIDI, notes are spelled the way
-  the scale of the key in force where the note starts spells them, so D minor gives `Bb` and
-  `C#`, Eb minor gives `Cb` and F# major `E#`, and after `key A major at 9.1.0` the same
-  black keys are `A#` and `C#`. A pitch has at most one sharp or flat, so the `C##` that
-  leads to D# minor is `D`.
+  both work (`F#3`, `Bb2`), up to two of either (`F##4`, `Bbb3`), and every spelling is kept:
+  `Cb5` is MIDI 71, the octave being the letter's, and `F##4` is MIDI 67. When reading MIDI,
+  notes are spelled the way the scale of the key in force where the note starts spells them,
+  so D minor gives `Bb` and `C#`, Eb minor gives `Cb`, F# major and F# minor `E#`, D# minor's
+  leading tone is `C##`, and after `key A major at 9.1.0` the same black keys are `A#` and
+  `C#`.
 - **Lengths** are in quarter notes, whatever the time signature: `1`, `0.5`, `1.5`, or a
   fraction like `1/3` for a triplet.
 - Lines starting with `#` are comments, and so is anything after a word that starts with `#`.

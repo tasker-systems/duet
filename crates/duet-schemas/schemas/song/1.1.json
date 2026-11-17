@@ -1,0 +1,329 @@
+{
+  "$defs": {
+    "Control": {
+      "description": "A channel event other than a note.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A control change, such as 64 for the sustain pedal or 1 for the mod wheel.",
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/Position"
+            },
+            "controller": {
+              "format": "uint8",
+              "maximum": 127,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "cc",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint8",
+              "maximum": 127,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "at",
+            "controller",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Pitch bend, from -8192 to 8191, with 0 as no bend.",
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/Position"
+            },
+            "type": {
+              "const": "bend",
+              "type": "string"
+            },
+            "value": {
+              "format": "int16",
+              "maximum": 8191,
+              "minimum": -8192,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "at",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A program change after the start of the track.",
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/Position"
+            },
+            "program": {
+              "format": "uint8",
+              "maximum": 127,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "program",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "at",
+            "program"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Key": {
+      "description": "A key such as D minor, Bb major or D dorian, with at most 7 sharps or flats.",
+      "pattern": "^\\s*[A-Ga-g][#b]*(\\s*([Mm]|([Mm][Aa][Jj]|[Ii][Oo][Nn]|[Mm][Ii][Nn]|[Aa][Ee][Oo]|[Dd][Oo][Rr]|[Pp][Hh][Rr]|[Ll][Yy][Dd]|[Mm][Ii][Xx]|[Ll][Oo][Cc]).*))?\\s*$",
+      "type": "string"
+    },
+    "KeyChange": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "key": {
+          "$ref": "#/$defs/Key"
+        }
+      },
+      "required": [
+        "at",
+        "key"
+      ],
+      "type": "object"
+    },
+    "Note": {
+      "additionalProperties": false,
+      "description": "One note.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position",
+          "description": "Where the note starts, as bar.beat.tick."
+        },
+        "beats": {
+          "description": "The length in quarter notes, whatever the time signature.",
+          "format": "double",
+          "type": "number"
+        },
+        "pitch": {
+          "$ref": "#/$defs/Pitch"
+        },
+        "vel": {
+          "description": "Velocity, 1 to 127.",
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "pitch",
+        "beats",
+        "vel"
+      ],
+      "type": "object"
+    },
+    "Pitch": {
+      "description": "A pitch in scientific notation, such as C4 (MIDI 60), F#3, Bb2, Cb5 (MIDI 71) or F##4 (MIDI 67), from C-1 to G9: a letter, up to two sharps or two flats, and the letter's octave. Its spelling is kept.",
+      "pattern": "^[A-Ga-g]([#♯]{0,2}|[b♭]{0,2})-?[0-9]+$",
+      "type": "string"
+    },
+    "Position": {
+      "description": "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the song's ticks. bar.beat alone is tick 0.",
+      "pattern": "^0*[1-9][0-9]*\\.0*[1-9][0-9]*(\\.[0-9]+)?$",
+      "type": "string"
+    },
+    "Song": {
+      "additionalProperties": false,
+      "description": "A whole song: its tempo, meter and key, and its tracks.",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/Position",
+          "description": "Where the song ends, if it says: a bar.beat.tick position such as `9.1.0` (the bar\nline before bar 9), or one inside a bar, for a song that stops mid-bar. Nothing in\nthe song may lie past it: a note may end on it, and no note may end after it.\n\n`None` means the song names no end, and its [default end](Song::default_end)\napplies: the end of the last bar holding an event. Every writer states the end it\nuses ([`Song::stated_end`]), so a written file always says where it ends, whatever\ndefault computed it."
+        },
+        "key": {
+          "$ref": "#/$defs/Key",
+          "description": "The key at the start, if the file names one."
+        },
+        "key_changes": {
+          "items": {
+            "$ref": "#/$defs/KeyChange"
+          },
+          "type": "array"
+        },
+        "tempo_bpm": {
+          "description": "The tempo at the start, in quarter notes per minute.",
+          "format": "double",
+          "type": "number"
+        },
+        "tempo_changes": {
+          "items": {
+            "$ref": "#/$defs/TempoChange"
+          },
+          "type": "array"
+        },
+        "ticks_per_quarter": {
+          "description": "The file's resolution. Tick offsets in positions are counted in these ticks.",
+          "format": "uint16",
+          "maximum": 32767,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "time_changes": {
+          "description": "Time signature changes. Each one's position is read against the changes before it;\none that falls mid-bar cuts that bar short.",
+          "items": {
+            "$ref": "#/$defs/TimeChange"
+          },
+          "type": "array"
+        },
+        "time_sig": {
+          "$ref": "#/$defs/TimeSig",
+          "description": "The time signature at the start."
+        },
+        "title": {
+          "description": "The song's name: the MIDI sequence name, from the first track of a format 1 file\nwhen that track holds no notes, or from the only track of a format 0 file.",
+          "type": "string"
+        },
+        "tracks": {
+          "items": {
+            "$ref": "#/$defs/Track"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ticks_per_quarter",
+        "tempo_bpm",
+        "time_sig",
+        "tracks"
+      ],
+      "type": "object"
+    },
+    "TempoChange": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "bpm": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "bpm"
+      ],
+      "type": "object"
+    },
+    "TimeChange": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "time_sig": {
+          "$ref": "#/$defs/TimeSig"
+        }
+      },
+      "required": [
+        "at",
+        "time_sig"
+      ],
+      "type": "object"
+    },
+    "TimeSig": {
+      "description": "A time signature such as 4/4 or 6/8: the denominator is 1, 2, 4, 8, 16, 32 or 64.",
+      "pattern": "^\\s*0*[1-9][0-9]*\\s*/\\s*0*(1|2|4|8|16|32|64)\\s*$",
+      "type": "string"
+    },
+    "Track": {
+      "additionalProperties": false,
+      "description": "One instrument part on one MIDI channel.",
+      "properties": {
+        "channel": {
+          "description": "The MIDI channel, 1 to 16 as DAWs number them.",
+          "format": "uint8",
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "controls": {
+          "description": "Controllers, pitch bends and later program changes, in the order they happen.",
+          "items": {
+            "$ref": "#/$defs/Control"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/Note"
+          },
+          "type": "array"
+        },
+        "program": {
+          "description": "The General MIDI program (0 to 127) set at the start, if any.",
+          "format": "uint8",
+          "maximum": 127,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "channel",
+        "notes"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A .duet document of kind song, at schema version 1.1.",
+  "properties": {
+    "$schema": {
+      "const": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.1.json"
+    },
+    "body": {
+      "$ref": "#/$defs/Song"
+    },
+    "duet": {
+      "$ref": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",
+      "properties": {
+        "kind": {
+          "const": "song"
+        },
+        "version": {
+          "const": "1.1"
+        }
+      }
+    }
+  },
+  "required": [
+    "duet",
+    "body"
+  ],
+  "title": "duet song 1.1",
+  "type": "object"
+}

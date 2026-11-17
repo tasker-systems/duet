@@ -13,15 +13,16 @@ const NATURAL: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
 /// A MIDI note number with a spelling, written in scientific pitch notation.
 ///
 /// Middle C (MIDI 60) is `C4`, so the lowest note, MIDI 0, is `C-1`. The spelling is a
-/// letter and one sharp, one flat or none: a black key is spelled with a sharp unless it is
-/// set to a flat, and a white key is its natural letter unless it is spelled as E#, B#, Cb
-/// or Fb. Double sharps and double flats are not spelled. Equality includes the spelling, so
-/// `A#3` and `Bb3` are the same MIDI note but not equal `Pitch` values, nor are `B3` and
-/// `Cb4`. The octave is the letter's, so `Cb4` is MIDI 59, a semitone below `C4`.
+/// letter and its alteration: a double flat, a flat, none, a sharp or a double sharp, written
+/// `bb`, `b`, ``, `#` and `##`. A black key is spelled with a sharp unless it is set to a flat,
+/// and a white key is its natural letter unless it is spelled otherwise, as E#, Cb or F##.
+/// Equality includes the spelling, so `A#3` and `Bb3` are the same MIDI note but not equal
+/// `Pitch` values, nor are `B3` and `Cb4`, or `G4` and `F##4`. The octave is the letter's, so
+/// `Cb4` is MIDI 59, a semitone below `C4`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pitch {
     midi: u8,
-    /// The letter's alteration: -1, 0 or 1.
+    /// The letter's alteration, from -2 to 2.
     alter: i8,
 }
 
@@ -79,11 +80,11 @@ impl Pitch {
         }
     }
 
-    /// The same note spelled with this alteration of its letter: -1 for a flat, 0 for a
-    /// natural, 1 for a sharp. `None` when no letter is that far from the note, as for a
-    /// flat on MIDI 62 (which would be Ebb).
+    /// The same note spelled with this alteration of its letter, from -2 (a double flat) to
+    /// 2 (a double sharp). `None` when no letter lies that far from the note, as for a double
+    /// flat on MIDI 61 (two semitones above it is D#, no letter), or past a double accidental.
     pub fn spelled(self, alter: i8) -> Option<Self> {
-        if !(-1..=1).contains(&alter) {
+        if !(-2..=2).contains(&alter) {
             return None;
         }
         natural_letter(i32::from(self.midi) - i32::from(alter)).map(|_| Pitch {
@@ -102,7 +103,8 @@ impl Pitch {
         self.alter < 0
     }
 
-    /// The alteration of the letter: -1 for a flat, 0 for a natural, 1 for a sharp.
+    /// The alteration of the letter: -2 for a double flat, -1 for a flat, 0 for a natural, 1
+    /// for a sharp and 2 for a double sharp.
     pub fn alteration(self) -> i8 {
         self.alter
     }
@@ -122,9 +124,11 @@ impl Pitch {
 impl fmt::Display for Pitch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let accidental = match self.alter {
+            -2 => "bb",
             -1 => "b",
             0 => "",
-            _ => "#",
+            1 => "#",
+            _ => "##",
         };
         write!(
             f,
@@ -139,9 +143,10 @@ impl fmt::Display for Pitch {
 impl FromStr for Pitch {
     type Err = Error;
 
-    /// Parses names like `C4`, `F#3`, `Bb2`, `c#-1` or `Cb4` (MIDI 59, spelled as Cb). A
-    /// double sharp or flat names its note, which is spelled as [`Pitch::spelled_flat`]
-    /// spells it, since a `Pitch` spells at most one accidental: `Bbb3` is `A3`.
+    /// Parses names like `C4`, `F#3`, `Bb2`, `c#-1`, `Cb4` (MIDI 59, spelled as Cb), `F##4`
+    /// (MIDI 67) or `Bbb3` (MIDI 69). The spelling is kept as written. Up to two sharps or two
+    /// flats are read; three, or sharps and flats together, are refused, since no spelling
+    /// keeps them.
     fn from_str(s: &str) -> Result<Self> {
         let bad = || Error::invalid(format!("'{s}' is not a pitch like C4, F#3 or Bb2"));
         let mut chars = s.chars();
@@ -161,18 +166,21 @@ impl FromStr for Pitch {
             .find(|c: char| c == '-' || c.is_ascii_digit())
             .ok_or_else(bad)?;
         let (accidentals, octave) = rest.split_at(octave_start);
-        let mut shift = 0;
-        let mut flat = false;
+        let mut sharps = 0;
+        let mut flats = 0;
         for c in accidentals.chars() {
             match c {
-                '#' | '♯' => shift += 1,
-                'b' | '♭' => {
-                    shift -= 1;
-                    flat = true;
-                }
+                '#' | '♯' => sharps += 1,
+                'b' | '♭' => flats += 1,
                 _ => return Err(bad()),
             }
         }
+        if (sharps > 0 && flats > 0) || sharps > 2 || flats > 2 {
+            return Err(Error::invalid(format!(
+                "'{s}' has no spelling: a pitch takes up to two sharps or two flats, not both"
+            )));
+        }
+        let shift = sharps - flats;
         let octave: i32 = octave.parse().map_err(|_| bad())?;
         let midi = (octave + 1) * 12 + base + shift;
         if !(0..=127).contains(&midi) {
@@ -180,10 +188,10 @@ impl FromStr for Pitch {
                 "pitch '{s}' is outside the MIDI range C-1 to G9"
             )));
         }
-        let pitch = Pitch::new(midi as u8)?;
-        Ok(pitch
-            .spelled(shift as i8)
-            .unwrap_or_else(|| pitch.spelled_flat(flat)))
+        Ok(Pitch {
+            midi: midi as u8,
+            alter: shift as i8,
+        })
     }
 }
 
@@ -207,7 +215,7 @@ mod tests {
     #[test]
     fn names_round_trip() {
         for midi in 0..=127u8 {
-            for alter in -1..=1 {
+            for alter in -2..=2 {
                 if let Some(p) = Pitch::new(midi).unwrap().spelled(alter) {
                     assert_eq!(p.to_string().parse::<Pitch>().unwrap(), p, "{p}");
                     assert_eq!(p.alteration(), alter);
@@ -224,8 +232,10 @@ mod tests {
         assert_eq!(p(64, -1).unwrap().to_string(), "Fb4");
         assert_eq!(p(60, 1).unwrap().to_string(), "B#3");
         assert_eq!(p(0, 1).unwrap().to_string(), "B#-2");
-        assert_eq!(p(62, -1), None); // Ebb
-        assert_eq!(p(62, 1), None); // C##
+        assert_eq!(p(62, -2).unwrap().to_string(), "Ebb4");
+        assert_eq!(p(62, 2).unwrap().to_string(), "C##4");
+        assert_eq!(p(61, -2), None); // no letter is two semitones above C#
+        assert_eq!(p(60, 3), None);
         assert_eq!(p(61, 0), None);
         // Spelled flat or sharp, a white key is its natural letter.
         assert_eq!(Pitch::new(71).unwrap().spelled_flat(true).to_string(), "B4");
@@ -243,7 +253,14 @@ mod tests {
         assert_eq!("E#4".parse::<Pitch>().unwrap().to_string(), "E#4");
         assert_eq!("B#3".parse::<Pitch>().unwrap().to_string(), "B#3");
         assert_eq!("Fb4".parse::<Pitch>().unwrap().to_string(), "Fb4");
-        assert_eq!("Bbb3".parse::<Pitch>().unwrap().to_string(), "A3");
+        assert_eq!("Bbb3".parse::<Pitch>().unwrap().midi(), 57);
+        assert_eq!("Bbb3".parse::<Pitch>().unwrap().to_string(), "Bbb3");
+        assert_eq!("F##4".parse::<Pitch>().unwrap().midi(), 67);
+        assert_eq!("F##4".parse::<Pitch>().unwrap().to_string(), "F##4");
+        assert_eq!("C♯♯4".parse::<Pitch>().unwrap().to_string(), "C##4");
+        for bad in ["C###4", "Cbbb4", "C#b4", "Cb#4"] {
+            assert!(bad.parse::<Pitch>().is_err(), "{bad}");
+        }
         assert_eq!("Bb2".parse::<Pitch>().unwrap().to_string(), "Bb2");
         assert_eq!("f#3".parse::<Pitch>().unwrap().to_string(), "F#3");
         assert!("H4".parse::<Pitch>().is_err());

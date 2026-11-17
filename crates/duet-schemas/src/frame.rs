@@ -204,8 +204,8 @@ fn envelope_for<K: Kind>(tool: &Tool, from: Option<&From>, statements: &[String]
 ///
 /// ```json
 /// {
-///   "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
-///   "duet": { "kind": "song", "version": "1.0", "tool": { "name": "duet", "version": "0.3.0" } },
+///   "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.1.json",
+///   "duet": { "kind": "song", "version": "1.1", "tool": { "name": "duet", "version": "0.3.0" } },
 ///   "body": { "ticks_per_quarter": 480, "tempo_bpm": 92.0, "time_sig": "4/4", "tracks": [] }
 /// }
 /// ```

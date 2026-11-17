@@ -78,8 +78,6 @@ refusals! {
         "it cannot be exact in ticks";
     ODD_LENGTH = "length that is not a whole tick at 480 ticks per quarter":
         "it cannot be exact in ticks";
-    ENHARMONIC = "double sharp or flat <^^/__>":
-        "a Pitch spells at most one sharp or flat; E#, B#, Cb and Fb are read";
     TEMPO_TEXT = "Q: text only":
         "it has no number";
     OLD_CHORD = "old chord syntax +CEG+":

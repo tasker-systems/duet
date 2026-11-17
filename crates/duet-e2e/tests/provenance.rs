@@ -16,21 +16,21 @@ fn json_of(path: &Path) -> Value {
 }
 
 /// The committed schema of `name` at 1.0.
-fn schema(name: &str) -> Value {
-    let path = root().join(format!("crates/duet-schemas/schemas/{name}/1.0.json"));
+fn schema(name: &str, version: &str) -> Value {
+    let path = root().join(format!("crates/duet-schemas/schemas/{name}/{version}.json"));
     serde_json::from_slice(&std::fs::read(path).expect("committed")).expect("json")
 }
 
 /// Validates a written document against the committed song schema, with the committed
 /// envelope schema registered for its `duet`.
 fn assert_valid(doc: &Value) {
-    let envelope = schema("envelope");
+    let envelope = schema("envelope", "1.0");
     let registry = jsonschema::Registry::new()
         .add(envelope["$id"].as_str().expect("an $id"), &envelope)
         .expect("a URI")
         .prepare()
         .expect("a registry");
-    let song = schema("song");
+    let song = schema("song", "1.1");
     let validator = jsonschema::options()
         .with_registry(&registry)
         .build(&song)

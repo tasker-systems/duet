@@ -694,10 +694,11 @@ fn black_keys_are_spelled_by_the_key_in_force() {
 }
 
 #[test]
-fn six_accidental_keys_spell_cb_and_e_sharp_through_midi_text_and_documents() {
+fn six_accidental_keys_and_double_accidentals_keep_their_spelling_through_midi_text_and_documents()
+{
     // Each scale written with MIDI's key signature alone: the reader spells the notes as the
-    // key does, Cb under six flats and E# under six sharps, and keeps every MIDI note.
-    // D# minor's leading tone, C##, is beyond a Pitch's one accidental, so it is D.
+    // key does, Cb under six flats, E# under six sharps and C## for D# minor's raised leading
+    // tone, and keeps every MIDI note.
     for (key, notes, spelled) in [
         (
             "Eb minor",
@@ -717,7 +718,7 @@ fn six_accidental_keys_spell_cb_and_e_sharp_through_midi_text_and_documents() {
         (
             "D# minor",
             [63, 65, 66, 68, 70, 71, 74, 75],
-            "D#4 E#4 F#4 G#4 A#4 B4 D5 D#5",
+            "D#4 E#4 F#4 G#4 A#4 B4 C##5 D#5",
         ),
     ] {
         let mut text = format!("key {key}\n\n[track \"P\" ch1]\n");
@@ -752,10 +753,12 @@ fn six_accidental_keys_spell_cb_and_e_sharp_through_midi_text_and_documents() {
         check_document(&back);
     }
 
-    // A hand-written Cb, B#, E# or Fb keeps its spelling through the text and a document,
-    // in any key: the spelling is the song's, and MIDI does not carry it.
+    // A hand-written Cb, B#, E#, Fb, double sharp or double flat keeps its spelling through
+    // the text and a document, in any key: the spelling is the song's, and MIDI does not
+    // carry it.
     let text = "key C major\n\n[track \"P\" ch1]\n\
-                1.1.0 Cb5 1 80\n2.1.0 B#3 1 80\n3.1.0 E#4 1 80\n4.1.0 Fb4 1 80\n";
+                1.1.0 Cb5 1 80\n2.1.0 B#3 1 80\n3.1.0 E#4 1 80\n4.1.0 Fb4 1 80\n\
+                5.1.0 F##4 1 80\n6.1.0 Bbb3 1 80\n";
     let song = stated(&Song::from_text(text).unwrap());
     assert_eq!(
         notes_of(&song),
@@ -763,7 +766,9 @@ fn six_accidental_keys_spell_cb_and_e_sharp_through_midi_text_and_documents() {
             "1.1.0 Cb5 1 80",
             "2.1.0 B#3 1 80",
             "3.1.0 E#4 1 80",
-            "4.1.0 Fb4 1 80"
+            "4.1.0 Fb4 1 80",
+            "5.1.0 F##4 1 80",
+            "6.1.0 Bbb3 1 80"
         ]
     );
     let midi: Vec<u8> = song.tracks[0]
@@ -771,7 +776,7 @@ fn six_accidental_keys_spell_cb_and_e_sharp_through_midi_text_and_documents() {
         .iter()
         .map(|n| n.pitch.midi())
         .collect();
-    assert_eq!(midi, [71, 60, 65, 64]);
+    assert_eq!(midi, [71, 60, 65, 64, 67, 57]);
     check_document(&song);
 }
 

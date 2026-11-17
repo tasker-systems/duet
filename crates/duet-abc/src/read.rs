@@ -227,8 +227,8 @@ pub(crate) struct Reader {
 }
 
 /// A MIDI note spelled with the alteration of the letter it was written on: `c` under
-/// `K:Ebm` is Cb5, `^E` is E#. Every note the reader makes is a letter and at most one
-/// sharp or flat, so its spelling always exists.
+/// `K:Ebm` is Cb5, `^E` is E#, `^^F` is F##. Every note the reader makes is a letter and at
+/// most two sharps or flats, so its spelling always exists.
 fn spelled(midi: u8, alter: i8) -> Result<Pitch> {
     let pitch = Pitch::new(midi)?;
     Ok(pitch
@@ -708,9 +708,8 @@ impl Reader {
         let voice = &mut self.voices[v];
         let letter = usize::from(n.letter);
         let explicit = match n.acc {
-            Some(Acc::DoubleFlat | Acc::DoubleSharp) => {
-                return Err(refuse(span, subset::ENHARMONIC, n.text.clone()));
-            }
+            Some(Acc::DoubleFlat) => Some(-2),
+            Some(Acc::DoubleSharp) => Some(2),
             Some(Acc::Sharp) => Some(1),
             Some(Acc::Flat) => Some(-1),
             Some(Acc::Natural) => Some(0),

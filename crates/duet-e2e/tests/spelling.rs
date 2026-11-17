@@ -1,7 +1,8 @@
-//! Notes in a key of six accidentals are spelled as the key spells them, in the song, its
-//! notes view and the ABC duet writes: Cb under E-flat minor's six flats, E# under F-sharp
-//! major's six sharps, and the E-flat minor of "Wayfaring Stranger" (`crates/duet-capture/corpus`,
-//! CC BY 4.0) in flats under a six-flat signature.
+//! Notes in a key of six accidentals, or with a double sharp for a leading tone, are spelled as
+//! the key spells them, in the song, its notes view and the ABC duet writes: Cb under E-flat
+//! minor's six flats, E# under F-sharp major's six sharps, F## leading to G-sharp minor, and the
+//! E-flat minor of "Wayfaring Stranger" (`crates/duet-capture/corpus`, CC BY 4.0) in flats under a
+//! six-flat signature.
 
 use std::path::Path;
 
@@ -51,6 +52,16 @@ fn six_accidental_scales_read_from_midi_are_spelled_by_the_key_in_the_view_and_t
              2.1.0 C#5 1 80\n2.2.0 D#5 1 80\n2.3.0 F5 1 80\n2.4.0 F#5 1 80\n",
             "F#4 G#4 A#4 B4 C#5 D#5 E#5 F#5",
             "V:1 name=\"P\"\n!mf!F2 G2 A2 B2 | c2 d2 e2 f2 | z8 |]\n",
+        ),
+        (
+            // G# minor, which the key estimate can give: its raised leading tone is F##.
+            "g-sharp-minor",
+            "G# minor",
+            "K:G#m",
+            "1.1.0 G#4 1 80\n1.2.0 A#4 1 80\n1.3.0 B4 1 80\n1.4.0 C#5 1 80\n\
+             2.1.0 D#5 1 80\n2.2.0 E5 1 80\n2.3.0 G5 1 80\n2.4.0 G#5 1 80\n",
+            "G#4 A#4 B4 C#5 D#5 E5 F##5 G#5",
+            "V:1 name=\"P\"\n!mf!G2 A2 B2 c2 | d2 e2 ^^f2 g2 | z8 |]\n",
         ),
     ] {
         // The scale as MIDI holds it: note numbers and a key signature, no spelling.

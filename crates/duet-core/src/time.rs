@@ -313,11 +313,10 @@ impl Key {
     }
 
     /// The note spelled as this key spells it. A note of the scale is spelled as the scale
-    /// spells it, so Eb minor has Cb and F# major has E#; only a double sharp or flat, such
-    /// as the C## that leads to D# minor, is left to the rule for other notes. Another
-    /// black key follows the signature, flat in flat keys and sharp otherwise, and another
-    /// white key is its natural letter, so the C of Eb dorian is C, written with a natural
-    /// under the signature. The MIDI note never changes.
+    /// spells it, so Eb minor has Cb, F# major has E#, F# minor's leading tone is E# and D#
+    /// minor's is C##. Another black key follows the signature, flat in flat keys and sharp
+    /// otherwise, and another white key is its natural letter, so the C of Eb dorian is C,
+    /// written with a natural under the signature. The MIDI note never changes.
     pub fn spell(self, pitch: Pitch) -> Pitch {
         let pc = pitch.midi() % 12;
         self.scale_accidental(pc)
@@ -684,11 +683,18 @@ mod tests {
             scale("F# major", &[66, 68, 70, 71, 73, 75, 77]),
             ["F#4", "G#4", "A#4", "B4", "C#5", "D#5", "E#5"]
         );
-        // D# minor's leading tone is C##, which a Pitch does not spell: it is D.
+        // D# minor's leading tone is C##, and G# minor's F##.
         assert_eq!(
             scale("D# minor", &[63, 65, 66, 68, 70, 71, 74]),
-            ["D#4", "E#4", "F#4", "G#4", "A#4", "B4", "D5"]
+            ["D#4", "E#4", "F#4", "G#4", "A#4", "B4", "C##5"]
         );
+        assert_eq!(
+            scale("G# minor", &[68, 70, 71, 73, 75, 76, 79]),
+            ["G#4", "A#4", "B4", "C#5", "D#5", "E5", "F##5"]
+        );
+        // And the leading tones of F# minor and C# minor are E# and B#.
+        assert_eq!(scale("F# minor", &[77]), ["E#5"]);
+        assert_eq!(scale("C# minor", &[72]), ["B#4"]);
         assert_eq!(
             scale("C# major", &[61, 63, 65, 66, 68, 70, 72]),
             ["C#4", "D#4", "E#4", "F#4", "G#4", "A#4", "B#4"]

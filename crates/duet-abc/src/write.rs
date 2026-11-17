@@ -220,10 +220,12 @@ impl TrackWriter<'_> {
             let in_force = self.bar_acc[usize::from(letter)]
                 .unwrap_or(key_alterations(self.key)[usize::from(letter)]);
             if alter != in_force {
-                out.push(match alter {
-                    -1 => '_',
-                    0 => '=',
-                    _ => '^',
+                out.push_str(match alter {
+                    -2 => "__",
+                    -1 => "_",
+                    0 => "=",
+                    1 => "^",
+                    _ => "^^",
                 });
                 self.bar_acc[usize::from(letter)] = Some(alter);
             }
