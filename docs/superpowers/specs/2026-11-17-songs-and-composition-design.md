@@ -5,7 +5,7 @@ folded into the domain model by the owner's ruling on the project design (temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, decision 10).
 
 **Status: Proposed. Nothing here is built.** The domain model under it is **Ruled** (owner,
-2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 9), and each point taken
+2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 10), and each point taken
 from it is marked so. Everything else is **Proposed**. What the owner has not ruled is listed in
 [Open questions](#open-questions), and each place it touches says so.
 
@@ -41,14 +41,19 @@ from it is marked so. Everything else is **Proposed**. What the owner has not ru
    that changes tempo and key is still one song; its composition records the changes.
 7. **The `song` document kind is renamed `part`, now.** Nothing has been captured, distributed or
    committed under the old name, so there is no migration.
-8. **A take with no click is placed by an estimated tempo by default.** The owner and an agent can
-   settle the tempo in a working session and set it, and the set mapping replaces the estimate. The
-   mapping records which it is: estimated or set.
+8. **A take's placement on the song's bars is one of three values.** `click`: recorded against the
+   song's click, placed by the click plus an offset (a take from the planned Logic tap arrives this
+   way). `estimated`: the default for a take with no click, from capture's tempo estimate. `set`:
+   the owner and an agent settled the tempo in a working session and set it; a set placement
+   replaces the estimate.
 9. **A song's status is a closed, enumerated state machine:** `idea`, `sketch`, `developing`,
    `arranged`. The only moves are idea → sketch, sketch → developing, developing → arranged, and
    arranged → developing (reopen); duet refuses any other. The owner sets the status, or an agent
    does with the owner; duet never infers it. A snapshot is an event recorded against the song, not
    a status, so taking one doesn't change the song's state.
+10. **There is nothing to migrate or retire.** No compatibility path from the old `song` kind:
+    `part` starts at 1.0, and the new song document starts fresh at 1.0, under a kind name proposed
+    as `song` and not yet ruled.
 
 **Agreed in the same discussion, as the model's working shape:**
 - **A part is one voice, line or groove** (notes, or a drum grid). It always states its source:
@@ -193,7 +198,7 @@ They are separate fields of the body, so a later split into two kinds moves a fi
 
 ### The kind's name and version
 
-**`song` 1.0, a new kind.** The version is settled by the owner's direction (2026-11-17): there is
+**`song` 1.0, a new kind.** The version is **Ruled** (ruling 10): there is
 nothing on disk to migrate or retire, so the old `song` kind is simply renamed `part` and this kind
 starts fresh at 1.0, with no compatibility path between them. **The name `song` is Proposed:** the
 old kind's rename frees it, and "song" is the owner's word for this thing. The alternative is a new
@@ -256,14 +261,14 @@ map plus an offset (the click case). A value the owner gives a take is remembere
 **`placed`** says where the song's bars fall in the take: `bar` falls `at_secs` into it, and every
 other bar follows from a tempo. `by` says where that tempo came from, one of three:
 - **`click`:** the take was recorded against a click playing the song's tempo map, so the map is
-  the take's tempo exactly. **Ruled** (project decision 6: the song's tempo map plus an offset).
+  the take's tempo exactly. **Ruled** (ruling 8, and project decision 6: the song's tempo map plus
+  an offset). A take from the planned Logic tap arrives this way.
 - **`estimated`:** the take had no click, and `bpm` is capture's estimate of its tempo. **Ruled**
   (ruling 8): the default for a take with no click.
 - **`set`:** the owner, or an agent with the owner, settled the tempo and set it. **Ruled** (ruling
   8): a set mapping replaces the estimate, and says so.
 
-The `click` value beside ruling 8's `estimated` and `set` is **Proposed**: the ruling names the two
-for a take with no click, and a click take's mapping is neither estimated nor set by hand.
+All three values are **Ruled (owner, 2026-11-17, temper `01a1eb48` ruling 8)**.
 
 ### Placed by the click
 
