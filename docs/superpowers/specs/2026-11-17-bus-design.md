@@ -325,6 +325,14 @@ that is stale the moment it is read.
 `/.duet/state/` are ignored. `journal.duet.jsonl` is committed with the authored half. This spec
 needs nothing more ignored.
 
+**Since overtaken** (owner, 2026-11-17, the project design's decisions 3 and 7, temper
+`01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`): a project has no sharing status and git is not duet's
+concern, so duet writes no ignore rules and has no "authored half". `.duet/run/` and `.duet/state/`
+stay machine-local by what they hold, and the paths are unchanged. This spec's decision 12
+(`.gitattributes` with `merge=union`) is in tension with decision 7, for the owner to rule
+([the project design, §3](2026-11-17-project-design.md#3-what-duet-init-writes)). What follows
+describes a project that someone keeps in git.
+
 A cloud session without the folder attach, or CI, sees a project's clone:
 - **the journal, and every authored document.** So they see every act, every ask and its answers,
   every verdict and comp, and can run `duet asks`, `duet journal show` and `duet watch --from 0`;
