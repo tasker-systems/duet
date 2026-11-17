@@ -1,6 +1,6 @@
 [package]
 name = "duet-dsp"
-version = "0.2.0"
+version.workspace = true
 description = "duet's audio analysis: samples in, events out, as a stream of stages that settle their output as they go. No I/O, codecs or formats."
 edition.workspace = true
 license.workspace = true
@@ -20,7 +20,7 @@ audioadapter-buffers = "5.2.0"
 # its model embedded from models/basic-pitch. 0.1.0, not 0.2.0: 0.2.0 is under seven days old, and
 # differs only in its `ort` backend, which duet does not use.
 basic-pitch-rs = { version = "=0.1.0", default-features = false, features = ["tract"], optional = true }
-duet-core = { path = "../duet-core", version = "0.2.0" }
+duet-core.workspace = true
 rubato = "5.1.0"
 rustfft = "6.4.1"
 # The performance types derive their schema here: duet-schemas commits it as performance 1.0.

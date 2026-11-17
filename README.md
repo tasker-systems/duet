@@ -904,6 +904,9 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo fmt --all --check
 ```
 
+Releasing (crates.io, the tag and the GitHub Release) runs through `cargo make` and is described
+in [RELEASING.md](RELEASING.md).
+
 Beyond cargo, a developer's machine wants a few things CI does not. mise cannot install
 abcmidi or FluidSynth (neither has a registry entry), so they are in the `Brewfile`:
 

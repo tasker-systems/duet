@@ -1,0 +1,71 @@
+# =============================================================================
+# duet: cargo-make release tasks
+# =============================================================================
+#
+# Releasing is the only thing cargo-make runs here; building and testing are plain cargo (README).
+# The tasks wire tools/scripts/release/ in, as temper's tools/cargo-make/release-tasks.toml does.
+# How a release runs, and the one-time bootstrap, are in RELEASING.md.
+#
+#   cargo make release-check          what a patch release would do; changes nothing
+#   cargo make release-check-minor    the same for a minor (below 1.0, the breaking bump)
+#   cargo make release-prepare        cut release/v<NEXT> at a patch and open its PR
+#   cargo make release-prepare-minor  the same at a minor
+#   cargo make release-prepare-major  the same at a major
+#   cargo make release-publish        publish the checked-out VERSION from this machine, with
+#                                     cargo's stored credential: the bootstrap, and a recovery door
+#
+# cargo-make tasks cannot forward arguments, so each bump level is its own task.
+
+[config]
+default_to_workspace = false
+skip_core_tasks = true
+
+[tasks.default]
+description = "List the release tasks"
+script = '''
+echo "duet release tasks (RELEASING.md):"
+echo "  cargo make release-check | release-check-minor"
+echo "  cargo make release-prepare | release-prepare-minor | release-prepare-major"
+echo "  cargo make release-publish"
+'''
+
+[tasks.release-check]
+description = "Dry run of a patch release: the next version, the API check against crates.io, and packaging. Changes nothing."
+category = "Release"
+script = ["./tools/scripts/release/release-prepare.sh --dry-run"]
+
+[tasks.release-check-minor]
+description = "Dry run of a minor release (below 1.0, the breaking bump). Changes nothing."
+category = "Release"
+script = ["./tools/scripts/release/release-prepare.sh --dry-run --minor"]
+
+[tasks.release-prepare]
+description = "Cut release/v<NEXT> at a patch, write every version site, verify-package every crate, and open the release PR."
+category = "Release"
+script = ["./tools/scripts/release/release-prepare.sh"]
+
+[tasks.release-prepare-minor]
+description = "release-prepare at a minor (below 1.0, the breaking bump)."
+category = "Release"
+script = ["./tools/scripts/release/release-prepare.sh --minor"]
+
+[tasks.release-prepare-major]
+description = "release-prepare at a major."
+category = "Release"
+script = ["./tools/scripts/release/release-prepare.sh --major"]
+
+[tasks.release-publish]
+description = "Publish the checked-out VERSION to crates.io from this machine, with cargo's stored credential: verify-package every crate, then publish what crates.io lacks, in order. The bootstrap for crates crates.io does not have yet, and a recovery door."
+category = "Release"
+script_runner = "bash"
+script = '''
+set -euo pipefail
+eval "$(./tools/scripts/release/read-version.sh)"
+DIST="${CARGO_TARGET_DIR:-target}/release-dist"
+rm -rf "$DIST"
+./tools/scripts/release/publish-crates.sh "$VERSION" --out "$DIST"
+./tools/scripts/release/publish-crates.sh "$VERSION" --from "$DIST" --dry-run
+read -r -p "Publish duet ${VERSION} to crates.io? This cannot be undone. (y/N) " answer
+[[ "$answer" =~ ^[Yy]$ ]] || { echo "Not published."; exit 1; }
+./tools/scripts/release/publish-crates.sh "$VERSION" --from "$DIST"
+'''

@@ -138,8 +138,8 @@ Statuses for **duet**:
 | SC-DENY-2 | gated: .github/workflows/ci.yml#gate |
 | SC-DENY-3 | gated: .github/workflows/ci.yml#gate |
 | SC-GHA-1 | practiced: every uses: is a commit SHA with its tag; nothing refuses a new tag or branch ref |
-| SC-GHA-2 | practiced: every workflow sets top-level permissions: contents: read, and codeql.yml#analyze adds security-events: write with its reason; nothing refuses a workflow without it |
-| SC-GHA-3 | n/a: no release chain |
+| SC-GHA-2 | practiced: every workflow sets top-level permissions: contents: read; codeql.yml#analyze adds security-events: write, release-tag.yml#tag and release.yml#github-release contents: write, and release.yml#publish-crates id-token: write, each with its reason; nothing refuses a workflow without it |
+| SC-GHA-3 | practiced: release-tag.yml runs only on a push to main that changes VERSION, and release.yml only on its call from release-tag.yml and on workflow_dispatch (RELEASING.md); nothing refuses a new trigger |
 | SC-IN-1 | practiced: install-action, its tool versions, gitleaks (module hash asserted) and the Go toolchain that builds it are pinned, each at least 7 days old when pinned; nothing checks it |
 | SC-IN-2 | practiced: Dependabot covers cargo and github-actions with a 7-day cooldown; nothing checks a new ecosystem is added |
 | SC-IN-3 | gated: .github/workflows/ci.yml#gate |

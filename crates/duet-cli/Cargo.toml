@@ -1,6 +1,6 @@
 [package]
 name = "duet-cli"
-version = "0.2.1"
+version.workspace = true
 description = "duet: compose with an LLM in text both can read, and convert it to and from MIDI."
 edition.workspace = true
 license.workspace = true
@@ -18,13 +18,13 @@ name = "duet"
 path = "src/main.rs"
 
 [dependencies]
-duet-core = { path = "../duet-core", version = "0.2.0" }
-duet-midi = { path = "../duet-midi", version = "0.2.0" }
-duet-drums = { path = "../duet-drums", version = "0.2.0" }
-duet-abc = { path = "../duet-abc", version = "0.2.0" }
-duet-capture = { path = "../duet-capture", version = "0.2.0" }
-duet-play = { path = "../duet-play", version = "0.2.0" }
-duet-schemas = { path = "../duet-schemas", version = "0.2.0" }
+duet-core.workspace = true
+duet-midi.workspace = true
+duet-drums.workspace = true
+duet-abc.workspace = true
+duet-capture.workspace = true
+duet-play.workspace = true
+duet-schemas.workspace = true
 serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"
 clap = { version = "4", features = ["derive"] }
