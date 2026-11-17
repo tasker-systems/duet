@@ -416,13 +416,18 @@ fn example_text(info: &KindInfo) -> String {
     }
 }
 
-/// A stream's example: every column, voiced and unvoiced frames, and a short last block.
+/// A stream's example: every column, voiced and unvoiced frames, a short last block, and the
+/// take (1.1).
 fn example_stream(name: &str) -> String {
     assert_eq!(name, "performance", "no example is defined for {name}");
-    let mut stream = Stream::new(
-        Tool::new("duet", "0.2.0"),
-        PerformanceHead::new(22_050, 256, 512),
+    let mut head = PerformanceHead::new(22_050, 256, 512);
+    head.take = Some(
+        serde_json::from_value(json!({
+            "digest": EXAMPLE_DIGEST, "rate": 44100, "channels": 2, "frames": 1764000
+        }))
+        .unwrap(),
     );
+    let mut stream = Stream::new(Tool::new("duet", "0.2.0"), head);
     stream.records = vec![
         FrameBlock::new(
             512,
@@ -492,10 +497,17 @@ fn example_grid() -> duet_drums::DrumGrid {
 /// beat by beat, the grid, the quantize offsets, and the reading (1.1) with a note between keys
 /// and a note with excursions (1.6), rejoined from two decoded notes (1.7), a note carried
 /// on over its breathy fall (1.9), a note made from a pitch held before the note it reaches,
-/// suggested a likely approach to it (1.11), and the key's profile (1.12).
+/// suggested a likely approach to it (1.11), the key's profile (1.12), and the variant
+/// annotation (1.13): the take's digest, rate, channels and length, and the passes that ran.
 pub fn example_analysis() -> Analysis {
     serde_json::from_value(json!({
         "rate": 22050,
+        "take": {
+            "digest": EXAMPLE_DIGEST,
+            "rate": 44100,
+            "channels": 2,
+            "frames": 1764000
+        },
         "events": [
             { "type": "onset", "frame": 11025, "strength": 0.8125 },
             { "type": "note", "start": 11100, "end": 21600, "midi": 63, "confidence": 0.93,
@@ -601,11 +613,16 @@ pub fn example_analysis() -> Analysis {
                 { "start": 34100, "key": 69, "suggests": "likely-approach",
                   "rule": "semitone-with-drift", "next_key": 70, "step": 1,
                   "drift_cents": 43.5 }
-            ]
+            ],
+            "passes": ["breathy", "rejoin", "held-pitch"]
         }
     }))
     .expect("the example analysis reads")
 }
+
+/// The take the examples state: a digest written as duet writes one.
+const EXAMPLE_DIGEST: &str =
+    "sha256:9f2c41d07b3e8a65c1f0d92e4b7a3c58e06d1f9a2b4c7e8d3f5a6b0c9d1e2f34";
 
 fn pos(s: &str) -> Position {
     s.parse().unwrap()

@@ -77,6 +77,7 @@ mod residual;
 mod stage;
 #[cfg(test)]
 mod synth;
+mod take;
 mod timing;
 
 #[cfg(feature = "basic-pitch")]
@@ -101,7 +102,7 @@ pub use performance::{
 pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use reading::{
-    A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reader, ReaderName, Reading,
+    A440_CENTS, BETWEEN_KEYS_CENTS, Pass, PerformanceFrames, ReadNote, Reader, ReaderName, Reading,
     Thresholds, Tuning, a4_cents_of_hz, estimate_tuning, interpret, read, read_as_decoded,
 };
 pub use rejoin::{Dip, REJOIN_CENTS, REJOIN_TOLERANCE_CENTS, Rejoin, rejoin};
@@ -111,6 +112,7 @@ pub use residual::{
     residual, residual_with_cost, silent_cost, sounding_cost, unread_cost,
 };
 pub use stage::{Chunk, Mono, Stage};
+pub use take::{Digester, Take, TakeDigest};
 pub use timing::{
     BeatTempo, Given, Origin, TempoAlternatives, Timing, WEAK_CONFIDENCE, beat_series, estimate,
     felt_quarters, is_compound,

@@ -9,9 +9,15 @@
 //! written whatever becomes of the score, which is written, or reported as failed, after it.
 //!
 //! A melody take also writes its every pitch frame, as a `performance` stream,
-//! `STEM.performance.duet.jsonl`, through duet-schemas ([`PerformanceFile`]). Its lines are
-//! written as the frames settle; it is kept once the `.duet` and `.capture.duet` are written,
-//! and removed again when the capture fails before then.
+//! `STEM.performance.duet.jsonl`, through duet-schemas ([`PerformanceFile`]). Its file is
+//! created before the take is read, and its lines written once the take has been read, since
+//! its head states the take's digest ([`Digester`]), which is known only then; until then they
+//! are held, as the frames are for the reading. It is kept once the `.duet` and `.capture.duet`
+//! are written, and removed again when the capture fails before then.
+//!
+//! Both the analysis and the performance state the take they were read from (`take`): the
+//! SHA-256 of its decoded samples, with their rate, channel count and length, computed from
+//! every chunk the source yields, beside `Prepare`.
 //!
 //! `duet capture compare` ([`compare`]) reads a melody take's recording and those files back,
 //! and plots and plays its reading against its performance. `duet capture review` ([`review`])
@@ -29,9 +35,9 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
-    A440_CENTS, ANALYSIS_RATE, Error, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono,
-    NoteModel, Performance, PerformanceFrames, PerformanceHead, Prepare, Quantized, ReadNote,
-    Source, Stage, a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart,
+    A440_CENTS, ANALYSIS_RATE, Digester, Error, Event, FileSource, Given, Hits, Kind, LaneMode,
+    Layer1, Mono, NoteModel, Performance, PerformanceFrames, PerformanceHead, Prepare, Quantized,
+    ReadNote, Source, Stage, a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart,
     quantize_offsets, read,
 };
 #[cfg(feature = "basic-pitch")]
@@ -174,7 +180,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     let keep = args.reader == Some(ReaderArg::BasicPitch);
     #[cfg(not(feature = "basic-pitch"))]
     let keep = false;
-    let (mut events, kept, samples) =
+    let (mut events, kept, samples, audio) =
         analyse(&args.input, take, args.lane.is_some(), &outputs, keep)?;
     #[cfg(not(feature = "basic-pitch"))]
     let _ = samples;
@@ -235,6 +241,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         },
     };
     let mut captured = assemble(&events, ANALYSIS_RATE, &timing, key, &kind).with_context(named)?;
+    captured.analysis.take = audio;
 
     // The score's grid is settled before the analysis is written, since the analysis gives
     // each note's quantize offset in its steps. A failure here is the score's, reported once
@@ -616,11 +623,7 @@ impl Analyser {
             Self::Melody { stage, .. } => {
                 let mut kept = Vec::new();
                 stage.finish(&mut kept)?;
-                self.keep(kept, events)?;
-                match self {
-                    Self::Melody { file, .. } => file.flush(),
-                    Self::Rhythm(_) => Ok(()),
-                }
+                self.keep(kept, events)
             }
             Self::Rhythm(hits) => Ok(hits.finish(events)?),
         }
@@ -650,15 +653,16 @@ impl Analyser {
 }
 
 /// The take's settled events: the file through `Prepare` and the take's analysis stage, to
-/// the end of the stream. For a melody, the events are its onsets, and its performance file,
-/// written in full but not yet kept, and its frames come with them.
+/// the end of the stream, and every chunk through the take's [`Digester`]. For a melody, the
+/// events are its onsets, and its performance file, written in full but not yet kept, and its
+/// frames come with them. The audio's digest is last: `None` when the file held no audio.
 fn analyse(
     input: &Path,
     take: Take,
     asked: bool,
     outputs: &Outputs,
     keep_samples: bool,
-) -> Result<(Vec<Event>, Option<Kept>, Vec<f32>)> {
+) -> Result<Analysed> {
     let mut source = FileSource::open(input)?;
     let mut prepare = Prepare::new(ANALYSIS_RATE);
     let mut stage = match (take, &outputs.performance) {
@@ -680,7 +684,9 @@ fn analyse(
     let (mut mono, mut events, mut samples) = (Vec::new(), Vec::new(), Vec::new());
     // The source's errors name the file; the stages' are named here.
     let named = || input.display().to_string();
+    let mut digester = Digester::new();
     while let Some(chunk) = source.next_chunk()? {
+        digester.push(&chunk).with_context(named)?;
         prepare.push(chunk, &mut mono).with_context(named)?;
         for m in mono.drain(..) {
             if keep_samples {
@@ -697,25 +703,45 @@ fn analyse(
         stage.push(m, &mut events).with_context(named)?;
     }
     stage.finish(&mut events).with_context(named)?;
+    let audio = digester.finish();
     let kept = match stage {
-        Analyser::Melody { file, frames, .. } => Some((file, frames)),
+        Analyser::Melody {
+            mut file, frames, ..
+        } => {
+            file.finish(audio)?;
+            Some((file, frames))
+        }
         Analyser::Rhythm(_) => None,
     };
-    Ok((events, kept, samples))
+    Ok((events, kept, samples, audio))
 }
+
+/// What [`analyse`] gives: the take's events, a melody's performance, the samples when they are
+/// kept, and the take's digest.
+type Analysed = (
+    Vec<Event>,
+    Option<Kept>,
+    Vec<f32>,
+    Option<duet_capture::Take>,
+);
 
 /// A melody's performance file, written but not yet kept, and its frames: none when the take
 /// held no audio at all.
 type Kept = (PerformanceFile, Option<PerformanceFrames>);
 
-/// A melody's `performance` stream, written through duet-schemas a line at a time as its frames
-/// settle: the envelope and head first, then one block of frames a line. It is created new, and
-/// removed again when dropped before [`keep`](PerformanceFile::keep), so a capture that fails
-/// leaves it behind no more than its other outputs.
+/// A melody's `performance` stream, written through duet-schemas: the envelope and head first,
+/// then one block of frames a line. The head states the take ([`finish`](PerformanceFile::finish)),
+/// whose digest is known only once the whole take is read, so each line is made as its frames
+/// settle and held until then. It is created new, and removed again when dropped before
+/// [`keep`](PerformanceFile::keep), so a capture that fails leaves it behind no more than its
+/// other outputs.
 struct PerformanceFile {
     path: PathBuf,
     file: Option<BufWriter<fs::File>>,
-    headed: bool,
+    /// Boxed: with the take it states, it is the file's largest part.
+    head: Option<Box<PerformanceHead>>,
+    /// Each block of frames' line, in order, until the head is written.
+    lines: Vec<String>,
 }
 
 impl PerformanceFile {
@@ -729,35 +755,43 @@ impl PerformanceFile {
         Ok(PerformanceFile {
             path: path.to_path_buf(),
             file: Some(BufWriter::new(file)),
-            headed: false,
+            head: None,
+            lines: Vec::new(),
         })
     }
 
-    /// Writes the head, the first time it comes, and every block of frames.
+    /// Keeps the head, the first time it comes, and makes every block of frames' line.
     fn write(&mut self, kept: Vec<Layer1>) -> Result<()> {
         for layer in kept {
-            let line = match layer {
-                Layer1::Head(head) if !self.headed => {
-                    self.headed = true;
-                    Stream::<PerformanceHead>::new(tool(), head).head_line()?
-                }
-                Layer1::Frames(block) if self.headed => {
-                    Stream::<PerformanceHead>::record_line(&block)?
+            match layer {
+                Layer1::Head(head) if self.head.is_none() => self.head = Some(Box::new(head)),
+                Layer1::Frames(block) if self.head.is_some() => {
+                    self.lines
+                        .push(Stream::<PerformanceHead>::record_line(&block)?)
                 }
                 Layer1::Frames(_) => bail!("a performance's frames came before its head"),
-                _ => continue,
-            };
-            self.out()?
-                .write_all(line.as_bytes())
-                .with_context(|| self.path.display().to_string())?;
+                _ => {}
+            }
         }
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<()> {
-        self.out()?
-            .flush()
-            .with_context(|| self.path.display().to_string())
+    /// Writes the head, stating `take`, then every line held, once the take is read. A take
+    /// whose performance never began (no audio) writes nothing.
+    fn finish(&mut self, take: Option<duet_capture::Take>) -> Result<()> {
+        let Some(mut head) = self.head.as_deref().copied() else {
+            return Ok(());
+        };
+        head.take = take;
+        let first = Stream::<PerformanceHead>::new(tool(), head).head_line()?;
+        let lines = std::mem::take(&mut self.lines);
+        let path = self.path.display().to_string();
+        let out = self.out()?;
+        for line in std::iter::once(&first).chain(&lines) {
+            out.write_all(line.as_bytes())
+                .with_context(|| path.clone())?;
+        }
+        out.flush().with_context(|| path.clone())
     }
 
     fn out(&mut self) -> Result<&mut BufWriter<fs::File>> {

@@ -455,6 +455,25 @@ pub struct Reading {
     /// `capture-analysis` 1.11; omitted when there is none, and absent before, when none was made.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suggestions: Vec<Suggestion>,
+    /// Each interpretive pass that ran over the notes as their reader decoded them, in the order
+    /// it ran, a pass that changed nothing included ([`interpret`] writes it). Added in
+    /// `capture-analysis` 1.13; absent before, meaning not stated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passes: Option<Vec<Pass>>,
+}
+
+/// An interpretive pass over a reading's notes, by the name a reading states it by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum Pass {
+    /// The breathy ornament ([`breathe`](crate::breathe)): its statements are `breathy`.
+    Breathy,
+    /// The same-key rejoin ([`rejoin`](crate::rejoin)): its statements are `rejoins`.
+    Rejoin,
+    /// The held pitch ([`hold_apart`](crate::hold_apart)): its statements are `held` and
+    /// `suggestions`.
+    HeldPitch,
 }
 
 impl Reading {
@@ -487,12 +506,38 @@ pub fn read(frames: &PerformanceFrames, onsets: &[Event], given: Option<f64>) ->
 /// note before it on its key. Each states
 /// what it did, so the reading keeps what was decoded. `onsets` are the take's, and `frames`
 /// the performance `reading` was read from.
+///
+/// Each pass's name is appended to the reading's `passes` as it runs, whether or not it changed
+/// a note, so `passes` holds under every reader and cannot drift from what ran.
 #[must_use]
-pub fn interpret(reading: Reading, frames: &PerformanceFrames, onsets: &[Event]) -> Reading {
-    hold_apart(
-        rejoin(breathe(reading, frames, onsets), frames, onsets),
-        frames,
-    )
+pub fn interpret(mut reading: Reading, frames: &PerformanceFrames, onsets: &[Event]) -> Reading {
+    let mut passes = reading.passes.take().unwrap_or_default();
+    let reading = ran(breathe(reading, frames, onsets), Pass::Breathy, &mut passes);
+    let reading = ran(rejoin(reading, frames, onsets), Pass::Rejoin, &mut passes);
+    let mut reading = ran(hold_apart(reading, frames), Pass::HeldPitch, &mut passes);
+    reading.passes = Some(passes);
+    reading
+}
+
+/// `reading`, after `pass` has run over it: the pass is appended to `passes`, and the reading
+/// keeps none of its own until [`interpret`] states them all.
+fn ran(mut reading: Reading, pass: Pass, passes: &mut Vec<Pass>) -> Reading {
+    passes.push(pass);
+    reading.passes = None;
+    reading
+}
+
+/// `reading`, read through [`interpret`], with its `passes` checked to be every pass in the
+/// order [`interpret`] runs them, and then taken off: what the passes' own witnesses compare
+/// with a reading as decoded.
+#[cfg(test)]
+pub(crate) fn passes_stated(mut reading: Reading) -> Reading {
+    assert_eq!(
+        reading.passes.take(),
+        Some(vec![Pass::Breathy, Pass::Rejoin, Pass::HeldPitch]),
+        "the passes stated"
+    );
+    reading
 }
 
 /// [`read`], before its interpretive passes: the notes as the rules segment them.
@@ -549,6 +594,7 @@ impl Reading {
             breathy: Vec::new(),
             held: Vec::new(),
             suggestions: Vec::new(),
+            passes: None,
         }
     }
 }

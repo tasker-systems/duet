@@ -75,7 +75,16 @@ use crate::{Kind, Version};
 /// `scores` were correlated with, `aarden-essen` (duet's default since 1.12) or
 /// `krumhansl-kessler`. Omitted when none is stated, so a 1.11 document reads as one stating no
 /// profile; duet wrote those with Krumhansl–Kessler.
+///
+/// **1.13** adds the variant annotation, also additive (the variants-and-comps design, §1 and
+/// §2). The analysis's optional `take` states the audio it was read from: the `digest`, the
+/// SHA-256 of its decoded samples written `sha256:` and 64 lowercase hex digits, with the
+/// source's own `rate`, `channels` and length in `frames`. The reading's optional `passes` states
+/// each interpretive pass that ran over its notes, in order (`breathy`, `rejoin`, `held-pitch`),
+/// a pass that changed nothing included. Two readings with one `take` are variants of one take;
+/// they are the same variant when their `reader` and `passes` are equal too. Both are omitted
+/// when not stated, so a 1.12 document reads as one stating no take and no passes.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 12);
+    const VERSION: Version = Version::new(1, 13);
 }

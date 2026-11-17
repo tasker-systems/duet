@@ -728,6 +728,7 @@ name = "duet-midi"
 version = "0.3.0"
 dependencies = [
  "duet-core",
+ "duet-dsp",
  "duet-schemas",
  "midly",
  "serde_json",

@@ -6,7 +6,7 @@
 use super::*;
 use crate::hmm::NoteModel;
 use crate::performance::{FrameBlock, PerformanceHead};
-use crate::reading::{A440_CENTS, read, read_as_decoded};
+use crate::reading::{A440_CENTS, passes_stated, read, read_as_decoded};
 
 const RATE: u32 = 22_050;
 const HOP: u64 = 256;
@@ -121,11 +121,11 @@ fn readings(by: By, frames: &PerformanceFrames, onsets: &[Event]) -> (Reading, R
     match by {
         By::Rules => (
             read_as_decoded(frames, onsets, given),
-            read(frames, onsets, given),
+            passes_stated(read(frames, onsets, given)),
         ),
         By::Hmm => (
             NoteModel::default().read_as_decoded(frames, onsets, given),
-            NoteModel::default().read(frames, onsets, given),
+            passes_stated(NoteModel::default().read(frames, onsets, given)),
         ),
     }
 }
