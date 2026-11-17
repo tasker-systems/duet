@@ -72,7 +72,7 @@ overshoots, then settles. This happens eight times.
 
 **3. What the formats carry today:**
 - `duet-abc` refuses every decoration except the dynamics, and refuses grace notes.
-- `song` 1.0 holds only notes and controls.
+- `song` 1.0 (now `part` 1.0, renamed 2026-11-17) holds only notes and controls.
 - MIDI holds only notes and bends.
 
 ## 1. Where an ornament lives
@@ -249,7 +249,7 @@ its key. The rejoin never joins notes on two keys.
   - the sine can play the ornaments (question 4).
 
 **Named for later, and not filed until the owner asks: ornaments in the score.**
-- `song` 1.1 gains an optional `Note.ornament`.
+- `part` 1.1 (written as `song` 1.1 before the rename) gains an optional `Note.ornament`.
 - The notes view gains a syntax for it.
 - `duet-abc` writes and reads `~`, `T`, `M`, `P` and `{g}`.
 - MIDI writes an ornament as bends only.
@@ -396,10 +396,10 @@ two ways, and adds no task:
     minor before meant: no ornament stated. Task A adds it.
   - The rejoin's statements are a new optional field of the reading in the same minor, omitted when
     there is none. Task B adds it.
-- **`song`, `performance`, the envelope:** no change in any task here.
+- **`part` (was `song`), `performance`, the envelope:** no change in any task here.
 - **The notes and grid views:** no change in any task here.
 - **The later ornaments-in-the-score work would add:**
-  - `song` 1.1, additive: `Note.ornament`, optional;
+  - `part` 1.1 (was `song` 1.1), additive: `Note.ornament`, optional;
   - a new notes-view syntax version in its header, `notes v2`;
   - a wider `duet-abc` subset. That is not a duet kind, but it needs round-trip tests in
     `crates/duet-midi/tests/roundtrip.rs` and the ABC crate.
