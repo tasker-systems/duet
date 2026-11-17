@@ -195,7 +195,7 @@ pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
 | `capture-analysis` | 1.0 | `duet_capture::Analysis` | Gains a reader. Absent values are omitted, not `null`. `tempo_alternatives` is named. |
 | `performance` | 1.0, a stream | new `duet_dsp` types, `PerformanceHead` and `FrameBlock`, written and read only through `duet-schemas` | New: the performance design's question 1, in this envelope. |
 | `project` | named, deferred | none yet | Designed in [the project design](2026-11-17-project-design.md). |
-| `song` (the piece; name **Proposed**) | **Proposed** 1.0 | none yet | A new kind, the song and its composition: [songs and composition](2026-11-17-songs-and-composition-design.md). |
+| `song` (the piece) | 1.0, **Ruled** name and version; design **Proposed** | none yet | A new kind, the song and its composition: [songs and composition](2026-11-17-songs-and-composition-design.md). |
 | lane map | **not a kind** | | Config. |
 | `duet.toml` | **not a kind** | | Config. |
 

@@ -5,9 +5,15 @@ folded into the domain model by the owner's ruling on the project design (temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, decision 10).
 
 **Status: Proposed. Nothing here is built.** The domain model under it is **Ruled** (owner,
-2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 10), and each point taken
+2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 11), and each point taken
 from it is marked so. Everything else is **Proposed**. What the owner has not ruled is listed in
 [Open questions](#open-questions), and each place it touches says so.
+
+**Reference pages,** drawn from the same rulings: the
+[Domain Map](https://claude.ai/artifact/J7rcg5qQ1hL83EDrfchtfB) and the
+[Lifecycle Map](https://claude.ai/artifact/T6QamgUyrWoEPD3UYU3b3a), beside Temper decisions
+`01a1eb48` (the domain model) and `01a1eb60` (the project decisions). Where a map and this spec
+disagree, the Temper decisions win.
 
 **Builds on:**
 - [duet documents](2026-11-15-duet-documents-design.md): the envelope, kinds, the version policy
@@ -52,8 +58,9 @@ from it is marked so. Everything else is **Proposed**. What the owner has not ru
    does with the owner; duet never infers it. A snapshot is an event recorded against the song, not
    a status, so taking one doesn't change the song's state.
 10. **There is nothing to migrate or retire.** No compatibility path from the old `song` kind:
-    `part` starts at 1.0, and the new song document starts fresh at 1.0, under a kind name proposed
-    as `song` and not yet ruled.
+    `part` starts at 1.0, and the new song document starts fresh at 1.0.
+11. **The new song document's kind is named `song`** ("keep song as the kind name"): `song` 1.0 at
+    `songs/<song>/song.duet`, holding the song and its composition.
 
 **Agreed in the same discussion, as the model's working shape:**
 - **A part is one voice, line or groove** (notes, or a drum grid). It always states its source:
@@ -198,11 +205,9 @@ They are separate fields of the body, so a later split into two kinds moves a fi
 
 ### The kind's name and version
 
-**`song` 1.0, a new kind.** The version is **Ruled** (ruling 10): there is
-nothing on disk to migrate or retire, so the old `song` kind is simply renamed `part` and this kind
-starts fresh at 1.0, with no compatibility path between them. **The name `song` is Proposed:** the
-old kind's rename frees it, and "song" is the owner's word for this thing. The alternative is a new
-name such as `piece`. **For the owner to rule** ([question 3](#open-questions)).
+**`song` 1.0, a new kind. Ruled** (rulings 10 and 11): there is nothing on disk to migrate or
+retire, so the old `song` kind is simply renamed `part`, and this kind takes the name `song` and
+starts fresh at 1.0, with no compatibility path between them.
 
 ## 2. Parts
 
@@ -361,7 +366,9 @@ Each is **Proposed** unless marked.
 
 - **A take:** added (copied or named), then found or missing on this machine, then placed or unplaced
   in each song that links it. It is never removed by a command (the project design's `take forget`
-  drops the entry and leaves the files).
+  drops the entry and leaves the files). The Domain Map also draws a take's working stages
+  (recorded, captured, reviewed, comped, kept, set aside, superseded); those are not ruled, and this
+  spec stores none of them.
 - **A part:** written (by capture, a comp, an operation or by hand), then placed or not, then changed
   by operations. Its `source` is set when it is written and changes only when an operation writes it
   again.
@@ -393,16 +400,14 @@ Each is **Proposed** unless marked.
 
 Not ruled by the owner. Each is recorded here, not decided.
 
-Ruled since first written, and no longer open: how a take with no click is placed (ruling 8,
-[§4](#takes-without-a-click)), and song states (ruling 9, [§7](#7-lifecycles)).
+Ruled since first written, and no longer open: how a take is placed (ruling 8,
+[§4](#4-how-a-take-maps-onto-the-bars)), song states (ruling 9, [§7](#7-lifecycles)), and the song
+kind's name and version (rulings 10 and 11, [§1](#the-kinds-name-and-version)).
 
 1. **Where an operation's change is stored:** a new part plus a step in the song's history, or a chain
    of changes carried by the part. For the transformations task ([§6](#6-operations-are-stated-changes)).
 2. **The comp lifecycle** (drafting, applied, stale, refused, with stale also caused by a change to the
    composition): Claude's reading of the comp design, not ruled ([§7](#7-lifecycles)).
-3. **The song kind's name:** `song`, or a new name such as `piece`
-   ([§1](#the-kinds-name-and-version)). It starts at 1.0 either way. Raised by this design, not by
-   the rulings.
 
 ## What this changes in other specs
 
