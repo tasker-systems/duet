@@ -1,4 +1,4 @@
-//! `duet play`: sound a song through the built-in SoundFont synth, or send it to a MIDI
+//! `duet play`: sound a part through the built-in SoundFont synth, or send it to a MIDI
 //! port.
 //!
 //! The events, their times and the synth's rendering are `duet-play`'s, and tested there.
@@ -18,7 +18,7 @@ use duet_play::{Renderer, Schedule, load_soundfont, send_timed};
 use etcetera::{AppStrategy, AppStrategyArgs, choose_app_strategy};
 
 use crate::config::Config;
-use crate::io::{Format, FormatParser, read, song_format};
+use crate::io::{Format, FormatParser, part_format, read};
 
 /// The environment variable naming the directory duet's installed files are in, such as
 /// its SoundFont, overriding the platform's data directory.
@@ -30,26 +30,26 @@ pub const SOUNDFONT_NAME: &str = "default.sf2";
 
 #[derive(Args)]
 pub struct PlayArgs {
-    /// The song to play: a .duet document, MIDI or ABC by its name, or - for standard input
+    /// The part to play: a .duet document, MIDI or ABC by its name, or - for standard input
     /// (a document if it starts with {, MIDI, or ABC with --from abc). A view's text plays
     /// through `duet apply`: `duet apply take.notes -o - | duet play -`.
     input: PathBuf,
     #[arg(long, value_parser = FormatParser)]
     from: Option<Format>,
-    /// The SoundFont (.sf2) to sound the song with, instead of duet.toml's `[play]`
+    /// The SoundFont (.sf2) to sound the part with, instead of duet.toml's `[play]`
     /// `soundfont` or the one duet installs.
     #[arg(long, conflicts_with = "port")]
     soundfont: Option<PathBuf>,
-    /// Send the song to this MIDI port instead, such as a DAW's or a synth's: its name, or
+    /// Send the part to this MIDI port instead, such as a DAW's or a synth's: its name, or
     /// a part of it only one port's name holds. No SoundFont is needed.
     #[arg(long)]
     port: Option<String>,
 }
 
 pub fn run(args: PlayArgs, config: &Config) -> Result<()> {
-    let format = song_format(&args.input, args.from, "duet play reads")?;
-    let song = read(&args.input, format, "duet play reads")?;
-    let schedule = Schedule::from_song(&song)?;
+    let format = part_format(&args.input, args.from, "duet play reads")?;
+    let part = read(&args.input, format, "duet play reads")?;
+    let schedule = Schedule::from_part(&part)?;
     match args.port {
         Some(port) => to_port(&schedule, &port, &args.input),
         None => {
@@ -106,7 +106,7 @@ fn find_soundfont(given: Option<PathBuf>, config: &Config) -> Result<PathBuf> {
     bail!(
         "no SoundFont to play with: duet looked for its installed one at\n{}\n\
          Install duet with its SoundFont, or name a General MIDI .sf2 with --soundfont or \
-         [play] soundfont in duet.toml. Or send the song to a DAW or synth with --port <name>.",
+         [play] soundfont in duet.toml. Or send the part to a DAW or synth with --port <name>.",
         places.join("\n")
     )
 }
@@ -266,7 +266,7 @@ fn to_port(schedule: &Schedule, wanted: &str, input: &Path) -> Result<()> {
         },
     );
     let result = match result {
-        // The wait to the end was cut short: the song's events were all sent.
+        // The wait to the end was cut short: the part's events were all sent.
         Ok(()) if stopped() => Err(Stop::Interrupted),
         other => other,
     };
@@ -302,7 +302,7 @@ fn stream_goes_on(kind: cpal::ErrorKind) -> bool {
 }
 
 /// Sounds the schedule through the default audio output with a SoundFont synth, until
-/// the song and its tail have played.
+/// the part and its tail have played.
 fn through_synth(schedule: &Schedule, font_path: &Path, input: &Path) -> Result<()> {
     let bytes =
         std::fs::read(font_path).with_context(|| format!("reading {}", font_path.display()))?;
@@ -310,7 +310,7 @@ fn through_synth(schedule: &Schedule, font_path: &Path, input: &Path) -> Result<
     let host = cpal::default_host();
     let device = host
         .default_output_device()
-        .ok_or_else(|| anyhow!("no audio output device; send the song to one with --port"))?;
+        .ok_or_else(|| anyhow!("no audio output device; send the part to one with --port"))?;
     let supported = device
         .default_output_config()
         .context("reading the audio device's output format")?;
@@ -342,7 +342,7 @@ fn through_synth(schedule: &Schedule, font_path: &Path, input: &Path) -> Result<
         }
         if start.elapsed() >= limit {
             bail!(
-                "the audio device stopped asking for sound before the song's end; it may \
+                "the audio device stopped asking for sound before the part's end; it may \
                  have been disconnected"
             );
         }

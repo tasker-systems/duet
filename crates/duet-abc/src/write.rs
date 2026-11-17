@@ -1,14 +1,14 @@
-//! `Song` → ABC.
+//! `Part` → ABC.
 //!
 //! The rules are the design's §4. Nothing is ever quantized or moved: a note that ABC
 //! cannot write where it is, or a velocity that has no dynamic, is refused by name
-//! ([`Error::Unwritable`]), and the song is left as it was. The output is canonical:
+//! ([`Error::Unwritable`]), and the part is left as it was. The output is canonical:
 //! writing what it reads back gives the same text.
 
 use std::fmt::Write as _;
 
 use duet_core::time::ticks_from_beats;
-use duet_core::{Key, Mode, Position, Song, TimeSig, Track};
+use duet_core::{Key, Mode, Part, Position, TimeSig, Track};
 
 use crate::error::{Error, Result};
 use crate::ratio::Ratio;
@@ -25,7 +25,7 @@ pub enum Dynamics {
     Nearest,
 }
 
-/// How to write a song as ABC.
+/// How to write a part as ABC.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct WriteOptions {
@@ -49,9 +49,9 @@ impl WriteOptions {
     }
 }
 
-const QUANTIZE_HINT: &str = "run duet song quantize --grid 1/16 first";
+const QUANTIZE_HINT: &str = "run duet part quantize --grid 1/16 first";
 
-/// The most bars a written tune holds. Every bar is laid out in memory, so a song that
+/// The most bars a written tune holds. Every bar is laid out in memory, so a part that
 /// ends far away (a stray end of track, say) is refused rather than written.
 const MAX_BARS: u32 = 100_000;
 
@@ -213,7 +213,7 @@ impl TrackWriter<'_> {
             out.push('[');
         }
         for i in notes {
-            // A note is written as the song spells it: Cb5 is `c` under K:Ebm and `_c`
+            // A note is written as the part spells it: Cb5 is `c` under K:Ebm and `_c`
             // under K:C, and B4 is `=B` under K:Ebm.
             let pitch = self.track.notes[i].pitch;
             let (letter, alter) = (pitch.letter(), pitch.alteration());
@@ -391,18 +391,18 @@ fn is_level(vel: u8) -> bool {
     DYNAMICS.iter().any(|(_, v)| *v == vel)
 }
 
-/// How many of the song's notes have a velocity that is not a dynamic's level: the notes
+/// How many of the part's notes have a velocity that is not a dynamic's level: the notes
 /// [`write()`] snaps under [`Dynamics::Nearest`], and refuses otherwise. 0 means writing the
-/// song changes no velocity.
-pub fn off_level_velocities(song: &Song) -> usize {
-    song.tracks
+/// part changes no velocity.
+pub fn off_level_velocities(part: &Part) -> usize {
+    part.tracks
         .iter()
         .flat_map(|t| &t.notes)
         .filter(|n| !is_level(n.vel))
         .count()
 }
 
-/// Writes a song as one ABC tune, `X:1`.
+/// Writes a part as one ABC tune, `X:1`.
 ///
 /// Refused, naming what and where ([`Error::Unwritable`]): a note off the 1/64-note grid
 /// that is not part of a triplet group (three equal slots filling whole beats, each note
@@ -410,16 +410,16 @@ pub fn off_level_velocities(song: &Song) -> usize {
 /// notes that overlap but neither start and end together; a velocity that is not one of
 /// the dynamics' levels (unless [`Dynamics::Nearest`]); a tempo that is not a whole bpm; a
 /// track on channel 10 (drums are the drum grid's); controls; a bar cut short by a meter
-/// change; a song that ends inside a bar; and tempo, meter or key changes in a song of
-/// several tracks. The song is never changed.
+/// change; a part that ends inside a bar; and tempo, meter or key changes in a part of
+/// several tracks. The part is never changed.
 ///
-/// ABC needs a key, so a song that names none is written in C major, and reads back so.
-pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
-    let tpq = u64::from(song.ticks_per_quarter);
+/// ABC needs a key, so a part that names none is written in C major, and reads back so.
+pub fn write(part: &Part, options: &WriteOptions) -> Result<String> {
+    let tpq = u64::from(part.ticks_per_quarter);
     let whole_ticks = 4 * tpq;
-    let map = song.time_map()?;
-    song.check_end()?;
-    let end = song.stated_end()?;
+    let map = part.time_map()?;
+    part.check_end()?;
+    let end = part.stated_end()?;
     let end_tick = map.tick(end)?;
 
     // The bars, each checked whole.
@@ -434,8 +434,8 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
             return Err(unwritable(
                 end,
                 None,
-                format!("the song is longer than {MAX_BARS} bars"),
-                "set an earlier end, or trim the song",
+                format!("the part is longer than {MAX_BARS} bars"),
+                "set an earlier end, or trim the part",
             ));
         }
         let next = map.tick(Position::bar(number + 1))?;
@@ -453,8 +453,8 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
             return Err(unwritable(
                 end,
                 None,
-                format!("the song ends inside bar {number}"),
-                "end the song on a bar line",
+                format!("the part ends inside bar {number}"),
+                "end the part on a bar line",
             ));
         }
         bars.push(BarSpan {
@@ -470,7 +470,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
     let pickup = bars.len() >= 2
         && bars[0].sig != bars[1].sig
         && bars[0].len < bars[1].len
-        && song
+        && part
             .time_changes
             .first()
             .is_some_and(|c| map.tick(c.at).ok() == Some(bars[1].start))
@@ -478,30 +478,30 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
     let header_sig = match (pickup, bars.first()) {
         (true, _) => bars[1].sig,
         (false, Some(b)) => b.sig,
-        (false, None) => song.time_sig,
+        (false, None) => part.time_sig,
     };
 
-    let multi = song.tracks.len() > 1;
+    let multi = part.tracks.len() > 1;
     let mut meter_changes: Vec<(u64, TimeSig)> = bars
         .windows(2)
         .enumerate()
         .filter(|(i, w)| w[0].sig != w[1].sig && !(pickup && *i == 0))
         .map(|(_, w)| (w[1].start, w[1].sig))
         .collect();
-    // A meter change on the song's end opens no bar, so it is written after the last one.
-    let last_sig = bars.last().map_or(song.time_sig, |b| b.sig);
+    // A meter change on the part's end opens no bar, so it is written after the last one.
+    let last_sig = bars.last().map_or(part.time_sig, |b| b.sig);
     if map.sig_at(end_tick) != last_sig && !bars.is_empty() {
         meter_changes.push((end_tick, map.sig_at(end_tick)));
     }
     if multi
         && (!meter_changes.is_empty()
-            || !song.key_changes.is_empty()
-            || !song.tempo_changes.is_empty())
+            || !part.key_changes.is_empty()
+            || !part.tempo_changes.is_empty())
     {
         return Err(unwritable(
             Position::bar(1),
             None,
-            "a song of several tracks with tempo, meter or key changes".to_owned(),
+            "a part of several tracks with tempo, meter or key changes".to_owned(),
             "this version writes those changes only in a single-voice tune",
         ));
     }
@@ -523,7 +523,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
 
     let mut head = String::new();
     let _ = writeln!(head, "X:1");
-    if let Some(title) = &song.title {
+    if let Some(title) = &part.title {
         let _ = writeln!(head, "T:{}", title.replace('%', "\\%").replace('\n', " "));
     }
     let _ = writeln!(head, "M:{header_sig}");
@@ -531,9 +531,9 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
     let _ = writeln!(
         head,
         "Q:1/4={}",
-        whole_bpm(song.tempo_bpm, Position::bar(1))?
+        whole_bpm(part.tempo_bpm, Position::bar(1))?
     );
-    let key = song.key.unwrap_or(Key {
+    let key = part.key.unwrap_or(Key {
         sharps: 0,
         mode: Mode::Major,
     });
@@ -545,14 +545,14 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
     for &(tick, sig) in &meter_changes {
         changes.push((tick, format!("[M:{sig}]"), None));
     }
-    for c in &song.key_changes {
+    for c in &part.key_changes {
         changes.push((
             map.tick(c.at)?,
             format!("[K:{}]", key_text(c.key)),
             Some(c.key),
         ));
     }
-    for c in &song.tempo_changes {
+    for c in &part.tempo_changes {
         changes.push((
             map.tick(c.at)?,
             format!("[Q:1/4={}]", whole_bpm(c.bpm, c.at)?),
@@ -564,7 +564,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
     let mut body = String::new();
     let mut snapped = false;
     let mut used_channels: Vec<u8> = Vec::new();
-    for (index, track) in song.tracks.iter().enumerate() {
+    for (index, track) in part.tracks.iter().enumerate() {
         let name = Some(track.name.as_str());
         let at1 = Position::bar(1);
         if track.channel == 10 {
@@ -593,7 +593,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
         }
         let default_channel = default_channel(&used_channels);
         used_channels.push(track.channel);
-        let default_name = song.title.clone().unwrap_or_else(|| "Tune".to_owned());
+        let default_name = part.title.clone().unwrap_or_else(|| "Tune".to_owned());
         if multi || track.name != default_name {
             // A % would start a comment: \% is a literal percent (§2.2.5).
             let _ = writeln!(
@@ -614,7 +614,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
         let mut timed: Vec<(u64, u64, usize)> = Vec::new();
         for (i, note) in track.notes.iter().enumerate() {
             let start = map.tick(note.at)?;
-            let len = ticks_from_beats(note.beats, song.ticks_per_quarter)?;
+            let len = ticks_from_beats(note.beats, part.ticks_per_quarter)?;
             if len == 0 {
                 return Err(unwritable(
                     note.at,
@@ -791,7 +791,7 @@ pub fn write(song: &Song, options: &WriteOptions) -> Result<String> {
                 .collect();
             texts.push(writer.bar(bar, &mut in_bar, &in_changes)?);
         }
-        // Changes on the song's end go after its last bar line, where they still fall.
+        // Changes on the part's end go after its last bar line, where they still fall.
         let at_end: String = track_changes
             .iter()
             .filter(|(t, _, _)| *t == end_tick)
@@ -844,14 +844,14 @@ mod tests {
         assert_eq!(name("E#4"), "E");
     }
 
-    /// A song whose first bar is `first`, then `meter` from the change at `change_tick`, with
+    /// A part whose first bar is `first`, then `meter` from the change at `change_tick`, with
     /// one quarter note at the start of bar 2.
-    fn first_bar_song(first: TimeSig, meter: TimeSig, change_tick: u64) -> Song {
-        let mut song = Song::default();
-        song.time_sig = first;
-        let mut map = TimeMap::new(song.ticks_per_quarter, first).unwrap();
+    fn first_bar_part(first: TimeSig, meter: TimeSig, change_tick: u64) -> Part {
+        let mut part = Part::default();
+        part.time_sig = first;
+        let mut map = TimeMap::new(part.ticks_per_quarter, first).unwrap();
         let at = map.change_at_tick(change_tick, meter).unwrap();
-        song.time_changes.push(TimeChange {
+        part.time_changes.push(TimeChange {
             at,
             time_sig: meter,
         });
@@ -862,38 +862,38 @@ mod tests {
             1.0,
             80,
         ));
-        song.tracks.push(track);
-        song
+        part.tracks.push(track);
+        part
     }
 
     #[test]
     fn off_level_velocities_are_the_ones_nearest_snaps() {
-        let mut song = first_bar_song(
+        let mut part = first_bar_part(
             TimeSig::new(4, 4).unwrap(),
             TimeSig::new(4, 4).unwrap(),
             1920,
         );
-        assert_eq!(off_level_velocities(&song), 0, "80 is mf's level");
-        let note = song.tracks[0].notes[0].clone();
-        song.tracks[0].notes[0].vel = 81;
-        assert_eq!(off_level_velocities(&song), 1);
+        assert_eq!(off_level_velocities(&part), 0, "80 is mf's level");
+        let note = part.tracks[0].notes[0].clone();
+        part.tracks[0].notes[0].vel = 81;
+        assert_eq!(off_level_velocities(&part), 1);
         let nearest = WriteOptions::default().with_dynamics(Dynamics::Nearest);
-        assert!(write(&song, &nearest).unwrap().contains("snapped"));
-        song.tracks[0].notes[0] = note;
-        assert!(!write(&song, &nearest).unwrap().contains("snapped"));
+        assert!(write(&part, &nearest).unwrap().contains("snapped"));
+        part.tracks[0].notes[0] = note;
+        assert!(!write(&part, &nearest).unwrap().contains("snapped"));
     }
 
     #[test]
     fn pickup_meter_for_agrees_with_the_writer() {
         let sig = |s: &str| s.parse::<TimeSig>().unwrap();
-        let wrote_a_pickup = |song: &Song| {
-            let abc = write(song, &WriteOptions::default()).unwrap();
+        let wrote_a_pickup = |part: &Part| {
+            let abc = write(part, &WriteOptions::default()).unwrap();
             // A pickup is written under the second bar's meter, with no meter of its own.
             abc.contains("M:4/4") && !abc.contains("M:1/4") && !abc.contains("[M:")
         };
 
         // A one-beat first bar before 4/4 is written as a pickup, and the rule says so.
-        let pickup = first_bar_song(sig("1/4"), sig("4/4"), 480);
+        let pickup = first_bar_part(sig("1/4"), sig("4/4"), 480);
         assert!(
             wrote_a_pickup(&pickup),
             "{}",
@@ -903,7 +903,7 @@ mod tests {
 
         // A first bar of a 128th, cut short by the change, is no time signature: the writer
         // writes no pickup (it refuses the cut bar), and the rule refuses it too.
-        let cut = first_bar_song(sig("4/4"), sig("3/4"), 15);
+        let cut = first_bar_part(sig("4/4"), sig("3/4"), 15);
         let written = write(&cut, &WriteOptions::default());
         assert!(
             matches!(&written, Err(Error::Unwritable { why, .. }) if why.contains("cut short")),

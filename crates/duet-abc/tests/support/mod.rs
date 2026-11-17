@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use duet_abc::{Book, ReadOptions, WriteOptions};
-use duet_core::Song;
+use duet_core::Part;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -87,25 +87,25 @@ pub fn read_file(name: &str) -> String {
 }
 
 /// Our reading of a corpus tune.
-pub fn our_song(entry: &TuneEntry) -> Song {
+pub fn our_part(entry: &TuneEntry) -> Part {
     let text = read_file(&entry.file);
     let book = Book::parse(&text).unwrap_or_else(|e| panic!("{}: {e}", entry.name));
     let tune = book
         .tune(entry.x)
         .unwrap_or_else(|| panic!("{}: no X:{} in {}", entry.name, entry.x, entry.file));
-    tune.to_song(&ReadOptions::default())
+    tune.to_part(&ReadOptions::default())
         .unwrap_or_else(|e| panic!("{}: {e}", entry.name))
-        .song
+        .part
 }
 
 /// Our writer's ABC for a corpus tune: `write(read(tune))`.
 pub fn our_written(entry: &TuneEntry) -> String {
-    duet_abc::write(&our_song(entry), &WriteOptions::default())
+    duet_abc::write(&our_part(entry), &WriteOptions::default())
         .unwrap_or_else(|e| panic!("{}: writing: {e}", entry.name))
 }
 
-/// A recording, read back as a song.
-pub fn recording(file: &str) -> Result<Song, String> {
+/// A recording, read back as a part.
+pub fn recording(file: &str) -> Result<Part, String> {
     let path = corpus().join(file);
     let text = std::fs::read_to_string(&path).map_err(|e| {
         format!(
@@ -113,13 +113,13 @@ pub fn recording(file: &str) -> Result<Song, String> {
             path.display()
         )
     })?;
-    Song::from_text(&text).map_err(|e| format!("{file}: {e}"))
+    Part::from_text(&text).map_err(|e| format!("{file}: {e}"))
 }
 
-pub fn notes_of(song: &Song) -> Vec<N> {
-    let map = song.time_map().expect("time map");
-    let tpq = song.ticks_per_quarter;
-    let mut out: Vec<N> = song
+pub fn notes_of(part: &Part) -> Vec<N> {
+    let map = part.time_map().expect("time map");
+    let tpq = part.ticks_per_quarter;
+    let mut out: Vec<N> = part
         .tracks
         .iter()
         .flat_map(|t| {
@@ -180,8 +180,8 @@ fn as_u64(v: &Option<toml::Value>, what: &str) -> Result<u64, String> {
 
 /// Applies each listed difference to our notes, so they read as abc2midi's would. Fails
 /// when a difference no longer occurs: no note it selects has its `ours` value.
-pub fn apply_differences(song: &Song, ours: &[N], diffs: &[Difference]) -> Result<Vec<N>, String> {
-    let map = song.time_map().map_err(|e| e.to_string())?;
+pub fn apply_differences(part: &Part, ours: &[N], diffs: &[Difference]) -> Result<Vec<N>, String> {
+    let map = part.time_map().map_err(|e| e.to_string())?;
     let mut out = ours.to_vec();
     for d in diffs {
         let range = match d.notes.as_str() {
@@ -257,11 +257,11 @@ pub fn apply_differences(song: &Song, ours: &[N], diffs: &[Difference]) -> Resul
 /// The tempo map as (tick, microseconds per quarter): the start, then each change. With
 /// `recorded`, a change after the start is mapped back one tick, as abc2midi writes
 /// tempo changes one tick late, like its notes.
-pub fn tempi_of(song: &Song, recorded: bool) -> Result<Vec<(u64, u32)>, String> {
-    let map = song.time_map().map_err(|e| e.to_string())?;
+pub fn tempi_of(part: &Part, recorded: bool) -> Result<Vec<(u64, u32)>, String> {
+    let map = part.time_map().map_err(|e| e.to_string())?;
     let micros = |bpm: f64| duet_core::time::micros_from_bpm(bpm).map_err(|e| e.to_string());
-    let mut out = vec![(0, micros(song.tempo_bpm)?)];
-    for c in &song.tempo_changes {
+    let mut out = vec![(0, micros(part.tempo_bpm)?)];
+    for c in &part.tempo_changes {
         let tick = map.tick(c.at).map_err(|e| e.to_string())?;
         let tick = if recorded && tick > 0 { tick - 1 } else { tick };
         out.push((tick, micros(c.bpm)?));
@@ -271,10 +271,10 @@ pub fn tempi_of(song: &Song, recorded: bool) -> Result<Vec<(u64, u32)>, String> 
 
 /// Each channel's program, where one is set: the track's own, or (as abc2midi writes it)
 /// a program change in the track's first tick.
-pub fn programs_of(song: &Song) -> Result<BTreeMap<u8, u8>, String> {
-    let map = song.time_map().map_err(|e| e.to_string())?;
+pub fn programs_of(part: &Part) -> Result<BTreeMap<u8, u8>, String> {
+    let map = part.time_map().map_err(|e| e.to_string())?;
     let mut out = BTreeMap::new();
-    for t in &song.tracks {
+    for t in &part.tracks {
         let mut program = t.program;
         for c in &t.controls {
             if let duet_core::Control::Program { at, program: p } = c
@@ -294,7 +294,7 @@ pub fn programs_of(song: &Song) -> Result<BTreeMap<u8, u8>, String> {
 /// Our tempo map and programs against a recording's. Tempos agree to within one
 /// microsecond per quarter: abc2midi's MIDI stores 168 bpm as 357142 µs where duet rounds
 /// to 357143, and that rounding is the only slack.
-fn compare_conductor(ours: &Song, recording: &Song) -> Result<(), String> {
+fn compare_conductor(ours: &Part, recording: &Part) -> Result<(), String> {
     let (a, b) = (tempi_of(ours, false)?, tempi_of(recording, true)?);
     let agree = a.len() == b.len()
         && a.iter()
@@ -314,15 +314,15 @@ fn compare_conductor(ours: &Song, recording: &Song) -> Result<(), String> {
     Ok(())
 }
 
-/// Compares our song with a recording of abc2midi's reading, under the fixed rule and
+/// Compares our part with a recording of abc2midi's reading, under the fixed rule and
 /// the listed differences: every note, then the tempo map and each channel's program.
 /// `Ok` holds the number of notes compared.
-pub fn compare(ours_song: &Song, recording: &Song, diffs: &[Difference]) -> Result<usize, String> {
-    let ours = apply_differences(ours_song, &notes_of(ours_song), diffs)?;
+pub fn compare(ours_part: &Part, recording: &Part, diffs: &[Difference]) -> Result<usize, String> {
+    let ours = apply_differences(ours_part, &notes_of(ours_part), diffs)?;
     let raw = notes_of(recording);
     let theirs = mapped_back(&raw)?;
     if ours == theirs {
-        compare_conductor(ours_song, recording)?;
+        compare_conductor(ours_part, recording)?;
         return Ok(ours.len());
     }
     let count = |v: &[N]| {

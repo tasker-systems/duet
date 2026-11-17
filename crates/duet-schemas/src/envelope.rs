@@ -14,8 +14,8 @@ pub const SCHEMA_BASE: &str =
 /// ```
 /// use duet_schemas::{schema_url, Version};
 /// assert_eq!(
-///     schema_url("song", Version::new(1, 0)),
-///     "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
+///     schema_url("part", Version::new(1, 0)),
+///     "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/part/1.0.json",
 /// );
 /// ```
 #[must_use]
@@ -46,7 +46,7 @@ impl Tool {
 /// Where a body came from, when it was imported from an outside format (ABC, MIDI).
 ///
 /// It is a fact about this file, not about the music, so it lives in the envelope: two
-/// documents with the same body are the same song.
+/// documents with the same body are the same part.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -115,7 +115,7 @@ impl Notice {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Envelope {
-    /// The kind's name, lowercase with hyphens: `song`, `drum-grid`.
+    /// The kind's name, lowercase with hyphens: `part`, `drum-grid`.
     #[schemars(regex(pattern = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"))]
     pub kind: String,
     /// The kind's schema version the body is written at.

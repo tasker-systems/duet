@@ -1,7 +1,7 @@
 //! duet's audio analysis: samples in, events out. Pure DSP, with no I/O, codecs or formats.
 //!
 //! This crate is the analysis half of `duet capture`. Reading a file (Symphonia) and
-//! assembling the events into a `Song` are `duet-capture`'s, which depends on this crate and
+//! assembling the events into a `Part` are `duet-capture`'s, which depends on this crate and
 //! re-exports what it needs from it.
 //!
 //! # The chain
@@ -34,7 +34,7 @@
 //! # The stream rule
 //!
 //! The stream rule, from the design's anti-goals: "A stage that buffers the entire take to
-//! do its work, other than the final assembly into a `Song`, is a design failure."
+//! do its work, other than the final assembly into a `Part`, is a design failure."
 //! Live input would otherwise be a rewrite. A [`Stage`] takes input a piece at a time, holds it
 //! back only until its output is settled, and reports how long that takes
 //! ([`Stage::latency_frames`]). [`estimate`] and [`estimate_key`] are functions over the

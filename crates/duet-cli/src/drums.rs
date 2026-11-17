@@ -10,33 +10,33 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
-use duet_core::{Grid, Song};
+use duet_core::{Grid, Part};
 use duet_drums::DrumGrid;
 
 use crate::config::Config;
 use crate::io::{
-    Format, FormatParser, grid_document, grid_path, read, read_grid_document, same_file,
-    song_format, with_end, write, write_bytes,
+    Format, FormatParser, grid_document, grid_path, part_format, read, read_grid_document,
+    same_file, with_end, write, write_bytes,
 };
 
 #[derive(Subcommand)]
 pub enum DrumsCommand {
-    /// Render a drum grid as a song: a song document (.duet), MIDI (.mid or .midi) or ABC
-    /// (.abc) by the output's name, or a song document on standard output.
+    /// Render a drum grid as a part: a part document (.duet), MIDI (.mid or .midi) or ABC
+    /// (.abc) by the output's name, or a part document on standard output.
     Render {
         /// The grid: a drum-grid document (.duet), or - for one on standard input.
         input: PathBuf,
-        /// The song to write, or - for a song document on standard output (another format
+        /// The part to write, or - for a part document on standard output (another format
         /// with --to). Must not be the input.
         output: PathBuf,
         #[arg(long, value_parser = FormatParser)]
         to: Option<Format>,
     },
-    /// Read a song's drum track into a drum grid. Nothing is moved to fit: a note off
+    /// Read a part's drum track into a drum grid. Nothing is moved to fit: a note off
     /// the grid, or on a key no lane plays, is refused by name. Note lengths, controls
     /// and other tracks are not part of a grid, and are left out.
     Read {
-        /// The song to read (a .duet document, MIDI or ABC by its name), or - for standard
+        /// The part to read (a .duet document, MIDI or ABC by its name), or - for standard
         /// input: a document if it starts with {, MIDI, or ABC with --from abc.
         input: PathBuf,
         /// The grid to write: a drum-grid document (.duet), which keeps any velocity, or - for
@@ -45,11 +45,11 @@ pub enum DrumsCommand {
         /// The step, such as 1/16 for sixteenths or 1/8t for triplet eighths.
         #[arg(long)]
         grid: Grid,
-        /// The drum track's name. Needed only when the song has no single track on
+        /// The drum track's name. Needed only when the part has no single track on
         /// channel 10.
         #[arg(long)]
         track: Option<String>,
-        /// How many bars the grid runs to. Without it, the grid runs to the song's end:
+        /// How many bars the grid runs to. Without it, the grid runs to the part's end:
         /// the one it names, or else the bar line after its last bar with a note or
         /// control. A hit or a tempo, meter or key change past the bars is refused.
         #[arg(long)]
@@ -87,34 +87,34 @@ pub fn write_grid(grid: &DrumGrid, path: &Path, what: &str) -> Result<()> {
     write_bytes(path, grid_document(grid)?.as_bytes())
 }
 
-/// How to read a song's drum track into a grid: `duet drums read`'s flags, which
+/// How to read a part's drum track into a grid: `duet drums read`'s flags, which
 /// `duet convert` takes too.
 pub struct ReadOptions {
     /// The step.
     pub grid: Grid,
     /// The drum track's name, when it is not the one track on the map's channel.
     pub track: Option<String>,
-    /// How many bars the grid runs to, when not to the song's end.
+    /// How many bars the grid runs to, when not to the part's end.
     pub bars: Option<u32>,
     /// Whether to snap velocities to the text levels.
     pub snap_levels: bool,
 }
 
-/// Reads a song's drum track into a grid: the song runs to its configured default end when it
+/// Reads a part's drum track into a grid: the part runs to its configured default end when it
 /// names none, nothing is moved to fit, every velocity is kept unless `snap_levels` snaps them
 /// to the text's levels, and what is left out is said on standard error. `duet convert`,
 /// `duet drums read` and `duet capture` all read drum tracks here.
-pub fn grid_of_song(song: &Song, options: &ReadOptions, config: &Config) -> Result<DrumGrid> {
-    // A song that names no end runs to the configured default's.
-    let song = with_end(song, config.end)?;
+pub fn grid_of_part(part: &Part, options: &ReadOptions, config: &Config) -> Result<DrumGrid> {
+    // A part that names no end runs to the configured default's.
+    let part = with_end(part, config.end)?;
     let track = options.track.as_deref();
-    let drums = DrumGrid::from_song(&song, options.grid, &config.lanes, track, options.bars)?;
+    let drums = DrumGrid::from_part(&part, options.grid, &config.lanes, track, options.bars)?;
     let drums = if options.snap_levels {
         drums.snapped_to_levels()
     } else {
         drums
     };
-    report_left_out(&song, track, &drums);
+    report_left_out(&part, track, &drums);
     Ok(drums)
 }
 
@@ -148,9 +148,9 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
     match command {
         DrumsCommand::Render { input, output, to } => {
             refuse_overwrite(&input, &output, "render")?;
-            let to = song_format(&output, to, "render writes")?;
+            let to = part_format(&output, to, "render writes")?;
             write(
-                &read_grid(&input, "render reads")?.to_song()?,
+                &read_grid(&input, "render reads")?.to_part()?,
                 &output,
                 to,
                 config.end,
@@ -166,7 +166,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
             from,
         } => {
             refuse_overwrite(&input, &output, "read")?;
-            let from = song_format(&input, from, "read reads")?;
+            let from = part_format(&input, from, "read reads")?;
             grid_path(&output, "read writes")?;
             let options = ReadOptions {
                 grid,
@@ -174,7 +174,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
                 bars,
                 snap_levels,
             };
-            let drums = grid_of_song(&read(&input, from, "read reads")?, &options, config)?;
+            let drums = grid_of_part(&read(&input, from, "read reads")?, &options, config)?;
             write_grid(&drums, &output, "read writes")
         }
         DrumsCommand::Snap { input, output } => {
@@ -222,12 +222,12 @@ pub fn moved_velocities(a: &DrumGrid, b: &DrumGrid) -> usize {
 
 /// Says on standard error what reading a drum track left out, so nothing is dropped
 /// silently. Note lengths are always dropped, and the help says so.
-fn report_left_out(song: &Song, track: Option<&str>, grid: &DrumGrid) {
+fn report_left_out(part: &Part, track: Option<&str>, grid: &DrumGrid) {
     let drums = match track {
-        Some(name) => song.tracks.iter().find(|t| t.name == name),
-        None => song.tracks.iter().find(|t| t.channel == grid.channel),
+        Some(name) => part.tracks.iter().find(|t| t.name == name),
+        None => part.tracks.iter().find(|t| t.channel == grid.channel),
     };
-    let others = song.tracks.len().saturating_sub(1);
+    let others = part.tracks.len().saturating_sub(1);
     let controls = drums.map_or(0, |t| t.controls.len());
     if others > 0 || controls > 0 {
         eprintln!(
@@ -241,7 +241,7 @@ fn report_left_out(song: &Song, track: Option<&str>, grid: &DrumGrid) {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use duet_core::Song;
+    use duet_core::Part;
     use duet_drums::DrumGrid;
     use duet_schemas::Document;
 
@@ -290,11 +290,11 @@ mod tests {
     #[test]
     fn off_level_velocities_are_refused_in_the_view_until_snapped() {
         let dir = temp("snap");
-        let song = "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n";
-        let song = Song::from_text(song).expect("parse");
+        let part = "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n";
+        let part = Part::from_text(part).expect("parse");
         std::fs::write(
             dir.join("take.duet"),
-            Document::new(tool(), song).write().expect("document"),
+            Document::new(tool(), part).write().expect("document"),
         )
         .expect("write");
         let p = |name: &str| dir.join(name).to_str().expect("utf-8").to_owned();

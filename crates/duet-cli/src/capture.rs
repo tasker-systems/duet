@@ -1,4 +1,4 @@
-//! `duet capture`: a recorded take in; the exact performance (`.duet`, a song document), a
+//! `duet capture`: a recorded take in; the exact performance (`.duet`, a part document), a
 //! quantized score (`.abc` for a melody, or `.grid.duet`, a drum-grid document, for a rhythm)
 //! and the analysis (`.capture.duet`, a `capture-analysis` document) out. Every document is
 //! written through duet-schemas.
@@ -42,11 +42,11 @@ use duet_capture::{
 };
 #[cfg(feature = "basic-pitch")]
 use duet_capture::{BasicPitch, Thresholds};
-use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
+use duet_core::{Control, Grid, Key, Part, Position, TimeMap, TimeSig};
 use duet_schemas::{Document, Stream};
 
 use crate::config::Config;
-use crate::drums::{ReadOptions, grid_of_song, refuse_overwrite};
+use crate::drums::{ReadOptions, grid_of_part, refuse_overwrite};
 use crate::io::{tool, with_end};
 
 #[derive(Subcommand)]
@@ -165,7 +165,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     };
     // Refused before anything is read, like every refusal: a score on this grid could not be
     // quantized at all.
-    grid.step_ticks(Song::default().ticks_per_quarter)
+    grid.step_ticks(Part::default().ticks_per_quarter)
         .with_context(|| format!("--grid {grid}"))?;
     let outputs = Outputs::new(&args.input, args.output.as_deref(), take)?;
     // Basic Pitch is loaded, and its thresholds checked, before anything is read.
@@ -247,8 +247,8 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     // each note's quantize offset in its steps. A failure here is the score's, reported once
     // the performance is written.
     let ms_per_quarter = 1000.0 * timing.beat_period_frames / f64::from(ANALYSIS_RATE);
-    let quantized = quantize_apart(&captured.song, grid, &kind).and_then(|q| {
-        let offsets = quantize_offsets(&captured.song, &q.song, q.grid, ms_per_quarter)?;
+    let quantized = quantize_apart(&captured.part, grid, &kind).and_then(|q| {
+        let offsets = quantize_offsets(&captured.part, &q.part, q.grid, ms_per_quarter)?;
         Ok((q, offsets))
     });
     if let Ok((q, offsets)) = &quantized {
@@ -277,22 +277,22 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         captured.lead_in,
         captured.downbeat_tick,
         meter,
-        captured.song.ticks_per_quarter,
+        captured.part.ticks_per_quarter,
     );
-    let song_said = [said.clone(), vec![lead_in.clone()]].concat();
-    let mut song = Document::new(tool(), with_end(&captured.song, config.end)?);
-    song.statements.clone_from(&song_said);
-    let song = song.write()?;
+    let part_said = [said.clone(), vec![lead_in.clone()]].concat();
+    let mut part = Document::new(tool(), with_end(&captured.part, config.end)?);
+    part.statements.clone_from(&part_said);
+    let part = part.write()?;
     let analysis = Document::new(tool(), captured.analysis).write()?;
 
     // The performance is written whatever becomes of the score.
-    for line in &song_said {
+    for line in &part_said {
         eprintln!("{line}");
     }
     if let Some(advice) = advice {
         eprintln!("{advice}");
     }
-    write_all(&[(&outputs.song, &song), (&outputs.analysis, &analysis)])?;
+    write_all(&[(&outputs.part, &part), (&outputs.analysis, &analysis)])?;
     if let Some(performance) = performance {
         performance.keep();
     }
@@ -302,7 +302,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
             "{}: {} not written; {} and {} hold the performance",
             named(),
             outputs.score.display(),
-            outputs.song.display(),
+            outputs.part.display(),
             outputs.analysis.display()
         )
     };
@@ -329,7 +329,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
 /// The grid a score is quantized to when no `--grid` is given.
 const DEFAULT_GRID: &str = "1/16";
 
-/// What a take's score is made from, besides the quantized song.
+/// What a take's score is made from, besides the quantized part.
 struct Scoring<'a> {
     take: Take,
     kind: &'a Kind,
@@ -366,11 +366,11 @@ impl Scoring<'_> {
                 self.take == Take::Rhythm,
             ));
         }
-        let trimmed = without_empty_lead_in(&quantized.song, self.downbeat_tick, self.meter)?;
+        let trimmed = without_empty_lead_in(&quantized.part, self.downbeat_tick, self.meter)?;
         if trimmed.is_some() {
             stated.push(statement::LEAD_IN_REMOVED.to_owned());
         }
-        let mut score = trimmed.unwrap_or(quantized.song);
+        let mut score = trimmed.unwrap_or(quantized.part);
         for merge in merge_collisions(&mut score, self.kind)? {
             stated.push(match self.take {
                 Take::Melody => statement::merged_notes(&merge),
@@ -416,7 +416,7 @@ impl Scoring<'_> {
                 };
                 // Every velocity kept exactly: a drum-grid document holds any velocity, so nothing
                 // is snapped to the text's levels, and nothing needs stating.
-                let grid = grid_of_song(&score, &options, self.config)?;
+                let grid = grid_of_part(&score, &options, self.config)?;
                 let mut doc = Document::new(tool(), grid);
                 doc.statements = score_said;
                 doc.write()?
@@ -495,8 +495,8 @@ fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
 
 /// The files a capture writes, each checked before any is written.
 struct Outputs {
-    /// The performance as a song document.
-    song: PathBuf,
+    /// The performance as a part document.
+    part: PathBuf,
     score: PathBuf,
     analysis: PathBuf,
     /// A melody's performance stream.
@@ -514,7 +514,7 @@ impl Outputs {
             PathBuf::from(path)
         };
         let outputs = Outputs {
-            song: named(".duet"),
+            part: named(".duet"),
             score: named(match take {
                 Take::Melody => ".abc",
                 Take::Rhythm => ".grid.duet",
@@ -522,7 +522,7 @@ impl Outputs {
             analysis: named(".capture.duet"),
             performance: (take == Take::Melody).then(|| named(".performance.duet.jsonl")),
         };
-        let all: Vec<&PathBuf> = [&outputs.song, &outputs.score, &outputs.analysis]
+        let all: Vec<&PathBuf> = [&outputs.part, &outputs.score, &outputs.analysis]
             .into_iter()
             .chain(&outputs.performance)
             .collect();
@@ -816,12 +816,12 @@ impl Drop for PerformanceFile {
 
 /// The quantized score of an assembled take with its lead-in taken out, when quantizing has
 /// left no note in the lead-in: every note and control moves back by `downbeat_tick`, the
-/// song starts in `meter`, and the change to it at bar 2 is dropped. `None` when the score
+/// part starts in `meter`, and the change to it at bar 2 is dropped. `None` when the score
 /// has no lead-in, or a note or control still lies in it.
 ///
-/// The song is one `assemble` built, so its only meter change is the one after a pickup, and
+/// The part is one `assemble` built, so its only meter change is the one after a pickup, and
 /// it has no tempo or key changes and names no end.
-fn without_empty_lead_in(score: &Song, downbeat_tick: u64, meter: TimeSig) -> Result<Option<Song>> {
+fn without_empty_lead_in(score: &Part, downbeat_tick: u64, meter: TimeSig) -> Result<Option<Part>> {
     if downbeat_tick == 0 {
         return Ok(None);
     }
@@ -914,15 +914,15 @@ mod tests {
         s.parse().expect("a time signature")
     }
 
-    /// A song with a one-beat pickup before 4/4 and notes at `ticks`.
-    fn with_pickup(ticks: &[u64]) -> Song {
-        let mut song = Song::default();
-        song.time_sig = sig("1/4");
-        song.time_changes.push(TimeChange {
+    /// A part with a one-beat pickup before 4/4 and notes at `ticks`.
+    fn with_pickup(ticks: &[u64]) -> Part {
+        let mut part = Part::default();
+        part.time_sig = sig("1/4");
+        part.time_changes.push(TimeChange {
             at: Position::bar(2),
             time_sig: sig("4/4"),
         });
-        let map = song.time_map().expect("map");
+        let map = part.time_map().expect("map");
         let mut track = Track::new("melody", 1);
         for &t in ticks {
             track.notes.push(Note::new(
@@ -932,14 +932,14 @@ mod tests {
                 80,
             ));
         }
-        song.tracks.push(track);
-        song
+        part.tracks.push(track);
+        part
     }
 
     #[test]
     fn an_empty_pickup_is_taken_out() {
-        let song = with_pickup(&[480, 960, 2400]);
-        let out = without_empty_lead_in(&song, 480, sig("4/4"))
+        let part = with_pickup(&[480, 960, 2400]);
+        let out = without_empty_lead_in(&part, 480, sig("4/4"))
             .expect("moves")
             .expect("the pickup is empty");
         assert_eq!(out.time_sig, sig("4/4"));
@@ -954,19 +954,19 @@ mod tests {
 
     #[test]
     fn a_pickup_with_a_note_in_it_stays() {
-        let song = with_pickup(&[0, 480]);
+        let part = with_pickup(&[0, 480]);
         assert!(
-            without_empty_lead_in(&song, 480, sig("4/4"))
+            without_empty_lead_in(&part, 480, sig("4/4"))
                 .expect("ok")
                 .is_none()
         );
     }
 
     #[test]
-    fn a_song_with_no_lead_in_is_left_alone() {
-        let song = with_pickup(&[0]);
+    fn a_part_with_no_lead_in_is_left_alone() {
+        let part = with_pickup(&[0]);
         assert!(
-            without_empty_lead_in(&song, 0, sig("4/4"))
+            without_empty_lead_in(&part, 0, sig("4/4"))
                 .expect("ok")
                 .is_none()
         );

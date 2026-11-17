@@ -4,7 +4,7 @@ use duet_core::Position;
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The text is not valid ABC, or breaks a rule a song needs, such as a bar of the
+    /// The text is not valid ABC, or breaks a rule a part needs, such as a bar of the
     /// wrong length. `line` and `col` are 1-based, counted in characters.
     #[error("line {line}, col {col}: {msg}")]
     Parse {
@@ -25,8 +25,8 @@ pub enum Error {
         found: String,
         hint: String,
     },
-    /// A song with no ABC form under the writer's rules. `track` is `None` when the
-    /// cause is song-wide, such as a tempo that is not a whole number of bpm.
+    /// A part with no ABC form under the writer's rules. `track` is `None` when the
+    /// cause is part-wide, such as a tempo that is not a whole number of bpm.
     #[error("{}at {at}: {why} ({hint})", track.as_ref().map(|t| format!("track '{t}' ")).unwrap_or_default())]
     Unwritable {
         at: Position,

@@ -3,7 +3,7 @@
 //!
 //! The pipeline is the one `duet capture` runs (`FileSource` → `Prepare` → `Performance` and its
 //! reading on the take's own tuning, or `Hits` → `estimate` → `assemble`), then
-//! `Song::quantized`; the `duet` binary is not involved.
+//! `Part::quantized`; the `duet` binary is not involved.
 
 #![expect(dead_code, reason = "each test file uses part of the support module")]
 
@@ -13,7 +13,7 @@ use duet_capture::{
     ANALYSIS_RATE, Event, FileSource, Given, Hits, Kind, LaneMode, Layer1, Mono, NoteModel,
     Performance, PerformanceFrames, Prepare, ReaderName, Source, Stage, assemble, estimate,
 };
-use duet_core::{Grid, Song, TimeSig};
+use duet_core::{Grid, Part, TimeSig};
 use duet_drums::LaneMap;
 use serde::Deserialize;
 
@@ -82,7 +82,7 @@ pub struct Take {
     /// The given key, as ABC names it in `K:`.
     #[serde(default)]
     pub key: Option<String>,
-    /// The step both songs are quantized to. Default `1/16`.
+    /// The step both parts are quantized to. Default `1/16`.
     #[serde(default = "default_grid")]
     pub grid: String,
 }
@@ -147,12 +147,12 @@ pub fn manifest() -> Manifest {
     manifest
 }
 
-/// Both of a take's songs, quantized to its grid.
+/// Both of a take's parts, quantized to its grid.
 pub struct Reading {
     pub grid: Grid,
     pub ticks_per_quarter: u16,
-    pub found: Song,
-    pub expected: Song,
+    pub found: Part,
+    pub expected: Part,
 }
 
 /// Runs a take through the library pipeline and reads its `expected` file.
@@ -176,7 +176,7 @@ pub fn read_by(
         .map_err(|e| format!("quantizing the capture: {e}"))?;
     let path = dir.join(&take.expected);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let expected = Song::from_text(&text)
+    let expected = Part::from_text(&text)
         .map_err(|e| format!("{}: {e}", path.display()))?
         .quantized(grid)
         .map_err(|e| format!("quantizing {}: {e}", take.expected))?;
@@ -195,7 +195,7 @@ fn capture(
     take: &Take,
     path: &Path,
     reader: ReaderName,
-) -> Result<(Song, Option<duet_capture::Reading>), String> {
+) -> Result<(Part, Option<duet_capture::Reading>), String> {
     let melody = take.kind == TakeKind::Melody;
     let mode = if take.kind == TakeKind::Tapped {
         LaneMode::Asked
@@ -229,7 +229,7 @@ fn capture(
         }
     };
     assemble(&events, ANALYSIS_RATE, &timing, key, &kind)
-        .map(|captured| (captured.song, read))
+        .map(|captured| (captured.part, read))
         .map_err(|e| e.to_string())
 }
 
@@ -332,10 +332,10 @@ fn analyse(
     Ok((events, Some(reading)))
 }
 
-/// A note or hit of a quantized song, where the comparison sees it.
+/// A note or hit of a quantized part, where the comparison sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Played {
-    /// The grid step the note starts on, counted from the start of the song.
+    /// The grid step the note starts on, counted from the start of the part.
     pub step: u64,
     /// The MIDI note number: a melody's pitch, or a drum's key.
     pub midi: u8,
@@ -349,14 +349,14 @@ impl Played {
     }
 }
 
-/// Every note of the song in time order (then pitch), as steps of the grid.
-pub fn played(song: &Song, grid: Grid) -> Result<Vec<Played>, String> {
-    let map = song.time_map().map_err(|e| e.to_string())?;
+/// Every note of the part in time order (then pitch), as steps of the grid.
+pub fn played(part: &Part, grid: Grid) -> Result<Vec<Played>, String> {
+    let map = part.time_map().map_err(|e| e.to_string())?;
     let step = grid
-        .step_ticks(song.ticks_per_quarter)
+        .step_ticks(part.ticks_per_quarter)
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
-    for track in &song.tracks {
+    for track in &part.tracks {
         for note in &track.notes {
             let tick = map.tick(note.at).map_err(|e| e.to_string())?;
             out.push(Played {

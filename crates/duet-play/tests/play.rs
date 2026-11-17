@@ -1,10 +1,10 @@
-//! What CI can witness of `duet play`: the song → timed-events schedule, an offline render
+//! What CI can witness of `duet play`: the part → timed-events schedule, an offline render
 //! through a SoundFont synth, and the timed sends a MIDI port would get, on a fake clock.
 //! Real-time sound and a real port are not covered here; only a local run shows them.
 
 use std::time::Duration;
 
-use duet_core::Song;
+use duet_core::Part;
 use duet_midi::Midi;
 use duet_play::{Renderer, Schedule, TAIL, load_soundfont, render, sample_at, send_timed};
 
@@ -82,24 +82,24 @@ fn sine_font() -> Vec<u8> {
     chunk(b"RIFF", &[b"sfbk".to_vec(), info, sdta, pdta].concat())
 }
 
-fn song(text: &str) -> Song {
-    Song::from_text(text).expect("a song")
+fn part(text: &str) -> Part {
+    Part::from_text(text).expect("a part")
 }
 
 fn secs(d: Duration) -> f64 {
     d.as_secs_f64()
 }
 
-/// Every message is the one the song's MIDI holds, at its tick, with its time from the
+/// Every message is the one the part's MIDI holds, at its tick, with its time from the
 /// tempo map: notes with pitch, channel and velocity, programs, controls and bends.
 #[test]
 fn the_schedule_holds_every_event_at_its_time() {
-    let s = song(
+    let s = part(
         "tempo 120\ntime 4/4\nend 3.1.0\n\n\
          [track \"Keys\" ch1 prog5]\n1.1.0 cc64 127\n1.2.0 C4 1 80\n\n\
          [track \"Bass\" ch2 prog33]\n1.1.0 E2 0.5 100\n2.1.0 bend 4096\n",
     );
-    let schedule = Schedule::from_song(&s).expect("schedule");
+    let schedule = Schedule::from_part(&s).expect("schedule");
     let got: Vec<(f64, Vec<u8>)> = schedule
         .events()
         .iter()
@@ -125,7 +125,7 @@ fn the_schedule_holds_every_event_at_its_time() {
 /// A tempo change moves every later event, and earlier ones not at all.
 #[test]
 fn a_tempo_change_moves_what_follows_it() {
-    let s = song(
+    let s = part(
         "tempo 120\ntime 4/4\nend 4.1.0\n\n[track \"P\" ch1]\n\
          1.4.0 C4 1 80\n3.1.0 D4 1 80\n\n",
     );
@@ -134,8 +134,8 @@ fn a_tempo_change_moves_what_follows_it() {
         at: duet_core::Position::new(2, 1, 0),
         bpm: 60.0,
     });
-    let on = |song: &Song| -> Vec<f64> {
-        Schedule::from_song(song)
+    let on = |part: &Part| -> Vec<f64> {
+        Schedule::from_part(part)
             .expect("schedule")
             .events()
             .iter()
@@ -146,20 +146,20 @@ fn a_tempo_change_moves_what_follows_it() {
     assert_eq!(on(&s), [1.5, 4.0]);
     // Bar 1 at 120 (2 s), then bar 2 at 60 (4 s): bar 3 starts at 6 s.
     assert_eq!(on(&slower), [1.5, 6.0]);
-    assert_eq!(secs(Schedule::from_song(&slower).expect("s").end()), 10.0);
+    assert_eq!(secs(Schedule::from_part(&slower).expect("s").end()), 10.0);
 }
 
-/// What plays is what `duet convert` writes: the schedule of a song is the schedule of
+/// What plays is what `duet convert` writes: the schedule of a part is the schedule of
 /// its MIDI file.
 #[test]
-fn the_schedule_is_the_songs_own_midi() {
+fn the_schedule_is_the_parts_own_midi() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/sketch.notes");
-    let s = song(&std::fs::read_to_string(path).expect("the sample"));
-    let from_song = Schedule::from_song(&s).expect("schedule");
+    let s = part(&std::fs::read_to_string(path).expect("the sample"));
+    let from_part = Schedule::from_part(&s).expect("schedule");
     let from_midi = Schedule::from_midi(&s.to_midi().expect("midi")).expect("schedule");
-    assert_eq!(from_song, from_midi);
+    assert_eq!(from_part, from_midi);
     let notes = s.tracks.iter().map(|t| t.notes.len()).sum::<usize>();
-    let ons = from_song
+    let ons = from_part
         .events()
         .iter()
         .filter(|e| e.message.kind() == 0x90)
@@ -167,13 +167,13 @@ fn the_schedule_is_the_songs_own_midi() {
     assert_eq!(ons, notes, "a note on for every note");
 }
 
-/// The render runs to the song's end and its tail, is silent before the first note, and
+/// The render runs to the part's end and its tail, is silent before the first note, and
 /// sounds within 20 ms of the note's time (the synth works in 64-sample blocks).
 #[test]
 fn an_offline_render_sounds_each_note_where_it_falls() {
     let font = load_soundfont(&sine_font()).expect("the test font");
-    let s = song("tempo 120\ntime 4/4\nend 2.1.0\n\n[track \"P\" ch1]\n1.3.0 A4 1 100\n");
-    let schedule = Schedule::from_song(&s).expect("schedule");
+    let s = part("tempo 120\ntime 4/4\nend 2.1.0\n\n[track \"P\" ch1]\n1.3.0 A4 1 100\n");
+    let schedule = Schedule::from_part(&s).expect("schedule");
     let (left, right) = render(&schedule, &font, RATE).expect("render");
 
     assert_eq!(left.len() as u64, sample_at(schedule.end() + TAIL, RATE));
@@ -199,10 +199,10 @@ fn an_offline_render_sounds_each_note_where_it_falls() {
 fn velocity_reaches_the_synth() {
     let font = load_soundfont(&sine_font()).expect("the test font");
     let peak = |vel: u8| {
-        let s = song(&format!(
+        let s = part(&format!(
             "tempo 120\nend 2.1.0\n\n[track \"P\" ch1]\n1.1.0 A4 1 {vel}\n"
         ));
-        let (left, _) = render(&Schedule::from_song(&s).expect("s"), &font, RATE).expect("r");
+        let (left, _) = render(&Schedule::from_part(&s).expect("s"), &font, RATE).expect("r");
         left.iter().fold(0.0f32, |m, x| m.max(x.abs()))
     };
     assert!(peak(120) > peak(30) * 2.0, "{} vs {}", peak(120), peak(30));
@@ -213,11 +213,11 @@ fn velocity_reaches_the_synth() {
 #[test]
 fn the_render_does_not_depend_on_buffer_size() {
     let font = load_soundfont(&sine_font()).expect("the test font");
-    let s = song(
+    let s = part(
         "tempo 97\ntime 3/4\nend 4.1.0\n\n[track \"P\" ch1]\n1.1.0 A4 0.5 90\n1.2.17 E5 0.7 70\n\
          2.3.200 A3 1 110\n",
     );
-    let schedule = Schedule::from_song(&s).expect("schedule");
+    let schedule = Schedule::from_part(&s).expect("schedule");
     let (whole, _) = render(&schedule, &font, RATE).expect("render");
 
     let mut renderer = Renderer::new(&schedule, &font, RATE).expect("renderer");
@@ -235,14 +235,14 @@ fn the_render_does_not_depend_on_buffer_size() {
 }
 
 /// The sends a port gets: every message's bytes, each sent once its time has come, then a
-/// wait to the song's end.
+/// wait to the part's end.
 #[test]
 fn a_port_is_sent_each_message_at_its_time() {
-    let s = song(
+    let s = part(
         "tempo 120\ntime 4/4\nend 2.1.0\n\n[track \"P\" ch3 prog7]\n1.2.0 C4 1 80\n\
          1.4.0 D4 0.5 60\n",
     );
-    let schedule = Schedule::from_song(&s).expect("schedule");
+    let schedule = Schedule::from_part(&s).expect("schedule");
     let clock = std::cell::Cell::new(Duration::ZERO);
     let mut sent: Vec<(Duration, Vec<u8>)> = Vec::new();
     send_timed::<()>(
@@ -268,8 +268,8 @@ fn a_port_is_sent_each_message_at_its_time() {
 /// A send that fails stops the playing there, and the error comes back.
 #[test]
 fn a_failed_send_stops_playing() {
-    let s = song("tempo 120\nend 2.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n1.2.0 D4 1 80\n");
-    let schedule = Schedule::from_song(&s).expect("schedule");
+    let s = part("tempo 120\nend 2.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n1.2.0 D4 1 80\n");
+    let schedule = Schedule::from_part(&s).expect("schedule");
     let mut count = 0;
     let got = send_timed(
         &schedule,
@@ -302,7 +302,7 @@ fn a_note_ending_never_cuts_off_one_starting_with_it_in_another_track() {
     let a_alone = "tempo 120\nend 2.1.0\n\n[track \"A\" ch1]\n1.2.0 A4 1 100\n";
     let both = "tempo 120\nend 2.1.0\n\n[track \"A\" ch1]\n1.2.0 A4 1 100\n\n\
                 [track \"B\" ch1]\n1.1.0 A4 1 100\n";
-    let schedule = Schedule::from_song(&song(both)).expect("schedule");
+    let schedule = Schedule::from_part(&part(both)).expect("schedule");
     assert_eq!(
         notes(&schedule),
         [
@@ -316,7 +316,7 @@ fn a_note_ending_never_cuts_off_one_starting_with_it_in_another_track() {
     // And the synth hears A's note through its whole length, as it would alone.
     let level = |text: &str| {
         let (left, _) =
-            render(&Schedule::from_song(&song(text)).expect("s"), &font, RATE).expect("render");
+            render(&Schedule::from_part(&part(text)).expect("s"), &font, RATE).expect("render");
         let (from, to) = (RATE as usize * 7 / 10, RATE as usize * 95 / 100);
         left[from..to].iter().map(|x| x.abs()).sum::<f32>() / (to - from) as f32
     };
@@ -331,7 +331,7 @@ fn a_note_ending_never_cuts_off_one_starting_with_it_in_another_track() {
 /// channel in an earlier one.
 #[test]
 fn a_program_change_comes_before_a_note_starting_with_it() {
-    let schedule = Schedule::from_song(&song(
+    let schedule = Schedule::from_part(&part(
         "tempo 120\nend 2.1.0\n\n[track \"A\" ch1]\n1.1.0 C4 1 80\n\n[track \"B\" ch1 prog40]\n",
     ))
     .expect("schedule");
@@ -350,7 +350,7 @@ fn a_program_change_comes_before_a_note_starting_with_it() {
 fn overlapping_notes_on_one_key_each_sound_to_their_end() {
     let font = load_soundfont(&sine_font()).expect("the test font");
     let overlap = "tempo 120\nend 3.1.0\n\n[track \"P\" ch1]\n1.1.0 A4 2 100\n1.2.0 A4 2 100\n";
-    let schedule = Schedule::from_song(&song(overlap)).expect("schedule");
+    let schedule = Schedule::from_part(&part(overlap)).expect("schedule");
     assert_eq!(
         notes(&schedule),
         [(0.0, 0x90, 69), (0.5, 0x90, 69), (1.5, 0x80, 69)]
@@ -366,7 +366,7 @@ fn overlapping_notes_on_one_key_each_sound_to_their_end() {
 /// A note of no length starts, then ends at the same tick: it never leaves a key held.
 #[test]
 fn a_note_of_no_length_starts_then_ends() {
-    let schedule = Schedule::from_song(&song(
+    let schedule = Schedule::from_part(&part(
         "tempo 120\nend 2.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 0 80\n1.1.0 E4 1 80\n",
     ))
     .expect("schedule");

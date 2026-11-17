@@ -1,7 +1,7 @@
 [package]
 name = "duet-drums"
 version.workspace = true
-description = "The duet drum grid: a lanes × steps velocity matrix, its text form, lane maps, and conversion to and from a duet Song."
+description = "The duet drum grid: a lanes × steps velocity matrix, its text form, lane maps, and conversion to and from a duet Part."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

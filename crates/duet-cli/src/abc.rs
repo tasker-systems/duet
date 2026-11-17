@@ -7,22 +7,22 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Subcommand, ValueEnum};
 use duet_abc::{Book, Dynamics, ReadOptions, Tune, WriteOptions};
-use duet_core::Song;
+use duet_core::Part;
 use duet_schemas::{From, Notice};
 
 use crate::config::Config;
-use crate::io::{Format, FormatParser, read, same_file, song_format, with_end, write_from};
+use crate::io::{Format, FormatParser, part_format, read, same_file, with_end, write_from};
 
 #[derive(Subcommand)]
 pub enum AbcCommand {
     /// Read every tune in a file, and list what each holds that is notation only (and
-    /// not carried into a song), or the construct it is refused for, with its line.
+    /// not carried into a part), or the construct it is refused for, with its line.
     Check {
         /// The ABC file to read, or - for standard input.
         input: PathBuf,
     },
-    /// Render one tune as a song: a document (.duet) or MIDI (.mid or .midi) by the output's
-    /// name. Standard output is MIDI unless --to says. `duet view` shows a song as text.
+    /// Render one tune as a part: a document (.duet) or MIDI (.mid or .midi) by the output's
+    /// name. Standard output is MIDI unless --to says. `duet view` shows a part as text.
     Render {
         /// The ABC file to read, or - for standard input.
         input: PathBuf,
@@ -34,10 +34,10 @@ pub enum AbcCommand {
         #[arg(long, value_parser = FormatParser)]
         to: Option<Format>,
     },
-    /// Write a song as ABC. Nothing is quantized: a note ABC cannot write where it is
+    /// Write a part as ABC. Nothing is quantized: a note ABC cannot write where it is
     /// is refused by name.
     Write {
-        /// The song to read: a .duet document or MIDI by its name, or - for standard input (a
+        /// The part to read: a .duet document or MIDI by its name, or - for standard input (a
         /// document if it starts with {, else MIDI).
         input: PathBuf,
         /// The ABC file to write, or - for standard output. Must not be the input.
@@ -73,16 +73,16 @@ fn text_of(path: &Path) -> Result<String> {
 }
 
 /// Reads a tune, and says on standard error how many notation-only constructs it held,
-/// so nothing is dropped silently. They come back as the song's provenance, `from`: the
+/// so nothing is dropped silently. They come back as the part's provenance, `from`: the
 /// format, the tune's `X:` number, and each notice at its line and column, as a `.duet`
-/// written from the song records them. A refused construct fails the read, so none is ever
+/// written from the part records them. A refused construct fails the read, so none is ever
 /// recorded.
-pub fn reading(tune: &Tune) -> Result<(Song, From)> {
-    let reading = tune.to_song(&ReadOptions::default())?;
+pub fn reading(tune: &Tune) -> Result<(Part, From)> {
+    let reading = tune.to_part(&ReadOptions::default())?;
     let n = reading.notices.len();
     if n > 0 {
         eprintln!(
-            "duet: X:{} held {n} notation-only construct{}, not carried into the song; \
+            "duet: X:{} held {n} notation-only construct{}, not carried into the part; \
              duet abc check lists them",
             tune.x(),
             if n == 1 { "" } else { "s" }
@@ -91,7 +91,7 @@ pub fn reading(tune: &Tune) -> Result<(Song, From)> {
     let mut from = From::new("abc");
     from.tune = Some(tune.x().to_string());
     from.notices = reading.notices.iter().map(notice).collect();
-    Ok((reading.song, from))
+    Ok((reading.part, from))
 }
 
 /// duet-abc's notice, as the envelope records it.
@@ -174,11 +174,11 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
                     book.tunes().len()
                 ),
             };
-            let (song, from) = reading(tune)?;
+            let (part, from) = reading(tune)?;
             // Standard output is MIDI here unless --to says, as it always was.
             let to = to.or((output == Path::new("-")).then_some(Format::Midi));
-            let to = song_format(&output, to, "duet abc render writes")?;
-            write_from(&song, &output, to, config.end, Some(&from))
+            let to = part_format(&output, to, "duet abc render writes")?;
+            write_from(&part, &output, to, config.end, Some(&from))
         }
         AbcCommand::Write {
             input,
@@ -190,8 +190,8 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             if input != Path::new("-") && same_file(&input, &output) {
                 bail!("{} is the input; write makes a new file", output.display());
             }
-            let from = song_format(&input, from, "duet abc write reads")?;
-            let song = with_end(&read(&input, from, "duet abc write reads")?, config.end)?;
+            let from = part_format(&input, from, "duet abc write reads")?;
+            let part = with_end(&read(&input, from, "duet abc write reads")?, config.end)?;
             let mut options = WriteOptions::default().with_dynamics(match dynamics {
                 DynamicsArg::Refuse => Dynamics::Refuse,
                 DynamicsArg::Nearest => Dynamics::Nearest,
@@ -200,7 +200,7 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
                 let (n, d) = unit_of(&unit)?;
                 options = options.with_unit(n, d);
             }
-            let abc = duet_abc::write(&song, &options)?;
+            let abc = duet_abc::write(&part, &options)?;
             if output == Path::new("-") {
                 crate::stdout(&abc)
             } else {
