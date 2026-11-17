@@ -7,7 +7,8 @@ stand"), with two dropped and two changed, and added one: temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, read together with the domain model, temper
 `01a1eb48-6b7a-7797-bb2b-68f335de87e9`. The rulings are listed in
 [Decisions (ruled 2026-11-17)](#decisions-ruled-2026-11-17). Decisions 12 and 13, taken in from the
-bus design after the eleven were set out, are ruled there (#75). What is still marked **Proposed** is
+bus design's layout asks after the eleven were set out, were ruled by the owner the same day,
+decision 12 changed. What is still marked **Proposed** is
 the design those rulings rest on: the owner ruled its decisions, not each line. Nothing here is
 built.
 
@@ -78,7 +79,7 @@ Secondary sources, read 2026-11-17, listed at the end. What was not verified is 
 | Tool | What it does | Taken | Left |
 |---|---|---|---|
 | **Logic Pro** | A project is a package or a folder. "Copy audio files into project" decides whether imported audio is copied in or referenced where it is. Apple notes a folder lets several project versions share one set of audio. | The choice between copying a source in and naming it where it is, made per source and stated. A plain folder, never a package: a package hides files from the CLI and from Claude, and sync tools have broken packages into folders. One set of takes shared by several songs. | The package. |
-| **Ardour** | A session is a folder with a fixed layout: `interchange/` for recorded and imported audio, `peaks/` and `analysis/` that are safe to delete and are rebuilt, `export/`, and the session file with its `.bak` and `.history`. Its manual says to move the whole folder, never the session file alone. | Fixed, named directories by what a file is. Rebuildable data in a place of its own. The record of actions (Ardour's `.history`) kept beside the state, not in place of it. | Undo history as a separate file per save: duet's journal is one append-only stream. |
+| **Ardour** | A session is a folder with a fixed layout: `interchange/` for recorded and imported audio, `peaks/` and `analysis/` that are safe to delete and are rebuilt, `export/`, and the session file with its `.bak` and `.history`. Its manual says to move the whole folder, never the session file alone. | Fixed, named directories by what a file is. Rebuildable data in a place of its own. The record of actions (Ardour's `.history`) kept beside the state, not in place of it. | Undo history as a separate file per save: duet's journal is append-only segments behind one index. |
 | **REAPER** | Media is referenced by path unless "copy all media into project directory" is ticked. A relative media path keeps a project portable; an absolute one breaks it. `.reapeaks` are rebuilt if missing. A shared media folder cleaned by one project can delete another's media. | Paths inside a project are always relative. A source outside the project is found by a machine-local map, never by a path written into the project document. One project's cleanup never touches anything outside it. | |
 | **DVC** | A small `.dvc` file names a large file by its hash, size and relative path; the content lives in a cache. | **The core idea:** the project document names a source by its content digest, and finds its content separately. duet's digest is already ruled. | A content-addressed cache directory of duet's own. A take is few and large, and its name is the owner's, not a hash. |
 | **git-annex** | Locked files are symlinks to content named by a key (`SHA256E` by default: a SHA-256 of the content and the extension). Unlocked files are pointer files behind git's clean and smudge filters, because symlinks get in the way of tools that edit files. | Identity by digest, and the lesson of its unlocked mode: **no symlinks.** They fail on Windows, in sync tools and in cloud sessions, and an audio app that follows one may write through it. | Any git integration. duet never runs git, hooks or filters. |
@@ -117,7 +118,8 @@ porch/                              the project: any directory, outside the duet
     takes.local.toml                where named takes live on this machine      machine-local
     run/                            the server's socket and lock, when running  machine-local
     state/                          the view-state store, when a face needs it  machine-local
-  journal.duet.jsonl                the domain-event journal                    the journal
+  journal.duet.jsonl                the journal's index: segments and their ranges   the journal
+  journal.<timestamp>.duet.jsonl    one segment of events, open or closed            the journal
   takes/
     wayfaring/                      one take: its source and everything from it
       wayfaring.flac                the source, when copied in (absent when named)
@@ -154,7 +156,7 @@ porch/                              the project: any directory, outside the duet
 | **Parts, comps** | `songs/<song>/parts/`, `songs/<song>/comps/` | The song's working files. Every change in the journal |
 | **Snapshots** | `songs/<song>/snapshots/<name>/` | Copies, written once and never changed |
 | **Other authored files** | `.duet/project.duet`, `.duet/duet.toml`, `review/` | Small and precious |
-| **The journal** | `journal.duet.jsonl` | Append-only |
+| **The journal** | `journal.duet.jsonl` (the index) and `journal.<timestamp>.duet.jsonl` (segments) | Append-only |
 | **Rebuildable** | `renders/` | Rebuilt from parts and songs. No special status |
 | **Machine-local** | `.duet/*.local.toml`, `.duet/run/`, `.duet/state/` | This machine only |
 | **Outside the project** | the user's config directory, the weights cache, soundfonts | Per user |
@@ -302,9 +304,9 @@ It does not:
 - **move, copy or delete anything.** Adopting files is a separate, explicit step
   ([§7](#7-adopting-scratch-work)).
 - **write a `.gitignore` or a `.gitattributes`, run git, or print a git line.** **Ruled** (decision
-  7, and its amendment of the bus design's decision 12). The journal is append-only, one event
-  per line, so it tolerates a union merge; someone who keeps a project in git may add
-  `journal.duet.jsonl merge=union` themselves, and duet doesn't write it.
+  7, and its amendment of the bus design's decision 12). The journal's files are append-only, one
+  entry per line, so they tolerate a union merge; someone who keeps a project in git may add
+  `merge=union` for them themselves, and duet doesn't write it.
 - **make directories** beyond `.duet/`.
 - **make a song.** `duet song new <name>` does that
   ([the songs design](2026-11-17-songs-and-composition-design.md)).
@@ -486,20 +488,29 @@ paths this section reserved and asked for four things more (its
 ["What this asks of the project layout"](2026-11-17-bus-design.md#what-this-asks-of-the-project-layout)).
 What the layout holds:
 
-1. **The journal is `journal.duet.jsonl` at the project root,** one stream per project, kind
-   `journal` 1.0, read with `duet journal show | check`. **Ruled** (owner, 2026-11-17, the bus
-   design's decision 15): it was `log.duet.jsonl`, but it is more than a log, and many things are
-   logs. It is the durable record: a restarted server replays it, and a CLI with no server appends
+1. **The journal is one per project, at the project root,** kind `journal` 1.0, read with
+   `duet journal show | check`. **Ruled** (owner, 2026-11-17, the bus design's decision 15): it was
+   `log.duet.jsonl`, but it is more than a log, and many things are logs. It is the durable record: a restarted server replays it, and a CLI with no server appends
    to it under the journal lock. It carries each song's history, since a session is not a duet
    entity (the domain model, ruling 1). It names takes by name and digest, never by path
    ([§6](#6-no-sharing-status-and-no-git)).
-   - **`init` writes no `.gitattributes`.** The journal is append-only, one event per line, so it
-     tolerates a union merge; someone who keeps a project in git may add
-     `journal.duet.jsonl merge=union` themselves, and duet doesn't write it. **Ruled** (owner,
-     2026-11-17, temper `01a1eb60`, amending the bus design's decision 12).
-   - **One file, never rotated, in v1.** A year of sessions is a few megabytes. Rotation, if ever
-     needed, is a later change to the layout. **Ruled (bus design, #75):** its layout ask 4
-     ([decision 12](#from-the-bus-design)).
+   - **An index plus timestamped segments.** **Ruled (owner, 2026-11-17, temper `01a1eb60`,
+     decision 12):**
+     - `journal.duet.jsonl` is the **index**. Each entry maps a segment file to the date range it
+       covers and to the project-level elements it concerns.
+     - Events live in **segments**, `journal.<timestamp>.duet.jsonl`.
+     - **The current segment** is the index entry with no end of range, matched to the file on disk
+       by its timestamp.
+   - **Left to the bus design to propose,** for the owner to rule: when a new segment starts (by
+     size, by date or on an event); which project-level elements the index names (songs, takes,
+     parts, say); the timestamp format in the file name; how replay and a subscriber's cursor move
+     across segments; how the index and the segments are written under the journal lock; and how an
+     index entry is closed. This supersedes the bus design's layout ask 4, "one file, never
+     rotated, in v1".
+   - **`init` writes no `.gitattributes`.** The journal's files are append-only, one entry per line,
+     so they tolerate a union merge; someone who keeps a project in git may add `merge=union` for
+     them themselves, and duet doesn't write it. **Ruled** (owner, 2026-11-17, temper `01a1eb60`,
+     amending the bus design's decision 12).
 2. **The server is found through a lock at a fixed path, `.duet/run/bus.lock`,** machine-local. It is
    a small TOML file naming the server's pid and **its socket's path**. The socket is usually in
    `.duet/run/` too, and falls back to `$TMPDIR` when the project's path is too long for a Unix
@@ -507,9 +518,9 @@ What the layout holds:
    6), refining this section's earlier "a fixed path for the socket".
    - **A stale lock is left for the next server to overwrite.** The CLI does not clear it: the
      `flock` already says it is stale, and a CLI that deleted it could race a server that is just
-     starting. **Ruled (bus design, #75):** its layout ask 2
-     ([decision 13](#from-the-bus-design)). This
-     replaces this section's earlier "a stale lock is the CLI's to clear".
+     starting. **Ruled (owner, 2026-11-17, temper `01a1eb60`,
+     [decision 13](#from-the-bus-design)).** This replaces this section's earlier "a stale lock is
+     the CLI's to clear".
 3. **The state store is `.duet/state/state.sqlite`,** machine-local, holding only view state (open
    take and moment, layout, each face's last-read cursor) and caches. It is **not built until a face
    needs it**, so the CLI-first build has none. Anything a person or Claude acts on (open asks, a
@@ -609,13 +620,19 @@ own repository", §6 as a licence boundary, and the "Shared?" column of the layo
 
 ### From the bus design
 
-Taken in from the bus design after the eleven were set out. **Ruled (bus design, #75),** which the
-owner ruled and merged:
+Taken in from the bus design's "What this asks of the project layout" (items 4 and 2) after the
+eleven were set out. They were not among the bus design's fifteen ruled decisions.
 
-12. **The journal is one file, never rotated, in v1**
-    ([§10](#10-what-the-layout-holds-for-the-bus)): the bus design's layout ask 4.
+12. **The journal is one file, never rotated, in v1.** **Changed: an index plus segments. Ruled
+    (owner, 2026-11-17, temper `01a1eb60`).** `journal.duet.jsonl` is the index; events live in
+    segments `journal.<timestamp>.duet.jsonl`; the current segment is the index entry with no end
+    of range. The details are the bus design's to propose
+    ([§10](#10-what-the-layout-holds-for-the-bus)). In the owner's words: "we should have a
+    `journal.duet.jsonl` that is the index file for other journal files like
+    `journal.<timestamp>.duet.jsonl`".
 13. **A stale `.duet/run/bus.lock` is left for the next server to overwrite,** not cleared by the
-    CLI ([§10](#10-what-the-layout-holds-for-the-bus)): the bus design's layout ask 2.
+    CLI ([§10](#10-what-the-layout-holds-for-the-bus)). **Ruled (owner, 2026-11-17, temper
+    `01a1eb60`).**
 
 ## Not decided here
 

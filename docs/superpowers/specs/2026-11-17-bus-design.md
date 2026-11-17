@@ -757,6 +757,8 @@ design the layout:
    conflict.
 4. **The journal is one file, never rotated, in v1.** At a few hundred bytes an event, a year of
    sessions is a few megabytes. Rotation, if ever needed, is a later minor of the project's layout.
+   **Superseded (owner, 2026-11-17, temper 01a1eb60): the journal is an index plus timestamped
+   segments; the bus design will propose the details.**
 
 ## Build tasks
 
