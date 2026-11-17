@@ -66,7 +66,7 @@ Secondary sources, read 2026-11-17, listed at the end. What was not verified is 
 | Tool | What it does | Taken | Left |
 |---|---|---|---|
 | **Logic Pro** | A project is a package or a folder. "Copy audio files into project" decides whether imported audio is copied in or referenced where it is. Apple notes a folder lets several project versions share one set of audio. | The choice between copying a source in and naming it where it is, made per source and stated. A plain folder, never a package: a package hides files from the CLI and from Claude, and sync tools have broken packages into folders. | The package. |
-| **Ardour** | A session is a folder with a fixed layout: `interchange/` for recorded and imported audio, `peaks/` and `analysis/` that are safe to delete and are rebuilt, `export/`, and the session file with its `.bak` and `.history`. Its manual says to move the whole folder, never the session file alone. | Fixed, named directories by what a file is. Rebuildable data marked as rebuildable. The record of actions (Ardour's `.history`) kept beside the state, not in place of it. | Undo history as a separate file per save: duet's record is one append-only stream. |
+| **Ardour** | A session is a folder with a fixed layout: `interchange/` for recorded and imported audio, `peaks/` and `analysis/` that are safe to delete and are rebuilt, `export/`, and the session file with its `.bak` and `.history`. Its manual says to move the whole folder, never the session file alone. | Fixed, named directories by what a file is. Rebuildable data marked as rebuildable. The record of actions (Ardour's `.history`) kept beside the state, not in place of it. | Undo history as a separate file per save: duet's journal is one append-only stream. |
 | **REAPER** | Media is referenced by path unless "copy all media into project directory" is ticked. A relative media path keeps a project portable; an absolute one breaks it. `.reapeaks` are rebuilt if missing. A shared media folder cleaned by one project can delete another's media. | Paths inside a project are always relative. A source outside the project is found by a machine-local map, never by a path written into a shared file. One project's cleanup never touches anything outside it. | |
 | **DVC** | A small `.dvc` file, committed to git, names a large file by its hash, size and relative path; the content lives in a cache and is kept out of git. | **The core idea:** the shared half names a source by its content digest, and the content lives somewhere git does not see. duet's digest is already ruled. | A content-addressed cache directory of duet's own. A take is few and large, and its name is the owner's, not a hash. |
 | **git-annex** | Locked files are symlinks to content named by a key (`SHA256E` by default: a SHA-256 of the content and the extension). Unlocked files are pointer files behind git's clean and smudge filters, because symlinks get in the way of tools that edit files. | Identity by digest, and the lesson of its unlocked mode: **no symlinks.** They fail on Windows, in sync tools and in cloud sessions, and an audio app that follows one may write through it. | Any git integration. duet never runs git hooks or filters. |
@@ -101,7 +101,7 @@ wayfaring/                          the project: any directory, outside the duet
     run/                            the server's socket and lock, when running  ignored
     state/                          the state store, its kind still to be ruled ignored
   .gitignore                        written by init, its duet block kept by duet
-  log.duet.jsonl                    the domain-event log                        the record
+  journal.duet.jsonl                the domain-event journal                    the journal
   takes/                            THE LICENCE BOUNDARY: ignored by one rule
     wayfaring/                      one take: its source and everything from it
       wayfaring.flac                the source, when copied in (absent when named)
@@ -129,7 +129,7 @@ wayfaring/                          the project: any directory, outside the duet
 | **Sources** | `takes/<name>/<file>`, or named where they are ([§4](#4-sources-named-without-copying)) | Never modified. Identified by digest | Restricted by default |
 | **Derived from a source** | `takes/<name>/` | Rebuilt from the source and the tool's version. A reading names its reader and passes, so variants sit side by side | Inherits its take's restriction |
 | **Authored** | `.duet/project.duet`, `.duet/duet.toml`, `review/`, `comps/`, `parts/` | Small and precious. Versioned like code | Shareable even when the audio is not |
-| **The record** | `log.duet.jsonl` | Append-only | As authored |
+| **The journal** | `journal.duet.jsonl` | Append-only | As authored |
 | **Rebuildable, not restricted** | `renders/` | Rebuilt from parts | Ignored by default, as build output is |
 | **Machine-local** | `.duet/*.local.toml`, `.duet/run/`, `.duet/state/` | This machine only | Never |
 | **Outside the project** | the user's config directory, the weights cache, soundfonts | Per user | Not applicable |
@@ -164,7 +164,7 @@ The `duet init` task asks this for the workbench (its "Added 2026-11-16").
   default `--dir` becomes this.
 - **A verdict that picks or marks** is a comp entry (variants design §8, ruled):
   `comps/<take>.comp.duet`.
-- **A verdict that picks nothing** ("no audible difference") lives in the record, as the variants
+- **A verdict that picks nothing** ("no audible difference") lives in the journal, as the variants
   design says. Whether the review task also keeps answers beside the moments file
   (`review/<take>.answers`, say) is that task's call; `review/` is where it would go.
 
@@ -316,8 +316,9 @@ duet take list                                              # every take, where 
   refused, naming the take, its digest, where duet looked, and `duet take locate`.
 - **No symlinks, ever** (git-annex's lesson). A take is a file in the project or a path in the
   local map.
-- **`duet record` in a project** records straight into `takes/<name>/<name>.flac`, adds the take
-  as `copied`, and logs it. It is the owner's own recording, so it is copied by definition.
+- **`duet record` in a project** records straight into `takes/<name>/<name>.flac`, adds the take as
+  `copied`, and records it in the journal. It is the owner's own recording, so it is copied by
+  definition.
 - **A take is never removed by a command.** `duet take forget <name>` drops the entry and its
   local path, and leaves every file in `takes/<name>/` for the owner to delete.
 
@@ -395,9 +396,9 @@ no command needs a project. Outside one, every command works exactly as today.
   restricted with their take is [decision 3](#decisions-for-the-owner).
 - **The authored half can be a repository of its own.** With the block in place, `git init` in the
   project commits only what is shareable. That is how a cloud session could ever see a project: it
-  sees the moments, comps, parts and record, and none of the audio, exactly as today's cloud
+  sees the moments, comps, parts and journal, and none of the audio, exactly as today's cloud
   sessions work from what the owner chose to share.
-- **The record names takes by name and digest, never by path,** so a shared record leaks no
+- **The journal names takes by name and digest, never by path,** so a shared journal leaks no
   machine path.
 
 ## 7. Adopting scratch work
@@ -429,7 +430,8 @@ The plan reads every file in the directory given and sorts it:
 
 Then:
 - **`--apply` copies** what the plan said, refusing any file that exists at the destination, and
-  logs one act per take. The scratch directory is untouched: deleting it is the owner's.
+  writes one act per take to the journal. The scratch directory is untouched: deleting it is the
+  owner's.
 - **Nothing is rewritten.** An adopted document's bytes are the same; its new path is the only
   change. That keeps every digest a comp or view header holds.
 - **The duet checkout's `fixtures/`** is the first thing to adopt. Once its work is in projects,
@@ -480,10 +482,12 @@ project state kept in something more like SQLite.
 The bus, its events and the CLI's hand-off are the workbench design's. This spec states what the
 layout must hold, **Proposed**, and leaves the rest open:
 
-1. **The domain-event log is `log.duet.jsonl` at the project root,** one stream per project. It is
-   the durable record: a restarted server replays it, and a CLI with no server appends to it. Its
-   kind and its events are the workbench's. It is authored-tier, so it is committed with the
-   authored half and names takes by name and digest, never by path ([§6](#6-the-licence-boundary)).
+1. **The domain-event journal is `journal.duet.jsonl` at the project root,** one stream per project.
+   **Named by the owner (2026-11-17),** in review of the bus design: it was `log.duet.jsonl`, but it
+   is more than a log, and many things are logs. It is the durable record: a restarted server
+   replays it, and a CLI with no server appends to it. Its kind and its events are the workbench's.
+   It is authored-tier, so it is committed with the authored half and names takes by name and
+   digest, never by path ([§6](#6-the-licence-boundary)).
 2. **The server is discoverable at a fixed path under `.duet/run/`,** git-ignored and machine-local:
    its socket, and a lock that says a server owns the project, holding its process id. A CLI looks
    there and nowhere else, so the quick check the ruling asks for is one stat and one connect. A
@@ -493,10 +497,10 @@ layout must hold, **Proposed**, and leaves the rest open:
    turns out to be (SQLite, a key-value file, or nothing). Proposed constraints, for the owner to
    rule with the durable/ephemeral line:
    - **it is never the only copy of authored work.** The project document, the comps, the moments
-     and the log stay files, as files first requires; a cloud session or a fresh clone sees no
+     and the journal stay files, as files first requires; a cloud session or a fresh clone sees no
      state store;
    - **deleting it loses only view and session state** (what was open, selected, playing), and
-     anything else in it can be rebuilt from the documents and the log;
+     anything else in it can be rebuilt from the documents and the journal;
    - **it is per machine,** never synced or committed, like `takes.local.toml`.
 
    If the owner rules that some project-level state lives only in the store, that state is not
@@ -506,8 +510,9 @@ layout must hold, **Proposed**, and leaves the rest open:
    in its own UI, since a DAW's working directory means nothing, then finds the server as the CLI
    does. Whether a sandboxed AUv3 can reach a project directory at all is the plugin design's check.
 
-**Open, for the workbench design:** the log's kind and events; what the server holds in memory; the
-transport; whether the log is ever split or rotated; and whether the state store exists at all.
+**Open, for the workbench design:** the journal's kind and events; what the server holds in memory;
+the transport; whether the journal is ever split or rotated; and whether the state store exists at
+all.
 
 ## Witnesses
 
@@ -549,7 +554,7 @@ Each names its witness. None is built before the owner rules.
 5. **Adoption:** `duet project adopt` and `--apply`. **Needs:** 3. **Witness:** the adopt test, and
    the owner's `fixtures/` adopted into a project on the owner's machine.
 
-The log's kind, and the server's socket, lock and state store under `.duet/`, are the workbench
+The journal's kind, and the server's socket, lock and state store under `.duet/`, are the workbench
 design's to build. This design reserves their paths and ignores them.
 
 ## Decisions for the owner
@@ -587,12 +592,12 @@ design's to build. This design reserves their paths and ignores them.
     decision 1. *Recommended: keep it separate.*
 11. **The state store is never the only copy of authored work**
     ([§10](#10-what-the-layout-holds-for-the-bus)). It holds view and session state and what can be
-    rebuilt; the project document, comps, moments and log stay files. This is to rule together with
-    the bus decision's open durable/ephemeral line. *Recommended: yes.*
+    rebuilt; the project document, comps, moments and journal stay files. This is to rule together
+    with the bus decision's open durable/ephemeral line. *Recommended: yes.*
 
 ## Not decided here
 
-- **The log's kind and events, the bus, and the state store's kind:** the workbench design's.
+- **The journal's kind and events, the bus, and the state store's kind:** the workbench design's.
 - **Composition:** layered or orchestrated, and alignment across takes: the composition task's.
 - **A take kind of its own**, listing a take's variants (the variants design left it to "the project
   and session record"): the project document's `takes` entry carries the take's identity, and the
