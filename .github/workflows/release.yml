@@ -82,6 +82,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
+      # duet-play's cpal and midir build against ALSA on Linux, and verify-packaging compiles
+      # them. The same pins as ci.yml's step of this name (SC-IN-1); move both together.
+      - name: ALSA headers for duet play
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1
       - name: Verify-package every crate crates.io lacks
         env:
           VERSION: ${{ needs.determine-version.outputs.version }}

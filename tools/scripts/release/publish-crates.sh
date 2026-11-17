@@ -11,7 +11,8 @@
 #
 #   --out DIR   the BUILD stage: `cargo package` every crate, which verify-compiles each against the
 #               others' packaged versions, and copy the `.crate` files into DIR. A crate already on
-#               crates.io at VERSION is left out. Holds no registry credential.
+#               crates.io at VERSION is left out, and when every crate is, nothing is compiled and
+#               DIR is left empty. Holds no registry credential.
 #   --from DIR  the PUBLISH stage: for each crate, in order, skip it if crates.io has it at
 #               VERSION; else re-package it without compiling, require its bytes to equal the
 #               verified `.crate` in DIR, and `cargo publish --no-verify` it. Compiles nothing.
@@ -67,12 +68,19 @@ done
 
 if [[ -n "$OUT_DIR" ]]; then
     log_header "verify-package duet ${VERSION} into ${OUT_DIR}"
+    mkdir -p "$OUT_DIR"
+    MISSING=0
+    for crate in "${CRATES[@]}"; do crate_published "$crate" "$VERSION" || MISSING=$((MISSING + 1)); done
+    if [[ "$MISSING" -eq 0 ]]; then
+        # Nothing to publish, so nothing is compiled: the release's publish job will not run.
+        log_info "every duet crate is on crates.io at ${VERSION}; nothing to package"
+        exit 0
+    fi
     PKG_ARGS=()
     for crate in "${CRATES[@]}"; do PKG_ARGS+=(-p "$crate"); done
     # All at once, so the unpublished crates resolve each other from cargo's local overlay and the
     # whole set is verified before anything is published.
     cargo package "${PKG_ARGS[@]}"
-    mkdir -p "$OUT_DIR"
     for crate in "${CRATES[@]}"; do
         if crate_published "$crate" "$VERSION"; then
             log_info "${crate} ${VERSION} is already on crates.io; left out"
