@@ -19,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.11 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.12 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -29,7 +29,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.11.json"))
+        .build(&read_json("schemas/capture-analysis/1.12.json"))
         .unwrap()
 }
 
@@ -49,9 +49,17 @@ fn validator_at(version: &str) -> jsonschema::Validator {
         .unwrap()
 }
 
-/// `document`, restamped as a capture-analysis document at `version`.
+/// `document`, restamped as a capture-analysis document at `version`. Before 1.12 the key states
+/// no profile, so its `profile` is left out, as every analysis now has one; any other field
+/// newer than `version` is the caller's to remove.
 fn as_version(document: &Value, version: &str) -> Value {
     let mut older = document.clone();
+    let minor: u32 = version.strip_prefix("1.").unwrap().parse().unwrap();
+    if minor < 12
+        && let Some(key) = older["body"]["key"].as_object_mut()
+    {
+        key.remove("profile");
+    }
     older["$schema"] = json!(format!(
         "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/{version}.json"
     ));
@@ -269,6 +277,8 @@ fn an_estimated_analysis_round_trips_exactly_and_validates() {
         json!({ "name": "rules", "note_cost": 4.0 })
     );
     assert!(body["key"]["key"]["estimated"].is_object(), "{body}");
+    // The key's profile, since 1.12.
+    assert_eq!(body["key"]["profile"], json!("aarden-essen"), "{body}");
 }
 
 #[test]
@@ -400,11 +410,7 @@ fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_8() {
         .with_registry(&registry)
         .build(&read_json("schemas/capture-analysis/1.7.json"))
         .unwrap();
-    let mut as_1_7 = value.clone();
-    as_1_7["$schema"] = json!(
-        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.7.json"
-    );
-    as_1_7["duet"]["version"] = json!("1.7");
+    let mut as_1_7 = as_version(&value, "1.7");
     assert!(!older.is_valid(&as_1_7), "1.7 accepts basic-pitch");
     // The same document read by the rules is a valid 1.7 one: only the reader's name differs.
     as_1_7["body"]["reading"]["reader"]["name"] = json!("rules");
@@ -474,11 +480,7 @@ fn a_readings_breathy_notes_round_trip_exactly_and_validate_only_from_1_9() {
     }
     // capture-analysis 1.8 has no `breathy`: a 1.8 reader refuses it, and takes the same
     // document without it.
-    let mut as_1_8 = value.clone();
-    as_1_8["$schema"] = json!(
-        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.8.json"
-    );
-    as_1_8["duet"]["version"] = json!("1.8");
+    let mut as_1_8 = as_version(&value, "1.8");
     let older = validator_1_8();
     assert!(!older.is_valid(&as_1_8), "1.8 accepts breathy");
     as_1_8["body"]["reading"]
@@ -540,4 +542,31 @@ fn a_readings_held_notes_and_suggestions_round_trip_exactly_and_validate_only_fr
     body.remove("held");
     body.remove("suggestions");
     assert!(older.is_valid(&as_1_10), "the 1.10 control is not valid");
+}
+
+#[test]
+fn a_keys_profile_round_trips_exactly_and_validates_only_from_1_12() {
+    let analysis = analysis_of(&take_with_an_approach(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    assert_eq!(value["body"]["key"]["profile"], json!("aarden-essen"));
+    let mut other = value.clone();
+    other["body"]["key"]["profile"] = json!("krumhansl-kessler");
+    assert_valid(&other);
+    let mut unknown = value.clone();
+    unknown["body"]["key"]["profile"] = json!("temperley");
+    assert!(
+        !validator().is_valid(&unknown),
+        "an unknown profile is accepted"
+    );
+    // capture-analysis 1.11 has no profile: a 1.11 reader refuses it, and takes the same
+    // document without it.
+    let older = validator_at("1.11");
+    let mut as_1_11 = value.clone();
+    as_1_11["$schema"] = as_version(&value, "1.11")["$schema"].clone();
+    as_1_11["duet"]["version"] = json!("1.11");
+    assert!(!older.is_valid(&as_1_11), "1.11 accepts a profile");
+    assert!(
+        older.is_valid(&as_version(&value, "1.11")),
+        "the 1.11 control is not valid"
+    );
 }

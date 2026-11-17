@@ -1274,7 +1274,7 @@ fn a_basic_pitch_reader_round_trips_exactly_through_json() {
     // capture-analysis 1.8: a reading by Basic Pitch names its reader `basic-pitch`, and the
     // document writes back as the text it was read from. As 1.8 and 1.9 wrote it, it has no
     // thresholds.
-    let text = analysis_example("1.11").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
+    let text = analysis_example("1.12").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
     assert!(
         text.contains(r#""name": "basic-pitch""#),
         "the example has no hmm reader"
@@ -1310,7 +1310,7 @@ fn a_basic_pitch_readers_thresholds_round_trip_exactly_through_json() {
         "          \"minimum_note_length_ms\": 211.3\n",
         "        }\n",
     );
-    let example = analysis_example("1.11");
+    let example = analysis_example("1.12");
     assert!(
         example.contains(hmm),
         "the example's reader is not as written here"
@@ -1345,7 +1345,7 @@ fn a_basic_pitch_readers_thresholds_round_trip_exactly_through_json() {
 fn a_notes_excursions_round_trip_exactly_through_json() {
     // capture-analysis 1.6, at the current version's example: every excursion's start, end and
     // cents read back to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.11");
+    let text = analysis_example("1.12");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1395,7 +1395,7 @@ fn rejoins_in(text: &str) -> Option<serde_json::Value> {
 fn a_readings_rejoins_round_trip_exactly_through_json() {
     // capture-analysis 1.7: every decoded note, dip and loss change a rejoin states reads back
     // to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.11");
+    let text = analysis_example("1.12");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1447,7 +1447,7 @@ fn a_readings_breathy_notes_round_trip_exactly_through_json() {
     // capture-analysis 1.9: every note the breathy pass carried on reads back, as decoded, with
     // its end, its quietest kept frame and its loss change to the bit, and the document writes
     // back as the text it was read from.
-    let text = analysis_example("1.11");
+    let text = analysis_example("1.12");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1497,7 +1497,7 @@ fn a_readings_held_notes_and_suggestions_round_trip_exactly_through_json() {
     // capture-analysis 1.11: every note the held-pitch pass made reads back, with the note it
     // reaches as decoded and its loss change to the bit; every suggestion reads back with its
     // step, drift and rule; and the document writes back as the text it was read from.
-    let text = analysis_example("1.11");
+    let text = analysis_example("1.12");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1552,6 +1552,52 @@ fn a_document_before_held_notes_reads_as_one_with_none_and_writes_none() {
     let written = doc.write().unwrap();
     assert_eq!(reading_field(&written, "held"), None);
     assert_eq!(reading_field(&written, "suggestions"), None);
+    let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(again, doc);
+}
+
+#[test]
+fn a_keys_profile_round_trips_exactly_through_json() {
+    // capture-analysis 1.12: the key estimate states the profile its scores were correlated
+    // with, and the document writes back as the text it was read from, with each profile.
+    let text = analysis_example("1.12");
+    for (name, other) in [
+        ("aarden-essen", None),
+        ("krumhansl-kessler", Some("krumhansl-kessler")),
+    ] {
+        let text = match other {
+            Some(other) => text.replace(
+                r#""profile": "aarden-essen""#,
+                &format!(r#""profile": "{other}""#),
+            ),
+            None => text.clone(),
+        };
+        let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+            panic!("read as another kind");
+        };
+        assert_eq!(doc.write().unwrap(), text);
+        let profile = doc.body.key.as_ref().unwrap().profile;
+        assert_eq!(
+            serde_json::to_value(profile).unwrap(),
+            serde_json::json!(name)
+        );
+    }
+}
+
+#[test]
+fn a_document_before_key_profiles_reads_as_stating_none_and_writes_none() {
+    // A 1.11 document's key states no profile: read today it states none, and writing it
+    // states none, rather than the default.
+    let text = analysis_example("1.11");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(doc.body.key.as_ref().unwrap().profile, None);
+    let written = doc.write().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert!(value["body"]["key"].get("profile").is_none(), "{written}");
     let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
         panic!("read as another kind");
     };
