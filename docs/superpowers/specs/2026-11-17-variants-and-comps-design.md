@@ -9,6 +9,13 @@ nine questions were each ruled as recommended, with one change, the name
 in [The owner's rulings on this design](#the-owners-rulings-on-this-design). What is still marked
 **Proposed** is the design those answers rest on: the owner ruled its questions, not each line.
 
+**Amended 2026-11-17: comps work across takes, on the song's bars.** **Ruled (owner, 2026-11-17,
+temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, ruling 4):** comping works across takes, anchored to
+the song's timeline (bars and beats) through its composition, and a one-take comp is the simple
+case. This spec was ruled for one take's readings. What the amendment changes, and what it leaves,
+is in [Amended: comps across takes](#amended-comps-across-takes); build tasks 2 to 4 are held until
+that section is ruled. Everything else here stands as ruled.
+
 **First written as "choices".** This spec was merged as
 `2026-11-17-variants-and-choices-design.md` (#67), naming the kind `choices`, the commands `duet
 choices`, and the reader `chosen`. The owner renamed them when ruling on it. The file and every
@@ -70,8 +77,74 @@ with per-note touch-ups, as an engineer comps a vocal from several takes.
 | the reading's field stating what was applied | `comp` |
 | the view | `comp v1` |
 
-**"Comp" here means only this:** a composite of one take's readings. It is not a comp of songs,
-of drum grids, or of several takes, none of which is in scope.
+**"Comp" here meant only this:** a composite of one take's readings. It is not a comp of songs or
+of drum grids. **Amended (owner, 2026-11-17):** it is now a composite across takes as well, on the
+song's bars ([Amended: comps across takes](#amended-comps-across-takes)), and one take's readings
+are the simple case.
+
+## Amended: comps across takes
+
+**Ruled (owner, 2026-11-17, temper `01a1eb48`):** comping works across takes ("yes we definitely
+do"). A comp is anchored to the song's timeline, bars and beats, through its composition. Each take
+maps onto that timeline, usually by the click's tempo plus an offset. A one-take comp is the simple
+case. **Proposed:** how this spec changes to build it. The song, its composition and a take's
+placement are [songs and composition](2026-11-17-songs-and-composition-design.md)'s (**Proposed**).
+
+### What stays
+
+- **Variants, the annotation and the take digest** (§1, §2, build task 1, built in #73): unchanged.
+  Each reading is still one take's, named by its take, reader and passes.
+- **Seams and whole notes** (§3, ruling 3): a span's edges are still seams, and a span still takes
+  whole notes. Nothing is shortened or lengthened.
+- **Marks** (§4, ruling 4): a mark still names a note by its variant, a frame in its held part (in
+  that variant's own take) and its heard key.
+- **Re-reads refused loudly,** and `--recheck` (§5, ruling 5): unchanged, per variant.
+- **Keys and drops stay marks** (ruling 9), the workbench's entries (§8), and the views' split: spans
+  in the comp view, marks in the notes view (§7, ruling 6).
+
+### What changes
+
+- **A comp belongs to a song and builds one of its parts.** It lives at
+  `songs/<song>/comps/<part>.comp.duet`, and its body names the part. Applying it writes
+  `songs/<song>/parts/<part>.duet`, with `source: comped` naming the comp and every take it drew from
+  ([the documents design](2026-11-15-duet-documents-design.md#part-10)).
+- **`variants` may come from several takes.** Each variant carries its own `take` and `rate`. The
+  body's single `take` and `rate` go. A variant's take must be linked to the song for this part.
+- **A span is stored on the song's timeline,** as `from` and `to` positions (`bar.beat.tick`), and
+  its variant. Each take's span is found through that take's placement in the song.
+- **A seam is a point on the song's timeline** where no note of the base or the picked variant,
+  each mapped through its take's placement, sounds across. For one take this is the frame rule of
+  §3, unchanged. Whether a tick is fine enough to hold every seam exactly is for task 2 to check; if
+  not, a span keeps each take's seam frame beside its position.
+- **A take that is not placed cannot be picked from,** except in a one-take comp. A pick from one is
+  refused, naming the take and `duet song place`.
+- **The one-take comp is the simple case.** All its variants read one take, so every edge is a
+  frame of that take, as §3 has it, and it needs no placement: there is nothing to align. Stored in
+  positions when the take is placed, and in frames when it is not. So the witness document stands as
+  a one-take comp of Wayfaring, which was recorded without a click.
+- **A comp records what it was placed against:** each take's placement and a digest of the
+  composition's tempo and meter maps. A change to either is refused when applying, as a re-read is,
+  naming what moved; `--recheck` places every span again on the new bars. Whether this is the
+  comp's "stale" state is the comp lifecycle, which is **open** ([the songs design, question 4](2026-11-17-songs-and-composition-design.md#open-questions)).
+- **What `apply` writes for a comp across takes.** A one-take comp writes its comped reading as §6
+  says. A comp across takes has no one take, timing or set of events, so its comped reading cannot be
+  one take's `capture-analysis` as it stands. Task 2 decides between one comped reading per take
+  touched, each holding that take's spans, and the part alone with its `source`. This is a design
+  question for the task, not one the owner has been asked.
+
+### What changes for the build tasks
+
+- **Task 1** (the variant annotation): built, unchanged.
+- **Task 2** (`comp` 1.0, and applying it): **held, and changed.** The body gains the song's part,
+  per-variant `take` and `rate`, spans in positions, and the placements and composition digest it
+  was made against; apply writes the part with its `source`. **Needs:** the songs design's tasks 2
+  and 3 for a comp across takes. The one-take comp can be built first, needing neither.
+- **Task 3** (writing a comp from the CLI): **held, and changed.** `duet comp new <song> <part>`
+  names the song and part; `pick` takes `--bar POS` as well as `--at SECS` (seconds into a named
+  take: `--at wayfaring:2.28`), and `--take` to say which take a label's variant is read from.
+- **Task 4** (the comp view): **held, and changed.** The view writes positions for spans of a placed
+  comp and seconds for a one-take comp, and its variant lines name their takes.
+- **Tasks 5 and 6:** unchanged.
 
 ## What the take shows
 
@@ -397,7 +470,7 @@ duet comp apply song.comp.duet wayfaring.hmm.capture.duet wayfaring.rules.captur
   the stream states it ([question 2](#2-the-take-digest), ruled (a)), otherwise by rate, hop and length.
 - **It writes,** each refused rather than overwritten, as capture and compare do:
   - `STEM.capture.duet`: the **comped reading**, in a `capture-analysis` document;
-  - `STEM.duet`: the song, the notes view's source;
+  - `STEM.duet`: the part (a `part` document, renamed from `song`), the notes view's source;
   - `STEM.abc`: the score.
 - **It never writes** a variant, the performance or the comp document (except under
   [question 5](#5-when-a-variant-is-read-again), ruled (a)).
@@ -507,7 +580,7 @@ mark hmm 14.915 F#3 fold  "a rise traced up to G#3, the real target"
 
 **The notes view can carry per-note marks, not spans.**
 
-- **Why no spans:** a song's notes view shows one reading's notes, in bars and beats. A span that
+- **Why no spans:** a part's notes view shows one reading's notes, in bars and beats. A span that
   picks another variant swaps in notes the view does not show, so it would be an edit made
   blind. Its edges are seams in frames, which bar positions cannot state exactly.
 - **Marks fit it.** The transformations ruling put them there: "Marks live in the notes view, per
@@ -584,7 +657,7 @@ the A3 folded, not the HMM's span. **Ruled (owner, 2026-11-17),** question 8: it
 | `performance` | **1.1** (question 2, ruled (a)) | **additive:** the head's optional `take` | 1 |
 | the `comp` view | **v1** | **new view** | 4 |
 | the `notes` view | **v2** | **new syntax:** per-note marks | the transformations task, under question 6, ruled (a) |
-| `song`, `drum-grid`, the envelope | none | | |
+| `part` (renamed from `song`), `drum-grid`, the envelope | none here; `part` gains `source` in the documents design | | |
 
 Each minor follows the version policy's rule: a new optional field, omitted when absent, whose
 absence means exactly what the minor before meant, and a new variant of a tagged enum. Every older
@@ -610,7 +683,7 @@ under question 2, ruled (a).
   - Whether a 24-bit re-encode of 16-bit samples keeps the digest is checked, and stated either
     way in the digester's docs.
 
-**2. `comp` 1.0, and applying it.**
+**2. `comp` 1.0, and applying it.** **Held, and changed by [the amendment](#what-changes-for-the-build-tasks).**
 - **Needs:** 1.
 - **What:** the kind, its schema and example; the splice and fold in duet-dsp, beside `interpret`;
   the re-read checks; `duet comp apply`; the comped reading's `comp` and the reader `comped`;
@@ -620,7 +693,7 @@ under question 2, ruled (a).
   - Overlapping spans, an unknown label, two labels for one annotation, and a comped reading named as
     a variant are each refused by name.
 
-**3. Writing a comp from the CLI.**
+**3. Writing a comp from the CLI.** **Held, and changed by [the amendment](#what-changes-for-the-build-tasks).**
 - **Needs:** 2.
 - **What:** `duet comp new` (from the base reading and the other variants), `duet comp pick --at
   SECS LABEL [--said TEXT]`, `duet comp mark --at SECS [fold|keep|key=…|drop=…]`, and
@@ -632,7 +705,7 @@ under question 2, ruled (a).
   - `unset` removes exactly that entry, and the rest of the document is byte for byte unchanged.
   - The document written by the commands applies as the committed witness document does.
 
-**4. The comp view.**
+**4. The comp view.** **Held, and changed by [the amendment](#what-changes-for-the-build-tasks).**
 - **Needs:** 2.
 - **What:** `comp v1`: `duet view` of a comp document, `--with` for context lines, and
   `duet apply --onto`.
@@ -695,6 +768,11 @@ overall". The one change is the name, under question 7.
 - **A comp over comped readings:** refused in 1.0.
 - **`compare` checking a reading's take by digest,** in place of rate and length: a small follow-up
   once task 1 lands.
-- **The session record's shape:** the workbench design's.
+- **The session record's shape:** the workbench design's. Since written, the bus design made the
+  project's record the journal, `journal.duet.jsonl`, and the domain model ruled that a session is
+  not a duet entity (temper `01a1eb48`, ruling 1). "The session record" in this spec means the
+  journal.
+- **The comp lifecycle** (drafting, applied, stale, refused): **open**, in
+  [the songs design](2026-11-17-songs-and-composition-design.md#open-questions).
 
 [`interpret`]: ../../../crates/duet-dsp/src/reading.rs
