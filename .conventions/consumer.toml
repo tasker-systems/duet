@@ -1,7 +1,7 @@
 # This repository's pin on the tasker-systems conventions baseline. Doctrine: CONS-* in
 # .conventions/baseline/doctrine/consuming.md. `revision` is written by `conventions.py bump`.
 name = "duet"
-revision = "4fd052ec831d5826c0aa20b716fa4e3cdd057bd5"
+revision = "d383cfccbb33bbc57ebc6678c08ea368af5f0d2f"
 
 # Each adopted canonical file: where it lives here, and how it is compared (exact, extends,
 # table, superset).
