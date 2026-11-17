@@ -9,16 +9,14 @@ use crate::{Kind, Version};
 /// `song` 1.0's body is exactly what `Song` serializes to: what duet's `.json` files held before
 /// documents.
 ///
-/// **1.1** keeps every pitch's spelling. A pitch is a letter, up to two sharps or two flats,
-/// and the letter's octave, so `Cb5` (MIDI 71), `E#4`, `F##4` and `Bbb3` are written and read as
-/// spelled, and a key spells its own scale with them: Cb in Eb minor, E# in F# major, C## as
-/// D# minor's leading tone. The shape is unchanged but for the pitch pattern, which now refuses
-/// what no spelling keeps (`C###4`, `C#b4`). A 1.0 reader reads every 1.1 pitch as the same MIDI
-/// note but respells it, writing `Cb5` back as `B4`, so it refuses 1.1. A 1.0 body reads as it
-/// did.
+/// Every pitch keeps its spelling: a letter, up to two sharps or two flats, and the letter's
+/// octave, so `Cb5` (MIDI 71), `E#4`, `F##4` and `Bbb3` are written and read as spelled. The
+/// pitch pattern refuses what no spelling keeps (`C###4`, `C#b4`). This came into 1.0 in place,
+/// with no minor: before a first release a format changes in place, since no file exists to
+/// keep (the owner's ruling 12 in decision 01a1eb48, 2026-11-17).
 impl Kind for Song {
     const NAME: &'static str = "song";
-    const VERSION: Version = Version::new(1, 1);
+    const VERSION: Version = Version::new(1, 0);
 }
 
 /// `drum-grid` 1.0's body is what `DrumGrid` serializes to: the conductor, the grid, channel,

@@ -156,7 +156,7 @@ duet apply old.notes -o old.duet                          # a lossless view into
 
 | View | Of | Drops |
 |---|---|---|
-| `notes` | a song | nothing: every field of song 1.1, normalized, with its end stated |
+| `notes` | a song | nothing: every field of song 1.0, normalized, with its end stated |
 | `grid` | a drum grid | nothing, while every velocity is 0 or one of its three levels |
 | `grid` | one drum track of a song, at a step | everything but that track's starts and velocities |
 
@@ -165,7 +165,7 @@ under the header. Comments added to a view are not read back. A velocity off the
 refused, naming its lane, bar and step, unless `--snap-levels` shows it snapped.
 
 **The header line** names the view and the document it came from, so a view reads back without
-a file name: `# duet notes v1 of song 1.1 from 3f9a1c0d5e2b7a41`, or `# duet grid v1 of song 1.1
+a file name: `# duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41`, or `# duet grid v1 of song 1.0
 track "Drums" step 1/16 from …` for a partial view. The digest is a 64-bit FNV-1a of the source
 document's body: `apply --onto` refuses a document changed since the view was rendered, naming
 both digests, unless `--force`. A newer view version or a schema version this duet does not read

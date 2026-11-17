@@ -178,11 +178,11 @@ fn the_gate_fails_on_a_field_added_to_song_at_the_same_version_naming_song() {
         panic!("a new field passed the gate");
     };
     assert!(
-        why.contains("the schema of song changed at the same version 1.1"),
+        why.contains("the schema of song changed at the same version 1.0"),
         "{why}"
     );
     assert!(
-        why.contains("crates/duet-schemas/schemas/song/1.1.json"),
+        why.contains("crates/duet-schemas/schemas/song/1.0.json"),
         "{why}"
     );
 }
@@ -230,7 +230,7 @@ fn a_missing_schema_fails_naming_the_file_and_how_to_write_it() {
         panic!("a missing file passed the gate");
     };
     assert!(
-        why.contains("crates/duet-schemas/schemas/song/1.1.json"),
+        why.contains("crates/duet-schemas/schemas/song/1.0.json"),
         "{why}"
     );
     assert!(
@@ -661,7 +661,7 @@ fn example_song() -> Song {
         Note::new(pos("1.2.0"), pitch("F#4"), 1.0, 80),
         Note::new(pos("2.1.0"), pitch("Bb3"), 1.5, 64),
         Note::new(pos("4.1.0"), pitch("C5"), 0.333, 100),
-        // 1.1: spellings a 1.0 reader respells.
+        // Spellings beyond a sharp or flat on a black key: Cb, E#, a double sharp and flat.
         Note::new(pos("4.2.0"), pitch("Cb5"), 0.5, 80),
         Note::new(pos("4.3.0"), pitch("E#4"), 0.5, 80),
         Note::new(pos("4.4.0"), pitch("F##4"), 0.5, 80),
@@ -749,12 +749,12 @@ fn the_schema_refuses_what_the_reader_refuses() {
         assert!(!validator.is_valid(&doc), "the schema accepts {what}");
     }
     let mut doc = good.clone();
-    doc["$schema"] = json!(duet_schemas::schema_url("song", Version::new(1, 0)));
+    doc["$schema"] = json!(duet_schemas::schema_url("song", Version::new(1, 1)));
     assert!(
         !validator.is_valid(&doc),
         "the schema accepts another $schema"
     );
-    // 1.1's pitch pattern refuses what no spelling keeps.
+    // The pitch pattern refuses what no spelling keeps.
     for pitch in ["C###4", "C#b4"] {
         let mut doc = good.clone();
         doc["body"]["tracks"][0]["notes"][0]["pitch"] = json!(pitch);
@@ -870,7 +870,7 @@ fn an_unknown_field_inside_a_song_body_is_refused_by_name() {
         );
     }
     doc["duet"]["kind"] = json!("lute-tab");
-    doc["$schema"] = json!(duet_schemas::schema_url("lute-tab", Version::new(1, 1)));
+    doc["$schema"] = json!(duet_schemas::schema_url("lute-tab", Version::new(1, 0)));
     let err = AnyDocument::read(&doc.to_string()).unwrap_err();
     assert!(err.to_string().contains("knows no kind lute-tab"), "{err}");
 }

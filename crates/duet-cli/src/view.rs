@@ -8,7 +8,7 @@
 //!
 //! | View | Of | Lossless? |
 //! |---|---|---|
-//! | `notes` | a song | yes: every field of song 1.1 |
+//! | `notes` | a song | yes: every field of song 1.0 |
 //! | `grid` | a drum grid | yes, for velocities on its three levels |
 //! | `grid` | one drum track of a song, at a step | no: that track's starts and velocities only |
 //!
@@ -33,9 +33,9 @@
 //! A view's first line names it, so it reads back without a file name:
 //!
 //! ```text
-//! # duet notes v1 of song 1.1 from 3f9a1c0d5e2b7a41
+//! # duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41
 //! # duet grid v1 of drum-grid 1.0 from 9c04e1b2a7d35f60
-//! # duet grid v1 of song 1.1 track "Drums" step 1/16 from 0b7e33c19a5d2f84
+//! # duet grid v1 of song 1.0 track "Drums" step 1/16 from 0b7e33c19a5d2f84
 //! ```
 //!
 //! The view and its syntax version, the kind and schema version it renders, which part of the
@@ -998,7 +998,6 @@ mod tests {
                 .map_err(|e| e.to_string())
         };
         assert!(check("# duet notes v1 of song 1.0").is_ok());
-        assert!(check("# duet notes v1 of song 1.1").is_ok());
         let err = check("# duet notes v2 of song 1.0").unwrap_err();
         assert!(
             err.contains("notes v2 view; this duet reads notes v1"),
@@ -1006,7 +1005,7 @@ mod tests {
         );
         let err = check("# duet notes v1 of song 1.4").unwrap_err();
         assert!(
-            err.contains("view of song 1.4; this duet reads song up to 1.1"),
+            err.contains("view of song 1.4; this duet reads song up to 1.0"),
             "{err}"
         );
         let err = check("# duet notes v1 of song 2.0").unwrap_err();
