@@ -66,7 +66,8 @@ disagree, the Temper decisions win.
 13. **A song and a part each have a stable id,** minted once when the document is made and never
     changed. The name (the folder or file stem) and the title stay free to rename. The journal's
     index lists songs and parts by id, with the name alongside, so a rename keeps the lookup of older
-    segments ([§1](#ids)).
+    segments. Its form (a UUIDv7 in the body), how a song refers to its parts, and what a copy
+    keeps are ruled with it ([§1](#ids)).
 14. **A song's current status lives in `song.duet`; the journal records each change.** Every move is a
     `song.status-set` event and every snapshot a `snapshot.taken` event, and `duet journal check`
     reports any disagreement between the document and the journal. It reports; it never repairs
@@ -174,18 +175,18 @@ composition as two parts of one document.**
 ### Ids
 
 **Ruled** (ruling 13): a song and a part each carry an `id`, minted once and never changed.
-- **What it is. Proposed:** a UUIDv7 in its standard text form, minted by the command that makes the
+- **What it is.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): a UUIDv7 in its standard text form, minted by the command that makes the
   document (`duet song new`, a part written by `comp apply`, an operation, or by hand through
   `duet part new`). It sorts by creation time, and needs no registry.
-- **Where it lives. Proposed:** in the body, as `id`, beside `title` for a song and as a top-level
+- **Where it lives.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): in the body, as `id`, beside `title` for a song and as a top-level
   body field for a part (folded into `part` 1.0 under ruling 12).
 - **Renames.** Renaming a song's folder or a part's file, or changing a title, never changes the id.
   The journal's index names songs and parts by id, with the name alongside, so older segments stay
   found after a rename.
-- **References. Proposed:** inside a song, `placements` and a take's `for` name a part by its stem,
+- **References.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): inside a song, `placements` and a take's `for` name a part by its stem,
   as above, so `song.duet` stays readable by hand; `duet part rename` rewrites them in the same act
   and records it in the journal. The journal, comps and anything outside the song name it by id.
-- **A copy is a new thing.** A snapshot keeps the ids it copied, since it is the same song at a
+- **A copy is a new thing.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): A snapshot keeps the ids it copied, since it is the same song at a
   point in time. Duplicating a song or a part to start a new one mints new ids.
 - **Takes are unchanged:** a take's identity is its digest, as ruled in the variants design.
 
