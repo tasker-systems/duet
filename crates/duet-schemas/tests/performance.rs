@@ -1,9 +1,12 @@
-//! performance 1.0: a real take's performance, as duet-dsp makes it, written as a stream, read
-//! back exactly, and validated line by line against the committed schema.
+//! performance 1.1: a real take's performance, as duet-dsp makes it, with the take it was read
+//! from stated as capture states it, written as a stream, read back exactly, and validated line by
+//! line against the committed schema.
 
 use std::path::Path;
 
-use duet_dsp::{ANALYSIS_RATE, FrameBlock, Layer1, Mono, Performance, PerformanceHead, Stage};
+use duet_dsp::{
+    ANALYSIS_RATE, Chunk, Digester, FrameBlock, Layer1, Mono, Performance, PerformanceHead, Stage,
+};
 use duet_schemas::{AnyDocument, Error, Stream, Tool, read_envelope};
 use serde_json::{Value, json};
 
@@ -18,7 +21,7 @@ fn read_json(relative: &str) -> Value {
 /// for `schema` against them.
 fn validator(schema: &Value) -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
-    let performance = read_json("schemas/performance/1.0.json");
+    let performance = read_json("schemas/performance/1.1.json");
     let registry = jsonschema::Registry::new()
         .add(envelope["$id"].as_str().unwrap(), &envelope)
         .unwrap()
@@ -33,11 +36,11 @@ fn validator(schema: &Value) -> jsonschema::Validator {
 }
 
 fn head_validator() -> jsonschema::Validator {
-    validator(&read_json("schemas/performance/1.0.json"))
+    validator(&read_json("schemas/performance/1.1.json"))
 }
 
 fn record_validator() -> jsonschema::Validator {
-    let id = read_json("schemas/performance/1.0.json")["$id"].clone();
+    let id = read_json("schemas/performance/1.1.json")["$id"].clone();
     validator(&json!({ "$ref": format!("{}#/$defs/Record", id.as_str().unwrap()) }))
 }
 
@@ -65,14 +68,25 @@ fn take() -> Vec<f32> {
     .concat()
 }
 
-/// The take's performance, as a stream.
+/// The take's performance, as a stream, its head stating the take as capture states it: every
+/// chunk through a [`Digester`].
 fn performance(signal: &[f32]) -> Stream<PerformanceHead> {
     let mut stage = Performance::new(RATE);
+    let mut digester = Digester::new();
     let mut out = Vec::new();
     for (i, piece) in signal.chunks(512).enumerate() {
+        let start_frame = (i * 512) as u64;
+        digester
+            .push(&Chunk {
+                rate: RATE,
+                channels: 1,
+                start_frame,
+                samples: piece.to_vec(),
+            })
+            .unwrap();
         let mono = Mono {
             rate: RATE,
-            start_frame: (i * 512) as u64,
+            start_frame,
             samples: piece.to_vec(),
         };
         stage.push(mono, &mut out).unwrap();
@@ -81,7 +95,9 @@ fn performance(signal: &[f32]) -> Stream<PerformanceHead> {
     let Some(Layer1::Head(head)) = out.first() else {
         panic!("no head first");
     };
-    let mut stream = Stream::new(Tool::new("duet", "0.2.1"), *head);
+    let mut head = *head;
+    head.take = digester.finish();
+    let mut stream = Stream::new(Tool::new("duet", "0.2.1"), head);
     stream.records = out
         .into_iter()
         .filter_map(|o| match o {
@@ -122,11 +138,21 @@ fn the_first_line_is_the_envelope_and_every_later_line_validates_on_its_own() {
     let first = lines.next().unwrap();
     let envelope = read_envelope(first).unwrap();
     assert_eq!(envelope.kind, "performance");
-    assert_eq!(envelope.version.to_string(), "1.0");
+    assert_eq!(envelope.version.to_string(), "1.1");
     let head = head_validator();
     let first: Value = serde_json::from_str(first).unwrap();
     assert!(head.is_valid(&first), "{first}");
     assert_eq!(first["head"]["unit"], "absolute-cents");
+    // The take, since 1.1: the decoded samples' digest, rate, channels and length.
+    let take = &first["head"]["take"];
+    assert!(
+        take["digest"].as_str().unwrap().starts_with("sha256:"),
+        "{take}"
+    );
+    assert_eq!(
+        (&take["rate"], &take["channels"], &take["frames"]),
+        (&json!(RATE), &json!(1), &json!(self::take().len()))
+    );
     let records = record_validator();
     let mut count = 0;
     for line in lines {
@@ -194,4 +220,62 @@ fn a_performance_is_not_read_as_a_document() {
     let first = text.lines().next().unwrap();
     let err = AnyDocument::read(first).unwrap_err();
     assert!(matches!(err, Error::Framing { .. }), "{err:?}");
+}
+
+#[test]
+fn a_heads_take_validates_only_from_1_1_and_a_1_0_stream_reads_as_stating_none() {
+    let text = performance(&take()).write().unwrap();
+    let first: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    // performance 1.0 has no take: a 1.0 reader refuses it, and takes the same head without it.
+    let envelope = read_json("schemas/envelope/1.0.json");
+    let registry = jsonschema::Registry::new()
+        .add(envelope["$id"].as_str().unwrap(), &envelope)
+        .unwrap()
+        .prepare()
+        .unwrap();
+    let older = jsonschema::options()
+        .with_registry(&registry)
+        .build(&read_json("schemas/performance/1.0.json"))
+        .unwrap();
+    let mut as_1_0 = first.clone();
+    as_1_0["$schema"] = json!(
+        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/performance/1.0.json"
+    );
+    as_1_0["duet"]["version"] = json!("1.0");
+    assert!(!older.is_valid(&as_1_0), "1.0 accepts a take");
+    as_1_0["head"].as_object_mut().unwrap().remove("take");
+    assert!(older.is_valid(&as_1_0), "the 1.0 control is not valid");
+    // The committed 1.0 example reads as a stream stating no take, and writes none back.
+    let example = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/performance/examples/1.0.duet.jsonl"),
+    )
+    .unwrap();
+    let read = Stream::<PerformanceHead>::read(&example).unwrap();
+    assert_eq!(read.head.take, None);
+    let written = read.write().unwrap();
+    assert!(
+        !written.lines().next().unwrap().contains("\"take\""),
+        "{written}"
+    );
+    assert_eq!(
+        Stream::<PerformanceHead>::read(&written).unwrap().head,
+        read.head
+    );
+    // A digest spelled otherwise than duet writes it is refused by the schema and the reader.
+    let mut upper = first.clone();
+    let digest = upper["head"]["take"]["digest"]
+        .as_str()
+        .unwrap()
+        .to_uppercase();
+    upper["head"]["take"]["digest"] = json!(digest);
+    assert!(
+        !head_validator().is_valid(&upper),
+        "an uppercase digest validates"
+    );
+    let mut line = upper.to_string();
+    line.push('\n');
+    assert!(
+        Stream::<PerformanceHead>::read(&line).is_err(),
+        "the reader takes it"
+    );
 }

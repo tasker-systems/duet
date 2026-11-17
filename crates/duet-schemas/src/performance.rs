@@ -8,9 +8,13 @@ use crate::{Kind, StreamKind, Version};
 
 /// `performance` 1.0's first line holds a [`PerformanceHead`]: the analysis rate, the hop, the
 /// sample frame of the first pitch frame, and the pitch unit, `"absolute-cents"`.
+///
+/// **1.1** adds the head's optional `take`, additive: the audio the frames were read from, as
+/// `capture-analysis` 1.13 states it (the decoded samples' digest, rate, channels and frames).
+/// Omitted when not stated, so a 1.0 stream reads as one stating no take.
 impl Kind for PerformanceHead {
     const NAME: &'static str = "performance";
-    const VERSION: Version = Version::new(1, 0);
+    const VERSION: Version = Version::new(1, 1);
 }
 
 /// Every later line is one [`FrameBlock`]: a run of consecutive frames as the columns `pitch`

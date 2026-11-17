@@ -55,7 +55,9 @@ A `[[listened]]` entry in the manifest is a recording the owner has judged by ea
 transcribed note by note: `wayfaring-stranger.flac`, the owner singing the traditional song,
 is the first. Its test holds only what the owner agreed (the key, the tuning, and the number
 of notes, each within a tolerance), so it catches a reader change that moves the take a long
-way, and says nothing about any one note. It is licensed CC BY 4.0, not MIT; the notice is
+way, and says nothing about any one note. Its `digest` pins the file as the take: the SHA-256 of
+its decoded samples, as `duet capture` states it in the analysis's `take`, so a file changed
+in any sample fails by name, and a re-encode that keeps every sample does not. It is licensed CC BY 4.0, not MIT; the notice is
 `wayfaring-stranger.flac.license`, beside it. `wayfaring-stranger.moments`, also beside it,
 names the moments the owner rules on by ear, for `duet capture review --moments`.
 
