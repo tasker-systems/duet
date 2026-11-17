@@ -13,6 +13,17 @@ The owner ruled the seven open questions on 2026-11-15, each as recommended exce
 TOML files, which are cut now. Each is marked **Ruled (owner, 2026-11-15)** where it is answered, and
 all seven are listed in [The owner's rulings](#the-owners-rulings). Everything else is **Proposed**.
 
+**Amended 2026-11-17: the `song` kind is renamed `part`.** **Ruled (owner, 2026-11-17, temper
+`01a1eb48-6b7a-7797-bb2b-68f335de87e9`, ruling 7).** A part is one voice, line or groove (notes, or
+a drum grid's role in a song), and "song" now names the piece those parts belong to
+([songs and composition](2026-11-17-songs-and-composition-design.md)). Nothing has been captured,
+distributed or committed under the old name, and nothing on disk needs carrying over, so the kind
+is simply `part` 1.0, its body unchanged. This design was written and built as `song` 1.0. Its
+kinds table, schema paths, views table, view headers, messages and examples now say `part`;
+elsewhere, in prose written before the rename, "a song" or "a song document" means a `part`
+document. `Song`, the Rust type, and the CLI's `duet song` commands keep their names until the code
+change that renames them; this amendment renames only the kind. See [part 1.0](#part-10).
+
 ## The decision this builds
 
 Temper decision `01a1df20-1918-7130-b2d6-90ab20979553`, made by the owner on 2026-11-15, in short:
@@ -57,7 +68,7 @@ Read from the code at `main` (4bd50df), and checked by generating `Song`'s schem
 
 ### What that means for v1
 
-- **`Song` can become `song` 1.0 unchanged.** The body of a song document is byte for byte what
+- **`Song` can become `part` 1.0 (built as `song` 1.0) unchanged.** The body of a part document is byte for byte what
   `.json` holds today. Converting costs nothing.
 - **`DrumGrid` changes in one place.** Its velocity matrix is a nested array per bar, and the decision
   makes a matrix a declared tensor over a flat array ([question 2](#2-the-kinds-and-their-v1-schemas)).
@@ -99,9 +110,9 @@ Read from the code at `main` (4bd50df), and checked by generating `Song`'s schem
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/part/1.0.json",
   "duet": {
-    "kind": "song",
+    "kind": "part",
     "version": "1.0",
     "tool": { "name": "duet", "version": "0.3.0" }
   },
@@ -109,7 +120,7 @@ Read from the code at `main` (4bd50df), and checked by generating `Song`'s schem
 }
 ```
 
-- **`duet.kind`:** the kind's name, lowercase with hyphens: `song`, `drum-grid`, `capture-analysis`,
+- **`duet.kind`:** the kind's name, lowercase with hyphens: `part`, `drum-grid`, `capture-analysis`,
   `performance`.
 - **`duet.version`:** `"<major>.<minor>"` of the kind's schema. There is no patch level
   ([question 3](#3-the-version-policy)).
@@ -130,7 +141,7 @@ Read from the code at `main` (4bd50df), and checked by generating `Song`'s schem
 
 **Why a wrapper rather than top-level keys:**
 
-- **The body is the type, unchanged.** `song` 1.0's body is today's `Song` JSON, with no added keys.
+- **The body is the type, unchanged.** `part` 1.0's body is today's `Song` JSON, with no added keys.
   Top-level keys would put `duet` beside `tracks`, so the body would no longer be the type.
 - **Unknown fields can be refused.** Top-level keys would need `#[serde(flatten)]`, and serde cannot
   combine `flatten` with `deny_unknown_fields`. The version policy needs the latter.
@@ -143,7 +154,7 @@ Read from the code at `main` (4bd50df), and checked by generating `Song`'s schem
 - **Options:**
   - (a) a URL in this repository: `https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/<kind>/<major>.<minor>.json`;
   - (b) a URL on a domain the owner holds;
-  - (c) a repository path with no URL, such as `duet:crates/duet-schemas/schemas/song/1.0.json`.
+  - (c) a repository path with no URL, such as `duet:crates/duet-schemas/schemas/part/1.0.json`.
 - **Why (a):** it resolves today with nothing to host, and editors can fetch it. A
   committed schema file is never edited once its version ships ([question 4](#4-the-schema-gate)),
   so the `main` URL is stable. Moving to (b) later is a change to the `$schema` value only, which a
@@ -169,7 +180,7 @@ gives each one its name and current version ([where things live](#where-things-l
 
 ```rust
 pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
-    const NAME: &'static str;        // "song"
+    const NAME: &'static str;        // "part"
     const VERSION: Version;          // 1.0
     /// Reads a body written at an older minor of this major. The default parses it as the
     /// current type, which is right while every minor is additive.
@@ -179,15 +190,31 @@ pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
 
 | Kind | v1 | Body type | Change from today |
 |---|---|---|---|
-| `song` | 1.0 | `duet_core::Song` | **None on write.** Read gains `deny_unknown_fields`. |
+| `part` (built as `song`) | 1.0 | `duet_core::Song` | **None on write.** Read gains `deny_unknown_fields`. Renamed from `song`, 2026-11-17. |
 | `drum-grid` | 1.0 | `duet_drums::DrumGrid` | The velocity matrix becomes one tensor. `Bar.bar` goes. |
 | `capture-analysis` | 1.0 | `duet_capture::Analysis` | Gains a reader. Absent values are omitted, not `null`. `tempo_alternatives` is named. |
 | `performance` | 1.0, a stream | new `duet_dsp` types, `PerformanceHead` and `FrameBlock`, written and read only through `duet-schemas` | New: the performance design's question 1, in this envelope. |
-| `project` | named, deferred | none yet | Waits for the project work. |
+| `project` | named, deferred | none yet | Designed in [the project design](2026-11-17-project-design.md). |
+| `song` (the piece) | 1.0, **Ruled** name and version; design **Proposed** | none yet | A new kind, the song and its composition: [songs and composition](2026-11-17-songs-and-composition-design.md). |
 | lane map | **not a kind** | | Config. |
 | `duet.toml` | **not a kind** | | Config. |
 
-### song 1.0
+### part 1.0
+
+**Built as `song` 1.0** (`crates/duet-schemas/schemas/song/1.0.json`). **Renamed `part` 1.0**
+(ruled, owner, 2026-11-17): the schema moves to `crates/duet-schemas/schemas/part/1.0.json`, its
+example to `schemas/part/examples/1.0.duet`, and `$schema`, `duet.kind` and every message that
+names the kind say `part`. The body is unchanged, so it stays 1.0. The rename is a code change
+still to come (the songs design's build task 1).
+
+- **Why the rename:** "song" is the owner's word for the piece, with its identity, intent, takes,
+  snapshots and composition. What this kind holds is one voice, line or groove of it: a melody, a
+  bass line, a hummed idea. Calling it a song would leave the piece without a name.
+- **Nothing to carry over.** No `song` document exists anywhere that matters, so the rename has no
+  compatibility path of any kind: `part` 1.0 is today's body under its new name. The name `song` is
+  then free for the piece, a new kind that starts at 1.0
+  ([songs and composition](2026-11-17-songs-and-composition-design.md#the-kinds-name-and-version)).
+Its rules, unchanged by the rename:
 
 - **Derives from** `Song`, `Track`, `Note`, `Control`, `TempoChange`, `TimeChange`, `KeyChange`, with
   hand-written schemas for `Position`, `TimeSig`, `Key`, `Grid` and `Pitch`. Each gives its string
@@ -199,8 +226,36 @@ pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
 - **Ranges are stated** with `#[schemars(range(…))]` where the reader holds one: `vel` 1 to 127,
   `channel` 1 to 16, `program` and `controller` 0 to 127, bend −8192 to 8191, `ticks_per_quarter` 1
   to 32767. The schema then says what the reader accepts.
-- **A written song always states its end.** Every writer already does this (`io::with_end`), so a song
-  document's `end` is always present, though the type keeps it optional.
+- **A written part always states its end.** Every writer already does this (`io::with_end`), so a
+  part document's `end` is always present, though the type keeps it optional.
+
+#### `source`, proposed for the next free minor of part
+
+**Proposed** (the domain model's working shape: a part always states its source). An optional field
+is additive, a minor (1.1, unless the ornaments work takes 1.1 first); making it required would be a
+major, so the minor adds it optional and every writer fills it. Its absence means "not stated", as
+in a part written before that minor.
+
+```json
+"source": { "comped": { "takes": [ { "take": "wayfaring", "digest": "sha256:9f2c…" } ],
+                        "readings": [ { "reader": { "name": "hmm", "note_cost": 4.0 }, "passes": ["breathy", "rejoin"] } ],
+                        "comp": { "path": "comps/melody.comp.duet", "body": "9c04e1b2a7d35f60" } } }
+"source": { "generated": { "operation": "bass-from-chords", "from": [ { "path": "parts/chords.duet", "body": "3f9a1c0d5e2b7a41" } ],
+                           "settings": { "register": "E1-E3" } } }
+"source": { "hand": { "by": "owner" } }
+```
+
+- **`comped`:** from takes. It names each take by its project name and digest, each reading by its
+  annotation (reader and passes), and the comp document when there is one, by its path inside the
+  song's folder and the FNV-1a digest of its body. A capture's own notes, from one reading of one
+  take with no comp, are the simple case: `comp` absent.
+- **`generated`:** made by an operation. It names the operation, each input by its path inside the
+  song's folder and its body digest, and the operation's settings, so it can be made again.
+- **`hand`:** written by a person or an agent, through a view or by hand. `by` is `owner` or
+  `claude`, as the bus's `who` spells them.
+- **Exactly one of the three.** An externally tagged enum, so a new source is a new variant: a minor.
+- **Imported from ABC or MIDI** is `hand`, with the import recorded where it already is, in the
+  envelope's `from` ([question 6](#6-outside-formats)).
 
 ### drum-grid 1.0
 
@@ -306,8 +361,8 @@ The performance design's question 1 defines what it holds. It is born in this en
 - **A reader refuses a newer minor by name:** "groove.duet is drum-grid 1.3; this duet reads drum-grid
   up to 1.2; update duet". It does not read the fields it knows and drop the rest. Writing such a file
   back would lose those fields silently, which breaks the exact round trip.
-- **A reader refuses another major by name,** pointing at the converter: "song.duet is song 2.0; this
-  duet reads song 1.x; `duet convert` reads it from a duet that knows 2.0".
+- **A reader refuses another major by name,** pointing at the converter: "melody.duet is part 2.0;
+  this duet reads part 1.x; `duet convert` reads it from a duet that knows 2.0".
 - **A writer writes the version it speaks.** An older minor read and written back gets the newer
   version in its envelope, and its body is unchanged, because an additive field is omitted when
   absent.
@@ -430,11 +485,11 @@ extensions, and that **a view reads back into a document**. This answers how.
 
 | View | Of kind | Renders | Lossless? |
 |---|---|---|---|
-| `notes` | `song` | today's notefmt text: the header, then one note or control per line, by track | **Lossless** against song 1.0 |
+| `notes` | `part` | today's notefmt text: the header, then one note or control per line, by track | **Lossless** against part 1.0 |
 | `grid` | `drum-grid` | today's `.drums` text: the header, then one row per lane and one column per step | **Lossless** against drum-grid 1.0, and refuses what it cannot show |
-| `grid` | `song`, one drum track | the same grid text, from one track of a song at a step | **Lossy**: shows one track's starts and velocities only |
+| `grid` | `part`, one drum track | the same grid text, from one track of a part at a step | **Lossy**: shows one track's starts and velocities only |
 
-The `grid` view of a song is the owner's case: "dump a rhythm section as a grid view". It is the
+The `grid` view of a part is the owner's case: "dump a rhythm section as a grid view". It is the
 view `duet drums read` makes today, without writing a grid document.
 
 ### The commands
@@ -474,13 +529,13 @@ neither belongs in one domain group.
 A saved view has no extension of its own, so its first line names it:
 
 ```text
-# duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41
+# duet notes v1 of part 1.0 from 3f9a1c0d5e2b7a41
 # duet grid v1 of drum-grid 1.0 from 9c04e1b2a7d35f60
-# duet grid v1 of song 1.0 track "Drums" step 1/16 from 0b7e33c19a5d2f84
+# duet grid v1 of part 1.0 track "Drums" step 1/16 from 0b7e33c19a5d2f84
 ```
 
 - **`notes v1`, `grid v1`:** the view and its syntax version. A change of syntax bumps it.
-- **`of song 1.0`:** the kind and the schema version the view renders.
+- **`of part 1.0`:** the kind and the schema version the view renders.
 - **`track "Drums" step 1/16`:** for a partial view, which part of the document it shows.
 - **`from <digest>`:** 16 hex digits of a 64-bit FNV-1a digest of the source document's body, as
   written. `apply --onto` checks it, and refuses when the document has changed since the view was
@@ -494,7 +549,7 @@ A saved view has no extension of its own, so its first line names it:
 
 - **It names a newer view version, or a newer schema version than this duet reads:** refused by name,
   under [the version policy](#3-the-version-policy).
-- **It is today's line,** `# notefmt v1: …` or `# notefmt drums v1: …`: read as `notes v1 of song 1.0`
+- **It is today's line,** `# notefmt v1: …` or `# notefmt drums v1: …`: read as `notes v1 of part 1.0`
   or `grid v1 of drum-grid 1.0`, with no digest. Every file written before this design still applies.
 - **It is missing:** `apply` asks for `--as notes|grid`, and reads the text at the current versions with
   no digest check. A view written from scratch by hand or by an agent has no header, and is read as
@@ -503,8 +558,8 @@ A saved view has no extension of its own, so its first line names it:
 
 ### What each view drops
 
-- **`notes` of a song: nothing in the body.**
-  - It shows every field of song 1.0: the conductor, the end, every track with its channel and
+- **`notes` of a part: nothing in the body.**
+  - It shows every field of part 1.0: the conductor, the end, every track with its channel and
     program, every note with its pitch's spelling, every control.
   - It shows the **normalized** body. A loose position (`1.1.960` in 4/4) or a length off the ticks is
     shown normalized. Every reader normalizes, so no document holds the loose form.
@@ -571,7 +626,7 @@ These replace or extend the `.drums` and notefmt round trips in
 
 **Proposed:**
 
-- **ABC and MIDI import into a song document** and export from one. Their readers and writers are
+- **ABC and MIDI import into a part document** and export from one. Their readers and writers are
   unchanged. They produce and take a `Song`, and the document wraps it.
 - **What `duet-abc` did not carry goes in the envelope's `from`.**
 
@@ -601,11 +656,11 @@ The owner ruled (2026-11-15) that `.duet` and `.duet.jsonl` are the only extensi
 
 | Today | Becomes |
 |---|---|
-| `<x>.notes` (and `.txt`, read as notefmt) | a song document, `<x>.duet`. Its text is the `notes` view. |
+| `<x>.notes` (and `.txt`, read as notefmt) | a part document, `<x>.duet`. Its text is the `notes` view. |
 | `<x>.drums` | a drum-grid document, `<x>.duet`. Its text is the `grid` view. |
-| `<x>.json`, `<x>.toml` (a song) | a song document, `<x>.duet` |
+| `<x>.json`, `<x>.toml` (a song) | a part document, `<x>.duet` |
 | `<x>.drums.json`, `<x>.drums.toml` | a drum-grid document, `<x>.duet` |
-| capture's `<stem>.notes` (the unquantized performance) | `<stem>.duet`, a song document |
+| capture's `<stem>.notes` (the unquantized performance) | `<stem>.duet`, a part document |
 | capture's `<stem>.drums` (a rhythm take's score) | `<stem>.grid.duet`, a drum-grid document |
 | capture's `<stem>.abc` (a melody take's score) | unchanged: ABC is an outside format |
 | `<stem>.capture.json` | `<stem>.capture.duet`, a `capture-analysis` document |
@@ -614,8 +669,9 @@ The owner ruled (2026-11-15) that `.duet` and `.duet.jsonl` are the only extensi
 
 - **The dispatch in `duet-cli/src/io.rs`:**
   - **`.duet` and `.duet.jsonl` are read by their envelope.** The kind decides what the file is, so a
-    song command given a drum-grid document refuses it, naming the kind: "beat.duet is a drum-grid;
-    duet play reads a song; duet drums render makes one".
+    part command given a drum-grid document refuses it, naming the kind: "beat.duet is a drum-grid;
+    duet play reads a part; duet drums render makes one". The message the binary prints today still
+    says "song", until the rename's code change.
   - **`.mid`, `.midi`, `.smf` and `.abc` keep their names.** They are outside formats with no envelope.
   - **A view is never read by its name.** Only `duet apply` reads one, by its header line.
   - **Standard input (`-`):** a first non-blank byte of `{` is a document, read by its envelope.
@@ -664,9 +720,9 @@ keeps passing unchanged. These are the new ones, each named for the task that ad
     refused naming both.
 - **Exact floats:** random `f64` and `f32` bit patterns (finite) write and read back to the same bits
   through serde_json, with `float_roundtrip` on. It fails without it.
-- **song 1.0** (in `crates/duet-midi/tests/roundtrip.rs`, as CLAUDE.md requires):
-  - every song the file already builds round-trips through a song document exactly;
-  - a song document's body is byte-identical to what `.json` wrote before this change;
+- **part 1.0, built as song 1.0** (in `crates/duet-midi/tests/roundtrip.rs`, as CLAUDE.md requires):
+  - every song the file already builds round-trips through a part document exactly;
+  - a part document's body is byte-identical to what `.json` wrote before this change;
   - the `notes` view witnesses of [question 5](#witnesses-for-the-views).
 - **drum-grid 1.0** (in `crates/duet-drums/tests/roundtrip.rs`):
   - the random grids of `the_drum_grid_round_trips_under_its_map` round-trip through a document
@@ -699,7 +755,7 @@ predecessor unless it says so.
    `statements`, the `Kind` trait, `.duet` and `.duet.jsonl` framing, and the version policy's
    errors. `serde_json`'s `float_roundtrip` on. Witnesses: the envelope and the policy, and exact
    floats, as `duet-schemas` unit tests.
-2. **The schema gate, with song 1.0.** `schemars` added; hand `JsonSchema` impls with patterns for
+2. **The schema gate, with song 1.0** (built; renamed `part` 1.0 by the songs design's task 1). `schemars` added; hand `JsonSchema` impls with patterns for
    `Position`, `TimeSig`, `Key`, `Grid` and `Pitch`; ranges stated; `deny_unknown_fields` on the song
    types; the `Kind` impl for `Song` and the registry in `duet-schemas`;
    `crates/duet-schemas/schemas/song/1.0.json` and its example committed; the gate test; CI-3's status updated. Witnesses: the gate, and song 1.0 in
@@ -724,7 +780,7 @@ predecessor unless it says so.
    schema committed. duet-cli's capture command writes, through `duet-schemas`, `<stem>.duet`, `<stem>.grid.duet` or `<stem>.abc`, and `<stem>.capture.duet`. What it inferred
    moves from `#` comments into `statements`. Witnesses: an analysis document round-trips exactly
    through its reader and validates against its schema; a capture with an estimated tempo has that
-   statement in its song document, and `duet view` shows it as a comment.
+   statement in its part document, and `duet view` shows it as a comment.
 8. **performance 1.0.** The performance design's task 2. duet-dsp yields `PerformanceHead` and
    `FrameBlock`, and duet-cli writes `<stem>.performance.duet.jsonl` through `duet-schemas`.
    Witnesses: that design's question 1, plus: the first line is the envelope, and every later line
@@ -738,7 +794,7 @@ task can start before the CLI work lands.
 Each gets a pointer where its file names change, and nothing else:
 
 - **[The capture design](2026-11-14-capture-design.md):** `<stem>.notes` becomes `<stem>.duet`, a
-  song document. `<stem>.drums` becomes `<stem>.grid.duet`, a drum-grid document. `<stem>.capture.json`
+  part document (written as a song document before the rename). `<stem>.drums` becomes `<stem>.grid.duet`, a drum-grid document. `<stem>.capture.json`
   becomes `<stem>.capture.duet`, a `capture-analysis` document. The `#` comment statements move to the
   envelope's `statements`, and every view shows them.
 - **[The performance and reading design](2026-11-15-performance-and-reading-design.md):**
@@ -775,8 +831,9 @@ Still **Proposed**:
 
 ## Not decided here, and why
 
-- **The project kind:** named, and constrained to live inside `.duet/`. What it holds is the project
-  work's question.
+- **The project kind:** named, and constrained to live inside `.duet/`. What it holds is
+  [the project design](2026-11-17-project-design.md)'s.
+- **The song kind, for the piece:** [songs and composition](2026-11-17-songs-and-composition-design.md)'s.
 - **A schema for `duet.toml`:** an editor convenience, not a contract. Deferred until someone wants it.
 - **Seconds beside frames in capture events:** the capture design promised them, and the file has frames
   and the rate. Whether to add them is a minor of `capture-analysis`, decided when the comparison tool

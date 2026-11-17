@@ -131,6 +131,10 @@ duet apply sketch.notes -o - | duet play -       # play a view's text, no file i
 `convert` reads and writes [drum-grid documents](#drum-grids) too; writing one from a song needs
 `--grid`.
 
+**The `song` kind is to be renamed `part`** (owner, 2026-11-17): a code change still to come
+renames the kind, its schema and its messages. Until then duet reads and writes `song` 1.0 as
+described here ([the documents design](docs/superpowers/specs/2026-11-15-duet-documents-design.md)).
+
 **A document says where its song came from.** A song imported from ABC or MIDI records it in
 the envelope's `from`: `{"format": "midi"}`, or for ABC the tune's `X:` number and every
 notation-only construct the reader read but did not carry (a slur, an annotation), each at its
