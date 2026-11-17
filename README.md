@@ -221,9 +221,12 @@ optionally the General MIDI program (0 to 127) at the start. Then one event per 
   eighth note after beat 2. `1.2` means `1.2.0`, and offsets past the end of a beat carry
   on (`1.1.960` in 4/4 is read as `1.3.0`).
 - **Pitches** are scientific pitch names with middle C (MIDI 60) as `C4`. Sharps and flats
-  both work (`F#3`, `Bb2`). When reading MIDI, black keys are spelled the way the scale of
-  the key in force where the note starts spells them, so D minor gives `Bb` and `C#`, and
-  after `key A major at 9.1.0` the same keys are `A#` and `C#`.
+  both work (`F#3`, `Bb2`), as do `Cb`, `Fb`, `E#` and `B#`, which keep their spelling: `Cb5`
+  is MIDI 71, the octave being the letter's. When reading MIDI, notes are spelled the way
+  the scale of the key in force where the note starts spells them, so D minor gives `Bb` and
+  `C#`, Eb minor gives `Cb` and F# major `E#`, and after `key A major at 9.1.0` the same
+  black keys are `A#` and `C#`. A pitch has at most one sharp or flat, so the `C##` that
+  leads to D# minor is `D`.
 - **Lengths** are in quarter notes, whatever the time signature: `1`, `0.5`, `1.5`, or a
   fraction like `1/3` for a triplet.
 - Lines starting with `#` are comments, and so is anything after a word that starts with `#`.

@@ -225,7 +225,7 @@ pub fn assemble(
         };
         let mut pitch = Pitch::new(p.key)?;
         if let Some(key) = song.key {
-            pitch = pitch.spelled_flat(key.spells_flat(p.key % 12));
+            pitch = key.spell(pitch);
         }
         track.notes.push(Note::new(
             map.position(start),

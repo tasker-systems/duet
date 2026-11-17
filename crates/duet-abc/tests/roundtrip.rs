@@ -175,8 +175,8 @@ fn every_refused_construct_names_itself_and_its_line() {
             4,
         ),
         (
-            "enharmonic spelling <E#/Cb/B#/Fb/^^/__>",
-            tune("", PLAIN, "C2 ^E2 E4 |]\n"),
+            "double sharp or flat <^^/__>",
+            tune("", PLAIN, "C2 ^^E2 E4 |]\n"),
             6,
             4,
         ),
@@ -385,6 +385,69 @@ fn the_writer_keeps_spelling_and_changes_that_reviews_found_it_losing() {
     round_trips(&t("C", "(3:2:2c4d2 z4 |]"));
     // Changes on the song's end, after its last bar line.
     round_trips(&t("C", "C8 |] [M:3/4][K:G][Q:1/4=90]"));
+}
+
+#[test]
+fn every_six_accidental_key_round_trips_with_its_spelling() {
+    let pitches = |song: &Song| -> String {
+        let names: Vec<String> = song.tracks[0]
+            .notes
+            .iter()
+            .map(|n| n.pitch.to_string())
+            .collect();
+        names.join(" ")
+    };
+    let canonical =
+        |key: &str, body: &str| format!("X:1\nT:t\nM:4/4\nL:1/8\nQ:1/4=120\nK:{key}\n{body}\n");
+    // Each scale under its six-accidental signature, with a written natural: the text reads,
+    // spells under the key (Cb, E#) and writes back exactly.
+    for (key, body, spelled) in [
+        (
+            "Ebm",
+            "E2 F2 G2 A2 | B2 c2 d2 =c2 | =d2 e6 |]",
+            "Eb4 F4 Gb4 Ab4 Bb4 Cb5 Db5 C5 D5 Eb5",
+        ),
+        (
+            "Gb",
+            "G2 A2 B2 c2 | d2 e2 f2 g2 | =c8 |]",
+            "Gb4 Ab4 Bb4 Cb5 Db5 Eb5 F5 Gb5 C5",
+        ),
+        (
+            "F#",
+            "F2 G2 A2 B2 | c2 d2 e2 f2 | =e8 |]",
+            "F#4 G#4 A#4 B4 C#5 D#5 E#5 F#5 E5",
+        ),
+        (
+            "D#m",
+            "D2 E2 F2 G2 | A2 B2 =d2 d2 | =e8 |]",
+            "D#4 E#4 F#4 G#4 A#4 B4 D5 D5 E5",
+        ),
+    ] {
+        let abc = canonical(key, body);
+        let song = read(&abc).unwrap();
+        assert_eq!(pitches(&song), spelled, "K:{key}");
+        assert_eq!(round_trips(&abc), abc, "K:{key} did not write back exactly");
+    }
+    let ebm: duet_core::Key = "Eb minor".parse().unwrap();
+    assert_eq!(read(&canonical("Ebm", "E8 |]")).unwrap().key, Some(ebm));
+
+    // A B natural under K:Ebm is B, not the key's Cb: it keeps its natural, which holds to
+    // the bar line.
+    let abc = canonical("Ebm", "=B2 c2 B4 |]");
+    assert_eq!(pitches(&read(&abc).unwrap()), "B4 Cb5 B4");
+    assert_eq!(round_trips(&abc), abc);
+    // E#, B#, Cb and Fb written out of key are read and kept: they are the same notes as
+    // F, C, B and E, spelled otherwise.
+    let abc = canonical("C", "^E2 ^B,2 _c2 _F2 |]");
+    let song = read(&abc).unwrap();
+    assert_eq!(pitches(&song), "E#4 B#3 Cb5 Fb4");
+    let midi: Vec<u8> = song.tracks[0]
+        .notes
+        .iter()
+        .map(|n| n.pitch.midi())
+        .collect();
+    assert_eq!(midi, [65, 60, 71, 64]);
+    assert_eq!(round_trips(&abc), abc);
 }
 
 #[test]
