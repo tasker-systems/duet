@@ -229,6 +229,11 @@ its key. The rejoin never joins notes on two keys.
     does not.
 - Ruling how these combine is the owner's call, not this design's. No task is filed until it is
   ruled (task F).
+- **Ruled (owner, 2026-11-16):** a weakly voiced frame belongs to the note it sits in when its
+  pitch continues the note's line, its level stays within a stated range of the note's held
+  level, and no onset follows before the next note; otherwise it is a breath, left unread as
+  #48 prices it. Pitch continuity weighs above level. Built as a pass over the reading, before
+  the rejoin (`crates/duet-dsp/src/breathy.rs`, which states the values and why).
 
 ## 3. What each output writes
 
@@ -369,7 +374,9 @@ Each task is filed by the control plane. None is built before the one it needs.
 - **Witness:** the owner's ruling on each moment, by ear, through the three renderings.
 
 **F. A breathy ornament is read as part of its note.**
-- **Not filed** until the breath question in question 2 is ruled.
+- **Filed** once the breath question in question 2 was ruled: temper
+  `01a1e523-ebde-773f-92b7-f810e8c112b5`. `capture-analysis` 1.9 (or the next free minor),
+  additive: the reading's optional `breathy`.
 - **Witness, once ruled:** Blood Sport's "-eak", for local listening only, reads one F#3 with its
   excursions. A synthetic breath between two phrases is still left unread.
 
@@ -396,6 +403,19 @@ two ways, and adds no task:
   - a new notes-view syntax version in its header, `notes v2`;
   - a wider `duet-abc` subset. That is not a duet kind, but it needs round-trip tests in
     `crates/duet-midi/tests/roundtrip.rs` and the ABC crate.
+
+## Since: a held pitch before the note it reaches (ruled 2026-11-17)
+
+The owner ruled after the held-pitch findings (temper research
+`01a1e767-1656-73ac-a220-e47b23b6c6f6`; task `01a1e77f-02fb-73bc-8c08-e1c3243db9a0`) that a pitch
+held at least the shortest note before the note it reaches is a note of its own, and that the
+reading suggests "likely approach to the next note" only for a semitone step with more than +30
+cents of drift toward it. This narrows question 2's arrival rule: the HMM still decodes a held
+approach as the arrival's attack, and a pass after the rejoin (`duet-dsp`'s `held.rs`) makes it a
+note, stating it in `capture-analysis` 1.11's `held`. Folding it back is a per-note choice. The
+pass reads pitches held below the note only; one held above it (an overshoot, a lean, the turn at
+a note's start in task A's witness) stays an excursion until the owner rules on approaches from
+above.
 
 ## Not decided here
 

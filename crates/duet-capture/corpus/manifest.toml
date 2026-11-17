@@ -63,14 +63,27 @@ downbeat = 0.25
 #                 the estimated A4's offset from 440 Hz, in cents, and how far it may move
 #   notes, notes_within
 #                 how many notes the HMM reads, and how far that may move
+#   excursions, excursions_within
+#                 how many excursions the HMM's notes hold in all, and how far that may move
 
 [[listened]]
 file = "wayfaring-stranger.flac"
 provenance = "The owner's recording of the traditional song Wayfaring Stranger, sung by James (Pete) Taylor, recorded 2026-11-15 with `duet record` (48 kHz 24-bit) and resampled to 22.05 kHz 16-bit mono"
 licence = "CC-BY-4.0"
 licence_file = "wayfaring-stranger.flac.license"
-key = "Eb"
+# E-flat minor, ruled by the owner (2026-11-17, temper task 01a1e95b): three of the four
+# phrases and the last note rest on E-flat, and G-flat is held where G is only an approach. The
+# Aarden-Essen profile reads it so under every reader, before and after the held-pitch pass;
+# Krumhansl-Kessler, duet's profile until then, read E-flat or A-flat major. v1 has major and
+# minor only, so its Dorian C is an accidental.
+key = "Ebm"
 tuning_cents = -7.0
 tuning_within = 3.0
-notes = 31
+# 38 since the held-pitch pass (2026-11-17): the HMM's 30, and the eight pitches held before
+# the note they reach that the owner ruled on (temper task 01a1e4f9, the moments in
+# wayfaring-stranger.moments). With those notes, the 13 excursions left are the ornaments
+# inside notes and the pitches held above the note they reach.
+notes = 38
 notes_within = 2
+excursions = 13
+excursions_within = 2

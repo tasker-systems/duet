@@ -165,6 +165,11 @@ pub struct Transition {
 /// from where the note is held, and spread no wider than a slide's frames may when they have
 /// arrived (35 cents over 50 ms, and in proportion over fewer frames), so a slide passing
 /// through is none.
+///
+/// One more is stated by the same-key rejoin ([`rejoin`](crate::rejoin)): a rejoined dip that
+/// turns at its bottom, as a V does, holds nowhere, so it is none of those; the rejoin states
+/// the run of frames about its bottom, each at least [`EXCURSION_CENTS`] from the note's centre,
+/// as its excursion.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]

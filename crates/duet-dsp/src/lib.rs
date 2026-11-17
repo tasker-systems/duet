@@ -40,10 +40,14 @@
 //! ([`Stage::latency_frames`]). [`estimate`] and [`estimate_key`] are functions over the
 //! settled events, not stages: like assembly, they keep the whole take only as events.
 //!
-//! # Where a model fits later
+//! # Where a model fits
 //!
-//! This version has no model, no model runtime and no model download. A model such as
-//! basic-pitch (Apache-2.0, with an ONNX export, run through `ort`) would be one more
+//! With the `basic-pitch` feature, Spotify's Basic Pitch is a reader (`BasicPitch`): it reads a
+//! monophonic take's samples, chooses where its notes start and end, and the performance keys
+//! them, as for the other readers. Its model is embedded and nothing is downloaded. Without the
+//! feature there is no model and no model runtime.
+//!
+//! A model that replaces the melody stage, for a polyphonic take, would be one more
 //! implementation of [`Stage`] with `In = Mono` and `Out = Event`: it owns whatever buffering
 //! the model's window needs, reports it as its `latency_frames`, and emits [`Event::Note`]s as
 //! they settle. It would replace [`Melody`] for polyphonic takes, and [`estimate`] and
@@ -53,8 +57,12 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "basic-pitch")]
+mod basic_pitch;
+mod breathy;
 mod error;
 mod event;
+mod held;
 mod hits;
 mod hmm;
 mod key;
@@ -64,19 +72,27 @@ mod performance;
 mod pitch;
 mod prepare;
 mod reading;
+mod rejoin;
 mod residual;
 mod stage;
 #[cfg(test)]
 mod synth;
 mod timing;
 
+#[cfg(feature = "basic-pitch")]
+pub use basic_pitch::{BasicPitch, BasicPitchRead, MODEL_SHA256};
+pub use breathy::{BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, breathe};
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
+pub use held::{
+    APPROACH_DRIFT_CENTS, HELD_PITCH_SECS, Held, NEXT_NOTE_GAP_SECS, Suggestion, SuggestionRule,
+    Suggests, hold_apart,
+};
 pub use hits::{Hits, LaneMode};
 pub use hmm::{
     ATTACK_COST, DROPOUT, LAG_SECS, NoteModel, ONSET_LEAVE, STABLE_SIGMA_SEMITONES, VOICING_FLOOR,
 };
-pub use key::{KeyEstimate, estimate_key};
+pub use key::{KeyEstimate, KeyProfile, estimate_key, estimate_key_with};
 pub use notes::Melody;
 pub use onset::Onsets;
 pub use performance::{
@@ -86,8 +102,9 @@ pub use pitch::{PitchFrame, PitchTrack};
 pub use prepare::{ANALYSIS_RATE, MAX_GAP_SECS, Prepare};
 pub use reading::{
     A440_CENTS, BETWEEN_KEYS_CENTS, PerformanceFrames, ReadNote, Reader, ReaderName, Reading,
-    Tuning, a4_cents_of_hz, estimate_tuning, read,
+    Thresholds, Tuning, a4_cents_of_hz, estimate_tuning, interpret, read, read_as_decoded,
 };
+pub use rejoin::{Dip, REJOIN_CENTS, REJOIN_TOLERANCE_CENTS, Rejoin, rejoin};
 pub use residual::{
     CentreHistogram, Drift, EXCURSION_CENTS, Excursion, LOSS_SIGMA_CENTS, Loss, Modulation,
     NOTE_COST, NoteResidual, SHORTEST_EXCURSION_FRAMES, TakeResidual, Transition, held_cost,

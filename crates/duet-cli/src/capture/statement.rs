@@ -91,14 +91,111 @@ fn cents(n: String) -> String {
 
 /// The reader, stated only when it is not the note HMM (the default): the segmentation rules.
 pub fn reader(reading: &Reading) -> Option<String> {
-    let reader = reading.reader?;
-    (reader.name == ReaderName::Rules).then(|| "reader: the segmentation rules".to_owned())
+    match reading.reader?.name {
+        ReaderName::Rules => Some("reader: the segmentation rules".to_owned()),
+        ReaderName::BasicPitch => {
+            let mut said =
+                "reader: Spotify's Basic Pitch (basic-pitch-rs), each note keyed by the \
+                            performance on the take's tuning"
+                    .to_owned();
+            if let Some(t) = reading.reader?.thresholds {
+                said.push_str(&format!(
+                    "; decoded at onset threshold {}, frame threshold {}, notes over {} ms",
+                    t.onset_threshold, t.frame_threshold, t.minimum_note_length_ms
+                ));
+            }
+            Some(said)
+        }
+        _ => None,
+    }
+}
+
+/// What became of Basic Pitch's notes: how many it found, and how many were cut back, dropped
+/// or keyed differently on the way to a reading of one note at a time.
+#[cfg(feature = "basic-pitch")]
+pub fn basic_pitch(read: &duet_capture::BasicPitchRead) -> String {
+    format!(
+        "basic-pitch: {} notes found; {} cut back and {} dropped where a louder note overlapped \
+         them; {} dropped with no voiced frame; {} on another key than on A440",
+        read.found, read.trimmed, read.overlapped, read.unvoiced, read.rekeyed
+    )
 }
 
 /// How many notes were read, and how many of them are between keys on the take's tuning.
 pub fn notes_read(reading: &Reading) -> String {
     let n = reading.notes.len();
     format!("notes: {n} read, {} between keys", reading.between_keys())
+}
+
+/// How many same-key splits the reading's pass rejoined, and what they did to the loss, in nats:
+/// stated only when it rejoined any, so that a rejoin that raised the loss is never hidden.
+pub fn rejoined(reading: &Reading) -> Option<String> {
+    let n = reading.rejoins.len();
+    if n == 0 {
+        return None;
+    }
+    let change: f64 = reading.rejoins.iter().map(|r| r.loss_change).sum();
+    Some(format!(
+        "rejoined: {n} same-key split{} around a dip within a whole tone, the loss {change:+.1} nats",
+        if n == 1 { "" } else { "s" }
+    ))
+}
+
+/// How many notes the reading's breathy pass carried on over the weakly voiced frames after them,
+/// for how long in all, and what it did to the loss, in nats: stated only when it carried any
+/// on, so that reading frames #48 would leave out is never hidden.
+pub fn breathy(reading: &Reading, rate: u32) -> Option<String> {
+    let n = reading.breathy.len();
+    if n == 0 {
+        return None;
+    }
+    let samples: u64 = reading.breathy.iter().map(|b| b.end - b.decoded.end).sum();
+    let ms = samples as f64 * 1000.0 / f64::from(rate);
+    let change: f64 = reading.breathy.iter().map(|b| b.loss_change).sum();
+    Some(format!(
+        "breathy: {n} note{} carried on over {ms:.0} ms of weakly voiced frames whose pitch goes on, the loss {change:+.1} nats",
+        if n == 1 { "" } else { "s" }
+    ))
+}
+
+/// How many notes the reading's held-pitch pass made from pitches held before the note they
+/// reach, and what they did to the loss, in nats: stated only when it made any, so that a note
+/// its reader did not read is never hidden.
+pub fn held(reading: &Reading) -> Option<String> {
+    let n: usize = reading.held.iter().map(|h| h.notes.len()).sum();
+    if n == 0 {
+        return None;
+    }
+    let change: f64 = reading.held.iter().map(|h| h.loss_change).sum();
+    Some(format!(
+        "held: {n} note{} made from a pitch held before the note it reaches, the loss {change:+.1} nats",
+        if n == 1 { "" } else { "s" }
+    ))
+}
+
+/// Each note the reading suggests is likely an approach to the next, by where it starts in
+/// seconds and its key: stated only when there is one. A suggestion changes no note.
+pub fn suggestions(reading: &Reading, rate: u32) -> Option<String> {
+    if reading.suggestions.is_empty() {
+        return None;
+    }
+    let each: Vec<String> = reading
+        .suggestions
+        .iter()
+        .map(|s| {
+            format!(
+                "{:.2} s (key {}, a semitone {} with {:+.0} cents of drift toward it)",
+                s.start as f64 / f64::from(rate),
+                s.key,
+                if s.step > 0 { "up" } else { "down" },
+                s.drift_cents
+            )
+        })
+        .collect();
+    Some(format!(
+        "likely approach to the next note: {}; kept as notes",
+        each.join(", ")
+    ))
 }
 
 /// The key, stated only when it was estimated, with its relative major or minor.

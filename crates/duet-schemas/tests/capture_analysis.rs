@@ -6,7 +6,8 @@ use std::path::Path;
 
 use duet_capture::{
     ANALYSIS_RATE, Analysis, Event, Given, Kind, Layer1, Mono, NoteModel, Performance,
-    PerformanceFrames, Stage, assemble, estimate, quantize_apart, quantize_offsets, read,
+    PerformanceFrames, Reader as ReadingReader, Stage, Thresholds, assemble, estimate,
+    quantize_apart, quantize_offsets, read,
 };
 use duet_schemas::{AnyDocument, Document, Tool};
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.6 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.12 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -28,8 +29,42 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.6.json"))
+        .build(&read_json("schemas/capture-analysis/1.12.json"))
         .unwrap()
+}
+
+/// A validator for the committed capture-analysis schema at `version`, an older one.
+fn validator_at(version: &str) -> jsonschema::Validator {
+    let envelope = read_json("schemas/envelope/1.0.json");
+    let registry = jsonschema::Registry::new()
+        .add(envelope["$id"].as_str().unwrap(), &envelope)
+        .unwrap()
+        .prepare()
+        .unwrap();
+    jsonschema::options()
+        .with_registry(&registry)
+        .build(&read_json(&format!(
+            "schemas/capture-analysis/{version}.json"
+        )))
+        .unwrap()
+}
+
+/// `document`, restamped as a capture-analysis document at `version`. Before 1.12 the key states
+/// no profile, so its `profile` is left out, as every analysis now has one; any other field
+/// newer than `version` is the caller's to remove.
+fn as_version(document: &Value, version: &str) -> Value {
+    let mut older = document.clone();
+    let minor: u32 = version.strip_prefix("1.").unwrap().parse().unwrap();
+    if minor < 12
+        && let Some(key) = older["body"]["key"].as_object_mut()
+    {
+        key.remove("profile");
+    }
+    older["$schema"] = json!(format!(
+        "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/{version}.json"
+    ));
+    older["duet"]["version"] = json!(version);
+    older
 }
 
 fn assert_valid(document: &Value) {
@@ -57,6 +92,34 @@ fn take_with_a_turn() -> Vec<f32> {
         t if t < ramp => up(t),
         t if t <= ramp + held => 200.0,
         t if t < 2.0 * ramp + held => up(2.0 * ramp + held - t),
+        _ => 0.0,
+    })
+}
+
+/// The scale, its fifth note (B-flat) dipping 170 cents and back over 0.1 s from 0.2 s in: the
+/// shape of the dip the same-key rejoin reads as one note (`duet-dsp`'s
+/// `a_dip_of_170_cents_with_no_onset_is_rejoined_into_one_note`).
+fn take_with_a_dip() -> Vec<f32> {
+    sung(|note, t| {
+        let into = (t - 0.2) / 0.05;
+        if note == 4 && (0.0..2.0).contains(&into) {
+            -170.0 * (1.0 - (into - 1.0).abs())
+        } else {
+            0.0
+        }
+    })
+}
+
+/// The scale, its fifth note (B-flat) held first on A +40 for 0.12 s and reached by a glide of
+/// 20 ms: a semitone approach drifting toward its note, which the note HMM takes in as its
+/// attack and the held-pitch pass makes a note, suggested a likely approach (`duet-dsp`'s
+/// `a_semitone_approach_drifting_40_cents_is_a_note_with_the_suggestion`).
+fn take_with_an_approach() -> Vec<f32> {
+    sung(|note, t| match t {
+        _ if note != 4 => 0.0,
+        t if t < 0.06 => -100.0,
+        t if t < 0.12 => -60.0,
+        t if t < 0.14 => -60.0 + 60.0 * (t - 0.12) / 0.02,
         _ => 0.0,
     })
 }
@@ -214,6 +277,8 @@ fn an_estimated_analysis_round_trips_exactly_and_validates() {
         json!({ "name": "rules", "note_cost": 4.0 })
     );
     assert!(body["key"]["key"]["estimated"].is_object(), "{body}");
+    // The key's profile, since 1.12.
+    assert_eq!(body["key"]["profile"], json!("aarden-essen"), "{body}");
 }
 
 #[test]
@@ -234,6 +299,28 @@ fn a_notes_excursion_round_trips_exactly_and_validates() {
     assert_eq!(excursions.len(), 1, "{excursions:?}");
     let cents = excursions[0]["cents"].as_f64().unwrap();
     assert!((cents - 200.0).abs() <= 10.0, "{excursions:?}");
+}
+
+#[test]
+fn a_readings_rejoin_round_trips_exactly_and_validates() {
+    // The HMM splits the B-flat at its dip, and the pass rejoins it, stating so (1.7).
+    let analysis = analysis_of(&take_with_a_dip(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let reading = &value["body"]["reading"];
+    assert_eq!(reading["notes"].as_array().unwrap().len(), 16, "{reading}");
+    let rejoins = reading["rejoins"].as_array().expect("a rejoin is stated");
+    assert_eq!(rejoins.len(), 1, "{rejoins:?}");
+    let decoded = rejoins[0]["decoded"].as_array().unwrap();
+    assert_eq!(decoded.len(), 2, "{decoded:?}");
+    assert!(
+        decoded
+            .iter()
+            .all(|n| n["key"] == 70 && n.get("residual").is_none())
+    );
+    assert!(rejoins[0]["loss_change"].is_f64(), "{rejoins:?}");
+    // A scale sung plain has nothing to rejoin, and writes no `rejoins`.
+    let (_, plain) = round_trip(analysis_of(&take(), &Given::default(), Reader::Hmm));
+    assert!(plain["body"]["reading"].get("rejoins").is_none());
 }
 
 #[test]
@@ -297,4 +384,189 @@ fn the_schema_and_the_reader_refuse_what_capture_never_writes() {
             );
         }
     }
+}
+
+#[test]
+fn a_basic_pitch_reading_names_its_reader_and_validates_only_from_1_8() {
+    let mut analysis = analysis(&Given::default());
+    let reading = analysis.reading.as_mut().unwrap();
+    // As 1.8 wrote it: a basic-pitch reader, with no thresholds.
+    let mut reader = ReadingReader::basic_pitch(Thresholds::BASIC_PITCH);
+    reader.thresholds = None;
+    reading.reader = Some(reader);
+    let (_, value) = round_trip(analysis);
+    assert_eq!(
+        value["body"]["reading"]["reader"]["name"],
+        json!("basic-pitch")
+    );
+    // capture-analysis 1.7 has no basic-pitch reader: a 1.7 reader refuses the name.
+    let envelope = read_json("schemas/envelope/1.0.json");
+    let registry = jsonschema::Registry::new()
+        .add(envelope["$id"].as_str().unwrap(), &envelope)
+        .unwrap()
+        .prepare()
+        .unwrap();
+    let older = jsonschema::options()
+        .with_registry(&registry)
+        .build(&read_json("schemas/capture-analysis/1.7.json"))
+        .unwrap();
+    let mut as_1_7 = as_version(&value, "1.7");
+    assert!(!older.is_valid(&as_1_7), "1.7 accepts basic-pitch");
+    // The same document read by the rules is a valid 1.7 one: only the reader's name differs.
+    as_1_7["body"]["reading"]["reader"]["name"] = json!("rules");
+    assert!(older.is_valid(&as_1_7), "the 1.7 control is not valid");
+}
+
+#[test]
+fn a_basic_pitch_reading_records_its_thresholds_and_validates_only_from_1_10() {
+    let mut analysis = analysis(&Given::default());
+    let reading = analysis.reading.as_mut().unwrap();
+    let thresholds = Thresholds {
+        onset_threshold: 0.6,
+        frame_threshold: 0.25,
+        minimum_note_length_ms: 200.0,
+    };
+    reading.reader = Some(ReadingReader::basic_pitch(thresholds));
+    let (_, value) = round_trip(analysis);
+    assert_eq!(
+        value["body"]["reading"]["reader"]["thresholds"],
+        json!({
+            "onset_threshold": 0.6,
+            "frame_threshold": 0.25,
+            "minimum_note_length_ms": 200.0,
+        })
+    );
+    // capture-analysis 1.9 has no thresholds: a 1.9 reader refuses them.
+    let older = validator_at("1.9");
+    let mut as_1_9 = as_version(&value, "1.9");
+    assert!(!older.is_valid(&as_1_9), "1.9 accepts thresholds");
+    // The same document without them is a valid 1.9 one: only the thresholds differ.
+    as_1_9["body"]["reading"]["reader"]
+        .as_object_mut()
+        .unwrap()
+        .remove("thresholds");
+    assert!(older.is_valid(&as_1_9), "the 1.9 control is not valid");
+}
+
+/// A validator for the committed capture-analysis 1.8 schema, the last before `breathy`.
+fn validator_1_8() -> jsonschema::Validator {
+    let envelope = read_json("schemas/envelope/1.0.json");
+    let registry = jsonschema::Registry::new()
+        .add(envelope["$id"].as_str().unwrap(), &envelope)
+        .unwrap()
+        .prepare()
+        .unwrap();
+    jsonschema::options()
+        .with_registry(&registry)
+        .build(&read_json("schemas/capture-analysis/1.8.json"))
+        .unwrap()
+}
+
+#[test]
+fn a_readings_breathy_notes_round_trip_exactly_and_validate_only_from_1_9() {
+    // A tone's last frames, as it dies away, are weakly voiced: the HMM leaves them unread, and
+    // the pass carries the note on over those whose pitch goes on, stating so (1.9).
+    let analysis = analysis_of(&take(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let reading = &value["body"]["reading"];
+    let breathy = reading["breathy"]
+        .as_array()
+        .expect("a breathy note is stated");
+    assert!(!breathy.is_empty());
+    for b in breathy {
+        assert!(b["decoded"].get("residual").is_none(), "{b}");
+        assert!(b["end"].as_u64() > b["decoded"]["end"].as_u64(), "{b}");
+        assert!(b["lowest_db"].as_f64().unwrap() >= -20.0, "{b}");
+    }
+    // capture-analysis 1.8 has no `breathy`: a 1.8 reader refuses it, and takes the same
+    // document without it.
+    let mut as_1_8 = as_version(&value, "1.8");
+    let older = validator_1_8();
+    assert!(!older.is_valid(&as_1_8), "1.8 accepts breathy");
+    as_1_8["body"]["reading"]
+        .as_object_mut()
+        .unwrap()
+        .remove("breathy");
+    assert!(older.is_valid(&as_1_8), "the 1.8 control is not valid");
+}
+
+#[test]
+fn a_readings_held_notes_and_suggestions_round_trip_exactly_and_validate_only_from_1_11() {
+    // The HMM takes the approach in as its B-flat's attack; the pass makes the A a note of its
+    // own, states it, and suggests it a likely approach to the B-flat (1.11).
+    let analysis = analysis_of(&take_with_an_approach(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let reading = &value["body"]["reading"];
+    let held = reading["held"].as_array().expect("a held note is stated");
+    let [held] = held.as_slice() else {
+        panic!("one note reached: {held:?}");
+    };
+    assert_eq!(held["decoded"]["key"], json!(70), "{held}");
+    assert!(held["decoded"].get("residual").is_none(), "{held}");
+    assert_eq!(held["notes"][0]["key"], json!(69), "{held}");
+    assert!(held["notes"][0].get("residual").is_none(), "{held}");
+    let suggestions = reading["suggestions"]
+        .as_array()
+        .expect("a suggestion is stated");
+    let [suggestion] = suggestions.as_slice() else {
+        panic!("one suggestion: {suggestions:?}");
+    };
+    assert_eq!(suggestion["suggests"], json!("likely-approach"));
+    assert_eq!(suggestion["rule"], json!("semitone-with-drift"));
+    assert_eq!(
+        (
+            &suggestion["key"],
+            &suggestion["next_key"],
+            &suggestion["step"]
+        ),
+        (&json!(69), &json!(70), &json!(1))
+    );
+    // capture-analysis 1.10 has neither: a 1.10 reader refuses each, and takes the same document
+    // without them.
+    let older = validator_at("1.10");
+    for field in ["held", "suggestions"] {
+        let mut as_1_10 = as_version(&value, "1.10");
+        let other = if field == "held" {
+            "suggestions"
+        } else {
+            "held"
+        };
+        as_1_10["body"]["reading"]
+            .as_object_mut()
+            .unwrap()
+            .remove(other);
+        assert!(!older.is_valid(&as_1_10), "1.10 accepts {field}");
+    }
+    let mut as_1_10 = as_version(&value, "1.10");
+    let body = as_1_10["body"]["reading"].as_object_mut().unwrap();
+    body.remove("held");
+    body.remove("suggestions");
+    assert!(older.is_valid(&as_1_10), "the 1.10 control is not valid");
+}
+
+#[test]
+fn a_keys_profile_round_trips_exactly_and_validates_only_from_1_12() {
+    let analysis = analysis_of(&take_with_an_approach(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    assert_eq!(value["body"]["key"]["profile"], json!("aarden-essen"));
+    let mut other = value.clone();
+    other["body"]["key"]["profile"] = json!("krumhansl-kessler");
+    assert_valid(&other);
+    let mut unknown = value.clone();
+    unknown["body"]["key"]["profile"] = json!("temperley");
+    assert!(
+        !validator().is_valid(&unknown),
+        "an unknown profile is accepted"
+    );
+    // capture-analysis 1.11 has no profile: a 1.11 reader refuses it, and takes the same
+    // document without it.
+    let older = validator_at("1.11");
+    let mut as_1_11 = value.clone();
+    as_1_11["$schema"] = as_version(&value, "1.11")["$schema"].clone();
+    as_1_11["duet"]["version"] = json!("1.11");
+    assert!(!older.is_valid(&as_1_11), "1.11 accepts a profile");
+    assert!(
+        older.is_valid(&as_version(&value, "1.11")),
+        "the 1.11 control is not valid"
+    );
 }

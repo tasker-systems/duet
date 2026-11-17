@@ -56,4 +56,16 @@ transcribed note by note: `wayfaring-stranger.flac`, the owner singing the tradi
 is the first. Its test holds only what the owner agreed (the key, the tuning, and the number
 of notes, each within a tolerance), so it catches a reader change that moves the take a long
 way, and says nothing about any one note. It is licensed CC BY 4.0, not MIT; the notice is
-`wayfaring-stranger.flac.license`, beside it.
+`wayfaring-stranger.flac.license`, beside it. `wayfaring-stranger.moments`, also beside it,
+names the moments the owner rules on by ear, for `duet capture review --moments`.
+
+## Outside transcriptions
+
+`wayfaring-stranger.logic-flex-pitch.mid` is the same performance transcribed by another tool:
+Logic Pro's Flex Pitch, from the 48 kHz original, exported unedited. It is a reference to set
+duet's readings and key estimate beside, not an answer: Flex Pitch makes its own choices, and
+splits the take into more and shorter notes (52) than any of duet's readers. It is CC BY 4.0,
+as the recording is; the notice is `wayfaring-stranger.logic-flex-pitch.mid.license`.
+`tests/flex_pitch.rs` reads it through duet-midi and holds it to the take: its note count, and
+where its first note starts and its last note ends against the HMM's reading of
+`wayfaring-stranger.flac`, so a different export, or one shifted in time, fails.

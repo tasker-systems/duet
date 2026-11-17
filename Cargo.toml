@@ -3,10 +3,27 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
+# The one version every published crate shares, and the repo-root VERSION once a release has cut
+# one: tools/scripts/release/update-versions.sh writes both, with every version below (RELEASING.md).
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
 repository = "https://github.com/tasker-systems/duet"
+
+# The workspace's own crates, at the shared version. A dependency spec cannot inherit
+# [workspace.package].version, so each is spelled out, and update-versions.sh moves them together.
+# The two dev-dependency cycles back to duet-schemas (from duet-midi and duet-drums) stay path-only
+# in their crates, so cargo strips them when it publishes.
+[workspace.dependencies]
+duet-core = { path = "crates/duet-core", version = "0.3.0" }
+duet-midi = { path = "crates/duet-midi", version = "0.3.0" }
+duet-abc = { path = "crates/duet-abc", version = "0.3.0" }
+duet-drums = { path = "crates/duet-drums", version = "0.3.0" }
+duet-dsp = { path = "crates/duet-dsp", version = "0.3.0" }
+duet-capture = { path = "crates/duet-capture", version = "0.3.0" }
+duet-play = { path = "crates/duet-play", version = "0.3.0" }
+duet-schemas = { path = "crates/duet-schemas", version = "0.3.0" }
 
 # The canonical lint table from tasker-systems/conventions (rust/workspace-lints.toml), adopted in
 # `table` mode: check A compares it with the projection (CONS-3). Change it there, not here.

@@ -14,9 +14,11 @@
 //! and removed again when the capture fails before then.
 //!
 //! `duet capture compare` ([`compare`]) reads a melody take's recording and those files back,
-//! and plots and plays its reading against its performance.
+//! and plots and plays its reading against its performance. `duet capture review` ([`review`])
+//! does it for each moment of a moments file, every reading side by side, on one page.
 
 mod compare;
+mod review;
 mod statement;
 
 use std::fs;
@@ -32,6 +34,8 @@ use duet_capture::{
     Source, Stage, a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart,
     quantize_offsets, read,
 };
+#[cfg(feature = "basic-pitch")]
+use duet_capture::{BasicPitch, Thresholds};
 use duet_core::{Control, Grid, Key, Position, Song, TimeMap, TimeSig};
 use duet_schemas::{Document, Stream};
 
@@ -57,6 +61,12 @@ pub enum CaptureCommand {
     /// STEM.compare.FROM-TO.svg and .wav. Reads the take's recording and what `duet capture
     /// melody` wrote at STEM; nothing is overwritten.
     Compare(compare::CompareArgs),
+    /// Review a melody take moment by moment, on one page: STEM.review/index.html shows each
+    /// moment of --moments with every reading side by side (the notes each reads, compare's plot
+    /// inline, and its clips as melody, steps, bends, legato and gapped), a box for a verdict, and
+    /// a button that copies every verdict. The clips are in STEM.review/clips. Reads what `duet
+    /// capture melody` wrote at STEM and each --reading; a directory that exists is refused.
+    Review(review::ReviewArgs),
 }
 
 /// What both kinds of take are captured with. Anything about the timing left out is
@@ -83,11 +93,28 @@ pub struct TakeArgs {
     /// exactly. Without it, the tuning is estimated from the take and stated.
     #[arg(long, allow_hyphen_values = true)]
     tuning: Option<TuningArg>,
-    /// What chooses a melody's notes from its performance: `hmm`, the note HMM (the default),
-    /// or `rules`, the segmentation rules, stated when chosen. The reader is written in
-    /// STEM.capture.duet either way.
+    /// What chooses a melody's notes from its performance: `hmm`, the note HMM (the default);
+    /// `rules`, the segmentation rules; or `basic-pitch`, Spotify's Basic Pitch, an outside
+    /// model, which chooses where notes start and end while the performance gives each its key
+    /// on the take's tuning. A reader other than the HMM is stated when chosen, and the reader
+    /// is written in STEM.capture.duet either way.
     #[arg(long, value_enum)]
     reader: Option<ReaderArg>,
+    /// With `--reader basic-pitch`: the onset activation, 0 to 1, at which Basic Pitch starts a
+    /// note. Its own default is 0.5; higher starts fewer notes.
+    #[cfg(feature = "basic-pitch")]
+    #[arg(long, value_name = "ACTIVATION", allow_hyphen_values = true)]
+    onset_threshold: Option<f64>,
+    /// With `--reader basic-pitch`: the note activation, 0 to 1, below which Basic Pitch ends a
+    /// note. Its own default is 0.3; lower holds a note through a deeper dip.
+    #[cfg(feature = "basic-pitch")]
+    #[arg(long, value_name = "ACTIVATION", allow_hyphen_values = true)]
+    frame_threshold: Option<f64>,
+    /// With `--reader basic-pitch`: Basic Pitch keeps only notes longer than this, in
+    /// milliseconds. Its own default is 127.7.
+    #[cfg(feature = "basic-pitch")]
+    #[arg(long, value_name = "MS", allow_hyphen_values = true)]
+    min_note_ms: Option<f64>,
     /// The step the score is quantized to, such as 1/16 (the default) or 1/8t. Where two
     /// notes, or two hits on one lane, would share a step, the step is halved, down to 1/64,
     /// and what still shares one is merged; each is stated. The .duet is never quantized.
@@ -107,6 +134,8 @@ pub struct TakeArgs {
 enum ReaderArg {
     Rules,
     Hmm,
+    #[cfg(feature = "basic-pitch")]
+    BasicPitch,
 }
 
 /// Which kind of take is captured.
@@ -121,6 +150,7 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         CaptureCommand::Melody(args) => (Take::Melody, args),
         CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
         CaptureCommand::Compare(args) => return compare::run(&args),
+        CaptureCommand::Review(args) => return review::run(&args),
     };
     let key = flags(take, &args)?;
     let grid = match args.grid {
@@ -132,19 +162,45 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     grid.step_ticks(Song::default().ticks_per_quarter)
         .with_context(|| format!("--grid {grid}"))?;
     let outputs = Outputs::new(&args.input, args.output.as_deref(), take)?;
+    // Basic Pitch is loaded, and its thresholds checked, before anything is read.
+    #[cfg(feature = "basic-pitch")]
+    let basic_pitch = basic_pitch_of(&args)?;
 
     // Every failure from here on is the take's, so it names the take. FileSource's own errors
     // name it already.
     let named = || args.input.display().to_string();
-    let (mut events, kept) = analyse(&args.input, take, args.lane.is_some(), &outputs)?;
+    // Basic Pitch reads the take's samples themselves, so they are kept for it.
+    #[cfg(feature = "basic-pitch")]
+    let keep = args.reader == Some(ReaderArg::BasicPitch);
+    #[cfg(not(feature = "basic-pitch"))]
+    let keep = false;
+    let (mut events, kept, samples) =
+        analyse(&args.input, take, args.lane.is_some(), &outputs, keep)?;
+    #[cfg(not(feature = "basic-pitch"))]
+    let _ = samples;
+    let mut read_said: Vec<String> = Vec::new();
     // A melody's notes are read from its performance, on its own tuning.
     let (performance, reading) = match kept {
         Some((file, frames)) => {
             let given = args.tuning.map(|t| t.a4_cents);
-            let reading = frames.map(|frames| match args.reader.unwrap_or(ReaderArg::Hmm) {
-                ReaderArg::Rules => read(&frames, &events, given),
-                ReaderArg::Hmm => NoteModel::default().read(&frames, &events, given),
-            });
+            let reading = frames
+                .map(|frames| -> Result<_> {
+                    Ok(match args.reader.unwrap_or(ReaderArg::Hmm) {
+                        ReaderArg::Rules => read(&frames, &events, given),
+                        ReaderArg::Hmm => NoteModel::default().read(&frames, &events, given),
+                        #[cfg(feature = "basic-pitch")]
+                        ReaderArg::BasicPitch => {
+                            let read = basic_pitch
+                                .as_ref()
+                                .context("basic-pitch was not loaded")?
+                                .read(&samples, &frames, &events, given)?;
+                            read_said.push(statement::basic_pitch(&read));
+                            read.reading
+                        }
+                    })
+                })
+                .transpose()
+                .with_context(named)?;
             if let Some(reading) = &reading {
                 events.extend(reading.notes.iter().map(ReadNote::event));
                 events.sort_by_key(event_frame);
@@ -201,7 +257,12 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     if let Some(reading) = &reading {
         said.extend(statement::tuning(&reading.tuning));
         said.extend(statement::reader(reading));
+        said.append(&mut read_said);
         said.push(statement::notes_read(reading));
+        said.extend(statement::breathy(reading, ANALYSIS_RATE));
+        said.extend(statement::rejoined(reading));
+        said.extend(statement::held(reading));
+        said.extend(statement::suggestions(reading, ANALYSIS_RATE));
     }
     said.extend(statement::key(captured.analysis.key.as_ref()));
     captured.analysis.reading = reading;
@@ -359,6 +420,30 @@ impl Scoring<'_> {
 }
 
 /// Refuses a flag the take cannot use, before anything is read, and reads the key.
+/// Basic Pitch, loaded with the thresholds given, when it reads the take. A threshold given
+/// for another reader is refused: it would change nothing.
+#[cfg(feature = "basic-pitch")]
+fn basic_pitch_of(args: &TakeArgs) -> Result<Option<BasicPitch>> {
+    let given = [
+        ("--onset-threshold", args.onset_threshold),
+        ("--frame-threshold", args.frame_threshold),
+        ("--min-note-ms", args.min_note_ms),
+    ];
+    if args.reader != Some(ReaderArg::BasicPitch) {
+        if let Some((flag, _)) = given.iter().find(|(_, v)| v.is_some()) {
+            bail!("{flag} is for --reader basic-pitch; no other reader decodes with it");
+        }
+        return Ok(None);
+    }
+    let own = Thresholds::BASIC_PITCH;
+    let thresholds = Thresholds {
+        onset_threshold: args.onset_threshold.unwrap_or(own.onset_threshold),
+        frame_threshold: args.frame_threshold.unwrap_or(own.frame_threshold),
+        minimum_note_length_ms: args.min_note_ms.unwrap_or(own.minimum_note_length_ms),
+    };
+    Ok(Some(BasicPitch::new()?.with_thresholds(thresholds)?))
+}
+
 fn flags(take: Take, args: &TakeArgs) -> Result<Option<Key>> {
     if let Some(bpm) = args.tempo
         && !(bpm.is_finite() && bpm > 0.0)
@@ -572,7 +657,8 @@ fn analyse(
     take: Take,
     asked: bool,
     outputs: &Outputs,
-) -> Result<(Vec<Event>, Option<Kept>)> {
+    keep_samples: bool,
+) -> Result<(Vec<Event>, Option<Kept>, Vec<f32>)> {
     let mut source = FileSource::open(input)?;
     let mut prepare = Prepare::new(ANALYSIS_RATE);
     let mut stage = match (take, &outputs.performance) {
@@ -591,17 +677,23 @@ fn analyse(
             },
         ))),
     };
-    let (mut mono, mut events) = (Vec::new(), Vec::new());
+    let (mut mono, mut events, mut samples) = (Vec::new(), Vec::new(), Vec::new());
     // The source's errors name the file; the stages' are named here.
     let named = || input.display().to_string();
     while let Some(chunk) = source.next_chunk()? {
         prepare.push(chunk, &mut mono).with_context(named)?;
         for m in mono.drain(..) {
+            if keep_samples {
+                samples.extend_from_slice(&m.samples);
+            }
             stage.push(m, &mut events).with_context(named)?;
         }
     }
     prepare.finish(&mut mono).with_context(named)?;
     for m in mono.drain(..) {
+        if keep_samples {
+            samples.extend_from_slice(&m.samples);
+        }
         stage.push(m, &mut events).with_context(named)?;
     }
     stage.finish(&mut events).with_context(named)?;
@@ -609,7 +701,7 @@ fn analyse(
         Analyser::Melody { file, frames, .. } => Some((file, frames)),
         Analyser::Rhythm(_) => None,
     };
-    Ok((events, kept))
+    Ok((events, kept, samples))
 }
 
 /// A melody's performance file, written but not yet kept, and its frames: none when the take

@@ -586,10 +586,16 @@ options; everything about the timing that is left out is estimated and stated.
 - **`--tuning <a4>`** is a melody's tuning: A4 in Hz (`440`, `442`) or in cents from 440 Hz
   (`+44c`, `-12c`), used exactly, up to a key either way. A rhythm take's hits have no pitch,
   and `--tuning` is refused for one.
-- **`--reader hmm|rules`** is what chooses a melody's notes from its performance: `hmm`, the
-  note HMM (the default), or `rules`, the segmentation rules, stated on standard error when
-  chosen (`reader: the segmentation rules`). See *Readers* below. A rhythm take's hits are not
+- **`--reader hmm|rules|basic-pitch`** is what chooses a melody's notes from its performance:
+  `hmm`, the note HMM (the default); `rules`, the segmentation rules; or `basic-pitch`,
+  Spotify's Basic Pitch. A reader other than the HMM is stated on standard error when chosen
+  (`reader: the segmentation rules`). See *Readers* below. A rhythm take's hits are not
   read as notes, and `--reader` is refused for one.
+- **`--onset-threshold <activation>`, `--frame-threshold <activation>`, `--min-note-ms <ms>`**
+  are, with `--reader basic-pitch`, where Basic Pitch decodes a note: the onset activation at
+  which it starts one (0.5), the note activation below which it ends one (0.3), and the length a
+  note must exceed (127.7 ms). Each defaults to Basic Pitch's own. They are stated with the
+  reader, written in the analysis, and refused for any other reader.
 - **`--key <key>`** is a melody's key as ABC's `K:` names it (`Eb`, `Bm`, `F#m`), used exactly.
   A rhythm take has no key, and `--key` is refused for one.
 - **`--grid <step>`** is the step the score is quantized to, such as `1/16` (the default) or
@@ -636,7 +642,43 @@ cannot be, that is reported after them, and they stay:
   held at least 50 cents from where the note is held, as its `start`, `end` and `cents` from
   the note's key. A held approach before the note's held pitch is one too. They are never
   named in the file: a grace, a turn or a trill is worked out from them when something is
-  written. A note with none writes none.
+  written. A note with none writes none. Since 1.7 the reading states its `rejoins`: where
+  a reader split one note on one key around a dip, with no onset between the two, every
+  frame between them voiced and the dip within a whole tone of the key, the two are read as
+  one note, and the dip is one of its excursions. Each rejoin states the notes as the reader
+  `decoded` them, each `dip` (where it starts and ends, and its furthest `cents` from the key)
+  and the `loss_change` it made, in nats, above zero when it raised the loss; capture states
+  how many it made. A split at an onset, a dip deeper than a whole tone, and two keys are never
+  rejoined. A reading with none writes none. Since 1.8 the reader may be `basic-pitch`.
+  Since 1.9 the reading states its `breathy` notes: where a reader ended a note and left the
+  weakly voiced frames after it unread, the note is carried on over each frame whose pitch
+  continues its line (no more than 30 cents from the frame before), whose level is within
+  20 dB of the note's held level, and after which no onset falls before the next note. A
+  breathy fall is then the note's, and a breath, whose pitch is no line or whose level is near
+  the floor, stays unread. Each states the note as its reader `decoded` it, its new `end`, its
+  quietest kept frame against the note's held level (`lowest_db`) and the `loss_change` it
+  made, above zero since reading weakly voiced frames costs their voicing; capture states how
+  many. It runs before the rejoin, so a note carried over a breathy dip meets its second half
+  and is rejoined. A reading with none writes none.
+  Since 1.10 a basic-pitch reader states the `thresholds` its notes were decoded with.
+  Since 1.11 the reading states its `held` notes and its `suggestions`. A pitch the voice holds
+  for at least the shortest note (0.05 s) before the note it reaches, at least 50 cents below
+  where that note is held, is a note of its own: the note HMM takes such a pitch in as the
+  note's attack, and Basic Pitch leaves it unread before the note, so the pass makes it a note,
+  ending it where the voice is nearer the note it reaches. Each states the note reached as its
+  reader `decoded` it, the `notes` made and the `loss_change`; capture states how many. A pitch
+  held above the note (an overshoot, a lean, a turn at its start) and an ornament once the voice
+  is on the note stay as their reader filed them. A note held before the next (at most 0.25 s,
+  the next longer and within 0.05 s of it) is suggested a `likely-approach` only when the step
+  to the next is a semitone and its last quarter drifts more than 30 cents toward it, measured
+  up to where the voice moves 0.7 semitones toward the next note, as the rules end a held pitch;
+  each states the `step`, the `drift_cents` and the `rule` (`semitone-with-drift`), and capture
+  lists them. A suggestion changes no note: folding an approach into its note is a choice made
+  per note. The pass runs after the rejoin, so the rejoin never joins a held pitch back into a
+  note before it on its key, and a dip the rejoin settled stays inside one note. A reading with none writes none.
+  Since 1.12 the key states the `profile` its scores were correlated with: `aarden-essen`, the
+  default, or `krumhansl-kessler`. A document without one states no profile; duet wrote those
+  with Krumhansl–Kessler.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -667,7 +709,7 @@ meter: estimated 4/4, confidence 0.14, weak
 downbeat: estimated at 0.255 s, confidence 0.14, weak
 tuning: estimated A4 = 440.2 Hz (+1 cent), spread 2 cents, confidence 1.00
 notes: 8 read, 0 between keys
-key: estimated C major (relative A minor), confidence 0.88
+key: estimated C major (relative A minor), confidence 0.72
 lead-in: none
 velocities: 8 snapped to the nearest dynamic's level in the .abc; the .duet keeps them exact
 ```
@@ -692,9 +734,13 @@ pitch wanders evenly, 1 when all of it is that near. Below 0.5 it is stated weak
 suggests giving the tuning with `--tuning`. Its spread is how widely the take strays from it. Each note is the key nearest its held pitch on that tuning; one
 held more than 35 cents from its key is **between keys**, counted on the `notes:` line and
 marked in the analysis's `reading`, with every note's `centre`, its distance from its key in
-cents. The key is estimated after, from those notes, and never changes one.
+cents. The key is estimated after, from those notes, and never changes one: each note's
+pitch class weighted by its length, correlated with the 24 major and minor keys of the
+Aarden–Essen profile, which was counted from the Essen collection's folk melodies (Aarden,
+2003). It reads a sung tune by its tonic and third, where Krumhansl–Kessler, duet's profile
+before `capture-analysis` 1.12, can take the degree held longest for the tonic.
 
-**Readers.** Two readers choose a melody's notes from its performance, on its tuning, and both
+**Readers.** Three readers choose a melody's notes from its performance, on its tuning, and all
 are judged by the same loss. The **rules** (`--reader rules`) segment the pitch where it leaves a
 held note and holds somewhere new, or at an onset. The **note HMM** (the default) decodes,
 frame by frame, whether the voice is sliding into a key (attack), holding it (stable) or silent,
@@ -707,8 +753,31 @@ held note): raising it merges notes, lowering it splits them. Vibrato of half a 
 way with a slow drift stays one note at `c` and at `c/2`; a semitone step held 0.5 s is two.
 Known limits: a glide slower than about 8 semitones a second (15 at `c/2`) is read as a short
 note on each key it passes, where the rules read a few fewer; the HMM leaves the last, weakly
-voiced frames of a decaying note unread, where the rules read them, and the loss charges
-nothing for them, since their voicing says they are not sung.
+voiced frames of a decaying note unread, where the rules read them. The breathy pass (above)
+reads those whose pitch goes on and whose level holds; the rest stay unread, and the loss
+charges nothing for them, since their voicing says they are not sung.
+
+**Basic Pitch** (`--reader basic-pitch`) is an outside reader: Spotify's
+[Basic Pitch](https://github.com/spotify/basic-pitch) note model, run in Rust through
+[basic-pitch-rs](https://github.com/AThevon/basic-pitch-rs), an unofficial port, on the take's
+own samples. It says where each note starts and ends; the performance then gives each note its
+key, centre and residual on the take's tuning, as for the other readers, so Basic Pitch's own
+A440 keys are only counted, never used. It is polyphonic and a reading is not: where its notes
+overlap, the louder is kept whole and a quieter one cut back to where it no longer overlaps, or
+dropped when less than half of it would be left. A note starts at the take's onset nearest its
+start when one is within 50 ms, as the note HMM starts its notes, since Basic Pitch's frames fall
+a hop or so either side of the onset the performance hears. Capture states how many notes it
+found, cut back, dropped and keyed differently (`basic-pitch: …`). The breathy pass, the
+same-key rejoin and the held pitch then run over its notes, as over the other readers'. Its thresholds are Basic
+Pitch's own unless `--onset-threshold`, `--frame-threshold` or `--min-note-ms` gives one; on
+"Wayfaring Stranger", of 45 settings of the three around them, none reads both of the owner's
+moments (9.54 s, 16.39 s) with a lower total loss. Its model, Spotify's `nmp.onnx` from
+basic-pitch v0.4.0 (230 kB, Apache-2.0), is built into duet and its SHA-256 checked by the
+tests; its licence and Spotify's NOTICE are in `crates/duet-dsp/models/basic-pitch/`. Nothing is
+downloaded. The reader is the `basic-pitch` feature, on by default; `--no-default-features`
+builds duet without it. Known limits: Basic Pitch takes no tuning and knows nothing of where a
+note settles, so a whole note is taken as held, its scoop in read as drift; and its notes reach
+into frames the performance hears as unvoiced, which the loss's `voicing` term charges.
 
 **Rhythm.** Without `--lane`, each hit is sorted by sound into `kick`, `snare` or `hh` (a closed
 hat). With `--lane`, every hit goes to that lane. Known limit: a hit has one lane. A kick and a
@@ -746,11 +815,13 @@ duet capture compare idea.m4a                       # idea.compare.svg and idea.
 duet capture compare idea.m4a --from 33 --to 38     # five seconds of it: idea.compare.33.0-38.0.svg, .wav
 duet capture compare idea.m4a -o scratch/idea       # the stem it was captured to
 duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of the take
+duet capture compare idea.m4a --render steps        # the ornaments as steps: idea.compare.steps.svg, .wav
 ```
 
 - `STEM.compare.svg`: the performance's pitch in cents over time; the reading's notes as bars
   at their keys on the take's tuning (orange when between keys); the residual, the gap between
-  them, shaded; and the onsets as ticks under it.
+  them, shaded; each excursion (an ornament the residual measured) as an amber bar where it is
+  held; the sine's pitch, dotted, as the WAV plays it; and the onsets as ticks under it.
 - `STEM.compare.wav`: the take in the left channel, as the analysis heard it (one channel at
   22 050 Hz, so it lines up with the reading sample for sample), and the reading in the right as
   a sine at the take's own tuning, gliding only through each note's slide in (its scoop, where
@@ -758,20 +829,58 @@ duet capture compare idea.m4a --reading hmm.capture.duet   # another reading of 
   than 0.2 s, about a consonant or a catch-breath, so a phrase plays as one tone. It is silent
   through a gap of 0.2 s or more, a breath or a rest, so a note the reading drops is heard as
   silence, not as the note before held on. `--legato` holds it through every gap; `--gapped`
-  silences it in every gap.
+  silences it in every gap. `--render` chooses what the sine plays inside a note, with any of
+  those: `melody`, the keys only (the default); `steps`, the keys with each excursion held at its
+  key plus its offset over its frames, so an ornament is heard as the reading states it; `bends`,
+  the keys plus the whole residual, so the sine follows the performance's own pitch.
 - On standard output, one line per note: when it starts, its key, its `centre` in cents, its
   residual's parts (where it is held, its drift in cents a second, its vibrato, scoop and fall,
-  and the rest), and whether it is between keys; then the take's loss as its three terms (pitch,
+  the rest, and its excursions, each its offset, length and start, `+200c 60 ms @ 0.290 s`), and
+  whether it is between keys; then the take's loss as its three terms (pitch,
   unread and notes). A reading written before `capture-analysis` 1.2 has no residual, and the
   output says so.
 
 `--from` and `--to` (seconds) window all three, and name the files after the window
 (`STEM.compare.FROM-TO.svg`, with `0.0` or `end` for a side not given), so a window never
-collides with the whole take's files. `--reading` compares another analysis of the same
+collides with the whole take's files. A `steps` or `bends` rendering adds its name after the
+window's (`STEM.compare.33.0-38.0.steps.wav`), so the three renderings sit side by side.
+`--reading` compares another analysis of the same
 take: its reading is the bars and the sine, the stem's own is drawn beside it dashed, and the
 outputs are named after it (`hmm.compare.svg`). Nothing is overwritten. Neither file the stem
 holds names the recording it was read from, so the recording is checked only by its length
 against the performance's.
+
+**Reviewing a take moment by moment.** `duet capture review` puts named moments of a take on one
+page, every reading side by side, to listen to and rule on:
+
+```sh
+duet capture review idea.m4a --moments idea.moments                         # idea.review/index.html
+duet capture review idea.m4a --moments idea.moments --reading rules=idea-rules.capture.duet
+duet capture review idea.m4a --moments idea.moments -o scratch/idea --dir scratch/idea-review
+```
+
+- **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from the
+  start of the take, the label free text. A line starting with `#` is a comment.
+  `crates/duet-capture/corpus/wayfaring-stranger.moments` names the 14 moments of "Wayfaring
+  Stranger" the owner ruled on by ear. A moment that ends past the take is refused, before
+  anything is written.
+- **The page,** `STEM.review/index.html`, shows the stem's reading (named after its reader) and
+  each `--reading NAME=ANALYSIS` side by side for each moment:
+  - the notes each reads in the window;
+  - `compare`'s plot of it, inline, so hovering an excursion shows its cents and length;
+  - players for its five renderings, each `compare`'s WAV: melody (gaps under 0.2 s bridged),
+    steps and bends, with legato and gapped folded away. A toggle repeats each clip, and one
+    clip plays at a time;
+  - a note when every reading reads the same notes there, so their melody clips sound alike;
+  - a box for a verdict. One button copies every verdict as text.
+
+  The whole take's melody is at the top, per reading, and the page explains its plot, its
+  renderings, how a short gap plays, and what an excursion is.
+- **The clips,** in `STEM.review/clips/`, are copies of the recording. When a licence notice sits
+  beside the take (`TAKE.license`, as the corpus keeps them), review states it, and the page
+  carries it. Otherwise review says so, and to keep the sheet out of git. Either way, keep a
+  licence-restricted take's sheet out of git.
+- **Nothing is overwritten:** a directory that exists is refused.
 
 **Correcting a capture.** Edit the ABC text, which is what it is for, or a rhythm's grid with
 the `duet drums` commands, which read the `.grid.duet` by its envelope. To fix an
@@ -849,6 +958,9 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo fmt --all --check
 ```
 
+Releasing (crates.io, the tag and the GitHub Release) runs through `cargo make` and is described
+in [RELEASING.md](RELEASING.md).
+
 Beyond cargo, a developer's machine wants a few things CI does not. mise cannot install
 abcmidi or FluidSynth (neither has a registry entry), so they are in the `Brewfile`:
 
@@ -858,9 +970,6 @@ scripts/fetch-soundfont.sh           # just the SoundFont, to duet's data direct
 scripts/port-check.sh                # duet play --port to FluidSynth, then check what arrived
 scripts/port-check.sh --interrupt 4  # the same, with Ctrl-C after 4 seconds
 scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's audio (macOS)
-scripts/duet-listen.sh TAKE --stem STEM [--reading hmm=OTHER.capture.duet] [--moments FILE]
-                                     # hear a take against its readings, moment by moment
-scripts/listen/check.sh              # duet-listen.sh's clips land at their windows
 ```
 
 - **The SoundFont** is the one duet's installer will fetch, pinned in `scripts/soundfont.env`
@@ -878,25 +987,6 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
   synthetic takes (the default), `all` both. Its encoders (`lame`, `flac`, `vorbis-tools`) are
   in the `Brewfile`; the AAC and HE-AAC files use macOS's own `afconvert`. CI uses the committed
   files, so run it only to change them.
-- **`duet-listen.sh`** is for checking a reading by ear.
-  - **What it builds:** clips of the whole take and of each named moment, for the stem's
-    reading and for any `--reading` beside it. Each clip has the take on the left and the
-    reading's sine on the right, raised 6 dB.
-  - **Three versions of each clip,** each as `duet capture compare` renders it:
-    - bridged, its default: the sine held through a gap under 0.2 s and silent at a longer one,
-      so a dropped note is heard as a gap;
-    - legato (`--legato`), with the sine held through every gap;
-    - gapped (`--gapped`), with the sine silent wherever the reading has no note.
-  - **Playing them:** a menu plays one clip at a time. `N` plays clip N bridged, `Nl` legato,
-    `Ng` gapped, and `q` quits. While a clip plays, it shows where the clip is in the take and
-    which note is being read.
-  - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
-    the start of the take, with a free-text label. A line starting with `#` is a comment.
-    `scripts/listen/synthetic-melody.moments` is an example.
-  - **Clips of a licence-restricted take are copies of it.** Keep them, and its moments
-    file, out of git.
-  - **`scripts/listen/check.sh`** builds the synthetic corpus melody's clips and checks each
-    one's length against its window. CI does not run it.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.

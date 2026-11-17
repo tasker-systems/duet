@@ -37,7 +37,45 @@ use crate::{Kind, Version};
 /// and its `cents` from the note's key. They are measured, never named: a grace, a turn or a
 /// trill is worked out from them when something is written. Omitted when a note has none, so a
 /// 1.5 document reads as one with no ornament stated.
+///
+/// **1.7** adds the reading's optional `rejoins`, also additive: each same-key split the reading's
+/// pass rejoined into one note, with the notes as its reader `decoded` them, each `dip` between
+/// them (its `start`, `end` and furthest `cents` from the key), and the `loss_change` the rejoin
+/// made, in nats, above zero where it raised the loss. Omitted when nothing was rejoined, so a
+/// 1.6 document reads as one whose notes are as decoded.
+///
+/// **1.8** adds `basic-pitch` to the reading's `reader.name`, also additive: Spotify's Basic
+/// Pitch, an outside model, chose where the notes start and end, and the take's performance
+/// gave each its key, centre and residual on the take's tuning. Every 1.7 document reads as it
+/// did.
+///
+/// **1.9** adds the reading's optional `breathy`, also additive: each note the reading's breathy
+/// pass carried on over the weakly voiced frames after it, its reader had left unread, with the
+/// note as its reader `decoded` it, the `end` it has now, the quietest kept frame's level
+/// against the note's held level (`lowest_db`), and the `loss_change` it made, in nats, above
+/// zero where reading those frames raised the loss. Omitted when no note was carried on, so a
+/// 1.8 document reads as one whose notes end where their reader ended them.
+///
+/// **1.10** adds the reading's optional `reader.thresholds`, also additive: the onset threshold,
+/// frame threshold and minimum note length, in Basic Pitch's own names, that a basic-pitch
+/// reading's notes were decoded with. Only a basic-pitch reader has them. A 1.9 basic-pitch
+/// reading has none, and was decoded with Basic Pitch's defaults (0.5, 0.3 and 127.7 ms).
+///
+/// **1.11** adds the reading's optional `held` and `suggestions`, also additive. `held` states
+/// each note the reading's held-pitch pass made from a pitch held at least the shortest note
+/// before the note it reaches: the note reached as its reader `decoded` it, the `notes` made, and
+/// the `loss_change` they made, in nats. `suggestions` states each note likely an approach to
+/// the next (`suggests`: `likely-approach`), by its `start` and `key`, with the `next_key`, the
+/// `step` to it in semitones, the held pitch's `drift_cents` toward it over its last quarter, and
+/// the `rule` that fired (`semitone-with-drift`). A suggestion changes no note. Both are omitted
+/// when there are none, so a 1.10 document reads as one whose held pitches are as its reader
+/// read them, with nothing suggested.
+///
+/// **1.12** adds the key estimate's optional `profile`, also additive: the key profile its
+/// `scores` were correlated with, `aarden-essen` (duet's default since 1.12) or
+/// `krumhansl-kessler`. Omitted when none is stated, so a 1.11 document reads as one stating no
+/// profile; duet wrote those with Krumhansl–Kessler.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 6);
+    const VERSION: Version = Version::new(1, 12);
 }

@@ -10,7 +10,7 @@ use crate::stage::{Mono, Stage};
 pub(crate) const SHORTEST_NOTE_SECS: f64 = 0.05;
 /// How far, in semitones, the pitch must move from where a note is held to count as leaving it.
 /// Above vibrato's usual swing of up to half a semitone, below a semitone step.
-const CHANGE_SEMITONES: f32 = 0.7;
+pub(crate) const CHANGE_SEMITONES: f32 = 0.7;
 /// How widely, in semitones, a slide's frames over [`CHANGE_HOLD_SECS`] may spread for its
 /// pitch to have arrived. A vibrato of 40 cents either side at 7 a second spreads about 0.2
 /// over that span at each turn of its swing; a glide of 7.5 semitones a second spreads this
@@ -395,7 +395,9 @@ struct Slide {
 /// leaves a note, before it has held is a slide from then on, so it must arrive as a slide
 /// does, within [`ARRIVED_SEMITONES`]. A pitch that dips
 /// away and comes back to where it was is a slide too, so it
-/// splits one pitch into two notes, as a voiced consonant between two syllables does.
+/// splits one pitch into two notes, as a voiced consonant between two syllables does. The
+/// reading's same-key rejoin ([`rejoin`](crate::rejoin)) then reads such a split as one note
+/// where no onset marks it and the dip stays within a whole tone.
 ///
 /// Where a note is held is the mean of its latest [`HELD_SECS`], so vibrato and a slow drift
 /// stay in it. A glide slow enough to be followed that way has still left the note once that
@@ -413,6 +415,9 @@ struct Slide {
 /// - The bottom of a scoop that wobbles in place for [`CHANGE_HOLD_SECS`] or more, within
 ///   [`CHANGE_SEMITONES`], has held, so it is a note of its own, as a short note is.
 /// - An onset ends whatever note is sounding, so a scoop an onset cuts can be a note.
+/// - A held approach, or a turn inside a note, that holds for [`CHANGE_HOLD_SECS`] on another
+///   key is a note of its own: a G#3 turning up to A#3 for 0.14 s reads G#3, A#3, G#3, which
+///   is no same-key pair, so the same-key rejoin leaves it. The note HMM takes either in.
 /// - A slide that keeps wobbling, so that its frames over every [`CHANGE_HOLD_SECS`] spread
 ///   wider than [`ARRIVED_SEMITONES`], never arrives, and is dropped as no note when the voice
 ///   stops, however long it is sung. A glide or a scoop into a fast or uneven wobble does this:
@@ -671,6 +676,47 @@ pub(crate) fn wobbling_slide() -> Vec<(Option<f32>, f32)> {
     }));
     frames.extend([(None, 0.0); 20]);
     frames
+}
+
+/// `frames` frames moving in a straight line from `from` to `to`, `to` included, in MIDI keys.
+#[cfg(test)]
+pub(crate) fn line(from: f32, to: f32, frames: usize) -> Vec<Option<f32>> {
+    (1..=frames)
+        .map(|k| Some(from + (to - from) * k as f32 / frames as f32))
+        .collect()
+}
+
+/// `frames` frames held on `midi`.
+#[cfg(test)]
+pub(crate) fn held(midi: f32, frames: usize) -> Vec<Option<f32>> {
+    vec![Some(midi); frames]
+}
+
+/// The first #28 dip witness, one frame a hop: a note held on key 60 falls 8 semitones and
+/// comes straight back, within 0.2 s, with no onset and no silence, as a voiced consonant
+/// between two syllables on one pitch. The same-key rejoin's tests read the same frames.
+#[cfg(test)]
+pub(crate) fn dip_between_syllables() -> Vec<Option<f32>> {
+    [
+        held(60.0, 25),
+        line(60.0, 52.0, 9),
+        line(52.0, 60.0, 8),
+        held(60.0, 25),
+    ]
+    .concat()
+}
+
+/// The second #28 dip witness: 3 semitones down and back over 0.23 s, slow enough that the
+/// frames at its turn sit within [`CHANGE_SEMITONES`] of one another, but never still.
+#[cfg(test)]
+pub(crate) fn slower_dip() -> Vec<Option<f32>> {
+    [
+        held(60.0, 25),
+        line(60.0, 57.0, 10),
+        line(57.0, 60.0, 10),
+        held(60.0, 25),
+    ]
+    .concat()
 }
 
 #[cfg(test)]
@@ -1078,17 +1124,6 @@ mod tests {
         segment(&stretches)
     }
 
-    /// `frames` frames moving in a straight line from `from` to `to`, `to` included.
-    fn line(from: f32, to: f32, frames: usize) -> Vec<Option<f32>> {
-        (1..=frames)
-            .map(|k| Some(from + (to - from) * k as f32 / frames as f32))
-            .collect()
-    }
-
-    fn held(midi: f32, frames: usize) -> Vec<Option<f32>> {
-        vec![Some(midi); frames]
-    }
-
     fn midis(found: &[(u64, u64, u8)]) -> Vec<u8> {
         found.iter().map(|n| n.2).collect()
     }
@@ -1155,30 +1190,15 @@ mod tests {
 
     #[test]
     fn a_dip_between_two_syllables_is_two_notes_and_the_dip_none() {
-        // A held note falls 8 semitones and comes straight back, within 0.2 s, with no onset
-        // and no silence: a voiced consonant between two syllables on one pitch.
-        let pitches = [
-            held(60.0, 25),
-            line(60.0, 52.0, 9),
-            line(52.0, 60.0, 8),
-            held(60.0, 25),
-        ]
-        .concat();
-        assert_eq!(midis(&segment_pitches(&pitches)), vec![60, 60]);
+        assert_eq!(
+            midis(&segment_pitches(&dip_between_syllables())),
+            vec![60, 60]
+        );
     }
 
     #[test]
     fn a_slower_dip_is_still_no_note_at_its_bottom() {
-        // 3 semitones down and back over 0.23 s: slow enough that the frames at its turn sit
-        // within CHANGE_SEMITONES of one another, but never still.
-        let pitches = [
-            held(60.0, 25),
-            line(60.0, 57.0, 10),
-            line(57.0, 60.0, 10),
-            held(60.0, 25),
-        ]
-        .concat();
-        let found = segment_pitches(&pitches);
+        let found = segment_pitches(&slower_dip());
         assert_eq!(midis(&found), vec![60, 60], "{found:?}");
     }
 

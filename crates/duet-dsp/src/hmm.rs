@@ -39,7 +39,8 @@
 //!   the same key included. The last is **legato**, which pYIN's model lacks: there, stable
 //!   leaves only through silent, so a step with no breath is decoded through a silent state
 //!   the voicing argues against. The same key is a dip that never goes unvoiced: it leaves the
-//!   pitch and comes back.
+//!   pitch and comes back. The reading's same-key rejoin ([`rejoin`](crate::rejoin)) reads such
+//!   a split as one note where no onset marks it and the dip stays within a whole tone.
 //!
 //! **The cost per note**, `c` ([`NOTE_COST`]), is the negative log probability of leaving
 //! stable: every note pays it once, when it ends. Raising it merges notes; lowering it splits
@@ -75,7 +76,7 @@ use crate::notes::{
     LEAST_CONFIDENCE, ONSET_GRACE_SECS, SHORTEST_NOTE_SECS, STRENGTH_WINDOW_SECS, level_strength,
     median,
 };
-use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, tuning_of};
+use crate::reading::{PerformanceFrames, ReadNote, Reader, Reading, interpret, tuning_of};
 use crate::residual::{NOTE_COST, held_cost, residual_with_cost, silent_cost, sounding_cost};
 
 /// The held pitch's σ, in semitones: about the vibrato tolerance. A vibrato swings up to half a
@@ -343,9 +344,23 @@ impl NoteModel {
 
     /// Reads `frames` and `onsets` (their [`Event::Onset`]s; other events are ignored) on
     /// `given`, A4 in absolute cents, or on the tuning estimated from the frames, as
-    /// [`read`](crate::read) does, with the notes chosen by this model.
+    /// [`read`](crate::read) does, with the notes chosen by this model. Then the reading's
+    /// interpretive passes are run over them ([`interpret`](crate::interpret)), the breathy
+    /// ornament, the same-key rejoin and the held pitch: [`NoteModel::read_as_decoded`] is the
+    /// reading before them.
     #[must_use]
     pub fn read(
+        &self,
+        frames: &PerformanceFrames,
+        onsets: &[Event],
+        given: Option<f64>,
+    ) -> Reading {
+        interpret(self.read_as_decoded(frames, onsets, given), frames, onsets)
+    }
+
+    /// [`NoteModel::read`], before its interpretive passes: the notes as this model decodes them.
+    #[must_use]
+    pub fn read_as_decoded(
         &self,
         frames: &PerformanceFrames,
         onsets: &[Event],

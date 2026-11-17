@@ -490,7 +490,9 @@ fn example_grid() -> duet_drums::DrumGrid {
 /// A melody take's analysis that uses every field: each kind of event, an estimated tempo with
 /// its half and double, a given meter, an estimated downbeat, a key with its evidence, the tempo
 /// beat by beat, the grid, the quantize offsets, and the reading (1.1) with a note between keys
-/// and a note with excursions (1.6).
+/// and a note with excursions (1.6), rejoined from two decoded notes (1.7), a note carried
+/// on over its breathy fall (1.9), a note made from a pitch held before the note it reaches,
+/// suggested a likely approach to it (1.11), and the key's profile (1.12).
 pub fn example_analysis() -> Analysis {
     serde_json::from_value(json!({
         "rate": 22050,
@@ -514,7 +516,8 @@ pub fn example_analysis() -> Analysis {
             "key": { "estimated": { "value": "Eb major", "confidence": 0.71 } },
             "alternative": "C minor",
             "histogram": [0.0, 0.0, 0.125, 0.25, 0.0, 0.0, 0.0, 0.375, 0.125, 0.0, 0.125, 0.0],
-            "scores": [["Eb major", 0.71], ["C minor", 0.64], ["Bb major", 0.52]]
+            "scores": [["Eb major", 0.71], ["C minor", 0.64], ["Bb major", 0.52]],
+            "profile": "aarden-essen"
         },
         "beats": [
             { "beat": 0, "secs": 0.5, "bpm": 119.5 },
@@ -564,7 +567,41 @@ pub fn example_analysis() -> Analysis {
                 "read_frames": 81,
                 "unread_frames": 3,
                 "loss": { "pitch": 31.25, "unread": 3.0, "notes": 8.0 }
-            }
+            },
+            "rejoins": [
+                { "decoded": [
+                      { "start": 11100, "end": 16200, "held_from": 11356, "key": 63,
+                        "centre": -2.0, "between_keys": false, "confidence": 0.9375,
+                        "strength": 0.8125 },
+                      { "start": 16200, "end": 21600, "held_from": 17224, "key": 63,
+                        "centre": -3.5, "between_keys": false, "confidence": 0.921875,
+                        "strength": 0.0625 }
+                  ],
+                  "dips": [ { "start": 16200, "end": 17224, "cents": -172.5 } ],
+                  "loss_change": 6.375 }
+            ],
+            "breathy": [
+                { "decoded": { "start": 22100, "end": 31832, "held_from": 22612, "key": 67,
+                               "centre": 38.0, "between_keys": true, "confidence": 0.90625,
+                               "strength": 0.5 },
+                  "end": 32600, "lowest_db": -9.5, "loss_change": 2.25 }
+            ],
+            "held": [
+                { "decoded": { "start": 34100, "end": 41500, "held_from": 36400, "key": 70,
+                               "centre": 4.5, "between_keys": false, "confidence": 0.875,
+                               "strength": 0.75 },
+                  "notes": [
+                      { "start": 34100, "end": 35900, "held_from": 34600, "key": 69,
+                        "centre": 21.5, "between_keys": false, "confidence": 0.84375,
+                        "strength": 0.75 }
+                  ],
+                  "loss_change": 1.625 }
+            ],
+            "suggestions": [
+                { "start": 34100, "key": 69, "suggests": "likely-approach",
+                  "rule": "semitone-with-drift", "next_key": 70, "step": 1,
+                  "drift_cents": 43.5 }
+            ]
         }
     }))
     .expect("the example analysis reads")

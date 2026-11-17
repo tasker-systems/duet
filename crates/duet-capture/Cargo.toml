@@ -1,6 +1,6 @@
 [package]
 name = "duet-capture"
-version = "0.2.0"
+version.workspace = true
 description = "duet capture: audio files in, a Song out. Decodes takes through Symphonia, runs duet-dsp's analysis and assembles the events."
 edition.workspace = true
 license.workspace = true
@@ -15,10 +15,10 @@ include = ["src/**", "Cargo.toml"]
 workspace = true
 
 [dependencies]
-duet-abc = { path = "../duet-abc", version = "0.2.0" }
-duet-core = { path = "../duet-core", version = "0.2.0" }
-duet-drums = { path = "../duet-drums", version = "0.2.0" }
-duet-dsp = { path = "../duet-dsp", version = "0.2.0" }
+duet-abc.workspace = true
+duet-core.workspace = true
+duet-drums.workspace = true
+duet-dsp.workspace = true
 # The analysis types derive their schema here: duet-schemas commits it as capture-analysis 1.0.
 schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
@@ -29,6 +29,12 @@ thiserror = "2"
 flacenc = { version = "0.5.1", default-features = false }
 
 [dev-dependencies]
+# tests/flex_pitch.rs reads the corpus's outside transcription, a MIDI file.
+duet-midi.workspace = true
 rustfft = "6.4.1"
 serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"
+
+[features]
+# The basic-pitch reader, with its model embedded (duet-dsp's `basic-pitch`).
+basic-pitch = ["duet-dsp/basic-pitch"]

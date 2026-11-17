@@ -153,9 +153,10 @@ fn a_slide_between_two_notes_belongs_to_the_one_it_arrives_at() {
 }
 
 #[test]
-fn a_dip_that_leaves_a_pitch_and_comes_back_is_two_notes() {
+fn a_dip_that_leaves_a_pitch_and_comes_back_is_decoded_as_two_notes() {
     // Held 0.5 s, a V-shaped dip two semitones down and back over 0.16 s, then held 0.5 s,
-    // voiced throughout: a voiced consonant between two syllables.
+    // voiced throughout. The decoder reads two notes, as #28 ruled a dip; the same-key rejoin
+    // then reads them as one, since the dip stays within a whole tone (rejoin.rs's witnesses).
     let dip = |t: f64| {
         let into = (t - 0.5) / 0.08;
         if (0.0..2.0).contains(&into) {
@@ -164,7 +165,8 @@ fn a_dip_that_leaves_a_pitch_and_comes_back_is_two_notes() {
             0.0
         }
     };
-    let reading = hmm(&sung(1.16, dip), NOTE_COST);
+    let (frames, onsets) = performance(&sung(1.16, dip));
+    let reading = NoteModel::default().read_as_decoded(&frames, &onsets, Some(A440_CENTS));
     assert_eq!(keys(&reading), [KEY, KEY], "{:?}", reading.notes);
     let (first, second) = (&reading.notes[0], &reading.notes[1]);
     assert_eq!(first.end, second.start, "legato through the dip");
@@ -210,7 +212,7 @@ fn the_fixed_lag_decodes_as_the_whole_take_does() {
     for signal in &signals {
         let (frames, onsets) = performance(signal);
         let model = NoteModel::default();
-        let lagged = model.read(&frames, &onsets, Some(A440_CENTS));
+        let lagged = model.read_as_decoded(&frames, &onsets, Some(A440_CENTS));
         let whole = model.read_with_lag(&frames, &onsets, Some(A440_CENTS), frames.len());
         assert_eq!(lagged.notes, whole.notes);
     }
@@ -579,11 +581,14 @@ fn a_turn_at_a_notes_start_is_one_note_with_one_excursion() {
 
 #[test]
 fn a_held_approach_the_hmm_takes_in_is_one_excursion_before_held_from() {
-    // 0.1 s held a semitone below G#3, then G#3: the HMM reads one G#3, the approach its
-    // attack, and the approach is its one excursion, a grace before its held pitch.
+    // 0.1 s held a semitone below G#3, then G#3: the HMM decodes one G#3, the approach its
+    // attack, and the approach is its one excursion, a grace before its held pitch. Since the
+    // owner's 2026-11-17 ruling the held-pitch pass makes it a note of its own
+    // (`held::tests`), so this is the reading as decoded.
     let approach = |t: f64| if t < 0.1 { -100.0 } else { 0.0 };
     let signal = padded(synth::contour(RATE, hz(G_SHARP_3), 0.8, approach, 4, 0.3));
-    let reading = hmm(&signal, NOTE_COST);
+    let (frames, onsets) = performance(&signal);
+    let reading = NoteModel::default().read_as_decoded(&frames, &onsets, Some(A440_CENTS));
     assert_eq!(keys(&reading), [G_SHARP_3], "{:?}", reading.notes);
     let note = &reading.notes[0];
     let part = note.residual.as_ref().unwrap();

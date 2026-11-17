@@ -467,6 +467,140 @@ fn the_reader_is_chosen_stated_and_written() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
+/// `--reader basic-pitch` reads the scale with Spotify's Basic Pitch: stated, counted and
+/// written in the analysis, with Basic Pitch's own thresholds, and with the HMM's keys. Its
+/// reading compares against the HMM's.
+#[test]
+fn basic_pitch_reads_a_scale_stated_and_written() {
+    let dir = scratch("capture-basic-pitch");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    let hmm = capture(&dir, &["melody", s(&wav), "-o", s(&dir.join("hmm"))]);
+    ok(&hmm, "capture");
+    let bp = capture(
+        &dir,
+        &[
+            "melody",
+            s(&wav),
+            "--reader",
+            "basic-pitch",
+            "-o",
+            s(&dir.join("bp")),
+        ],
+    );
+    ok(&bp, "capture --reader basic-pitch");
+    let err = stderr(&bp);
+    assert!(
+        err.lines()
+            .any(|l| l.starts_with("reader: Spotify's Basic Pitch")),
+        "{err}"
+    );
+    assert!(
+        err.lines()
+            .any(|l| l.starts_with("basic-pitch: ") && l.contains(" notes found")),
+        "{err}"
+    );
+    assert_eq!(
+        keys(&song_of(&dir.join("bp.duet"))),
+        keys(&song_of(&dir.join("hmm.duet")))
+    );
+    let reading = &analysis_of(&dir.join("bp.capture.duet"))["reading"];
+    assert_eq!(
+        reading["reader"],
+        serde_json::json!({
+            "name": "basic-pitch",
+            "note_cost": 4.0,
+            "thresholds": {
+                "onset_threshold": 0.5,
+                "frame_threshold": 0.3,
+                "minimum_note_length_ms": 127.7
+            }
+        })
+    );
+    let compared = duet(
+        &dir,
+        &[
+            "capture",
+            "compare",
+            s(&wav),
+            "-o",
+            s(&dir.join("hmm")),
+            "--reading",
+            s(&dir.join("bp.capture.duet")),
+        ],
+    );
+    ok(&compared, "capture compare --reading bp.capture.duet");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// Basic Pitch's thresholds, given, are stated and written in the analysis; one given for
+/// another reader, or one Basic Pitch refuses, is refused before anything is written.
+#[test]
+fn basic_pitch_thresholds_are_stated_written_and_refused_where_they_would_mean_nothing() {
+    let dir = scratch("capture-basic-pitch-thresholds");
+    let wav = take(&dir, "tune.wav", &eb_major());
+    let out = capture(
+        &dir,
+        &[
+            "melody",
+            s(&wav),
+            "--reader",
+            "basic-pitch",
+            "--onset-threshold",
+            "0.6",
+            "--frame-threshold",
+            "0.25",
+            "--min-note-ms",
+            "200",
+            "-o",
+            s(&dir.join("bp")),
+        ],
+    );
+    ok(&out, "capture --reader basic-pitch with thresholds");
+    let err = stderr(&out);
+    assert!(
+        err.lines()
+            .any(|l| l.starts_with("reader: Spotify's Basic Pitch")
+                && l.ends_with(
+                    "decoded at onset threshold 0.6, frame threshold 0.25, notes over 200 ms"
+                )),
+        "{err}"
+    );
+    assert_eq!(
+        analysis_of(&dir.join("bp.capture.duet"))["reading"]["reader"]["thresholds"],
+        serde_json::json!({
+            "onset_threshold": 0.6,
+            "frame_threshold": 0.25,
+            "minimum_note_length_ms": 200.0
+        })
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+
+    for (args, said) in [
+        (
+            &["--min-note-ms", "200"][..],
+            "--min-note-ms is for --reader basic-pitch",
+        ),
+        (
+            &["--reader", "rules", "--onset-threshold", "0.6"][..],
+            "--onset-threshold is for --reader basic-pitch",
+        ),
+        (
+            &["--reader", "basic-pitch", "--frame-threshold", "-0.1"][..],
+            "frame_threshold",
+        ),
+    ] {
+        let dir = scratch("capture-basic-pitch-refused");
+        let wav = take(&dir, "tune.wav", &eb_major());
+        let mut all = vec!["melody", s(&wav)];
+        all.extend_from_slice(args);
+        let out = capture(&dir, &all);
+        assert!(!out.status.success(), "{args:?} was accepted");
+        assert!(stderr(&out).contains(said), "{args:?}: {}", stderr(&out));
+        assert_eq!(files(&dir), ["tune.wav"], "{args:?}: something was written");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+}
+
 /// Every file a melody capture writes is refused, rather than overwritten, when it exists.
 #[test]
 fn melody_refuses_to_overwrite_each_of_its_outputs() {
@@ -597,6 +731,100 @@ fn estimates_are_stated_on_stderr_and_in_both_files() {
         err.lines().any(|l| l.starts_with("downbeat: estimated ")),
         "{err}"
     );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
+fn a_rejoined_dip_is_stated_and_written_in_the_analysis() {
+    // A held B-flat dipping 170 cents and back over 0.1 s with no onset, among plain notes:
+    // the note HMM splits it at the dip, and the reading's pass rejoins it, saying so.
+    let dir = scratch("capture-rejoined");
+    let notes = [(63, 0.5), (67, 0.5), (70, 1.0), (67, 0.5), (63, 1.0)];
+    let dip = |note: usize, t: f64| {
+        let into = (t - 0.45) / 0.05;
+        if note == 2 && (0.0..2.0).contains(&into) {
+            -170.0 * (1.0 - (into - 1.0).abs())
+        } else {
+            0.0
+        }
+    };
+    let wav = take(&dir, "dip.wav", &audio::notes_bent(0.5, &notes, dip));
+    let out = capture(&dir, &["melody", s(&wav), "--tempo", "120"]);
+    ok(&out, "capture melody");
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("rejoined: 1 same-key split "))
+        .unwrap_or_else(|| panic!("no rejoin statement: {err}"));
+    assert!(line.contains(" nats"), "{line}");
+    let stated = document_of(&dir.join("dip.duet")).statements;
+    assert!(stated.iter().any(|l| l == line), "{stated:?}");
+    let analysis = analysis_of(&dir.join("dip.capture.duet"));
+    let reading = &analysis["reading"];
+    let keys: Vec<u64> = reading["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["key"].as_u64().unwrap())
+        .collect();
+    assert_eq!(keys, [63, 67, 70, 67, 63], "{reading}");
+    let rejoins = reading["rejoins"]
+        .as_array()
+        .expect("the rejoin is written");
+    assert_eq!(rejoins.len(), 1, "{rejoins:?}");
+    assert_eq!(rejoins[0]["decoded"].as_array().unwrap().len(), 2);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
+fn a_held_approach_is_made_a_note_suggested_stated_and_written_in_the_analysis() {
+    // A B-flat held first on A +40 for 0.12 s and reached by a glide of 20 ms, among plain
+    // notes: the note HMM takes the A in as the B-flat's attack, and the reading's held-pitch
+    // pass makes it a note of its own and suggests it a likely approach, saying both.
+    let dir = scratch("capture-held");
+    let notes = [(63, 0.5), (67, 0.5), (70, 1.0), (67, 0.5), (63, 1.0)];
+    let approach = |note: usize, t: f64| match t {
+        _ if note != 2 => 0.0,
+        t if t < 0.06 => -100.0,
+        t if t < 0.12 => -60.0,
+        t if t < 0.14 => -60.0 + 60.0 * (t - 0.12) / 0.02,
+        _ => 0.0,
+    };
+    let wav = take(&dir, "held.wav", &audio::notes_bent(0.5, &notes, approach));
+    let out = capture(&dir, &["melody", s(&wav), "--tempo", "120"]);
+    ok(&out, "capture melody");
+    let err = stderr(&out);
+    let stated = document_of(&dir.join("held.duet")).statements;
+    for opening in [
+        "held: 1 note made from a pitch held before the note it reaches",
+        "likely approach to the next note: ",
+    ] {
+        let line = err
+            .lines()
+            .find(|l| l.starts_with(opening))
+            .unwrap_or_else(|| panic!("no {opening:?}: {err}"));
+        assert!(stated.iter().any(|l| l == line), "{stated:?}");
+    }
+    let analysis = analysis_of(&dir.join("held.capture.duet"));
+    let reading = &analysis["reading"];
+    let keys: Vec<u64> = reading["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["key"].as_u64().unwrap())
+        .collect();
+    assert_eq!(keys, [63, 67, 69, 70, 67, 63], "{reading}");
+    let held = reading["held"]
+        .as_array()
+        .expect("the held note is written");
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0]["decoded"]["key"], 70);
+    let suggestions = reading["suggestions"]
+        .as_array()
+        .expect("the suggestion is written");
+    assert_eq!(suggestions.len(), 1, "{suggestions:?}");
+    assert_eq!(suggestions[0]["key"], 69);
+    assert_eq!(suggestions[0]["suggests"], "likely-approach");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
