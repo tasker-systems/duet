@@ -1,7 +1,7 @@
 # This repository's status for each baseline rule, in the register's vocabulary:
 # gated: <path>[#job], partial: …, practiced, convention: …, uncovered, unexamined, n/a.
 # `reviewed_at` is the baseline revision these statuses were reviewed against (check F).
-reviewed_at = "4fd052ec831d5826c0aa20b716fa4e3cdd057bd5"
+reviewed_at = "d383cfccbb33bbc57ebc6678c08ea368af5f0d2f"
 [rules]
 "RUST-LINT-1" = "partial: the workspace table is pinned to the projection by the conventions check (.github/workflows/ci.yml#gate) and applied by clippy (.github/workflows/ci.yml#check); nothing checks that a new crate sets [lints] workspace = true"
 "RUST-LINT-2" = "gated: .github/workflows/ci.yml#check"
@@ -143,3 +143,5 @@ reviewed_at = "4fd052ec831d5826c0aa20b716fa4e3cdd057bd5"
 "CONS-7" = "gated: .github/workflows/ci.yml#gate"
 "CONS-8" = "gated: .github/workflows/ci.yml#gate"
 "CONS-9" = "gated: .github/workflows/conventions-bump.yml#bump"
+"COMPAT-1" = "convention: no per-PR compatibility gate, by the release design (RELEASING.md): below 1.0 a break is declared by the bump, a version class, at release time, so no PR is charged with a break; the one compatibility judgement is the pre-publish check in tools/scripts/release/release-prepare.sh, which runs cargo-semver-checks on each library crate crates.io has, against its latest published version (the published copy, not the tree at the tag), and refuses a break the requested bump does not admit; duet declares only a version class, so it cannot tell breaks apart; the maintainer runs it, and release.yml publishes without it, so a VERSION change not made by release-prepare, or a merge to main between the check and the release PR's merge, ships unchecked"
+"COMPAT-2" = "uncovered: release-prepare.sh takes the version from VERSION, while cargo-semver-checks finds its own baseline on crates.io, so there are two derivations of the last release; crate_exists in tools/scripts/release/lib/common.sh reads any failed crates.io request as a crate not published yet, and that crate is then reported as new and not API-checked, which fails open; no check runs in CI"

@@ -26,6 +26,7 @@ touching; each rule states its *why* beside it, and its id is what you cite in a
 | Shell scripts and CI gate scripts | `.conventions/baseline/doctrine/shell.md` |
 | Markdown | `.conventions/baseline/doctrine/docs.md` |
 | HTTP API JSON and OpenAPI | `.conventions/baseline/doctrine/api.md` |
+| A compatibility or semver gate | `.conventions/baseline/doctrine/compat.md` |
 | Dependencies, advisories, licenses, Actions, tool pins | `.conventions/baseline/doctrine/supply-chain.md` |
 | Credentials, redaction, SQL, auth | `.conventions/baseline/doctrine/security.md` |
 | Channels, spawned work, locks, database coordination | `.conventions/baseline/doctrine/concurrency.md` |
@@ -66,6 +67,8 @@ Statuses for **duet**:
 | CI-4 | uncovered: no pre-commit hook |
 | CI-5 | practiced: ci.yml triggers on merge_group; no merge queue is configured |
 | CI-6 | practiced: every job sets timeout-minutes with room for a cold cache |
+| COMPAT-1 | convention: no per-PR compatibility gate, by the release design (RELEASING.md): below 1.0 a break is declared by the bump, a version class, at release time, so no PR is charged with a break; the one compatibility judgement is the pre-publish check in tools/scripts/release/release-prepare.sh, which runs cargo-semver-checks on each library crate crates.io has, against its latest published version (the published copy, not the tree at the tag), and refuses a break the requested bump does not admit; duet declares only a version class, so it cannot tell breaks apart; the maintainer runs it, and release.yml publishes without it, so a VERSION change not made by release-prepare, or a merge to main between the check and the release PR's merge, ships unchecked |
+| COMPAT-2 | uncovered: release-prepare.sh takes the version from VERSION, while cargo-semver-checks finds its own baseline on crates.io, so there are two derivations of the last release; crate_exists in tools/scripts/release/lib/common.sh reads any failed crates.io request as a crate not published yet, and that crate is then reported as new and not API-checked, which fails open; no check runs in CI |
 | CONC-BOUND-1 | gated: .github/workflows/ci.yml#check |
 | CONC-BOUND-2 | n/a: no channels or queues |
 | CONC-BOUND-3 | n/a: no channels or queues |
