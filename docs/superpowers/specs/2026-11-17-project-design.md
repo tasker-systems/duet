@@ -18,8 +18,11 @@ are numbered decisions at the end ([Decisions for the owner](#decisions-for-the-
   owner's rulings on what duet is, and section 8, the layout by what each thing is.
 - The composition task (temper `01a1dc62-9d9f-73ae-b4ec-03b07a08e407`): layered song, project, or
   both. This spec names the choice it forces and does not design composition.
-- The workbench task (temper `01a1e563-22e6-70e6-a7ce-8b38e93b3091`) and today's ideation on a
-  server loop as the bus (temper `01a1e9eb-b8f0-724e-be60-0dbeb03137fc`, raised, not ruled).
+- The workbench task (temper `01a1e563-22e6-70e6-a7ce-8b38e93b3091`), and the owner's ruling on it:
+  a server loop is duet's event bus, built bus-and-CLI first, and the CLI always stands alone
+  (temper `01a1e9ff-33f4-7123-85d9-7323abead248`, 2026-11-17). The bus is the workbench's to design;
+  this spec states only what the layout must hold for it
+  ([§10](#10-what-the-layout-holds-for-the-bus)).
 
 **Grounding:** the code at `main` (`bb58d0f`, `capture-analysis` 1.12). The take digest of the
 variants design is not built yet; this design depends on it (build task 1 there).
@@ -94,9 +97,10 @@ wayfaring/                          the project: any directory, outside the duet
     duet.toml                       project config, as today                    authored
     duet.local.toml                 this machine's config, as today             ignored
     takes.local.toml                where named takes live on this machine      ignored
-    run/                            locks, and a server's socket if one runs    ignored
+    run/                            the server's socket and lock, when running  ignored
+    state/                          the state store, its kind still to be ruled ignored
   .gitignore                        written by init, its duet block kept by duet
-  log.duet.jsonl                    the session record                          the record
+  log.duet.jsonl                    the domain-event log                        the record
   takes/                            THE LICENCE BOUNDARY: ignored by one rule
     wayfaring/                      one take: its source and everything from it
       wayfaring.flac                the source, when copied in (absent when named)
@@ -126,7 +130,7 @@ wayfaring/                          the project: any directory, outside the duet
 | **Authored** | `.duet/project.duet`, `.duet/duet.toml`, `review/`, `comps/`, `parts/` | Small and precious. Versioned like code | Shareable even when the audio is not |
 | **The record** | `log.duet.jsonl` | Append-only | As authored |
 | **Rebuildable, not restricted** | `renders/` | Rebuilt from parts | Ignored by default, as build output is |
-| **Machine-local** | `.duet/*.local.toml`, `.duet/run/` | This machine only | Never |
+| **Machine-local** | `.duet/*.local.toml`, `.duet/run/`, `.duet/state/` | This machine only | Never |
 | **Outside the project** | the user's config directory, the weights cache, soundfonts | Per user | Not applicable |
 
 ### Rules the layout keeps
@@ -368,6 +372,7 @@ no command needs a project. Outside one, every command works exactly as today.
 /renders/
 /.duet/*.local.toml
 /.duet/run/
+/.duet/state/
 # duet: end
 ```
 
@@ -463,22 +468,45 @@ The control-plane habit (cloud sessions design, the local session listens, Tempe
 needs nothing from duet's files, and an offer inside `init` is a dependency in all but name. A
 project's title and digests are what a Temper note would cite, and they are plain text.
 
-## 10. The record, whichever way the bus is ruled
+## 10. What the layout holds for the bus
 
-The workbench design owns the record's kind and the bus. Today two directions are on the table: the
-2026-11-16 one (no server; every face appends to the record and follows it), which stands, and the
-2026-11-17 ideation (a small server loop is the bus and the record its durable log), raised and not
-ruled. **This layout holds either:**
-- **The record is `log.duet.jsonl` at the project root,** one stream per project. (Its kind and the
-  name of its records are the workbench's.)
-- **Without a server,** a command appends under a lock file in `.duet/run/` and releases it.
-- **With a server,** the server owns the append and its socket sits in `.duet/run/`; a command that
-  finds a live socket submits there, and otherwise appends under the lock, as the 11-17 note's Q4
-  proposes. Either way the file is the same file.
-- **`.duet/run/` is ignored,** machine-local, and safe to delete when nothing is running.
-- **A plugin** (the Later goal's tap and play-in) finds its project by `DUET_PROJECT` or a path set
-  in its own UI, since a DAW's working directory means nothing. Whether a sandboxed AUv3 can reach
-  a project directory at all is the plugin design's check, noted in the jobs note.
+**Ruled** (owner, 2026-11-17, temper `01a1e9ff-33f4-7123-85d9-7323abead248`): a server loop is
+duet's event bus, built bus-and-CLI first. The CLI always stands alone. When a server is running for
+the project, the CLI posts its events to it and can subscribe. The desktop face, later, is Tauri.
+**Still open there:** where the line falls between a streaming domain-event log and UI, session and
+project state kept in something more like SQLite.
+
+The bus, its events and the CLI's hand-off are the workbench design's. This spec states what the
+layout must hold, **Proposed**, and leaves the rest open:
+
+1. **The domain-event log is `log.duet.jsonl` at the project root,** one stream per project. It is
+   the durable record: a restarted server replays it, and a CLI with no server appends to it. Its
+   kind and its events are the workbench's. It is authored-tier, so it is committed with the
+   authored half and names takes by name and digest, never by path ([§6](#6-the-licence-boundary)).
+2. **The server is discoverable at a fixed path under `.duet/run/`,** git-ignored and machine-local:
+   its socket, and a lock that says a server owns the project, holding its process id. A CLI looks
+   there and nowhere else, so the quick check the ruling asks for is one stat and one connect. A
+   stale lock (its process gone) is the CLI's to clear. The file names, and whether the transport is
+   a Unix socket or a localhost port written into the lock, are the workbench's.
+3. **A state store has room at `.duet/state/`,** git-ignored and machine-local, whatever its kind
+   turns out to be (SQLite, a key-value file, or nothing). Proposed constraints, for the owner to
+   rule with the durable/ephemeral line:
+   - **it is never the only copy of authored work.** The project document, the comps, the moments
+     and the log stay files, as files first requires; a cloud session or a fresh clone sees no
+     state store;
+   - **deleting it loses only view and session state** (what was open, selected, playing), and
+     anything else in it can be rebuilt from the documents and the log;
+   - **it is per machine,** never synced or committed, like `takes.local.toml`.
+
+   If the owner rules that some project-level state lives only in the store, that state is not
+   shareable and a cloud session cannot see it. That is the trade
+   [decision 11](#decisions-for-the-owner) puts.
+4. **A plugin** (the Later goal's tap and play-in) finds its project by `DUET_PROJECT` or a path set
+   in its own UI, since a DAW's working directory means nothing, then finds the server as the CLI
+   does. Whether a sandboxed AUv3 can reach a project directory at all is the plugin design's check.
+
+**Open, for the workbench design:** the log's kind and events; what the server holds in memory; the
+transport; whether the log is ever split or rotated; and whether the state store exists at all.
 
 ## Witnesses
 
@@ -519,7 +547,8 @@ Each names its witness. None is built before the owner rules.
 5. **Adoption:** `duet project adopt` and `--apply`. **Needs:** 3. **Witness:** the adopt test, and
    the owner's `fixtures/` adopted into a project on the owner's machine.
 
-The record's lock and socket in `.duet/run/` are the workbench design's to build.
+The log's kind, and the server's socket, lock and state store under `.duet/`, are the workbench
+design's to build. This design reserves their paths and ignores them.
 
 ## Decisions for the owner
 
@@ -554,10 +583,14 @@ The record's lock and socket in `.duet/run/` are the workbench design's to build
    matters.*
 10. **The composition task does not fold into this one.** It stays its own task, constrained by
     decision 1. *Recommended: keep it separate.*
+11. **The state store is never the only copy of authored work**
+    ([§10](#10-what-the-layout-holds-for-the-bus)). It holds view and session state and what can be
+    rebuilt; the project document, comps, moments and log stay files. This is to rule together with
+    the bus decision's open durable/ephemeral line. *Recommended: yes.*
 
 ## Not decided here
 
-- **The record's kind, records and bus:** the workbench design's.
+- **The log's kind and events, the bus, and the state store's kind:** the workbench design's.
 - **Composition:** layered or orchestrated, and alignment across takes: the composition task's.
 - **A take kind of its own**, listing a take's variants (the variants design left it to "the project
   and session record"): the project document's `takes` entry carries the take's identity, and the
