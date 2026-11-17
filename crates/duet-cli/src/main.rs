@@ -10,6 +10,7 @@ mod capture;
 mod config;
 mod drums;
 mod io;
+mod journal;
 mod play;
 mod record;
 mod song;
@@ -104,6 +105,10 @@ enum Command {
     /// Show duet's configuration: where its duet.toml files are, and what they set.
     #[command(subcommand)]
     Config(ConfigCommand),
+    /// Read a project's journal, journal.duet.jsonl: the shared, ordered account of what the
+    /// owner and Claude did and asked of each other.
+    #[command(subcommand)]
+    Journal(journal::JournalCommand),
 }
 
 #[derive(Subcommand)]
@@ -152,6 +157,7 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
         Command::Apply(args) => view::run_apply(args, &Config::load(dirs)?),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),
+        Command::Journal(command) => journal::run(command),
     }
 }
 

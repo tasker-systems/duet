@@ -13,6 +13,7 @@ use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, SchemaGenerator};
 use serde_json::{Map, Value, json};
 
+use crate::journal::EventKind;
 use crate::{Envelope, Kind, StreamKind, Version, schema_url};
 
 /// The envelope schema's own name in `schemas/`.
@@ -179,4 +180,44 @@ pub fn stream_schema<K: StreamKind>() -> Value {
         head,
         defs,
     )
+}
+
+/// Where an event kind's body schema is committed, under `schemas/`: `journal/events/<name>`.
+#[must_use]
+pub fn event_schema_name(name: &str) -> String {
+    format!("journal/events/{name}")
+}
+
+/// The schema of event kind `E`'s body: `schemas/journal/events/<E::NAME>/<E::VERSION>.json`.
+///
+/// It is the body's alone, so that a new event kind, or a new minor of one, changes no other
+/// schema: the journal's `$defs/Record` frames every entry, and its `body` is read by this.
+#[must_use]
+pub fn event_schema<E: EventKind>() -> Value {
+    let id = schema_url(&event_schema_name(E::NAME), E::VERSION);
+    let mut schema = Map::new();
+    schema.insert("$schema".into(), json!(DIALECT));
+    schema.insert("$id".into(), json!(id));
+    schema.insert(
+        "title".into(),
+        json!(format!("duet journal event {} {}", E::NAME, E::VERSION)),
+    );
+    schema.insert(
+        "description".into(),
+        json!(format!(
+            "The body of a journal entry whose `event` is {} and whose `v` is {}.",
+            E::NAME,
+            E::VERSION
+        )),
+    );
+    if let Value::Object(fields) = generator().into_root_schema_for::<E>().to_value() {
+        schema.extend(
+            fields
+                .into_iter()
+                .filter(|(key, _)| !matches!(key.as_str(), "$schema" | "title" | "description")),
+        );
+    }
+    let mut schema = Value::Object(schema);
+    absent_is_omitted(&mut schema);
+    schema
 }

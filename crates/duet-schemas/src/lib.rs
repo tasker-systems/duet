@@ -46,8 +46,15 @@
 //! The kinds this build knows are [`KINDS`]: `song` 1.0 and `capture-analysis` 1.0
 //! (duet-capture's [`Analysis`](duet_capture::Analysis)), documents, and `performance` 1.0, a
 //! stream of duet-dsp's [`PerformanceHead`](duet_dsp::PerformanceHead) and
-//! [`FrameBlock`](duet_dsp::FrameBlock)s. [`AnyDocument`] reads a `.duet` of any document kind by
-//! its envelope.
+//! [`FrameBlock`](duet_dsp::FrameBlock)s, and `journal` 1.0 ([`journal`]), a project's stream
+//! of entries, each one event. [`AnyDocument`] reads a `.duet` of any document kind by its
+//! envelope.
+//!
+//! **The journal's events version on their own** ([`EVENTS`]), each schema committed under
+//! `schemas/journal/events/<event>/<major>.<minor>.json` and gated like a kind's. A reader keeps
+//! an entry of an event kind it does not know, or of a newer minor, verbatim, and states the
+//! skip: the one departure from the policy below, since a journal is never written back
+//! ([`journal`] gives the reason).
 //!
 //! # The rule
 //!
@@ -68,6 +75,7 @@ mod capture;
 mod envelope;
 mod error;
 mod frame;
+pub mod journal;
 mod kind;
 mod performance;
 mod registry;
@@ -78,11 +86,11 @@ mod version;
 pub use envelope::{Envelope, From, Notice, SCHEMA_BASE, Tool, schema_url};
 pub use error::{Error, Result};
 pub use frame::{Document, Stream, read_envelope};
+pub use journal::{EVENTS, EventInfo, EventKind, Journal, JournalHead, event_kind};
 pub use kind::{Kind, StreamKind};
 pub use registry::{AnyDocument, ENVELOPE_INFO, Framing, KINDS, KindInfo, kind};
 pub use schema::{ENVELOPE, ENVELOPE_VERSION};
 pub use version::Version;
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

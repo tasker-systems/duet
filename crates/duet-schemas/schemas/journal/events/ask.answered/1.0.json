@@ -1,0 +1,33 @@
+{
+  "$defs": {
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/ask.answered/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is ask.answered and whose `v` is 1.0.",
+  "properties": {
+    "answer": {
+      "description": "The answer: one of the ask's options, or the answerer's own.",
+      "type": "string"
+    },
+    "ask": {
+      "$ref": "#/$defs/Id",
+      "description": "The ask answered: its entry's id."
+    },
+    "said": {
+      "description": "The answerer's own words beside the answer, if any.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask",
+    "answer"
+  ],
+  "title": "duet journal event ask.answered 1.0",
+  "type": "object"
+}

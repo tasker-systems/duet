@@ -21,8 +21,9 @@ duet-drums.workspace = true
 duet-dsp.workspace = true
 schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
-# float_roundtrip: every float a document holds reads back to the same bits.
-serde_json = { version = "1", features = ["float_roundtrip"] }
+# float_roundtrip: every float a document holds reads back to the same bits. raw_value: a
+# journal entry's body is read from its exact text, so an unknown field is refused by name.
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
 thiserror = "2"
 
 [dev-dependencies]

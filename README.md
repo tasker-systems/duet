@@ -21,7 +21,8 @@ The workspace is split by domain:
 | `duet-play` | a `Song` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Song` and score |
-| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy |
+| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, and the `journal` kind and its events |
+| `duet-bus` | the project's journal: appended under one lock, read from a cursor, replayed and checked |
 | `duet-cli` | the `duet` binary |
 
 ## How the formats fit together
@@ -904,6 +905,22 @@ tempo that changes within a take (drift is reported in the analysis, not correct
 tests are measured against, each with a hand-checked transcription. Its
 [README](crates/duet-capture/corpus/README.md) says how to add a take.
 
+## The journal
+
+A project's `journal.duet.jsonl` is the shared, ordered account of what the owner and Claude did
+and asked of each other: a `.duet.jsonl` stream of kind `journal`, whose every line after the
+first is one entry, one event (`ask.asked`, `ask.answered`, `doc.written`, …). Each event kind
+versions on its own, so an entry this duet does not read, of a newer duet's event, is kept as it
+is and stated, never refused. The design is
+[`docs/superpowers/specs/2026-11-17-bus-design.md`](docs/superpowers/specs/2026-11-17-bus-design.md).
+
+```sh
+duet journal show    # every entry: its seq, when, who, the event and its body
+duet journal check   # what this duet keeps unread, what replay skips; exits 1 if anything is wrong
+```
+
+Both read `journal.duet.jsonl` in the working directory, or the path given. Neither writes.
+
 ## Configuration
 
 `duet` reads `duet.toml` and `duet.local.toml` from two places, each file over the ones
@@ -1018,7 +1035,8 @@ envelope's, is generated from the Rust types and committed under `crates/duet-sc
 with an example document beside it. The gate fails when a committed schema's shape differs from
 the code at the same version (bump the kind's version), and asks only to regenerate when its
 descriptions alone changed. Every committed example must still read, and validate against its
-schema. To write a new or regenerated schema:
+schema. The journal's events are gated the same way, each under
+`schemas/journal/events/<event>/`, at its own version. To write a new or regenerated schema:
 
 ```sh
 DUET_BLESS_SCHEMAS=1 cargo test -p duet-schemas

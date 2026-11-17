@@ -631,6 +631,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "duet-bus"
+version = "0.3.0"
+dependencies = [
+ "duet-schemas",
+ "getrandom 0.4.3",
+ "jsonschema",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "duet-capture"
 version = "0.3.0"
 dependencies = [
@@ -658,6 +669,7 @@ dependencies = [
  "cpal",
  "ctrlc",
  "duet-abc",
+ "duet-bus",
  "duet-capture",
  "duet-core",
  "duet-drums",

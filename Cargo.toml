@@ -24,6 +24,7 @@ duet-dsp = { path = "crates/duet-dsp", version = "0.3.0" }
 duet-capture = { path = "crates/duet-capture", version = "0.3.0" }
 duet-play = { path = "crates/duet-play", version = "0.3.0" }
 duet-schemas = { path = "crates/duet-schemas", version = "0.3.0" }
+duet-bus = { path = "crates/duet-bus", version = "0.3.0" }
 
 # The canonical lint table from tasker-systems/conventions (rust/workspace-lints.toml), adopted in
 # `table` mode: check A compares it with the projection (CONS-3). Change it there, not here.

@@ -1,0 +1,133 @@
+{
+  "$defs": {
+    "At": {
+      "description": "A UTC time to the millisecond, such as 2026-11-17T15:04:05.123Z.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "type": "string"
+    },
+    "By": {
+      "additionalProperties": false,
+      "description": "Who wrote an entry, and through which face. An audit label, never authentication: nothing\nis refused for who wrote it.",
+      "properties": {
+        "face": {
+          "description": "The face they acted through: `cli`, later `server`, `app` or `mcp`.",
+          "type": "string"
+        },
+        "who": {
+          "description": "Who acted: `owner`, `claude`, or what `DUET_ACTOR` names.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "who",
+        "face"
+      ],
+      "type": "object"
+    },
+    "EntryFrame": {
+      "additionalProperties": false,
+      "description": "One entry as `journal` 1.0 frames it, its body unread: what the committed schema's\n`$defs/Record` describes. A reader reads the body by its event kind ([`read_line`]).",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/At",
+          "description": "When it was written."
+        },
+        "body": {
+          "description": "The event's body.",
+          "type": "object"
+        },
+        "by": {
+          "$ref": "#/$defs/By",
+          "description": "Who wrote it."
+        },
+        "cause": {
+          "$ref": "#/$defs/Id",
+          "description": "The entry that caused it, if one did."
+        },
+        "event": {
+          "description": "The event kind.",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*(\\.[a-z][a-z0-9]*(-[a-z0-9]+)*)+$",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/Id",
+          "description": "The entry's own id."
+        },
+        "v": {
+          "$ref": "#/$defs/Version",
+          "description": "The event kind's version the body is written at."
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "by",
+        "event",
+        "v",
+        "body"
+      ],
+      "type": "object"
+    },
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "JournalHead": {
+      "additionalProperties": false,
+      "description": "`journal` 1.0's first line holds the head: the project's name, and the journal's own id.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id",
+          "description": "This journal's id, made when it was started."
+        },
+        "project": {
+          "description": "The name of the project whose journal this is.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "id"
+      ],
+      "type": "object"
+    },
+    "Record": {
+      "$ref": "#/$defs/EntryFrame"
+    },
+    "Version": {
+      "description": "A kind's schema version, <major>.<minor>, such as 1.0.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The first line of a .duet.jsonl stream of kind journal, at schema version 1.0.",
+  "properties": {
+    "$schema": {
+      "const": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/1.0.json"
+    },
+    "duet": {
+      "$ref": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",
+      "properties": {
+        "kind": {
+          "const": "journal"
+        },
+        "version": {
+          "const": "1.0"
+        }
+      }
+    },
+    "head": {
+      "$ref": "#/$defs/JournalHead"
+    }
+  },
+  "required": [
+    "duet",
+    "head"
+  ],
+  "title": "duet journal 1.0",
+  "type": "object"
+}
