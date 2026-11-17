@@ -828,6 +828,38 @@ outputs are named after it (`hmm.compare.svg`). Nothing is overwritten. Neither 
 holds names the recording it was read from, so the recording is checked only by its length
 against the performance's.
 
+**Reviewing a take moment by moment.** `duet capture review` puts named moments of a take on one
+page, every reading side by side, to listen to and rule on:
+
+```sh
+duet capture review idea.m4a --moments idea.moments                         # idea.review/index.html
+duet capture review idea.m4a --moments idea.moments --reading rules=idea-rules.capture.duet
+duet capture review idea.m4a --moments idea.moments -o scratch/idea --dir scratch/idea-review
+```
+
+- **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from the
+  start of the take, the label free text. A line starting with `#` is a comment.
+  `crates/duet-capture/corpus/wayfaring-stranger.moments` names the 14 moments of "Wayfaring
+  Stranger" the owner ruled on by ear. A moment that ends past the take is refused, before
+  anything is written.
+- **The page,** `STEM.review/index.html`, shows the stem's reading (named after its reader) and
+  each `--reading NAME=ANALYSIS` side by side for each moment:
+  - the notes each reads in the window;
+  - `compare`'s plot of it, inline, so hovering an excursion shows its cents and length;
+  - players for its five renderings, each `compare`'s WAV: melody (gaps under 0.2 s bridged),
+    steps and bends, with legato and gapped folded away. A toggle repeats each clip, and one
+    clip plays at a time;
+  - a note when every reading reads the same notes there, so their melody clips sound alike;
+  - a box for a verdict. One button copies every verdict as text.
+
+  The whole take's melody is at the top, per reading, and the page explains its plot, its
+  renderings, how a short gap plays, and what an excursion is.
+- **The clips,** in `STEM.review/clips/`, are copies of the recording. When a licence notice sits
+  beside the take (`TAKE.license`, as the corpus keeps them), review states it, and the page
+  carries it. Otherwise review says so, and to keep the sheet out of git. Either way, keep a
+  licence-restricted take's sheet out of git.
+- **Nothing is overwritten:** a directory that exists is refused.
+
 **Correcting a capture.** Edit the ABC text, which is what it is for, or a rhythm's grid with
 the `duet drums` commands, which read the `.grid.duet` by its envelope. To fix an
 estimate, run again with `--tempo`, `--meter`, `--downbeat` or `--key` (add `-o` to keep the
@@ -916,9 +948,6 @@ scripts/fetch-soundfont.sh           # just the SoundFont, to duet's data direct
 scripts/port-check.sh                # duet play --port to FluidSynth, then check what arrived
 scripts/port-check.sh --interrupt 4  # the same, with Ctrl-C after 4 seconds
 scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's audio (macOS)
-scripts/duet-listen.sh TAKE --stem STEM [--reading hmm=OTHER.capture.duet] [--moments FILE]
-                                     # hear a take against its readings, moment by moment
-scripts/listen/check.sh              # duet-listen.sh's clips land at their windows
 ```
 
 - **The SoundFont** is the one duet's installer will fetch, pinned in `scripts/soundfont.env`
@@ -936,33 +965,6 @@ scripts/listen/check.sh              # duet-listen.sh's clips land at their wind
   synthetic takes (the default), `all` both. Its encoders (`lame`, `flac`, `vorbis-tools`) are
   in the `Brewfile`; the AAC and HE-AAC files use macOS's own `afconvert`. CI uses the committed
   files, so run it only to change them.
-- **`duet-listen.sh`** is for checking a reading by ear.
-  - **What it builds:** clips of the whole take and of each named moment, for the stem's
-    reading and for any `--reading` beside it. Each clip has the take on the left and the
-    reading's sine on the right, raised 6 dB.
-  - **Five versions of each clip,** each as `duet capture compare` renders it:
-    - bridged, its default: the sine held through a gap under 0.2 s and silent at a longer one,
-      so a dropped note is heard as a gap;
-    - legato (`--legato`), with the sine held through every gap;
-    - gapped (`--gapped`), with the sine silent wherever the reading has no note;
-    - steps (`--render steps`), bridged, with each excursion held at its key plus its offset;
-    - bends (`--render bends`), bridged, with the keys plus the residual: the performance's own
-      pitch.
-  - **Playing them:** a menu plays one clip at a time. `N` plays clip N bridged, `Nl` legato,
-    `Ng` gapped, `Ns` steps, `Nb` bends, and `q` quits. While a clip plays, it shows where the clip is in the take and
-    which note is being read.
-  - **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from
-    the start of the take, with a free-text label. A line starting with `#` is a comment.
-    `scripts/listen/synthetic-melody.moments` is an example, and
-    `crates/duet-capture/corpus/wayfaring-stranger.moments` names the moments of "Wayfaring
-    Stranger" that the owner rules on by ear.
-  - **Clips of a licence-restricted take are copies of it.** Keep them, and its moments
-    file, out of git. "Wayfaring Stranger" is CC BY 4.0, so its moments file is committed; its
-    clips are still copies, and stay out of git.
-  - **`scripts/listen/check.sh`** builds the clips of the synthetic corpus melody and of
-    "Wayfaring Stranger", checks that each moment lies inside its take, each clip's length
-    against its window, and that the steps and bends clips are their own renderings. CI does
-    not run it.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.
