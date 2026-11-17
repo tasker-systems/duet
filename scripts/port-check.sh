@@ -5,9 +5,9 @@
 #
 #   scripts/port-check.sh                        # play samples/sketch.notes to the end
 #   scripts/port-check.sh --interrupt 4          # Ctrl-C duet after 4 seconds
-#   scripts/port-check.sh --interrupt 4 song.mid # any song duet reads
+#   scripts/port-check.sh --interrupt 4 part.mid # any part duet reads
 #
-# Played to the end, it passes when every note of the song arrived as a note-on and no key
+# Played to the end, it passes when every note of the part arrived as a note-on and no key
 # is left on. Interrupted, it passes when duet says it stopped, the port's last messages are
 # sustain off (CC64 0) and all notes off (CC123 0) on each channel it used, and no key is
 # left on. macOS only: FluidSynth's port here is CoreMIDI. Run scripts/dev-setup.sh first.
@@ -15,12 +15,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 interrupt=""
-song="$root/samples/sketch.notes"
+part="$root/samples/sketch.notes"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --interrupt) interrupt="${2:?--interrupt needs a number of seconds}"; shift 2 ;;
     -h | --help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) song="$1"; shift ;;
+    *) part="$1"; shift ;;
   esac
 done
 
@@ -29,7 +29,7 @@ command -v fluidsynth >/dev/null || { echo "error: no fluidsynth; run scripts/de
 data_dir="${DUET_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/duet}"
 font="$data_dir/default.sf2"
 [[ -f "$font" ]] || { echo "error: no SoundFont at $font; run scripts/fetch-soundfont.sh" >&2; exit 1; }
-[[ -f "$song" ]] || { echo "error: no song at $song" >&2; exit 1; }
+[[ -f "$part" ]] || { echo "error: no part at $part" >&2; exit 1; }
 
 echo "building duet"
 duet="$(cd "$root" && cargo build --quiet --locked -p duet-cli --bin duet --message-format=json \
@@ -54,7 +54,7 @@ disown  # stopped by stop_fluidsynth; bash need not report its end
 # them, and that exits 1, so its output is caught before it is searched.
 port_listed() {
   local ports
-  ports="$("$duet" play "$song" --port "$port-is-not-a-port" 2>&1 || true)"
+  ports="$("$duet" play "$part" --port "$port-is-not-a-port" 2>&1 || true)"
   grep -qx "  $port" <<<"$ports"
 }
 for _ in $(seq 50); do
@@ -64,32 +64,32 @@ done
 port_listed || { echo "error: FluidSynth's port $port never appeared" >&2; exit 1; }
 before="$(wc -l <"$log")"
 
-echo "playing $(basename "$song") to $port${interrupt:+, Ctrl-C after ${interrupt}s}"
+echo "playing $(basename "$part") to $port${interrupt:+, Ctrl-C after ${interrupt}s}"
 status=0
 if [[ -n "$interrupt" ]]; then
-  "$duet" play "$song" --port "$port" 2>"$work/duet.err" &
+  "$duet" play "$part" --port "$port" 2>"$work/duet.err" &
   pid=$!
   sleep "$interrupt"
   kill -INT "$pid"
   wait "$pid" || status=$?
 else
-  "$duet" play "$song" --port "$port" 2>"$work/duet.err" || status=$?
+  "$duet" play "$part" --port "$port" 2>"$work/duet.err" || status=$?
 fi
 cat "$work/duet.err" >&2
 sleep 1
 stop_fluidsynth
 
 tail -n "+$((before + 1))" "$log" | tr -d '\r' | grep '^event_pre_' >"$work/received" || true
-"$duet" song show "$song" --to json >"$work/song.json"
+"$duet" part show "$part" --to json >"$work/part.json"
 
-python3 -I - "$work/received" "$work/song.json" "$status" "${interrupt:+interrupted}" \
+python3 -I - "$work/received" "$work/part.json" "$status" "${interrupt:+interrupted}" \
   "$work/duet.err" <<'EOF'
 import collections, json, sys
 
-received, song, status, interrupted, err = sys.argv[1:]
+received, part, status, interrupted, err = sys.argv[1:]
 events = [line.split() for line in open(received)]
 kinds = collections.Counter(e[0].removeprefix("event_pre_") for e in events)
-notes = sum(len(t["notes"]) for t in json.load(open(song))["tracks"])
+notes = sum(len(t["notes"]) for t in json.load(open(part))["tracks"])
 held, channels = collections.Counter(), set()
 for kind, *v in events:
     channels.add(v[0])
@@ -114,7 +114,7 @@ else:
     if status != "0":
         failures.append(f"duet exited {status}")
     if kinds["noteon"] != notes:
-        failures.append(f"{kinds['noteon']} note-ons arrived for the song's {notes} notes")
+        failures.append(f"{kinds['noteon']} note-ons arrived for the part's {notes} notes")
 if failures:
     print("FAIL:", *failures, sep="\n  ")
     sys.exit(1)
