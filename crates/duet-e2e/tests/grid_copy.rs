@@ -1,14 +1,14 @@
 //! `duet convert` from a drum-grid document to a drum-grid document with no `--grid` is a
-//! straight copy, as `duet drums snap` writes one without snapping, so what a song cannot hold
+//! straight copy, as `duet drums snap` writes one without snapping, so what a part cannot hold
 //! (a lane with no hits, the grid's own velocity levels, any velocity at all) survives. With
-//! `--grid`, the grid goes through a song at that step, as `drums render` then `drums read`
+//! `--grid`, the grid goes through a part at that step, as `drums render` then `drums read`
 //! would take it. A grid's text is a view: `duet apply` reads it and `duet view` shows it.
 
 use std::path::{Path, PathBuf};
 
 use duet_e2e::{duet, golden, grid_doc, notes_doc, ok, root, s, scratch, view_text};
 
-/// A grid a song cannot carry whole: a lane with no hits, and its own velocity levels.
+/// A grid a part cannot carry whole: a lane with no hits, and its own velocity levels.
 const KEEPS: &str = "grid 1/8\nvel g 30 x 80 X 110\n\n[bars 1-2]\n\
     ride  | . . . . . . . . | . . . . . . . . |\n\
     snare | . . x . . . x g | . . x . . . x . |\n\
@@ -135,9 +135,9 @@ fn off_level_velocities_are_refused_and_snap_only_when_asked() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// With `--grid`, a grid goes through a song at that step: the same bytes as `drums render`
+/// With `--grid`, a grid goes through a part at that step: the same bytes as `drums render`
 /// then `drums read` at that step, so a 1/8 grid becomes a 1/16 one. `--track` and `--bars`
-/// read a song's drum track, so without `--grid` they are refused by name.
+/// read a part's drum track, so without `--grid` they are refused by name.
 #[test]
 fn a_named_step_re_steps_a_grid_and_track_or_bars_need_one() {
     let dir = scratch("copy-restep");
@@ -169,17 +169,17 @@ fn a_named_step_re_steps_a_grid_and_track_or_bars_need_one() {
     assert!(text.contains("\ngrid 1/16\n"), "{text}");
     assert!(
         !text.contains("ride"),
-        "a song carries no unplayed lane: {text}"
+        "a part carries no unplayed lane: {text}"
     );
 
     for (flags, want) in [
         (
             &["--track", "Drums"][..],
-            "--track is for reading a song's drum track",
+            "--track is for reading a part's drum track",
         ),
         (
             &["--bars", "2"][..],
-            "--bars is for reading a song's drum track",
+            "--bars is for reading a part's drum track",
         ),
         (
             &["--track", "Drums", "--bars", "2"][..],
@@ -296,7 +296,7 @@ fn an_off_level_velocity_survives_a_document_and_midi_exactly() {
     let dir = scratch("copy-midi");
     let take = notes_doc(
         &dir,
-        "song.notes",
+        "part.notes",
         "[track \"Kit\" ch10]\n1.1.0 C2 0.25 101\n1.2.0 D2 0.25 7\n1.3.0 F#2 0.25 127\n",
     );
     let doc = dir.join("take.duet");

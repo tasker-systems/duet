@@ -1,6 +1,6 @@
 //! `duet play` end to end, as far as a machine with no audio device or MIDI port can
 //! take it: every way it refuses to start, which is before it opens either. Sound and
-//! port output themselves are witnessed only by a local run. It plays a song document: the
+//! port output themselves are witnessed only by a local run. It plays a part document: the
 //! sample's notes view is applied into one, and reading it gets as far as looking for a
 //! SoundFont.
 
@@ -12,7 +12,7 @@ fn stderr(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-/// The sample sketch as a song document in `dir`.
+/// The sample sketch as a part document in `dir`.
 fn sample_in(dir: &Path) -> String {
     let doc = dir.join("sketch.duet");
     let notes = root().join("samples/sketch.notes");
@@ -141,10 +141,10 @@ fn soundfont_and_port_together_are_refused() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// A song that cannot be written as MIDI cannot be played, and says why before anything
+/// A part that cannot be written as MIDI cannot be played, and says why before anything
 /// else is looked for.
 #[test]
-fn a_song_that_cannot_be_midi_is_refused_first() {
+fn a_part_that_cannot_be_midi_is_refused_first() {
     let dir = scratch("play-bad");
     // duet writes no such document, so the end is moved by hand, past what `apply` checks.
     let bad = notes_doc(
@@ -162,15 +162,15 @@ fn a_song_that_cannot_be_midi_is_refused_first() {
     let out = duet(&dir, &["play", s(&bad)]);
     assert!(!out.status.success());
     let err = stderr(&out);
-    assert!(err.contains("past the song's end"), "{err}");
+    assert!(err.contains("past the part's end"), "{err}");
     assert!(!err.contains("SoundFont"), "{err}");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// A song document on standard input is read by its envelope: it gets as far as looking for
+/// A part document on standard input is read by its envelope: it gets as far as looking for
 /// a SoundFont, as the file does.
 #[test]
-fn a_song_document_on_standard_input_is_played() {
+fn a_part_document_on_standard_input_is_played() {
     let dir = scratch("play-stdin");
     let doc = std::fs::read(sample_in(&dir)).expect("the .duet");
     let out = duet_with(&dir, &dir.join("no-config"), &["play", "-"], &doc);
@@ -186,7 +186,7 @@ fn a_song_document_on_standard_input_is_played() {
 /// A document of another kind, and a view's old name, are refused before anything else is
 /// looked for, each by name.
 #[test]
-fn play_refuses_what_is_not_a_song_by_name() {
+fn play_refuses_what_is_not_a_part_by_name() {
     let dir = scratch("play-kind");
     let grid = dir.join("beat.duet");
     let beat = root().join("samples/groove.drums");
@@ -198,8 +198,8 @@ fn play_refuses_what_is_not_a_song_by_name() {
     assert!(!out.status.success());
     let err = stderr(&out);
     assert!(
-        err.contains("beat.duet is a drum-grid document, and duet play reads a song")
-            && err.contains("duet drums render makes a song of one"),
+        err.contains("beat.duet is a drum-grid document, and duet play reads a part")
+            && err.contains("duet drums render makes a part of one"),
         "{err}"
     );
     assert!(!err.contains("SoundFont"), "{err}");
@@ -226,7 +226,7 @@ fn play_refuses_what_is_not_a_song_by_name() {
 }
 
 /// A view's text plays through `duet apply`, piped: `duet apply sketch.notes -o - | duet play
-/// -` gets as far as looking for a SoundFont, so the song was read.
+/// -` gets as far as looking for a SoundFont, so the part was read.
 #[test]
 fn a_view_applied_to_standard_output_pipes_into_play() {
     let dir = scratch("play-pipe");

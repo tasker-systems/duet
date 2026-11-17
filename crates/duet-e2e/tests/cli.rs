@@ -1,5 +1,5 @@
 //! The `duet` binary end to end: every conversion writes the same music it wrote before
-//! songs could carry an end, now stating where it ends, and a drum grid that ends in
+//! parts could carry an end, now stating where it ends, and a drum grid that ends in
 //! empty bars comes back whole through MIDI with no bar count.
 
 use std::path::Path;
@@ -100,13 +100,13 @@ fn midi_tracks(bytes: &[u8]) -> (Vec<Vec<String>>, Vec<u64>) {
     (tracks, ends)
 }
 
-/// The golden files in `golden/` were written by duet at 145077f, before a song
+/// The golden files in `golden/` were written by duet at 145077f, before a part
 /// could name an end, from `samples/sketch.notes` (then `sketch.txt`, and the text golden
 /// files `.txt` too; only the names changed) and `samples/groove.drums` (which now
 /// state their ends, `end 5.1.0` and `end 3.1.0`, the defaults). Every file written now
 /// holds exactly the same music, every note, control and conductor event at the same
 /// tick, and differs only by stating its end: an `end` line in text, and every MIDI track
-/// ending there. The song's `.json` and `.toml` are no longer written: a song document's
+/// ending there. The part's `.json` and `.toml` are no longer written: a part document's
 /// body is what they held, so each is compared with the `.duet` written now, whose body
 /// states its end.
 #[test]
@@ -119,18 +119,18 @@ fn every_output_holds_the_same_music_and_states_its_end() {
     let p = |s: &'static str| Path::new(s);
     let write = |name: &str, bytes: Vec<u8>| std::fs::write(out(name), bytes).expect("write");
 
-    // The sample's text is a view: `duet apply` reads it into a song document, and that
+    // The sample's text is a view: `duet apply` reads it into a part document, and that
     // document is what every other output is written from.
     duet(&[p("apply"), &sketch, p("-o"), &out("sketch-view.duet")]);
     duet(&[p("convert"), &out("sketch-view.duet"), &out("sketch.duet")]);
     duet(&[p("convert"), &out("sketch.duet"), &out("sketch.mid")]);
     write(
         "sketch.notes",
-        duet_out(&[p("song"), p("show"), &out("sketch.duet")]),
+        duet_out(&[p("part"), p("show"), &out("sketch.duet")]),
     );
     write(
         "sketch-from-midi.notes",
-        duet_out(&[p("song"), p("show"), &out("sketch.mid")]),
+        duet_out(&[p("part"), p("show"), &out("sketch.mid")]),
     );
     // The groove's text reads into a drum-grid document, and renders from that.
     duet(&[p("apply"), &groove, p("-o"), &out("groove-grid.duet")]);
@@ -144,7 +144,7 @@ fn every_output_holds_the_same_music_and_states_its_end() {
     }
     write(
         "groove.notes",
-        duet_out(&[p("song"), p("show"), &out("groove.duet")]),
+        duet_out(&[p("part"), p("show"), &out("groove.duet")]),
     );
     duet(&[
         p("drums"),
@@ -198,11 +198,11 @@ fn every_output_holds_the_same_music_and_states_its_end() {
                 };
                 let doc = std::fs::read(dir.join(format!("{stem}.duet"))).expect("written");
                 let mut doc: serde_json::Value = serde_json::from_slice(&doc).expect("a .duet");
-                assert_eq!(doc["duet"]["kind"], "song", "{stem}.duet");
+                assert_eq!(doc["duet"]["kind"], "part", "{stem}.duet");
                 let body = doc["body"].as_object_mut().expect("a body");
                 let stated = body.remove("end");
                 assert_eq!(stated, Some(serde_json::Value::from(end)), "{name}");
-                assert_eq!(doc["body"], want, "{name}: the same song");
+                assert_eq!(doc["body"], want, "{name}: the same part");
             }
             _ => {
                 let got = std::fs::read(dir.join(&name)).expect("written");
@@ -238,16 +238,16 @@ fn a_grid_ending_in_empty_bars_survives_midi_with_no_bar_count() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// A song that names no end is written stating its default, in every format.
+/// A part that names no end is written stating its default, in every format.
 #[test]
-fn a_song_with_no_end_is_written_stating_its_default() {
+fn a_part_with_no_end_is_written_stating_its_default() {
     let dir = scratch("default");
     let take = duet_e2e::notes_doc(&dir, "take.notes", "[track \"P\" ch1]\n2.3.0 C4 1 80\n");
     let p = |s: &'static str| Path::new(s);
     duet(&[p("convert"), &take, &dir.join("take-out.duet")]);
     std::fs::write(
         dir.join("take-out.notes"),
-        duet_out(&[p("song"), p("show"), &take]),
+        duet_out(&[p("part"), p("show"), &take]),
     )
     .expect("write");
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect("read");
@@ -279,11 +279,11 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
     let dir = scratch("precedence");
     let user = dir.join("user");
     let project = dir.join("project");
-    let below = project.join("songs/sketches");
+    let below = project.join("parts/sketches");
     std::fs::create_dir_all(&below).expect("dirs");
     write(
         &user.join("duet.toml"),
-        "[song]\nend = { round-up = 4 }\n\n[lanes.shaker-2]\nkey = 82\naliases = [\"sh2\"]\n",
+        "[part]\nend = { round-up = 4 }\n\n[lanes.shaker-2]\nkey = 82\naliases = [\"sh2\"]\n",
     );
     write(
         &user.join("duet.local.toml"),
@@ -291,7 +291,7 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
     );
     write(
         &project.join(".duet/duet.toml"),
-        "[song]\nend = { round-up = 2 }\n\n[lanes.kick]\naliases = [\"boom\"]\n",
+        "[part]\nend = { round-up = 2 }\n\n[lanes.kick]\naliases = [\"boom\"]\n",
     );
     write(
         &project.join(".duet/duet.local.toml"),
@@ -340,7 +340,7 @@ fn config_files_merge_in_order_and_the_end_default_is_stable() {
     let take = duet_e2e::notes_doc(&dir, "take.notes", "[track \"P\" ch1]\n1.1.0 C4 1 80\n");
     without_end(&take);
     let convert = |cwd: &Path, user_dir: &Path| {
-        let out = duet_in(cwd, user_dir, &[p("song"), p("show"), &take]);
+        let out = duet_in(cwd, user_dir, &[p("part"), p("show"), &take]);
         assert!(
             out.status.success(),
             "{}",
@@ -451,15 +451,15 @@ fn a_config_file_that_breaks_a_rule_is_refused_naming_it() {
     let user = dir.join("user");
     let file = user.join("duet.toml");
     let cases = [
-        ("[song\nend = 4\n", "TOML parse error"),
-        ("[song]\nlength = 4\n", "unknown field `length`"),
+        ("[part\nend = 4\n", "TOML parse error"),
+        ("[part]\nlength = 4\n", "unknown field `length`"),
         (
-            "[song]\nend = { round-up = 0 }\n",
+            "[part]\nend = { round-up = 0 }\n",
             "round-up is a whole number of bars, 1 or more, not 0",
         ),
         (
-            "[song]\nend = \"bar\"\n",
-            "[song] end is \"last-bar\" or { round-up = <bars> }",
+            "[part]\nend = \"bar\"\n",
+            "[part] end is \"last-bar\" or { round-up = <bars> }",
         ),
         (
             "[lanes.kick]\nkey = 38\n",
@@ -589,7 +589,7 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
     // A file of two tunes needs --tune; the second is in 3/4.
     let doc = dir.join("second.duet");
     let show = |doc: &Path| {
-        let out = run(&[Path::new("song"), Path::new("show"), doc]);
+        let out = run(&[Path::new("part"), Path::new("show"), doc]);
         assert!(
             out.status.success(),
             "{}",
@@ -642,7 +642,7 @@ fn abc_tunes_render_convert_and_are_refused_by_name() {
     );
 }
 
-/// Takes the stated end out of a song document, as a document written by hand may leave it,
+/// Takes the stated end out of a part document, as a document written by hand may leave it,
 /// so the configured default decides it. `duet apply -o` states one, as every writer does.
 fn without_end(doc: &Path) {
     let mut json: serde_json::Value =
@@ -653,4 +653,39 @@ fn without_end(doc: &Path) {
         .remove("end")
         .expect("apply -o states the end");
     std::fs::write(doc, json.to_string()).expect("write");
+}
+
+/// The kind that holds one voice, line or groove is `part`, and `duet part` works on it.
+/// `duet song` is no longer a command: the name is kept for the piece, a kind still to come,
+/// so it is unknown rather than an alias.
+#[test]
+fn duet_song_is_an_unknown_command_and_duet_part_shows_a_part() {
+    let none = scratch("song-unknown");
+    let sketch = root().join("samples/sketch.notes");
+    let doc = none.join("sketch.duet");
+    let p = Path::new;
+    let out = apply_in(&none, &none.join("user"), &sketch, "notes", &doc);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let shown = duet_out(&[p("part"), p("show"), &doc]);
+    assert!(!shown.is_empty(), "duet part show printed nothing");
+
+    for args in [&[p("song"), p("show"), &doc][..], &[p("song")][..]] {
+        let out = duet_in(&none, &none.join("user"), args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "duet {args:?} should fail");
+        assert!(
+            err.contains("unrecognized subcommand 'song'"),
+            "duet {args:?}: {err}"
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "duet {args:?} wrote {:?}",
+            out.stdout
+        );
+    }
 }
