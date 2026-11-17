@@ -139,6 +139,8 @@ pub fn breathe(reading: Reading, frames: &PerformanceFrames, onsets: &[Event]) -
     let mut out = Reading::of(reading.tuning, reader, notes, parts, take);
     out.rejoins = reading.rejoins;
     out.breathy = breathy;
+    out.held = reading.held;
+    out.suggestions = reading.suggestions;
     out
 }
 

@@ -581,11 +581,14 @@ fn a_turn_at_a_notes_start_is_one_note_with_one_excursion() {
 
 #[test]
 fn a_held_approach_the_hmm_takes_in_is_one_excursion_before_held_from() {
-    // 0.1 s held a semitone below G#3, then G#3: the HMM reads one G#3, the approach its
-    // attack, and the approach is its one excursion, a grace before its held pitch.
+    // 0.1 s held a semitone below G#3, then G#3: the HMM decodes one G#3, the approach its
+    // attack, and the approach is its one excursion, a grace before its held pitch. Since the
+    // owner's 2026-11-17 ruling the held-pitch pass makes it a note of its own
+    // (`held::tests`), so this is the reading as decoded.
     let approach = |t: f64| if t < 0.1 { -100.0 } else { 0.0 };
     let signal = padded(synth::contour(RATE, hz(G_SHARP_3), 0.8, approach, 4, 0.3));
-    let reading = hmm(&signal, NOTE_COST);
+    let (frames, onsets) = performance(&signal);
+    let reading = NoteModel::default().read_as_decoded(&frames, &onsets, Some(A440_CENTS));
     assert_eq!(keys(&reading), [G_SHARP_3], "{:?}", reading.notes);
     let note = &reading.notes[0];
     let part = note.residual.as_ref().unwrap();

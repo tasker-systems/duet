@@ -661,6 +661,21 @@ cannot be, that is reported after them, and they stay:
   many. It runs before the rejoin, so a note carried over a breathy dip meets its second half
   and is rejoined. A reading with none writes none.
   Since 1.10 a basic-pitch reader states the `thresholds` its notes were decoded with.
+  Since 1.11 the reading states its `held` notes and its `suggestions`. A pitch the voice holds
+  for at least the shortest note (0.05 s) before the note it reaches, at least 50 cents below
+  where that note is held, is a note of its own: the note HMM takes such a pitch in as the
+  note's attack, and Basic Pitch leaves it unread before the note, so the pass makes it a note,
+  ending it where the voice is nearer the note it reaches. Each states the note reached as its
+  reader `decoded` it, the `notes` made and the `loss_change`; capture states how many. A pitch
+  held above the note (an overshoot, a lean, a turn at its start) and an ornament once the voice
+  is on the note stay as their reader filed them. A note held before the next (at most 0.25 s,
+  the next longer and within 0.05 s of it) is suggested a `likely-approach` only when the step
+  to the next is a semitone and its last quarter drifts more than 30 cents toward it, measured
+  up to where the voice moves 0.7 semitones toward the next note, as the rules end a held pitch;
+  each states the `step`, the `drift_cents` and the `rule` (`semitone-with-drift`), and capture
+  lists them. A suggestion changes no note: folding an approach into its note is a choice made
+  per note. The pass runs after the rejoin, so the rejoin never joins a held pitch back into a
+  note before it on its key, and a dip the rejoin settled stays inside one note. A reading with none writes none.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame and the unit); each later line is about a second of frames as the columns
@@ -745,8 +760,8 @@ overlap, the louder is kept whole and a quieter one cut back to where it no long
 dropped when less than half of it would be left. A note starts at the take's onset nearest its
 start when one is within 50 ms, as the note HMM starts its notes, since Basic Pitch's frames fall
 a hop or so either side of the onset the performance hears. Capture states how many notes it
-found, cut back, dropped and keyed differently (`basic-pitch: …`). The breathy pass and the
-same-key rejoin then run over its notes, as over the other readers'. Its thresholds are Basic
+found, cut back, dropped and keyed differently (`basic-pitch: …`). The breathy pass, the
+same-key rejoin and the held pitch then run over its notes, as over the other readers'. Its thresholds are Basic
 Pitch's own unless `--onset-threshold`, `--frame-threshold` or `--min-note-ms` gives one; on
 "Wayfaring Stranger", of 45 settings of the three around them, none reads both of the owner's
 moments (9.54 s, 16.39 s) with a lower total loss. Its model, Spotify's `nmp.onnx` from

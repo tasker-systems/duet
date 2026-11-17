@@ -404,6 +404,19 @@ two ways, and adds no task:
   - a wider `duet-abc` subset. That is not a duet kind, but it needs round-trip tests in
     `crates/duet-midi/tests/roundtrip.rs` and the ABC crate.
 
+## Since: a held pitch before the note it reaches (ruled 2026-11-17)
+
+The owner ruled after the held-pitch findings (temper research
+`01a1e767-1656-73ac-a220-e47b23b6c6f6`; task `01a1e77f-02fb-73bc-8c08-e1c3243db9a0`) that a pitch
+held at least the shortest note before the note it reaches is a note of its own, and that the
+reading suggests "likely approach to the next note" only for a semitone step with more than +30
+cents of drift toward it. This narrows question 2's arrival rule: the HMM still decodes a held
+approach as the arrival's attack, and a pass after the rejoin (`duet-dsp`'s `held.rs`) makes it a
+note, stating it in `capture-analysis` 1.11's `held`. Folding it back is a per-note choice. The
+pass reads pitches held below the note only; one held above it (an overshoot, a lean, the turn at
+a note's start in task A's witness) stays an excursion until the owner rules on approaches from
+above.
+
 ## Not decided here
 
 - **Whether ornaments go into the score:** named above for later, and not filed until the owner asks.

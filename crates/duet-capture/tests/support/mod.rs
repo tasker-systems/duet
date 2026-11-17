@@ -49,6 +49,9 @@ pub struct Listened {
     /// How many notes the HMM reads, and how far that may move.
     pub notes: usize,
     pub notes_within: usize,
+    /// How many excursions the HMM's notes hold in all, and how far that may move.
+    pub excursions: usize,
+    pub excursions_within: usize,
 }
 
 #[derive(Debug, Deserialize)]

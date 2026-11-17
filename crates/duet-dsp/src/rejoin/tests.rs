@@ -386,16 +386,19 @@ fn a_sixteenth_note_step_stays_three_notes() {
 #[test]
 fn a_held_approach_is_the_note_it_arrives_at() {
     // 0.1 s held 35 cents flat a semitone below F#3, then F#3: the HMM reads one note on the
-    // arrival, the approach its attack. This is the arrival rule, and the pass leaves it. The
+    // arrival, the approach its attack. This is the arrival rule, and the rejoin leaves it. The
     // voice moves to the arrival over 20 ms, as a voice does: a step in no time at all is a
-    // change of spectrum the onsets find, and an onset would split any note.
+    // change of spectrum the onsets find, and an onset would split any note. Since the owner's
+    // 2026-11-17 ruling the held-pitch pass, which runs after the rejoin, makes the approach a
+    // note of its own (`held::tests`), so this is the rejoin's reading alone.
     let approach = |t: f64| match t {
         t if t < 0.1 => -135.0,
         t if t < 0.12 => -135.0 * (1.0 - (t - 0.1) / 0.02),
         _ => 0.0,
     };
     let (frames, onsets) = performance(&sung(F_SHARP_3, 0.8, approach));
-    let (decoded, rejoined) = readings(By::Hmm, &frames, &onsets);
+    let (decoded, _) = readings(By::Hmm, &frames, &onsets);
+    let rejoined = rejoin(decoded.clone(), &frames, &onsets);
     assert_eq!(keys(&rejoined), [F_SHARP_3], "{:?}", rejoined.notes);
     assert_eq!(rejoined, decoded);
 }

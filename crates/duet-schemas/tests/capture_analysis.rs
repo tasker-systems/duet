@@ -19,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.10 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.11 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -29,7 +29,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.10.json"))
+        .build(&read_json("schemas/capture-analysis/1.11.json"))
         .unwrap()
 }
 
@@ -99,6 +99,20 @@ fn take_with_a_dip() -> Vec<f32> {
         } else {
             0.0
         }
+    })
+}
+
+/// The scale, its fifth note (B-flat) held first on A +40 for 0.12 s and reached by a glide of
+/// 20 ms: a semitone approach drifting toward its note, which the note HMM takes in as its
+/// attack and the held-pitch pass makes a note, suggested a likely approach (`duet-dsp`'s
+/// `a_semitone_approach_drifting_40_cents_is_a_note_with_the_suggestion`).
+fn take_with_an_approach() -> Vec<f32> {
+    sung(|note, t| match t {
+        _ if note != 4 => 0.0,
+        t if t < 0.06 => -100.0,
+        t if t < 0.12 => -60.0,
+        t if t < 0.14 => -60.0 + 60.0 * (t - 0.12) / 0.02,
+        _ => 0.0,
     })
 }
 
@@ -472,4 +486,58 @@ fn a_readings_breathy_notes_round_trip_exactly_and_validate_only_from_1_9() {
         .unwrap()
         .remove("breathy");
     assert!(older.is_valid(&as_1_8), "the 1.8 control is not valid");
+}
+
+#[test]
+fn a_readings_held_notes_and_suggestions_round_trip_exactly_and_validate_only_from_1_11() {
+    // The HMM takes the approach in as its B-flat's attack; the pass makes the A a note of its
+    // own, states it, and suggests it a likely approach to the B-flat (1.11).
+    let analysis = analysis_of(&take_with_an_approach(), &Given::default(), Reader::Hmm);
+    let (_, value) = round_trip(analysis);
+    let reading = &value["body"]["reading"];
+    let held = reading["held"].as_array().expect("a held note is stated");
+    let [held] = held.as_slice() else {
+        panic!("one note reached: {held:?}");
+    };
+    assert_eq!(held["decoded"]["key"], json!(70), "{held}");
+    assert!(held["decoded"].get("residual").is_none(), "{held}");
+    assert_eq!(held["notes"][0]["key"], json!(69), "{held}");
+    assert!(held["notes"][0].get("residual").is_none(), "{held}");
+    let suggestions = reading["suggestions"]
+        .as_array()
+        .expect("a suggestion is stated");
+    let [suggestion] = suggestions.as_slice() else {
+        panic!("one suggestion: {suggestions:?}");
+    };
+    assert_eq!(suggestion["suggests"], json!("likely-approach"));
+    assert_eq!(suggestion["rule"], json!("semitone-with-drift"));
+    assert_eq!(
+        (
+            &suggestion["key"],
+            &suggestion["next_key"],
+            &suggestion["step"]
+        ),
+        (&json!(69), &json!(70), &json!(1))
+    );
+    // capture-analysis 1.10 has neither: a 1.10 reader refuses each, and takes the same document
+    // without them.
+    let older = validator_at("1.10");
+    for field in ["held", "suggestions"] {
+        let mut as_1_10 = as_version(&value, "1.10");
+        let other = if field == "held" {
+            "suggestions"
+        } else {
+            "held"
+        };
+        as_1_10["body"]["reading"]
+            .as_object_mut()
+            .unwrap()
+            .remove(other);
+        assert!(!older.is_valid(&as_1_10), "1.10 accepts {field}");
+    }
+    let mut as_1_10 = as_version(&value, "1.10");
+    let body = as_1_10["body"]["reading"].as_object_mut().unwrap();
+    body.remove("held");
+    body.remove("suggestions");
+    assert!(older.is_valid(&as_1_10), "the 1.10 control is not valid");
 }

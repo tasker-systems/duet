@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::breathy::{Breathy, breathe};
 use crate::error::{Error, Result};
 use crate::event::Event;
+use crate::held::{Held, Suggestion, hold_apart};
 use crate::notes::{Segment, Segmenter};
 use crate::performance::{FrameBlock, PerformanceHead, absolute_cents};
 use crate::rejoin::{Rejoin, rejoin};
@@ -443,6 +444,17 @@ pub struct Reading {
     /// read a breathy frame.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub breathy: Vec<Breathy>,
+    /// Each note the reading's held-pitch pass made from a pitch held before the note it
+    /// reaches, with that note as its reader decoded it, in order
+    /// ([`hold_apart`](crate::hold_apart)). Added in `capture-analysis` 1.11; omitted when there
+    /// is none, and absent before, when no reading made one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<Held>,
+    /// Each suggestion about a note, in order: a note held before the next that is likely an
+    /// approach to it ([`hold_apart`](crate::hold_apart)). It changes no note. Added in
+    /// `capture-analysis` 1.11; omitted when there is none, and absent before, when none was made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suggestions: Vec<Suggestion>,
 }
 
 impl Reading {
@@ -467,14 +479,20 @@ pub fn read(frames: &PerformanceFrames, onsets: &[Event], given: Option<f64>) ->
 }
 
 /// A reading's interpretive passes, run over any reader's notes as it decoded them, in order:
-/// the breathy ornament ([`breathe`](crate::breathe)), then the same-key rejoin
+/// the breathy ornament ([`breathe`](crate::breathe)); the same-key rejoin
 /// ([`rejoin`](crate::rejoin)), which needs the two notes it joins to meet, and so sees a note
-/// the first has carried over a breathy dip. Each states what it did, so the reading keeps
-/// what was decoded. `onsets` are the take's, and `frames` the performance `reading` was read
-/// from.
+/// the first has carried over a breathy dip; then the held pitch
+/// ([`hold_apart`](crate::hold_apart)), which makes a note of a pitch held before the note it
+/// reaches, and so runs after the rejoin, which would otherwise join a held pitch back into a
+/// note before it on its key. Each states
+/// what it did, so the reading keeps what was decoded. `onsets` are the take's, and `frames`
+/// the performance `reading` was read from.
 #[must_use]
 pub fn interpret(reading: Reading, frames: &PerformanceFrames, onsets: &[Event]) -> Reading {
-    rejoin(breathe(reading, frames, onsets), frames, onsets)
+    hold_apart(
+        rejoin(breathe(reading, frames, onsets), frames, onsets),
+        frames,
+    )
 }
 
 /// [`read`], before its interpretive passes: the notes as the rules segment them.
@@ -529,6 +547,8 @@ impl Reading {
             residual: Some(take),
             rejoins: Vec::new(),
             breathy: Vec::new(),
+            held: Vec::new(),
+            suggestions: Vec::new(),
         }
     }
 }

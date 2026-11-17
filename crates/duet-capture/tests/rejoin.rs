@@ -2,6 +2,8 @@
 //! (`corpus/wayfaring-stranger.flac`, CC BY 4.0), read as `duet capture melody` reads it with
 //! nothing given, under either reader (the 2026-11-16 arrivals and ornaments design, task B).
 //! The owner heard 9.54 s as one D#3 with a dip, and 16.39 s as two F#3 at a new word.
+//! The held approach at 18.56 s, which the HMM took in as the F#3's attack, is a note of its own
+//! since the held-pitch pass (`tests/held.rs`).
 
 mod support;
 
@@ -42,7 +44,9 @@ fn a_dip_inside_a_phrase_at_9_54_s_is_one_d_sharp_3_with_the_dip_its_excursion()
         let rejoin = reading
             .rejoins
             .iter()
-            .find(|r| r.decoded[0].start == note.start)
+            // By its end: under the HMM the held-pitch pass makes the C3 held at 9.07 s a note,
+            // so the D#3 starts later than the rejoin's first decoded note.
+            .find(|r| r.decoded.last().unwrap().end == note.end)
             .unwrap_or_else(|| panic!("{reader:?}: no rejoin stated: {:?}", reading.rejoins));
         assert_eq!(rejoin.decoded.len(), 2, "{reader:?}: {rejoin:?}");
         let dip = rejoin.dips[0];
@@ -85,15 +89,6 @@ fn a_consonant_at_16_39_s_stays_two_f_sharp_3() {
     }
 }
 
-#[test]
-fn the_held_approach_at_18_56_s_is_the_f_sharp_3_it_arrives_at() {
-    // F3 35 cents flat, held 0.1 s, then F#3: the HMM takes the approach in as its attack.
-    let reading = reading(ReaderName::Hmm);
-    let notes = during(&reading, 18.5, 18.75);
-    let keys: Vec<u8> = notes.iter().map(|n| n.key).collect();
-    assert_eq!(keys, [F_SHARP_3], "{notes:?}");
-}
-
 #[cfg(feature = "basic-pitch")]
 #[test]
 fn basic_pitch_reads_the_dip_at_9_54_s_as_one_d_sharp_3_once_rejoined() {
@@ -106,7 +101,7 @@ fn basic_pitch_reads_the_dip_at_9_54_s_as_one_d_sharp_3_once_rejoined() {
     let rejoin = reading
         .rejoins
         .iter()
-        .find(|r| r.decoded[0].start == notes[0].start)
+        .find(|r| r.decoded.last().unwrap().end == notes[0].end)
         .unwrap_or_else(|| panic!("no rejoin stated: {:?}", reading.rejoins));
     assert_eq!(rejoin.decoded.len(), 3, "{rejoin:?}");
 }
