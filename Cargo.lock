@@ -638,6 +638,7 @@ dependencies = [
  "duet-core",
  "duet-drums",
  "duet-dsp",
+ "duet-midi",
  "flacenc",
  "rustfft",
  "schemars",

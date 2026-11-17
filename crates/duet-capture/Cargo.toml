@@ -29,6 +29,8 @@ thiserror = "2"
 flacenc = { version = "0.5.1", default-features = false }
 
 [dev-dependencies]
+# tests/flex_pitch.rs reads the corpus's outside transcription, a MIDI file.
+duet-midi.workspace = true
 rustfft = "6.4.1"
 serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"
