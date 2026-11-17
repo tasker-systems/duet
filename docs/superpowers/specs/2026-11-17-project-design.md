@@ -20,9 +20,9 @@ are numbered decisions at the end ([Decisions for the owner](#decisions-for-the-
   both. This spec names the choice it forces and does not design composition.
 - The workbench task (temper `01a1e563-22e6-70e6-a7ce-8b38e93b3091`), and the owner's ruling on it:
   a server loop is duet's event bus, built bus-and-CLI first, and the CLI always stands alone
-  (temper `01a1e9ff-33f4-7123-85d9-7323abead248`, 2026-11-17). The bus is the workbench's to design;
-  this spec states only what the layout must hold for it
-  ([§10](#10-what-the-layout-holds-for-the-bus)).
+  (temper `01a1e9ff-33f4-7123-85d9-7323abead248`, 2026-11-17). The bus is designed, and its fifteen
+  decisions ruled, in [the bus design](2026-11-17-bus-design.md) (#75). This spec states only what
+  the layout holds for it ([§10](#10-what-the-layout-holds-for-the-bus)).
 
 **Grounding:** the code at `main` (`bb58d0f`, `capture-analysis` 1.12) when written. The take digest
 of the variants design (its build task 1) has since merged (#73): `capture-analysis` 1.13 and
@@ -266,6 +266,9 @@ It writes, and prints each path it wrote:
    one is left alone and named.
 3. **`.gitignore`**: the duet block ([§6](#6-the-licence-boundary)). Appended between marker lines
    to an existing file, never rewritten around the owner's own lines.
+4. **`.gitattributes`**: `journal.duet.jsonl merge=union`, appended the same way, so two clones that
+   each appended to the journal merge without a conflict. **Ruled** (owner, 2026-11-17, the bus
+   design's decision 12).
 
 It does not:
 - **overwrite.** A directory that already holds `.duet/project.duet` is refused, naming it. A
@@ -476,43 +479,45 @@ project's title and digests are what a Temper note would cite, and they are plai
 **Ruled** (owner, 2026-11-17, temper `01a1e9ff-33f4-7123-85d9-7323abead248`): a server loop is
 duet's event bus, built bus-and-CLI first. The CLI always stands alone. When a server is running for
 the project, the CLI posts its events to it and can subscribe. The desktop face, later, is Tauri.
-**Still open there:** where the line falls between a streaming domain-event log and UI, session and
-project state kept in something more like SQLite.
 
-The bus, its events and the CLI's hand-off are the workbench design's. This spec states what the
-layout must hold, **Proposed**, and leaves the rest open:
+The bus, its events, the wire and the CLI's hand-off are
+[the bus design](2026-11-17-bus-design.md)'s (#75), whose fifteen decisions are ruled. It used the
+paths this section reserved and asked for four things more (its
+["What this asks of the project layout"](2026-11-17-bus-design.md#what-this-asks-of-the-project-layout)).
+What the layout holds:
 
-1. **The domain-event journal is `journal.duet.jsonl` at the project root,** one stream per project.
-   **Named by the owner (2026-11-17),** in review of the bus design: it was `log.duet.jsonl`, but it
-   is more than a log, and many things are logs. It is the durable record: a restarted server
-   replays it, and a CLI with no server appends to it. Its kind and its events are the workbench's.
-   It is authored-tier, so it is committed with the authored half and names takes by name and
-   digest, never by path ([§6](#6-the-licence-boundary)).
-2. **The server is discoverable at a fixed path under `.duet/run/`,** git-ignored and machine-local:
-   its socket, and a lock that says a server owns the project, holding its process id. A CLI looks
-   there and nowhere else, so the quick check the ruling asks for is one stat and one connect. A
-   stale lock (its process gone) is the CLI's to clear. The file names, and whether the transport is
-   a Unix socket or a localhost port written into the lock, are the workbench's.
-3. **A state store has room at `.duet/state/`,** git-ignored and machine-local, whatever its kind
-   turns out to be (SQLite, a key-value file, or nothing). Proposed constraints, for the owner to
-   rule with the durable/ephemeral line:
-   - **it is never the only copy of authored work.** The project document, the comps, the moments
-     and the journal stay files, as files first requires; a cloud session or a fresh clone sees no
-     state store;
-   - **deleting it loses only view and session state** (what was open, selected, playing), and
-     anything else in it can be rebuilt from the documents and the journal;
-   - **it is per machine,** never synced or committed, like `takes.local.toml`.
-
-   If the owner rules that some project-level state lives only in the store, that state is not
-   shareable and a cloud session cannot see it. That is the trade
-   [decision 11](#decisions-for-the-owner) puts.
+1. **The journal is `journal.duet.jsonl` at the project root,** one stream per project, kind
+   `journal` 1.0, read with `duet journal show | check`. **Ruled** (owner, 2026-11-17, the bus
+   design's decision 15): it was `log.duet.jsonl`, but it is more than a log, and many things are
+   logs. It is the durable record: a restarted server replays it, and a CLI with no server appends
+   to it under the journal lock. It is authored-tier, so it is committed with the authored half and
+   names takes by name and digest, never by path ([§6](#6-the-licence-boundary)).
+   - **Git merges it by union** (`.gitattributes`, written by `init`,
+     [§3](#3-what-duet-init-writes)). **Ruled** (the bus design's decision 12).
+   - **One file, never rotated, in v1.** A year of sessions is a few megabytes. Rotation, if ever
+     needed, is a later change to the layout. **Proposed** (the bus design's layout ask 4;
+     [decision 12](#decisions-for-the-owner)).
+2. **The server is found through a lock at a fixed path, `.duet/run/bus.lock`,** git-ignored and
+   machine-local. It is a small TOML file naming the server's pid and **its socket's path**. The
+   socket is usually in `.duet/run/` too, and falls back to `$TMPDIR` when the project's path is too
+   long for a Unix socket (macOS allows 104 bytes). A CLI reads only the lock. **Ruled** (the bus
+   design's decision 6), refining this section's earlier "a fixed path for the socket".
+   - **A stale lock is left for the next server to overwrite.** The CLI does not clear it: the
+     `flock` already says it is stale, and a CLI that deleted it could race a server that is just
+     starting. **Proposed** (the bus design's layout ask 2;
+     [decision 13](#decisions-for-the-owner)). This replaces this section's earlier "a stale lock
+     is the CLI's to clear".
+3. **The state store is `.duet/state/state.sqlite`,** git-ignored and machine-local, holding only
+   view state (open take and moment, layout, each face's last-read cursor) and caches. It is **not
+   built until a face needs it**, so the CLI-first build has none. Anything a person or Claude acts
+   on (open asks, a review in progress, the current comp) is a projection of the journal and the
+   documents, never store-only, so deleting `.duet/state/` loses where the windows were and nothing
+   else. A cloud session or a fresh clone loses nothing it needs. **Ruled** (the bus design's
+   decision 1), which also rules [decision 11](#decisions-for-the-owner).
 4. **A plugin** (the Later goal's tap and play-in) finds its project by `DUET_PROJECT` or a path set
-   in its own UI, since a DAW's working directory means nothing, then finds the server as the CLI
-   does. Whether a sandboxed AUv3 can reach a project directory at all is the plugin design's check.
-
-**Open, for the workbench design:** the journal's kind and events; what the server holds in memory;
-the transport; whether the journal is ever split or rotated; and whether the state store exists at
-all.
+   in its own UI, since a DAW's working directory means nothing, then finds the server through the
+   lock as the CLI does. Whether a sandboxed AUv3 can reach a project directory at all is the plugin
+   design's check.
 
 ## Witnesses
 
@@ -521,7 +526,7 @@ For the build tasks below, each in the crate CLAUDE.md names:
   and validates against `project/1.0.json`; its committed example reads; an unknown field, a
   duplicate take name and an unknown `kept` or `restriction` are each refused by name.
 - **`crates/duet-e2e`:**
-  - `init` in an empty directory writes exactly the three files, and `init` again is refused
+  - `init` in an empty directory writes exactly the four files, and `init` again is refused
     naming `.duet/project.duet`.
   - `init` in a directory with `.duet/duet.toml` keeps that file byte for byte.
   - `init` appends its block to an existing `.gitignore` and leaves every other line as it was.
@@ -554,10 +559,13 @@ Each names its witness. None is built before the owner rules.
 5. **Adoption:** `duet project adopt` and `--apply`. **Needs:** 3. **Witness:** the adopt test, and
    the owner's `fixtures/` adopted into a project on the owner's machine.
 
-The journal's kind, and the server's socket, lock and state store under `.duet/`, are the workbench
-design's to build. This design reserves their paths and ignores them.
+The journal's kind, and the server's lock, socket and state store under `.duet/`, are the bus
+design's build tasks. This design reserves their paths and ignores them, and its `init` writes the
+`.gitattributes` line.
 
 ## Decisions for the owner
+
+Decision 11 is ruled. Decisions 1 to 10, 12 and 13 are open.
 
 1. **A project is a workspace, not one piece** ([§8](#8-the-choice-composition-forces)), so
    composition becomes its own kind later and `project` 1.0 holds no parts. *Recommended: yes.*
@@ -591,13 +599,18 @@ design's to build. This design reserves their paths and ignores them.
 10. **The composition task does not fold into this one.** It stays its own task, constrained by
     decision 1. *Recommended: keep it separate.*
 11. **The state store is never the only copy of authored work**
-    ([§10](#10-what-the-layout-holds-for-the-bus)). It holds view and session state and what can be
-    rebuilt; the project document, comps, moments and journal stay files. This is to rule together
-    with the bus decision's open durable/ephemeral line. *Recommended: yes.*
+    ([§10](#10-what-the-layout-holds-for-the-bus)). **Ruled** (owner, 2026-11-17, through the bus
+    design's decision 1): the store holds only view state and caches, and is built only when a face
+    needs it.
+12. **The journal is one file, never rotated, in v1**
+    ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
+13. **A stale `.duet/run/bus.lock` is left for the next server to overwrite,** not cleared by the
+    CLI ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
 
 ## Not decided here
 
-- **The journal's kind and events, the bus, and the state store's kind:** the workbench design's.
+- **The journal's kind and events, the bus and the wire:**
+  [the bus design](2026-11-17-bus-design.md)'s.
 - **Composition:** layered or orchestrated, and alignment across takes: the composition task's.
 - **A take kind of its own**, listing a take's variants (the variants design left it to "the project
   and session record"): the project document's `takes` entry carries the take's identity, and the
