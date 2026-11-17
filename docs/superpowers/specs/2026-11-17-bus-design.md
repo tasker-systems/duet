@@ -763,7 +763,8 @@ design the layout:
 4. **The journal is one file, never rotated, in v1.** At a few hundred bytes an event, a year of
    sessions is a few megabytes. Rotation, if ever needed, is a later minor of the project's layout.
    **Superseded (owner, 2026-11-17, temper 01a1eb60): the journal is an index plus timestamped
-   segments; the bus design will propose the details.**
+   segments.** The details are proposed in [The journal's index and
+   segments](#the-journals-index-and-segments).
 
 ## The journal's index and segments
 
@@ -773,8 +774,8 @@ the project-level elements it concerns. Events live in **segments**, `journal.<t
 The **current segment** is the index entry with no end of range, matched to the file on disk by its
 timestamp. This supersedes layout ask 4 above.
 
-**Proposed** below, for the owner to rule: the six questions that decision leaves to this design
-([decisions 16–22](#decisions-for-the-owner)). The design keeps every property §1 and §4 rely on:
+**Proposed** below, for the owner to rule: the six questions that decision leaves to this design,
+and two events the domain model assumes ([decisions 16–23](#decisions-for-the-owner)). The design keeps every property §1 and §4 rely on:
 - one lock;
 - one write and `fdatasync` per line;
 - the torn-tail cut;
@@ -795,7 +796,8 @@ timestamp. This supersedes layout ask 4 above.
 ```jsonc
 {"opens": {"segment": "20261117T150405123Z", "id": "0196…", "from": "2026-11-17T15:04:05.123Z"},
  "closes": {"segment": "20261110T091200004Z", "to": "2026-11-17T15:04:05.101Z",
-            "entries": 4096, "last": "0196…e1", "songs": ["wayfaring"], "takes": ["wayfaring"]}}
+            "entries": 4096, "last": "0196…e1", "songs": ["wayfaring"], "parts": ["wayfaring/lead"],
+            "takes": [{"take": "wayfaring", "digest": "sha256:9f2c…"}]}}
 ```
 
 - **Why a kind of its own:** an index line is not an act, so it isn't an event. Its version can
@@ -817,18 +819,23 @@ timestamp. This supersedes layout ask 4 above.
 
 ### 2. What the index names (decision 17)
 
-**Songs and takes, by name.**
-- The closing record of each segment lists the songs and the takes its events concern.
+**Songs, parts and takes, the domain's project-level elements.**
+- The closing record of each segment lists:
+  - the songs, by name;
+  - the parts, by `<song>/<part>`, since a part belongs to one song;
+  - the takes, by name and digest, since a take is named by both and never by path.
+- **What is not named:**
+  - **a session:** it is not a duet entity (domain model, temper `01a1eb48`);
+  - **comps, snapshots and renders:** each belongs to a song, so the song finds their segments.
 - Each event kind states what it concerns, as a function beside its type in `duet-schemas`:
   - `take.added`: its take;
-  - `doc.written`: the song whose folder holds the path (`songs/<song>/…`);
+  - `doc.written`: the song, and the part, whose folder holds the path
+    (`songs/<song>/parts/<part>…`);
   - `moment.played`, `verdict.given` and the asks: what their reference names, once the reference
     grammar is ruled;
-  - an event that concerns neither concerns nothing.
-- **Parts and comps are not named:** each belongs to one song, so naming the song is enough to find
-  the segments.
-- **What it is for:** `duet journal show --song wayfaring` and a later face read only the segments
-  that concern a song.
+  - an event that concerns none of them concerns nothing.
+- **What it is for:** `duet journal show --song wayfaring` (or `--take`, `--part`), and a later
+  face, read only the segments that concern it.
 - **The open segment has no list yet.** It is read whole, as it is the one being written.
 - *Alternative:* name nothing until a face needs it. Recommended against, because a closing record
   is written once, and can't gain a field later without a new minor of `journal-index`.
@@ -885,7 +892,7 @@ index line that opens it, then the entry.
 - No index line is ever rewritten. The index is append-only like a segment, so it stays tolerant
   of a union merge.
 - **There is always exactly one open entry:** the last line.
-- The closing record (`to`, `entries`, `last`, `songs`, `takes`) is a **summary of the segment
+- The closing record (`to`, `entries`, `last`, `songs`, `parts`, `takes`) is a **summary of the segment
   file, which stays the truth.** `journal check` compares the two and lists any difference.
 
 **After a union merge of two clones that both rolled,** the index has two lines that each close the
@@ -897,6 +904,21 @@ same old segment, and two new segments, `S2a` (ours) and `S2b` (theirs). Then:
   record that no longer matches its file the same way.
 - **What it does report as wrong:** an index line whose file is missing, or a segment file with
   entries that no index line names.
+
+### Events the domain model assumes, not yet listed (decision 23)
+
+The domain model and the review sequence assume durable events that [the events
+table](#the-events-10-each) lacks. They are proposed here. The songs-and-composition spec owns
+their kinds, and none is built with the journal:
+- **`song.status-set`:** `song`, `from` and `to`. A song's status is a closed state machine that
+  the owner sets: `idea` → `sketch` → `developing` → `arranged`, and `arranged` → `developing` to
+  reopen. This is a second lifecycle in the journal beside the ask's. So §1's "only the ask's
+  lifecycle is in the journal" becomes "the ask's and the song status's". It replays leniently the
+  same way, the first transition in order standing.
+- **`snapshot.taken`:** `song`, the snapshot's name, and the digest of what it froze. A snapshot is
+  an event against the song, not a status, so it changes no state.
+- `comp.marked` and `comp.applied` are already listed. They wait on the comp document, as the comp
+  events do in #79.
 
 ### What changes in the crates (decision 22)
 
@@ -1087,8 +1109,9 @@ design, in [The journal's index and segments](#the-journals-index-and-segments).
 
 16. **A segment rolls by size,** at `[journal] segment-size` (default `1MiB`), checked before an
     append, never by date or on an event. **Proposed.**
-17. **The index names songs and takes, by name,** in each segment's closing record. Each event kind
-    states what it concerns; parts and comps are found through their song. **Proposed.**
+17. **The index names songs, parts (`<song>/<part>`) and takes (by name and digest)** in each
+    segment's closing record, and never a session. Each event kind states what it concerns, and
+    comps, snapshots and renders are found through their song. **Proposed.**
 18. **The file name's timestamp is UTC ISO 8601 basic to the millisecond:**
     `journal.20261117T150405123Z.duet.jsonl`, stepped a millisecond forward when taken. **Proposed.**
 19. **Replay folds the segments in index order. `seq` is a position within a segment, and a cursor
@@ -1099,6 +1122,9 @@ design, in [The journal's index and segments](#the-journals-index-and-segments).
     the index is append-only and has exactly one open entry, the last line. **Proposed.**
 22. **The index is its own kind, `journal-index` 1.0. A segment stays a `journal` stream, whose head
     gains `segment`.** **Proposed.**
+23. **Two durable events the domain model assumes are added:** `song.status-set`, which makes the
+    song's status a second lifecycle in the journal, and `snapshot.taken`. Their kinds are owned
+    by the songs-and-composition spec. **Proposed.**
 
 ## Not decided here
 
