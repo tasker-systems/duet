@@ -774,7 +774,7 @@ the project-level elements it concerns. Events live in **segments**, `journal.<t
 The **current segment** is the index entry with no end of range, matched to the file on disk by its
 timestamp. This supersedes layout ask 4 above.
 
-**Proposed** below, for the owner to rule: the six questions that decision leaves to this design,
+**Ruled as proposed** (owner, 2026-11-17): the six questions that decision leaves to this design,
 and two events the domain model assumes ([decisions 16–23](#decisions-for-the-owner)). The design keeps every property §1 and §4 rely on:
 - one lock;
 - one write and `fdatasync` per line;
@@ -1107,28 +1107,28 @@ first, then 1–9 and 11–13 "agreed on all", then 10 after discussion. Each wa
     **Amended** by the project design's decision 12 (owner, 2026-11-17, temper `01a1eb60`):
     `journal.duet.jsonl` is the index, and the events live in segments.
 
-**Proposed, for the owner to rule:** the questions the project design's decision 12 leaves to this
-design, in [The journal's index and segments](#the-journals-index-and-segments).
+**Ruled as proposed (owner, 2026-11-17):** the questions the project design's decision 12 leaves
+to this design, in [The journal's index and segments](#the-journals-index-and-segments).
 
 16. **A segment rolls by size,** at `[journal] segment-size` (default `1MiB`), checked before an
-    append, never by date or on an event. **Proposed.**
+    append, never by date or on an event. **Ruled (owner, 2026-11-17).**
 17. **The index names songs, parts (`<song>/<part>`) and takes (by name and digest)** in each
     segment's closing record, and never a session. Each event kind states what it concerns, and
-    comps, snapshots and renders are found through their song. **Proposed.**
+    comps, snapshots and renders are found through their song. **Ruled (owner, 2026-11-17).**
 18. **The file name's timestamp is UTC ISO 8601 basic to the millisecond:**
-    `journal.20261117T150405123Z.duet.jsonl`, stepped a millisecond forward when taken. **Proposed.**
+    `journal.20261117T150405123Z.duet.jsonl`, stepped a millisecond forward when taken. **Ruled (owner, 2026-11-17).**
 19. **Replay folds the segments in index order. `seq` is a position within a segment, and a cursor
-    is `(segment, seq, id)`.** A cursor that no longer matches gets `resync`. **Proposed.**
+    is `(segment, seq, id)`.** A cursor that no longer matches gets `resync`. **Ruled (owner, 2026-11-17).**
 20. **One lock covers the index and the segments. A roll writes the new segment's head first and
-    the index line second,** and the next writer adopts a segment with no index line. **Proposed.**
+    the index line second,** and the next writer adopts a segment with no index line. **Ruled (owner, 2026-11-17).**
 21. **An index entry is closed only by the line that opens the next segment, in the same write,** so
-    the index is append-only and has exactly one open entry, the last line. **Proposed.**
+    the index is append-only and has exactly one open entry, the last line. **Ruled (owner, 2026-11-17).**
 22. **The index is its own kind, `journal-index` 1.0. A segment stays a `journal` stream, whose head
     gains `segment`, changed in place at 1.0 since no release has been cut** (temper `01a1eb48`
-    ruling 12). **Proposed.**
+    ruling 12). **Ruled (owner, 2026-11-17).**
 23. **Two durable events the domain model assumes are added:** `song.status-set`, which makes the
     song's status a second lifecycle in the journal, and `snapshot.taken`. Their kinds are owned
-    by the songs-and-composition spec. **Proposed.**
+    by the songs-and-composition spec. **Ruled (owner, 2026-11-17).**
 
 ## Not decided here
 
