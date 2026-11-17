@@ -78,8 +78,6 @@ refusals! {
         "it cannot be exact in ticks";
     ODD_LENGTH = "length that is not a whole tick at 480 ticks per quarter":
         "it cannot be exact in ticks";
-    ENHARMONIC = "enharmonic spelling <E#/Cb/B#/Fb/^^/__>":
-        "a Pitch cannot name it; in-key spellings, such as E# in F# major, are read";
     TEMPO_TEXT = "Q: text only":
         "it has no number";
     OLD_CHORD = "old chord syntax +CEG+":

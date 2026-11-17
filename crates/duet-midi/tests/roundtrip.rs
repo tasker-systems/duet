@@ -694,6 +694,93 @@ fn black_keys_are_spelled_by_the_key_in_force() {
 }
 
 #[test]
+fn six_accidental_keys_and_double_accidentals_keep_their_spelling_through_midi_text_and_documents()
+{
+    // Each scale written with MIDI's key signature alone: the reader spells the notes as the
+    // key does, Cb under six flats, E# under six sharps and C## for D# minor's raised leading
+    // tone, and keeps every MIDI note.
+    for (key, notes, spelled) in [
+        (
+            "Eb minor",
+            [63, 65, 66, 68, 70, 71, 73, 72],
+            "Eb4 F4 Gb4 Ab4 Bb4 Cb5 Db5 C5",
+        ),
+        (
+            "Gb major",
+            [66, 68, 70, 71, 73, 75, 77, 78],
+            "Gb4 Ab4 Bb4 Cb5 Db5 Eb5 F5 Gb5",
+        ),
+        (
+            "F# major",
+            [66, 68, 70, 71, 73, 75, 77, 78],
+            "F#4 G#4 A#4 B4 C#5 D#5 E#5 F#5",
+        ),
+        (
+            "D# minor",
+            [63, 65, 66, 68, 70, 71, 74, 75],
+            "D#4 E#4 F#4 G#4 A#4 B4 C##5 D#5",
+        ),
+    ] {
+        let mut text = format!("key {key}\n\n[track \"P\" ch1]\n");
+        for (i, midi) in notes.iter().enumerate() {
+            let pitch = duet_core::Pitch::new(*midi).unwrap();
+            text.push_str(&format!("{}.1.0 {pitch} 1 80\n", i + 1));
+        }
+        let back = Song::from_midi(&Song::from_text(&text).unwrap().to_midi().unwrap()).unwrap();
+        let got: Vec<String> = back.tracks[0]
+            .notes
+            .iter()
+            .map(|n| n.pitch.to_string())
+            .collect();
+        assert_eq!(got.join(" "), spelled, "{key}");
+        let midi: Vec<u8> = back.tracks[0]
+            .notes
+            .iter()
+            .map(|n| n.pitch.midi())
+            .collect();
+        assert_eq!(midi, notes, "{key}: a note changed");
+
+        // The spelled song through MIDI again, the notes view and a song document: exact.
+        assert_eq!(Song::from_midi(&back.to_midi().unwrap()).unwrap(), back);
+        let view = back.to_text();
+        for name in spelled.split(' ') {
+            assert!(
+                view.contains(&format!(" {name} ")),
+                "{name} not in the view:\n{view}"
+            );
+        }
+        assert_eq!(Song::from_text(&view).unwrap(), back, "{view}");
+        check_document(&back);
+    }
+
+    // A hand-written Cb, B#, E#, Fb, double sharp or double flat keeps its spelling through
+    // the text and a document, in any key: the spelling is the song's, and MIDI does not
+    // carry it.
+    let text = "key C major\n\n[track \"P\" ch1]\n\
+                1.1.0 Cb5 1 80\n2.1.0 B#3 1 80\n3.1.0 E#4 1 80\n4.1.0 Fb4 1 80\n\
+                5.1.0 F##4 1 80\n6.1.0 Bbb3 1 80\n";
+    let song = stated(&Song::from_text(text).unwrap());
+    assert_eq!(
+        notes_of(&song),
+        [
+            "1.1.0 Cb5 1 80",
+            "2.1.0 B#3 1 80",
+            "3.1.0 E#4 1 80",
+            "4.1.0 Fb4 1 80",
+            "5.1.0 F##4 1 80",
+            "6.1.0 Bbb3 1 80"
+        ]
+    );
+    let midi: Vec<u8> = song.tracks[0]
+        .notes
+        .iter()
+        .map(|n| n.pitch.midi())
+        .collect();
+    assert_eq!(midi, [71, 60, 65, 64, 67, 57]);
+    check_document(&song);
+}
+
+#[test]
 fn format_0_sequence_name_is_the_title() {
     let (bytes, _) = played_take(480, Format::SingleTrack);
     let song = Song::from_midi(&bytes).unwrap();

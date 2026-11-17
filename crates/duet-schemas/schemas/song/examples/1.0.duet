@@ -83,6 +83,30 @@
             "pitch": "C5",
             "beats": 0.333,
             "vel": 100
+          },
+          {
+            "at": "4.2.0",
+            "pitch": "Cb5",
+            "beats": 0.5,
+            "vel": 80
+          },
+          {
+            "at": "4.3.0",
+            "pitch": "E#4",
+            "beats": 0.5,
+            "vel": 80
+          },
+          {
+            "at": "4.4.0",
+            "pitch": "F##4",
+            "beats": 0.5,
+            "vel": 80
+          },
+          {
+            "at": "5.1.0",
+            "pitch": "Bbb3",
+            "beats": 0.5,
+            "vel": 80
           }
         ],
         "controls": [

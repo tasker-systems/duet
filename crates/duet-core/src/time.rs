@@ -5,6 +5,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{Error, Result};
+use crate::pitch::Pitch;
 
 macro_rules! string_serde {
     ($ty:ty) => {
@@ -265,12 +266,11 @@ impl Key {
         FIFTHS[(self.sharps + self.mode.fifths_from_major() + FIFTHS_C) as usize]
     }
 
-    /// Whether a black key (pitch class 0 to 11, C = 0) should be spelled as a flat in this
-    /// key. Notes of the scale (harmonic minor for minor, so the leading tone is raised,
-    /// and the natural scale for every other mode) are spelled as the scale spells them, so
-    /// D minor has Bb and C#. Other black keys follow the key signature: flats in flat
-    /// keys, sharps otherwise.
-    pub fn spells_flat(self, pitch_class: u8) -> bool {
+    /// The accidental this key's scale spells a pitch class (0 to 11, C = 0) with, if it is
+    /// a note of the scale: harmonic minor for minor, so the leading tone is raised, and the
+    /// natural scale for every other mode. -1 is a flat, 1 a sharp, 2 a double sharp (the
+    /// leading tone of D# minor is C##).
+    fn scale_accidental(self, pitch_class: u8) -> Option<i32> {
         const NATURAL: [u8; 7] = [0, 2, 4, 5, 7, 9, 11]; // C D E F G A B
         let tonic = self.tonic();
         let letter = match tonic.as_bytes()[0] {
@@ -287,15 +287,41 @@ impl Key {
             .map(|c| if c == '#' { 1 } else { -1 })
             .sum();
         let tonic_pc = (i32::from(NATURAL[letter]) + shift).rem_euclid(12);
-        for (degree, step) in self.mode.spelling_steps().iter().enumerate() {
-            let pc = (tonic_pc + i32::from(*step)).rem_euclid(12);
-            if pc == i32::from(pitch_class % 12) {
-                let natural = i32::from(NATURAL[(letter + degree) % 7]);
-                let accidental = (pc - natural + 18).rem_euclid(12) - 6;
-                return accidental < 0;
-            }
+        self.mode
+            .spelling_steps()
+            .iter()
+            .enumerate()
+            .find_map(|(degree, step)| {
+                let pc = (tonic_pc + i32::from(*step)).rem_euclid(12);
+                (pc == i32::from(pitch_class % 12)).then(|| {
+                    let natural = i32::from(NATURAL[(letter + degree) % 7]);
+                    (pc - natural + 18).rem_euclid(12) - 6
+                })
+            })
+    }
+
+    /// Whether a black key (pitch class 0 to 11, C = 0) should be spelled as a flat in this
+    /// key. Notes of the scale (harmonic minor for minor, so the leading tone is raised,
+    /// and the natural scale for every other mode) are spelled as the scale spells them, so
+    /// D minor has Bb and C#. Other black keys follow the key signature: flats in flat
+    /// keys, sharps otherwise.
+    pub fn spells_flat(self, pitch_class: u8) -> bool {
+        match self.scale_accidental(pitch_class) {
+            Some(accidental) => accidental < 0,
+            None => self.sharps < 0,
         }
-        self.sharps < 0
+    }
+
+    /// The note spelled as this key spells it. A note of the scale is spelled as the scale
+    /// spells it, so Eb minor has Cb, F# major has E#, F# minor's leading tone is E# and D#
+    /// minor's is C##. Another black key follows the signature, flat in flat keys and sharp
+    /// otherwise, and another white key is its natural letter, so the C of Eb dorian is C,
+    /// written with a natural under the signature. The MIDI note never changes.
+    pub fn spell(self, pitch: Pitch) -> Pitch {
+        let pc = pitch.midi() % 12;
+        self.scale_accidental(pc)
+            .and_then(|accidental| pitch.spelled(i8::try_from(accidental).ok()?))
+            .unwrap_or_else(|| pitch.spelled_flat(self.sharps < 0))
     }
 }
 
@@ -634,6 +660,58 @@ mod tests {
         assert_eq!(spell("Bb major"), [true; 5]);
         assert_eq!(spell("E major"), [false; 5]);
         assert_eq!(spell("F major"), [true; 5]); // Bb, then flats
+    }
+
+    #[test]
+    fn six_and_seven_accidental_keys_spell_their_scales() {
+        let scale = |key: &str, midi: &[u8]| -> Vec<String> {
+            let key: Key = key.parse().unwrap();
+            midi.iter()
+                .map(|m| key.spell(Pitch::new(*m).unwrap()).to_string())
+                .collect()
+        };
+        // Eb natural minor, its harmonic leading tone, and the dorian C: a natural.
+        assert_eq!(
+            scale("Eb minor", &[63, 65, 66, 68, 70, 71, 73, 74, 72]),
+            ["Eb4", "F4", "Gb4", "Ab4", "Bb4", "Cb5", "Db5", "D5", "C5"]
+        );
+        assert_eq!(
+            scale("Gb major", &[66, 68, 70, 71, 73, 75, 77]),
+            ["Gb4", "Ab4", "Bb4", "Cb5", "Db5", "Eb5", "F5"]
+        );
+        assert_eq!(
+            scale("F# major", &[66, 68, 70, 71, 73, 75, 77]),
+            ["F#4", "G#4", "A#4", "B4", "C#5", "D#5", "E#5"]
+        );
+        // D# minor's leading tone is C##, and G# minor's F##.
+        assert_eq!(
+            scale("D# minor", &[63, 65, 66, 68, 70, 71, 74]),
+            ["D#4", "E#4", "F#4", "G#4", "A#4", "B4", "C##5"]
+        );
+        assert_eq!(
+            scale("G# minor", &[68, 70, 71, 73, 75, 76, 79]),
+            ["G#4", "A#4", "B4", "C#5", "D#5", "E5", "F##5"]
+        );
+        // And the leading tones of F# minor and C# minor are E# and B#.
+        assert_eq!(scale("F# minor", &[77]), ["E#5"]);
+        assert_eq!(scale("C# minor", &[72]), ["B#4"]);
+        assert_eq!(
+            scale("C# major", &[61, 63, 65, 66, 68, 70, 72]),
+            ["C#4", "D#4", "E#4", "F#4", "G#4", "A#4", "B#4"]
+        );
+        assert_eq!(
+            scale("Cb major", &[59, 61, 63, 64, 66, 68, 70]),
+            ["Cb4", "Db4", "Eb4", "Fb4", "Gb4", "Ab4", "Bb4"]
+        );
+        // Spelling never changes the note.
+        for sharps in -7..=7 {
+            for minor in [false, true] {
+                let key = Key::new(sharps, minor).unwrap();
+                for midi in 0..=127 {
+                    assert_eq!(key.spell(Pitch::new(midi).unwrap()).midi(), midi);
+                }
+            }
+        }
     }
 
     #[test]

@@ -8,6 +8,12 @@ use crate::{Kind, Version};
 
 /// `song` 1.0's body is exactly what `Song` serializes to: what duet's `.json` files held before
 /// documents.
+///
+/// Every pitch keeps its spelling: a letter, up to two sharps or two flats, and the letter's
+/// octave, so `Cb5` (MIDI 71), `E#4`, `F##4` and `Bbb3` are written and read as spelled. The
+/// pitch pattern refuses what no spelling keeps (`C###4`, `C#b4`). This came into 1.0 in place,
+/// with no minor: before a first release a format changes in place, since no file exists to
+/// keep (the owner's ruling 12 in decision 01a1eb48, 2026-11-17).
 impl Kind for Song {
     const NAME: &'static str = "song";
     const VERSION: Version = Version::new(1, 0);
