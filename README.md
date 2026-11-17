@@ -21,8 +21,8 @@ The workspace is split by domain:
 | `duet-play` | a `Song` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Song` and score |
-| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, and the `journal` kind and its events |
-| `duet-bus` | the project's journal: appended under one lock, read from a cursor, replayed and checked |
+| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, and the journal's kinds and events |
+| `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
 | `duet-cli` | the `duet` binary |
 
 ## How the formats fit together
@@ -911,19 +911,25 @@ tests are measured against, each with a hand-checked transcription. Its
 
 ## The journal
 
-A project's `journal.duet.jsonl` is the shared, ordered account of what the owner and Claude did
-and asked of each other: a `.duet.jsonl` stream of kind `journal`, whose every line after the
-first is one entry, one event (`ask.asked`, `ask.answered`, `doc.written`, …). Each event kind
-versions on its own, so an entry this duet does not read, of a newer duet's event, is kept as it
-is and stated, never refused. The design is
-[`docs/superpowers/specs/2026-11-17-bus-design.md`](docs/superpowers/specs/2026-11-17-bus-design.md).
+A project's journal is the shared, ordered account of what the owner and Claude did and asked of
+each other. Its entries are events (`ask.asked`, `ask.answered`, `doc.written`, …), one per line.
+It is an **index**, `journal.duet.jsonl`, over **segments**, `journal.<stamp>.duet.jsonl`:
+- each index line opens a segment and closes the one before it;
+- a new segment starts when the current one reaches 1 MiB. The size is `[journal] segment-size`
+  in `duet.toml`, read once a command writes the journal; nothing writes one yet.
+
+Each event kind versions on its own, so an entry this duet does not read, of a newer duet's event,
+is kept as it is and stated, never refused. The design is
+[`docs/superpowers/specs/2026-11-17-bus-design.md`](docs/superpowers/specs/2026-11-17-bus-design.md),
+"The journal's index and segments".
 
 ```sh
-duet journal show    # every entry: its seq, when, who, the event and its body
+duet journal show    # every entry: its segment and seq, when, who, the event and its body
 duet journal check   # what this duet keeps unread, what replay skips; exits 1 if anything is wrong
 ```
 
-Both read `journal.duet.jsonl` in the working directory, or the path given. Neither writes.
+Both read the project in the working directory, or the root or `journal.duet.jsonl` given.
+Neither writes.
 
 ## Configuration
 

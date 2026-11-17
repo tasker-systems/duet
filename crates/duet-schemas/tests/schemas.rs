@@ -23,12 +23,14 @@ use duet_core::{
 };
 use duet_dsp::{FrameBlock, PerformanceHead};
 use duet_schemas::journal::{
-    AskAnswered, AskAsked, AskWithdrawn, At, Audience, By, DocDigest, DocWritten, Entry, EventInfo,
-    Id, MomentPlayed, Party, RelPath, TakeAdded, VerdictGiven,
+    AskAnswered, AskAsked, AskWithdrawn, At, Audience, By, Closes, Concerns, DocDigest, DocWritten,
+    Entry, EventInfo, Id, IndexLine, MomentPlayed, Opens, Party, RelPath, SegmentStamp, TakeAdded,
+    TakeRef, VerdictGiven,
 };
 use duet_schemas::{
-    AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, EVENTS, Framing, From, Journal, JournalHead,
-    KINDS, KindInfo, Notice, Stream, Tool, Version, read_envelope, schema,
+    AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, EVENTS, Framing, From, IndexHead, Journal,
+    JournalHead, JournalIndex, KINDS, KindInfo, Notice, Stream, Tool, Version, read_envelope,
+    schema,
 };
 use serde_json::{Value, json};
 
@@ -513,6 +515,9 @@ fn check_stream_example(info: &KindInfo, version: Version, text: &str, relative:
                 .and_then(|journal| journal.write())
                 .unwrap_or_else(|e| panic!("{relative}: {e}"))
         }
+        "journal-index" => JournalIndex::read(text)
+            .and_then(|index| index.write())
+            .unwrap_or_else(|e| panic!("{relative}: {e}")),
         other => panic!("no stream reader is named for {other}"),
     };
     let schema = committed_schema(info.name, version);
@@ -579,6 +584,9 @@ fn example_stream(name: &str) -> String {
     if name == "journal" {
         return example_journal();
     }
+    if name == "journal-index" {
+        return example_index();
+    }
     assert_eq!(name, "performance", "no example is defined for {name}");
     let mut head = PerformanceHead::new(22_050, 256, 512);
     head.take = Some(
@@ -614,7 +622,7 @@ fn id(n: u8) -> Id {
 /// A journal's example: one entry of every event kind, every optional field used once, and a
 /// `cause`.
 fn example_journal() -> String {
-    let head = JournalHead::new("wayfaring", id(0));
+    let head = JournalHead::new("wayfaring", id(20), example_stamp(1));
     let mut text = Journal::head_line(&Tool::new("duet", "0.3.0"), &head).unwrap();
     let claude = By::new("claude", "cli");
     let owner = By::new("owner", "cli");
@@ -663,6 +671,34 @@ fn example_journal() -> String {
         }
         text.push_str(&entry.line().unwrap());
     }
+    text
+}
+
+/// The stamp of the example's `n`th segment.
+fn example_stamp(n: u64) -> SegmentStamp {
+    SegmentStamp::new(At::from_unix_ms(1_795_446_245_000 + 86_400_000 * (n - 1)))
+}
+
+/// An index's example: the first line opens a segment, the second closes it with every field of
+/// its summary and opens the next.
+fn example_index() -> String {
+    let head = IndexHead::new("wayfaring", id(0));
+    let mut text = JournalIndex::head_line(&Tool::new("duet", "0.3.0"), &head).unwrap();
+    let first = Opens::new(example_stamp(1), id(20), example_stamp(1).at());
+    text.push_str(&IndexLine::new(first, None).line().unwrap());
+    let mut concerns = Concerns::new();
+    concerns.songs = vec!["wayfaring".into()];
+    concerns.parts = vec!["wayfaring/lead".into()];
+    concerns.takes = vec![TakeRef::new("wayfaring", EXAMPLE_DIGEST.parse().unwrap())];
+    let closes = Closes::new(
+        example_stamp(1),
+        At::from_unix_ms(1_795_446_253_000),
+        8,
+        id(8),
+        concerns,
+    );
+    let second = Opens::new(example_stamp(2), id(21), example_stamp(2).at());
+    text.push_str(&IndexLine::new(second, Some(closes)).line().unwrap());
     text
 }
 
@@ -1049,6 +1085,7 @@ fn the_hand_written_patterns_match_what_reads() {
         "At": schema_of::<At>(),
         "RelPath": schema_of::<RelPath>(),
         "DocDigest": schema_of::<DocDigest>(),
+        "SegmentStamp": schema_of::<SegmentStamp>(),
     });
     let check_journal =
         |def: &str, reads: &[&str], refused: &[&str], parses: &dyn Fn(&str) -> bool| {
@@ -1096,6 +1133,17 @@ fn the_hand_written_patterns_match_what_reads() {
         &["comps/a.duet", ".hidden", "..x", "a/...", "a b/c"],
         &["/abs", "a/../b", "./a", "a//b", "a/", "", "..", "a\\b"],
         &|s| s.parse::<RelPath>().is_ok(),
+    );
+    check_journal(
+        "SegmentStamp",
+        &["20261117T150405123Z", "19700101T000000000Z"],
+        &[
+            "2026-11-17T15:04:05.123Z",
+            "20261117T150405Z",
+            "20261117T150405123",
+            "",
+        ],
+        &|s| s.parse::<SegmentStamp>().is_ok(),
     );
     check_journal(
         "DocDigest",

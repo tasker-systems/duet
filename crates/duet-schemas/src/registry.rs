@@ -6,7 +6,7 @@ use duet_drums::DrumGrid;
 use duet_dsp::PerformanceHead;
 use serde_json::Value;
 
-use crate::journal::JournalHead;
+use crate::journal::{IndexHead, JournalHead};
 use crate::schema::{document_schema, envelope_schema, stream_schema};
 use crate::{Document, Error, Kind, Result, StreamKind, Version, read_envelope};
 
@@ -57,6 +57,7 @@ pub const KINDS: &[KindInfo] = &[
     document::<Analysis>(),
     stream::<PerformanceHead>(),
     stream::<JournalHead>(),
+    stream::<IndexHead>(),
 ];
 
 /// The envelope's schema, as a [`KindInfo`] whose name is [`ENVELOPE`](crate::ENVELOPE). It is

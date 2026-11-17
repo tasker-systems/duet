@@ -75,25 +75,35 @@
     },
     "JournalHead": {
       "additionalProperties": false,
-      "description": "`journal` 1.0's first line holds the head: the project's name, and the journal's own id.",
+      "description": "`journal` 1.0's first line holds the head: the project's name, the segment's own id, and its\nstamp, so a segment read alone still says which it is.",
       "properties": {
         "id": {
           "$ref": "#/$defs/Id",
-          "description": "This journal's id, made when it was started."
+          "description": "This segment's id, as the index line that opens it names it."
         },
         "project": {
           "description": "The name of the project whose journal this is.",
           "type": "string"
+        },
+        "segment": {
+          "$ref": "#/$defs/SegmentStamp",
+          "description": "This segment's stamp, as its file name gives it."
         }
       },
       "required": [
         "project",
-        "id"
+        "id",
+        "segment"
       ],
       "type": "object"
     },
     "Record": {
       "$ref": "#/$defs/EntryFrame"
+    },
+    "SegmentStamp": {
+      "description": "A segment's first moment, UTC to the millisecond in ISO 8601 basic form, such as 20261117T150405123Z. Its file is journal.<stamp>.duet.jsonl.",
+      "pattern": "^[0-9]{8}T[0-9]{9}Z$",
+      "type": "string"
     },
     "Version": {
       "description": "A kind's schema version, <major>.<minor>, such as 1.0.",

@@ -1,7 +1,14 @@
-//! `journal`: a project's shared, ordered account of what the owner and Claude did and asked of
-//! each other, written as a `.duet.jsonl` stream (`journal.duet.jsonl`).
+//! A project's journal: the shared, ordered account of what the owner and Claude did and asked of
+//! each other. It is an **index** over **segments** (bus design decisions 16–23):
 //!
-//! The first line is the envelope with a [`JournalHead`]. Every later line is one **entry**: an
+//! - **`journal-index`** ([`IndexHead`], [`JournalIndex`]) is `journal.duet.jsonl`. Every line
+//!   after its head opens a segment, and, after the first, closes the one before it with a
+//!   summary ([`Closes`]). No line is ever rewritten, so the last line is always the one open
+//!   entry: the current segment.
+//! - **`journal`** ([`JournalHead`], [`Journal`]) is one segment, `journal.<stamp>.duet.jsonl`
+//!   ([`SegmentStamp`]). Its events are what follows.
+//!
+//! A segment's first line is the envelope with a [`JournalHead`]. Every later line is one **entry**: an
 //! [`Id`], when it was written ([`At`]), who wrote it ([`By`]), what caused it (optional), and
 //! one **event**: its name (`event`), its own version (`v`) and its `body`.
 //!
@@ -22,9 +29,9 @@
 //!
 //! # Sequence
 //!
-//! An entry's `seq` is its position: the first entry (line 2) is `seq` 1. It is never stored, so
-//! a union merge of two clones cannot make two lines claim one `seq`. What a line stores is its
-//! `id`, a UUIDv7, unique across machines.
+//! An entry's `seq` is its position within its segment: the segment's first entry (line 2) is
+//! `seq` 1. It is never stored, so a union merge of two clones cannot make two lines claim one
+//! `seq`. What a line stores is its `id`, a UUIDv7, unique across machines.
 //!
 //! # A torn last line
 //!
@@ -331,28 +338,166 @@ impl By {
 
 // --- The head ---
 
-/// `journal` 1.0's first line holds the head: the project's name, and the journal's own id.
+// --- Segments ---
+
+/// A segment's stamp: its first moment, UTC to the millisecond, written in ISO 8601 basic form,
+/// `20261117T150405123Z`. It names the segment's file, `journal.<stamp>.duet.jsonl`, sorts as
+/// text in time order, and has no colon (bus design decision 18).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SegmentStamp(At);
+
+impl SegmentStamp {
+    /// The stamp of `at`.
+    #[must_use]
+    pub const fn new(at: At) -> Self {
+        Self(at)
+    }
+
+    /// The moment it names.
+    #[must_use]
+    pub const fn at(self) -> At {
+        self.0
+    }
+
+    /// The stamp a millisecond later: what a writer steps to when a name is taken.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(At::from_unix_ms(self.0.unix_ms() + 1))
+    }
+
+    /// The segment's file name: `journal.<stamp>.duet.jsonl`.
+    #[must_use]
+    pub fn file_name(self) -> String {
+        format!("journal.{self}.duet.jsonl")
+    }
+
+    /// The stamp a segment's file name gives, if it is one: `journal.duet.jsonl`, the index, is
+    /// not.
+    #[must_use]
+    pub fn of_file_name(name: &str) -> Option<Self> {
+        name.strip_prefix("journal.")?
+            .strip_suffix(".duet.jsonl")?
+            .parse()
+            .ok()
+    }
+}
+
+impl fmt::Display for SegmentStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text: String = self
+            .0
+            .to_string()
+            .chars()
+            .filter(|c| !matches!(c, '-' | ':' | '.'))
+            .collect();
+        f.write_str(&text)
+    }
+}
+
+impl fmt::Debug for SegmentStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+const STAMP_PATTERN: &str = "^[0-9]{8}T[0-9]{9}Z$";
+
+impl FromStr for SegmentStamp {
+    type Err = String;
+
+    /// Reads exactly the form a stamp is written in, of a real time.
+    fn from_str(s: &str) -> std::result::Result<Self, String> {
+        let bad = || {
+            format!(
+                "{s:?} is not a segment stamp: one is UTC to the millisecond in ISO 8601 basic \
+                 form, such as 20261117T150405123Z"
+            )
+        };
+        let b = s.as_bytes();
+        let shape = b.len() == 19
+            && b.iter().enumerate().all(|(i, c)| match i {
+                8 => *c == b'T',
+                18 => *c == b'Z',
+                _ => c.is_ascii_digit(),
+            });
+        if !shape {
+            return Err(bad());
+        }
+        let at = format!(
+            "{}-{}-{}T{}:{}:{}.{}Z",
+            &s[0..4],
+            &s[4..6],
+            &s[6..8],
+            &s[9..11],
+            &s[11..13],
+            &s[13..15],
+            &s[15..18]
+        );
+        at.parse().map(Self).map_err(|_| bad())
+    }
+}
+
+impl Serialize for SegmentStamp {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for SegmentStamp {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let text = Cow::<str>::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for SegmentStamp {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("SegmentStamp")
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        Cow::Borrowed("duet_schemas::journal::SegmentStamp")
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "string",
+            "pattern": STAMP_PATTERN,
+            "description": "A segment's first moment, UTC to the millisecond in ISO 8601 basic \
+                form, such as 20261117T150405123Z. Its file is journal.<stamp>.duet.jsonl.",
+        })
+    }
+}
+
+/// `journal` 1.0's first line holds the head: the project's name, the segment's own id, and its
+/// stamp, so a segment read alone still says which it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct JournalHead {
     /// The name of the project whose journal this is.
     pub project: String,
-    /// This journal's id, made when it was started.
+    /// This segment's id, as the index line that opens it names it.
     pub id: Id,
+    /// This segment's stamp, as its file name gives it.
+    pub segment: SegmentStamp,
 }
 
 impl JournalHead {
     #[must_use]
-    pub fn new(project: impl Into<String>, id: Id) -> Self {
+    pub fn new(project: impl Into<String>, id: Id, segment: SegmentStamp) -> Self {
         Self {
             project: project.into(),
             id,
+            segment,
         }
     }
 }
 
-/// `journal` 1.0: the head on the first line, then one [`EntryFrame`] per line.
+/// `journal` 1.0: one segment. The head on the first line, then one [`EntryFrame`] per line.
+///
+/// The head's `segment` was added in place at 1.0: before a first release a format changes in
+/// place (owner, 2026-11-17, the domain model's ruling 12).
 impl Kind for JournalHead {
     const NAME: &'static str = "journal";
     const VERSION: Version = Version::new(1, 0);
@@ -1186,10 +1331,7 @@ impl Journal {
     /// [`Error::EmptyStream`] when there is no whole first line, and [`Error::Line`] naming the
     /// 1-based line and why it was refused.
     pub fn read(text: &str) -> Result<Self> {
-        let (whole, torn) = match text.rfind('\n') {
-            Some(i) => (&text[..=i], &text[i + 1..]),
-            None => ("", text),
-        };
+        let (whole, torn) = split_torn(text);
         let mut lines = whole.split_terminator('\n');
         let first = lines.next().ok_or(Error::EmptyStream)?;
         let head = Stream::<JournalHead>::read(first)?;
@@ -1208,7 +1350,7 @@ impl Journal {
             statements: head.statements,
             head: head.head,
             lines,
-            torn: (!torn.is_empty()).then(|| torn.to_string()),
+            torn,
         })
     }
 
@@ -1228,6 +1370,344 @@ impl Journal {
         }
         Ok(text)
     }
+}
+
+// --- What an event concerns ---
+
+/// A take as the index names it: its name and its digest, never a path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct TakeRef {
+    pub take: String,
+    pub digest: TakeDigest,
+}
+
+impl TakeRef {
+    #[must_use]
+    pub fn new(take: impl Into<String>, digest: TakeDigest) -> Self {
+        Self {
+            take: take.into(),
+            digest,
+        }
+    }
+}
+
+/// The project-level elements some events concern (bus design decision 17): songs, parts as
+/// `<song>/<part>`, and takes by name and digest. Never a session, which is no duet entity.
+/// Comps, snapshots and renders are found through their song.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Concerns {
+    /// Sorted, each once.
+    pub songs: Vec<String>,
+    /// `<song>/<part>`, sorted, each once.
+    pub parts: Vec<String>,
+    /// In the order first concerned, each once.
+    pub takes: Vec<TakeRef>,
+}
+
+impl Concerns {
+    /// Nothing.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether it concerns nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.songs.is_empty() && self.parts.is_empty() && self.takes.is_empty()
+    }
+
+    fn add_song(&mut self, song: &str) {
+        if let Err(at) = self.songs.binary_search_by(|s| s.as_str().cmp(song)) {
+            self.songs.insert(at, song.to_string());
+        }
+    }
+
+    fn add_part(&mut self, part: String) {
+        if let Err(at) = self.parts.binary_search(&part) {
+            self.parts.insert(at, part);
+        }
+    }
+
+    /// Adds everything `other` concerns.
+    pub fn extend(&mut self, other: &Self) {
+        for song in &other.songs {
+            self.add_song(song);
+        }
+        for part in &other.parts {
+            self.add_part(part.clone());
+        }
+        for take in &other.takes {
+            if !self.takes.contains(take) {
+                self.takes.push(take.clone());
+            }
+        }
+    }
+}
+
+impl Event {
+    /// What this event concerns, by its kind:
+    /// - `take.added`: its take;
+    /// - `doc.written`: the song whose folder holds the path (`songs/<song>/…`), and the part
+    ///   when the path is under the song's `parts/` (`songs/<song>/parts/<part>…`, the part
+    ///   named by the file's name up to its first `.`);
+    /// - every other event: nothing yet. The asks, `moment.played` and `verdict.given` will
+    ///   concern what their reference names, once the reference grammar is ruled.
+    #[must_use]
+    pub fn concerns(&self) -> Concerns {
+        let mut concerns = Concerns::new();
+        match self {
+            Self::TakeAdded(added) => concerns
+                .takes
+                .push(TakeRef::new(added.take.clone(), added.digest)),
+            Self::DocWritten(written) => {
+                let parts: Vec<&str> = written.path.as_str().split('/').collect();
+                if let ["songs", song, rest @ ..] = parts.as_slice()
+                    && !rest.is_empty()
+                {
+                    concerns.add_song(song);
+                    if let ["parts", file, ..] = rest {
+                        let part = file.split('.').next().unwrap_or(file);
+                        concerns.add_part(format!("{song}/{part}"));
+                    }
+                }
+            }
+            _ => {}
+        }
+        concerns
+    }
+}
+
+// --- The index ---
+
+/// `journal-index` 1.0's first line holds the head: the project's name, and the journal's own
+/// id, made when it was started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct IndexHead {
+    /// The name of the project whose journal this is.
+    pub project: String,
+    /// The journal's id.
+    pub id: Id,
+}
+
+impl IndexHead {
+    #[must_use]
+    pub fn new(project: impl Into<String>, id: Id) -> Self {
+        Self {
+            project: project.into(),
+            id,
+        }
+    }
+}
+
+/// The segment an index line opens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Opens {
+    /// Its stamp, which names its file.
+    pub segment: SegmentStamp,
+    /// Its id, as its head names it.
+    pub id: Id,
+    /// The moment it was opened.
+    pub from: At,
+}
+
+impl Opens {
+    #[must_use]
+    pub const fn new(segment: SegmentStamp, id: Id, from: At) -> Self {
+        Self { segment, id, from }
+    }
+}
+
+/// The summary of the segment an index line closes. The segment's file stays the truth: `journal
+/// check` compares the two and states any difference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Closes {
+    /// Its stamp.
+    pub segment: SegmentStamp,
+    /// When its last entry was written.
+    pub to: At,
+    /// How many entries it holds.
+    pub entries: u64,
+    /// Its last entry's id.
+    pub last: Id,
+    /// The songs its events concern, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub songs: Vec<String>,
+    /// The parts its events concern, as `<song>/<part>`, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<String>,
+    /// The takes its events concern, by name and digest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub takes: Vec<TakeRef>,
+}
+
+impl Closes {
+    /// The summary of `segment`, whose last entry was `last`, written at `to`.
+    #[must_use]
+    pub fn new(segment: SegmentStamp, to: At, entries: u64, last: Id, concerns: Concerns) -> Self {
+        Self {
+            segment,
+            to,
+            entries,
+            last,
+            songs: concerns.songs,
+            parts: concerns.parts,
+            takes: concerns.takes,
+        }
+    }
+}
+
+/// One index line: it opens a segment, and, after the first, closes the one before it, in one
+/// write (bus design decision 21).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct IndexLine {
+    pub opens: Opens,
+    /// Absent on the first line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closes: Option<Closes>,
+}
+
+impl IndexLine {
+    #[must_use]
+    pub const fn new(opens: Opens, closes: Option<Closes>) -> Self {
+        Self { opens, closes }
+    }
+
+    /// The line with its newline.
+    ///
+    /// # Errors
+    ///
+    /// When it does not serialize.
+    pub fn line(&self) -> Result<String> {
+        Stream::<IndexHead>::record_line(self)
+    }
+}
+
+/// `journal-index` 1.0: the index head on the first line, then one [`IndexLine`] per line.
+impl Kind for IndexHead {
+    const NAME: &'static str = "journal-index";
+    const VERSION: Version = Version::new(1, 0);
+}
+
+impl StreamKind for IndexHead {
+    type Record = IndexLine;
+}
+
+/// One index line as read: its exact text and what it says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IndexEntry {
+    /// The line as it is in the file, without its newline.
+    pub text: String,
+    pub line: IndexLine,
+}
+
+/// A whole index as read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct JournalIndex {
+    pub tool: Tool,
+    pub from: Option<From>,
+    pub statements: Vec<String>,
+    pub head: IndexHead,
+    /// Every whole line after the head, in file order. The last opens the current segment.
+    pub lines: Vec<IndexEntry>,
+    /// A last line with no newline: a write that never finished.
+    pub torn: Option<String>,
+}
+
+impl JournalIndex {
+    /// The first line of an index of `head`, written by `tool`, with its newline.
+    ///
+    /// # Errors
+    ///
+    /// When the head does not serialize.
+    pub fn head_line(tool: &Tool, head: &IndexHead) -> Result<String> {
+        Stream::new(tool.clone(), head.clone()).head_line()
+    }
+
+    /// Reads an index: the head by the version policy, and each whole line strictly. A last line
+    /// with no newline is kept apart in [`JournalIndex::torn`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::EmptyStream`] when there is no whole first line, and [`Error::Line`] naming the
+    /// 1-based line and why it was refused.
+    pub fn read(text: &str) -> Result<Self> {
+        let (whole, torn) = split_torn(text);
+        let mut lines = whole.split_terminator('\n');
+        let first = lines.next().ok_or(Error::EmptyStream)?;
+        let head = Stream::<IndexHead>::read(first)?;
+        let lines = lines
+            .enumerate()
+            .map(|(n, text)| {
+                serde_json::from_str::<IndexLine>(text)
+                    .map(|line| IndexEntry {
+                        text: text.to_string(),
+                        line,
+                    })
+                    .map_err(|source| Error::Line {
+                        line: n + 2,
+                        source: Box::new(Error::Body {
+                            kind: IndexHead::NAME,
+                            version: IndexHead::VERSION,
+                            part: "an index line",
+                            source,
+                        }),
+                    })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            tool: head.tool,
+            from: head.from,
+            statements: head.statements,
+            head: head.head,
+            lines,
+            torn,
+        })
+    }
+
+    /// Writes the index: the head line, then each line as this build writes it.
+    ///
+    /// # Errors
+    ///
+    /// When a line does not serialize.
+    pub fn write(&self) -> Result<String> {
+        let mut stream = Stream::new(self.tool.clone(), self.head.clone());
+        stream.from.clone_from(&self.from);
+        stream.statements.clone_from(&self.statements);
+        let mut text = stream.head_line()?;
+        for entry in &self.lines {
+            text.push_str(&entry.line.line()?);
+        }
+        Ok(text)
+    }
+
+    /// The current segment: what the last line opens (bus design decision 21).
+    #[must_use]
+    pub fn current(&self) -> Option<&Opens> {
+        self.lines.last().map(|entry| &entry.line.opens)
+    }
+}
+
+/// `text` split at its last newline: the whole lines, and a torn last line if there is one.
+fn split_torn(text: &str) -> (&str, Option<String>) {
+    let (whole, torn) = match text.rfind('\n') {
+        Some(i) => (&text[..=i], &text[i + 1..]),
+        None => ("", text),
+    };
+    (whole, (!torn.is_empty()).then(|| torn.to_string()))
 }
 
 #[cfg(test)]
@@ -1272,6 +1752,56 @@ mod tests {
         ] {
             assert!(bad.parse::<At>().is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_segment_stamp_has_one_spelling_and_names_its_file() {
+        let stamp = SegmentStamp::new(At::from_unix_ms(1_795_446_245_123));
+        assert_eq!(stamp.to_string(), "20261123T150405123Z");
+        assert_eq!(stamp.file_name(), "journal.20261123T150405123Z.duet.jsonl");
+        assert_eq!(SegmentStamp::of_file_name(&stamp.file_name()), Some(stamp));
+        assert_eq!(SegmentStamp::of_file_name("journal.duet.jsonl"), None);
+        assert_eq!(stamp.next().to_string(), "20261123T150405124Z");
+        for bad in [
+            "20261123T150405123",
+            "2026-11-23T15:04:05.123Z",
+            "20260230T000000000Z",
+            "20261123t150405123Z",
+        ] {
+            assert!(bad.parse::<SegmentStamp>().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_doc_written_concerns_its_song_and_part_and_a_take_added_its_take() {
+        let written = |path: &str| {
+            Event::from(DocWritten::new(
+                path.parse().unwrap(),
+                "part",
+                Version::new(1, 0),
+                DocDigest(0),
+                false,
+            ))
+            .concerns()
+        };
+        let lead = written("songs/wayfaring/parts/lead.duet");
+        assert_eq!(lead.songs, ["wayfaring"]);
+        assert_eq!(lead.parts, ["wayfaring/lead"]);
+        let comp = written("songs/wayfaring/comps/a.duet");
+        assert_eq!((comp.songs.len(), comp.parts.len()), (1, 0));
+        assert!(written("renders/wayfaring.mid").is_empty());
+        assert!(written("songs/x.duet").is_empty());
+        let digest: TakeDigest =
+            "sha256:9f2c41d07b3e8a65c1f0d92e4b7a3c58e06d1f9a2b4c7e8d3f5a6b0c9d1e2f34"
+                .parse()
+                .unwrap();
+        let take = Event::from(TakeAdded::new("wayfaring", digest)).concerns();
+        assert_eq!(take.takes, [TakeRef::new("wayfaring", digest)]);
+        let mut all = lead;
+        all.extend(&take);
+        all.extend(&take);
+        assert_eq!(all.takes.len(), 1);
+        assert!(Event::from(AskAsked::new("?")).concerns().is_empty());
     }
 
     #[test]

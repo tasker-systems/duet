@@ -46,8 +46,9 @@
 //! The kinds this build knows are [`KINDS`]: `song` 1.0 and `capture-analysis` 1.0
 //! (duet-capture's [`Analysis`](duet_capture::Analysis)), documents, and `performance` 1.0, a
 //! stream of duet-dsp's [`PerformanceHead`](duet_dsp::PerformanceHead) and
-//! [`FrameBlock`](duet_dsp::FrameBlock)s, and `journal` 1.0 ([`journal`]), a project's stream
-//! of entries, each one event. [`AnyDocument`] reads a `.duet` of any document kind by its
+//! [`FrameBlock`](duet_dsp::FrameBlock)s, and a project's journal ([`journal`]): `journal-index`
+//! 1.0, the index over its segments, and `journal` 1.0, one segment, a stream of entries, each
+//! one event. [`AnyDocument`] reads a `.duet` of any document kind by its
 //! envelope.
 //!
 //! **The journal's events version on their own** ([`EVENTS`]), each schema committed under
@@ -86,7 +87,9 @@ mod version;
 pub use envelope::{Envelope, From, Notice, SCHEMA_BASE, Tool, schema_url};
 pub use error::{Error, Result};
 pub use frame::{Document, Stream, read_envelope};
-pub use journal::{EVENTS, EventInfo, EventKind, Journal, JournalHead, event_kind};
+pub use journal::{
+    EVENTS, EventInfo, EventKind, IndexHead, Journal, JournalHead, JournalIndex, event_kind,
+};
 pub use kind::{Kind, StreamKind};
 pub use registry::{AnyDocument, ENVELOPE_INFO, Framing, KINDS, KindInfo, kind};
 pub use schema::{ENVELOPE, ENVELOPE_VERSION};

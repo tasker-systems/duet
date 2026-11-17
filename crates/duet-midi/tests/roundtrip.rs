@@ -1693,7 +1693,8 @@ fn a_performances_take_round_trips_exactly_through_json() {
     assert_eq!(Stream::<PerformanceHead>::read(&written).unwrap(), older);
 }
 
-/// A project's journal round-trips exactly: read, then written, is byte-identical. Every entry
+/// A project's journal round-trips exactly: a segment and the index, read, then written, are
+/// byte-identical. Every entry
 /// this build reads is written again from its event, so its text is duet's own; an entry of an
 /// event kind it does not read, or of a newer minor, is kept as its text, spacing and key order
 /// included.
@@ -1718,4 +1719,13 @@ fn a_journal_round_trips_exactly_with_entries_this_duet_does_not_read() {
         2
     );
     assert_eq!(journal.write().unwrap(), mixed);
+
+    // The index over the segments round-trips the same way.
+    let index = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../duet-schemas/schemas/journal-index/examples/1.0.duet.jsonl"
+    ))
+    .unwrap();
+    let read = duet_schemas::JournalIndex::read(&index).unwrap();
+    assert_eq!(read.write().unwrap(), index);
 }

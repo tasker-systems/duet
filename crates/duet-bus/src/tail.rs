@@ -1,33 +1,33 @@
-//! Reading the journal from a cursor, and following it as it grows.
+//! Reading the journal from a cursor, across segments, and following it as it grows.
 
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use duet_schemas::Journal;
-use duet_schemas::journal::{Id, Line, read_line};
+use duet_schemas::journal::{Id, Line, SegmentStamp};
 
-use crate::{Error, Result};
+use crate::{Place, ProjectJournal, Result, read, segment_path};
 
-/// Where a reader is: the `seq` of the last entry it has, and that entry's `id`. `seq` 0, with
-/// the journal's own id, is before the first entry.
+/// Where a reader is: the segment, the `seq` within it of the last entry it has, and that
+/// entry's `id` (bus design decision 19). `seq` 0, with the segment's own id, is before the
+/// segment's first entry. It names durable things only, so it survives a restart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Cursor {
+    pub segment: SegmentStamp,
     pub seq: u64,
     pub id: Id,
 }
 
 impl Cursor {
     #[must_use]
-    pub const fn new(seq: u64, id: Id) -> Self {
-        Self { seq, id }
+    pub const fn new(segment: SegmentStamp, seq: u64, id: Id) -> Self {
+        Self { segment, seq, id }
     }
 
-    /// Before the first entry of `journal`.
+    /// At the entry at `place`, whose id is `id`.
     #[must_use]
-    pub fn start(journal: &Journal) -> Self {
-        Self::new(0, journal.head.id.clone())
+    pub fn at(place: Place, id: Id) -> Self {
+        Self::new(place.segment, place.seq, id)
     }
 }
 
@@ -35,135 +35,139 @@ impl Cursor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Polled {
-    /// The entries after the cursor, each with its `seq`. Empty when there are none yet.
-    After(Vec<(u64, Line)>),
+    /// The entries after the cursor, in replay order. Empty when there are none yet.
+    After(Vec<(Place, Line)>),
     /// The entry at the cursor is no longer the one it named: the journal was merged or rewritten
-    /// under it. The reader starts over from `seq` 0, and these are every entry from the first.
-    Resync(Vec<(u64, Line)>),
+    /// under it. The reader starts over, and these are every entry from the first.
+    Resync(Vec<(Place, Line)>),
 }
 
-/// The entries of `journal` after `cursor`: [`Polled::After`] when the line at `cursor.seq` is
-/// still `cursor.id`, and [`Polled::Resync`] with every entry when it is not. A reader is never
-/// told it is up to date when it is not.
+fn all(journal: &ProjectJournal) -> Vec<(Place, Line)> {
+    journal
+        .entries()
+        .map(|(place, line)| (place, line.clone()))
+        .collect()
+}
+
+/// The entries of `journal` after `cursor`: the rest of its segment, then every later segment in
+/// index order, when the line at `cursor` is still `cursor.id`; [`Polled::Resync`] with every
+/// entry when it is not. A reader is never told it is up to date when it is not.
 #[must_use]
-pub fn after(journal: &Journal, cursor: &Cursor) -> Polled {
-    let numbered = |from: usize| -> Vec<(u64, Line)> {
-        (1..)
-            .zip(&journal.lines)
-            .skip(from)
-            .map(|(seq, line)| (seq, line.clone()))
-            .collect()
+pub fn after(journal: &ProjectJournal, cursor: &Cursor) -> Polled {
+    let Some(i) = journal
+        .segments
+        .iter()
+        .position(|s| s.stamp == cursor.segment)
+    else {
+        return Polled::Resync(all(journal));
     };
-    let at = usize::try_from(cursor.seq).ok();
-    let holds = match at {
-        Some(0) => cursor.id == journal.head.id,
-        Some(n) => journal.lines.get(n - 1).is_some_and(|l| l.id == cursor.id),
-        None => false,
+    let segment = &journal.segments[i];
+    let holds = match usize::try_from(cursor.seq) {
+        Ok(0) => segment.journal.head.id == cursor.id,
+        Ok(n) => segment
+            .journal
+            .lines
+            .get(n - 1)
+            .is_some_and(|l| l.id == cursor.id),
+        Err(_) => false,
     };
-    match (holds, at) {
-        (true, Some(n)) => Polled::After(numbered(n)),
-        _ => Polled::Resync(numbered(0)),
+    if !holds {
+        return Polled::Resync(all(journal));
     }
+    let mut out = Vec::new();
+    for (j, segment) in journal.segments.iter().enumerate().skip(i) {
+        let from = if j == i { cursor.seq } else { 0 };
+        for (seq, line) in (1..).zip(&segment.journal.lines) {
+            if seq > from {
+                out.push((Place::new(segment.stamp, seq), line.clone()));
+            }
+        }
+    }
+    Polled::After(out)
 }
 
-/// Follows a journal file from a cursor: each [`Tail::poll`] reads the whole lines appended
-/// since the last, and never a torn one.
+/// Follows a project's journal from a cursor. Each [`Tail::poll`] reads the whole entries
+/// appended since the last, across rolls, and never a torn line.
+///
+/// It reads the index on each poll and a segment only when its length changed. When a segment
+/// before the cursor's changes, a merge added entries the reader has passed, so it is sent
+/// [`Polled::Resync`]: nothing is lost. A change that happened while no tail ran is caught only
+/// when it moves the line at the cursor.
 #[derive(Debug)]
 pub struct Tail {
-    path: PathBuf,
-    /// The byte just past the last whole line read.
-    offset: u64,
-    /// That last line, with its newline, checked on each poll.
-    last: Vec<u8>,
-    cursor: Cursor,
+    root: PathBuf,
+    cursor: Option<Cursor>,
+    lengths: HashMap<SegmentStamp, u64>,
 }
 
 impl Tail {
-    /// Opens the journal at `path` and reads it from `cursor` (`None`: from the start). Returns
-    /// the tail, and what is after the cursor now.
+    /// Opens the journal of the project at `root` and reads it from `cursor` (`None`: from the
+    /// start). Returns the tail, and what is after the cursor now.
     ///
     /// # Errors
     ///
     /// When the journal cannot be read, or does not read.
-    pub fn open(path: &Path, cursor: Option<Cursor>) -> Result<(Self, Polled)> {
+    pub fn open(root: &Path, cursor: Option<Cursor>) -> Result<(Self, Polled)> {
         let mut tail = Self {
-            path: path.to_path_buf(),
-            offset: 0,
-            last: Vec::new(),
-            cursor: Cursor::new(0, Id::from_parts(0, [0; 10])),
+            root: root.to_path_buf(),
+            cursor,
+            lengths: HashMap::new(),
         };
-        let polled = tail.reread(cursor.as_ref())?;
+        let polled = tail.poll()?;
         Ok((tail, polled))
     }
 
-    /// The cursor after the last entry read.
+    /// The cursor after the last entry read, if any was.
     #[must_use]
-    pub const fn cursor(&self) -> &Cursor {
-        &self.cursor
-    }
-
-    /// Reads the whole file again, and what is after `cursor` in it.
-    fn reread(&mut self, cursor: Option<&Cursor>) -> Result<Polled> {
-        let text = std::fs::read_to_string(&self.path).map_err(Error::io(&self.path))?;
-        let journal = Journal::read(&text).map_err(Error::journal(&self.path))?;
-        let whole = text.len() - journal.torn.as_ref().map_or(0, String::len);
-        let start = Cursor::start(&journal);
-        let polled = after(&journal, cursor.unwrap_or(&start));
-        self.offset = whole as u64;
-        let last_start = text[..whole.saturating_sub(1)]
-            .rfind('\n')
-            .map_or(0, |i| i + 1);
-        self.last = text.as_bytes()[last_start..whole].to_vec();
-        self.cursor = journal.lines.last().map_or(start, |line| {
-            Cursor::new(journal.lines.len() as u64, line.id.clone())
-        });
-        Ok(match (cursor, polled) {
-            // Opening from the start is no resync: there was nothing to lose.
-            (None, Polled::Resync(all)) => Polled::After(all),
-            (_, polled) => polled,
-        })
+    pub const fn cursor(&self) -> Option<&Cursor> {
+        self.cursor.as_ref()
     }
 
     /// The whole entries appended since the last poll, or [`Polled::Resync`] with every entry
-    /// when the file changed under the tail.
+    /// when the journal changed under the tail.
     ///
     /// # Errors
     ///
-    /// When the journal cannot be read, or a new line does not read.
+    /// When the journal cannot be read, or a line does not read.
     pub fn poll(&mut self) -> Result<Polled> {
-        let path = self.path.clone();
-        let io = |e| Error::io(&path)(e);
-        let mut file = File::open(&self.path).map_err(io)?;
-        let len = file.metadata().map_err(io)?.len();
-        let still = self.offset <= len && {
-            let mut here = vec![0u8; self.last.len()];
-            file.seek(SeekFrom::Start(self.offset - self.last.len() as u64))
-                .map_err(io)?;
-            file.read_exact(&mut here).map_err(io)?;
-            here == self.last
+        let journal = read(&self.root)?;
+        let lengths: HashMap<SegmentStamp, u64> = journal
+            .segments
+            .iter()
+            .filter_map(|s| {
+                std::fs::metadata(segment_path(&self.root, s.stamp))
+                    .ok()
+                    .map(|m| (s.stamp, m.len()))
+            })
+            .collect();
+        let polled = match &self.cursor {
+            None => Polled::After(all(&journal)),
+            Some(cursor) => {
+                let before = journal
+                    .segments
+                    .iter()
+                    .take_while(|s| s.stamp != cursor.segment);
+                let merged = before.into_iter().any(|s| {
+                    self.lengths
+                        .get(&s.stamp)
+                        .is_some_and(|l| lengths.get(&s.stamp) != Some(l))
+                });
+                if merged {
+                    Polled::Resync(all(&journal))
+                } else {
+                    after(&journal, cursor)
+                }
+            }
         };
-        if !still {
-            let cursor = self.cursor.clone();
-            return self.reread(Some(&cursor));
+        self.lengths = lengths;
+        let last = match &polled {
+            Polled::After(v) | Polled::Resync(v) => v.last(),
+        };
+        if let Some((place, line)) = last {
+            self.cursor = Some(Cursor::at(*place, line.id.clone()));
+        } else if let Polled::Resync(_) = polled {
+            self.cursor = None;
         }
-        let mut text = String::new();
-        file.read_to_string(&mut text).map_err(io)?;
-        let whole = text.rfind('\n').map_or(0, |i| i + 1);
-        let mut out = Vec::new();
-        for line in text[..whole].split_inclusive('\n') {
-            let seq = self.cursor.seq + 1;
-            let read = read_line(line.trim_end_matches('\n')).map_err(|source| Error::Journal {
-                path: self.path.clone(),
-                source: duet_schemas::Error::Line {
-                    line: usize::try_from(seq + 1).unwrap_or(usize::MAX),
-                    source: Box::new(source),
-                },
-            })?;
-            self.cursor = Cursor::new(seq, read.id.clone());
-            self.offset += line.len() as u64;
-            self.last = line.as_bytes().to_vec();
-            out.push((seq, read));
-        }
-        Ok(Polled::After(out))
+        Ok(polled)
     }
 }

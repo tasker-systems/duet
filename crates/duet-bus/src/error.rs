@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use duet_schemas::journal::SegmentStamp;
+
 use crate::ask::Refusal;
 
 /// Why a journal was not read, or an entry not appended.
@@ -17,13 +19,21 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// The journal did not read: the source names the line and why.
+    /// A file of the journal did not read: the source names the line and why.
     #[error("{}", path.display())]
     Journal {
         path: PathBuf,
         #[source]
         source: duet_schemas::Error,
     },
+
+    /// There is no index, so no journal, at the project's root.
+    #[error("{}: no journal here (no {})", root.display(), crate::INDEX)]
+    NoJournal { root: PathBuf },
+
+    /// The index names the current segment, and its file does not exist.
+    #[error("the index names the current segment {segment}, and its file {} does not exist", segment.file_name())]
+    MissingSegment { segment: SegmentStamp },
 
     /// The entry's transition is refused by its lifecycle, so it was not appended.
     #[error("refused, {refusal}: {why}")]
