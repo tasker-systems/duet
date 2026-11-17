@@ -71,7 +71,10 @@ file = "wayfaring-stranger.flac"
 provenance = "The owner's recording of the traditional song Wayfaring Stranger, sung by James (Pete) Taylor, recorded 2026-11-15 with `duet record` (48 kHz 24-bit) and resampled to 22.05 kHz 16-bit mono"
 licence = "CC-BY-4.0"
 licence_file = "wayfaring-stranger.flac.license"
-key = "Eb"
+# The owner agreed E-flat major (2026-11-15). Since the held-pitch pass (2026-11-17) the HMM
+# estimates A-flat major (0.70 against E-flat's 0.63), as the rules already did: the held G#3s
+# and C#3 now count as notes. Pinned at what it reads until the owner rules.
+key = "Ab"
 tuning_cents = -7.0
 tuning_within = 3.0
 # 38 since the held-pitch pass (2026-11-17): the HMM's 30, and the eight pitches held before
