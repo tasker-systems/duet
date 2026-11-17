@@ -1,4 +1,4 @@
-# duet's event bus: a server loop, the log it writes, and the CLI against it
+# duet's event bus: a server loop, the journal it writes, and the CLI against it
 
 **Date:** 2026-11-17. **Task:** temper `01a1e563-22e6-70e6-a7ce-8b38e93b3091`.
 
@@ -10,7 +10,7 @@ tasks](#build-tasks), each with its witness. Nothing here is built.
 
 **Builds on:**
 - [duet documents](2026-11-15-duet-documents-design.md): the envelope, kinds, the `.duet.jsonl`
-  framing and the version policy. The log is a document of that crate.
+  framing and the version policy. The journal is a document of that crate.
 - [Variants and comps](2026-11-17-variants-and-comps-design.md), ruled: a verdict that picks or
   marks is a comp entry, and "the session record logs the act" (its ruling 5).
 - [The project design](2026-11-17-project-design.md) (temper
@@ -71,7 +71,7 @@ flowchart LR
         OWN["owns: player,<br/>loaded models, file watch"]
         PROJ["projections<br/>(open asks, …)"]
     end
-    LOG[("log.duet.jsonl<br/>committed")]
+    LOG[("journal.duet.jsonl<br/>committed")]
     STORE[(".duet/state/<br/>state.sqlite<br/>rebuildable")]
     CLI -- "command (socket)" --> SEQ
     SEQ -- "events, transient topics" --> CLI
@@ -82,11 +82,11 @@ flowchart LR
     SHIM & MCP & APP -.-> SEQ
 ```
 
-The one idea that holds it together, **Proposed:** **the log file is the sequence.** Every durable
-event is a line appended under one lock. The server is the usual writer, but not the only one: a CLI
-with no server appends under the same lock, and the server tails the file, so it publishes those
-lines too. "Write to the log before publishing" (the ideation's proposal) then holds by
-construction: the server publishes only lines that are already in the file.
+The one idea that holds it together, **Proposed:** **the journal file is the sequence.** Every
+durable event is a line appended under one lock. The server is the usual writer, but not the only
+one: a CLI with no server appends under the same lock, and the server tails the file, so it
+publishes those lines too. "Write to the journal before publishing" (the ideation's proposal) then
+holds by construction: the server publishes only lines that are already in the file.
 
 ## 1. The bus
 
@@ -99,16 +99,16 @@ construction: the server publishes only lines that are already in the file.
   events it caused by `seq`, or `refused`, naming the refusal as duet already names refusals (a
   newer minor, an existing output, an unknown ask).
 - **Events are facts.** They say what happened and what came of it. They never say what someone
-  asked to happen, so the log replays without running anything. A command is not logged; the events
-  it caused are, and each one names its `cause`, the command id.
-- **A refusal is a reply, and a published topic, but not a logged event.** *The refinement:* the
+  asked to happen, so the journal replays without running anything. A command is not written to the
+  journal; the events it caused are, and each one names its `cause`, the command id.
+- **A refusal is a reply, and a published topic, but not a journal entry.** *The refinement:* the
   ideation put refusals as events. A refusal changes nothing, so by the test in §2 it is transient.
   It is published, so a face that didn't submit the command still sees "the owner's `comp pick` was
   refused: an existing pick at 2.28". It isn't kept ([decision 4](#decisions-for-the-owner)).
 - **Asks and answers by id,** as ruled on 11-16. An ask's id is the id of its `ask.asked` event, and
   `ask.answered` names it. Delivery is now live, but nothing depends on its being live: an open ask
-  is an `ask.asked` with no answer in the log, so a CLI with no server, a cloud session reading a
-  clone, or a restarted server all see the same open asks.
+  is an `ask.asked` with no answer in the journal, so a CLI with no server, a cloud session reading
+  a clone, or a restarted server all see the same open asks.
 
 ### The action registry
 
@@ -128,12 +128,12 @@ Each action declares:
   does. When the CLI is joined to a server, it still runs `capture melody` in its own process, then
   posts the events. So a joined run and a standalone run execute the same code and write the same
   files. The only difference is who appends the line. That contains the ideation's "two code paths"
-  risk: there is one execution path and two sequencing paths, and the sequencing paths share the log
-  writer.
+  risk: there is one execution path and two sequencing paths, and the sequencing paths share the
+  journal writer.
 - **`runs: server` actions** are the ones that need what the server owns: playing to the owner's
   device while another face controls it (`play`, with `stop` and `seek`), and later, inference on a
   model the server keeps loaded. Each one states what it does with no server. `play` plays in the
-  CLI's own process, as today. `wait` reads the log ([§3](#the-commands-the-cli-adds)).
+  CLI's own process, as today. `wait` reads the journal ([§3](#the-commands-the-cli-adds)).
 - **Every face is thin.** The CLI maps clap to an input, MCP maps a tool call, and the app maps a
   `#[tauri::command]`. "The same tools" then holds by construction, as the ideation proposed. A
   registry witness checks it: every registered action has a CLI path, and every CLI subcommand that
@@ -143,14 +143,14 @@ Each action declares:
 
 **Proposed.**
 
-- **One lock orders appends:** `.duet/run/log.lock`, an advisory exclusive `flock` taken for each
-  append. Under the lock, the writer writes one whole line with one `write(2)` and calls `fdatasync`
-  before releasing it. The server publishes only after that.
+- **One lock orders appends:** `.duet/run/journal.lock`, an advisory exclusive `flock` taken for
+  each append. Under the lock, the writer writes one whole line with one `write(2)` and calls
+  `fdatasync` before releasing it. The server publishes only after that.
 - **`seq` is the event's ordinal in the file:** line 2 is `seq` 1, since line 1 is the head. It is
   not stored in the line ([decision 3](#decisions-for-the-owner)). What a line stores is its `id`
   (UUIDv7), which is unique across machines.
 - **A subscriber resumes from a cursor `(seq, id)`.** The server checks that the line at `seq` has
-  that `id`, and sends everything after it. If the line differs, because the log was merged or
+  that `id`, and sends everything after it. If the line differs, because the journal was merged or
   rewritten under it, the server sends `resync` and the subscriber starts over from `seq` 0. A
   subscriber is never told "you are up to date" when it isn't.
 - **Transient topics have no cursor.** A subscriber that joins late gets the latest value of each
@@ -161,8 +161,8 @@ Each action declares:
 **Proposed**, after tasker-core's task and step state machines.
 
 **A word on names first.** tasker-core's state-machine "events" (`Start`, `Cancel`) are inputs. In
-this spec those are **commands**. duet's logged **events** are facts, closer to the transition rows
-tasker-core appends to `task_transitions`.
+this spec those are **commands**. duet's journal entries, its **events**, are facts, closer to the
+transition rows tasker-core appends to `task_transitions`.
 
 **Each lifecycle is an enum and one function.** The function is `transition(state, event) ->
 Result<State, Refusal>`, a single `match` on the current state and the event. An arm that isn't
@@ -175,12 +175,12 @@ listed refuses, naming why. A terminal state never changes. The lifecycles:
 | the player | `idle` ⇄ `playing` | none |
 | a CLI run in a project | `probing` → `joined` or `standalone` | both, for that run |
 
-Only the ask's lifecycle is in the log. The others are in-process and transient.
+Only the ask's lifecycle is in the journal. The others are in-process and transient.
 
-**The check and the append are one step under the log lock** ([decision
+**The check and the append are one step under the journal lock** ([decision
 13](#decisions-for-the-owner)). This is duet's form of tasker-core's guard and write in one
 transaction, and of CONC-DB-1's compare-and-set. A writer:
-1. takes `.duet/run/log.lock`;
+1. takes `.duet/run/journal.lock`;
 2. folds in any lines appended since it last read;
 3. runs `transition` on the result;
 4. appends the event only if the transition is allowed;
@@ -192,17 +192,17 @@ both would append. A long action, such as a capture, runs outside the lock; only
 append are inside it.
 
 **Replay is lenient where a live command is strict.** **Ruled (owner, 2026-11-17,** in review of
-this spec). Replay folds the log through the same `transition`. A transition that fails there can
-only come from a union merge of two clones or a hand edit, such as two answers to one ask. It is
-skipped, the first in file order wins, and `duet log check` lists it. It is never fatal.
+this spec). Replay folds the journal through the same `transition`. A transition that fails there
+can only come from a union merge of two clones or a hand edit, such as two answers to one ask. It is
+skipped, the first in file order wins, and `duet journal check` lists it. It is never fatal.
 
 **Who acted is recorded, never enforced.** `by` is an audit label. tasker-core learned this in
 TAS-54: it enforced which processor owned a task, which blocked crash recovery, and it now records
 the processor for audit only.
 
-**The machines stay small.** tasker-core's transition table has gathered legacy arms. duet's log is
-kept forever, so every transition ever written must still replay. A change to a lifecycle is a new
-event version, never an edit to an old arm.
+**The machines stay small.** tasker-core's transition table has gathered legacy arms. duet's journal
+is kept forever, so every transition ever written must still replay. A change to a lifecycle is a
+new event version, never an edit to an old arm.
 
 ### The wire
 
@@ -214,7 +214,7 @@ same shape as a `.duet.jsonl` line, so the same tools read both.
 {"hello": {"bus": 1, "tool": {"name": "duet", "version": "0.4.0"}, "by": {"who": "claude", "face": "cli"}}}
 // server → client
 {"welcome": {"bus": 1, "tool": {"name": "duet", "version": "0.4.0"}, "project": "wayfaring",
-             "log": {"kind": "log", "version": "1.0", "last": {"seq": 41, "id": "0196…"}},
+             "journal": {"kind": "journal", "version": "1.0", "last": {"seq": 41, "id": "0196…"}},
              "registry": "fnv1a:9c04e1b2a7d35f60"}}
 
 {"submit": {"id": "0196…c1", "action": "answer", "input": {"ask": "7f3a", "answer": "two", "said": "a new word"}}}
@@ -222,22 +222,22 @@ same shape as a `.duet.jsonl` line, so the same tools read both.
 {"refused": {"id": "0196…c1", "refusal": {"name": "unknown-ask", "message": "no open ask matches 7f3a"}}}
 
 {"subscribe": {"from": {"seq": 41, "id": "0196…"}, "events": ["ask.*", "comp.*"], "topics": ["presence"]}}
-{"event": {"seq": 42, "line": { /* the log line, verbatim */ }}}
+{"event": {"seq": 42, "line": { /* the journal line, verbatim */ }}}
 {"topic": {"name": "playhead", "value": {"take": "wayfaring", "at": 2.31, "playing": true}}}
 {"resync": {"reason": "the line at seq 41 is not 0196…"}}
 {"lagged": {"seq": 57}}                                     // then the server closes; resume from 57
 ```
 
-- **`bus` is the wire's own integer version.** It is separate from the log's kind version and from
-  duet's version. The server refuses a `hello` with another `bus` by name. The CLI then runs
+- **`bus` is the wire's own integer version.** It is separate from the journal's kind version and
+  from duet's version. The server refuses a `hello` with another `bus` by name. The CLI then runs
   standalone and says so ([§3](#the-cli-joined-or-standalone)).
 - **`registry` is a digest of every action's name and input schema.** A CLI whose registry differs
   from the server's (a newer duet in the shell, an older server still running) does not submit. It
-  runs standalone and says why. The server still sees what it wrote, by tailing the log.
+  runs standalone and says why. The server still sees what it wrote, by tailing the journal.
 - **Backpressure:** a subscriber too slow for durable events is sent `lagged` and disconnected. It
-  loses nothing, because it resumes from the log. A slow subscriber to a transient topic only ever
-  sees that topic's latest value. Every channel behind this, its size and what happens when it is
-  full are in [The server's channels](#the-servers-channels).
+  loses nothing, because it resumes from the journal. A slow subscriber to a transient topic only
+  ever sees that topic's latest value. Every channel behind this, its size and what happens when it
+  is full are in [The server's channels](#the-servers-channels).
 - **Authentication is the filesystem.** The socket sits in a directory the server creates `0700`,
   and the socket is `0600`, so only the owner's user connects. That covers a cloud session through
   the folder attach, which runs as the owner on the Mac. No secret is needed on the socket. A later
@@ -259,27 +259,27 @@ that is stale the moment it is read.
 
 | Tier | Where | Examples | Who sees it with no server |
 |---|---|---|---|
-| **Durable** | `log.duet.jsonl`, committed | a take added or captured, a moment played for someone, an ask, an answer, a verdict, a comp pick or mark, a comp applied, a document written | everyone: a CLI, a cloud session's clone, CI |
+| **Durable** | `journal.duet.jsonl`, committed | a take added or captured, a moment played for someone, an ask, an answer, a verdict, a comp pick or mark, a comp applied, a document written | everyone: a CLI, a cloud session's clone, CI |
 | **View state** | `.duet/state/state.sqlite`, ignored, per machine | the open take and moment in the app, the layout, panel sizes, the last cursor each face read up to | only that machine's faces, once a server has run |
 | **Transient** | the bus only, never stored | the playhead, hover, the moment a face has in focus, who is connected, a long command's progress, a refusal | nobody: there is no bus |
 
 ### The three changes
 
 1. **Durable tier: open asks, a review in progress and "the current comp" are not session state.**
-   They are projections of the log. The proposal put "session state worth restoring" in the store.
-   But an open ask must be visible to a CLI with no server and to a cloud session reading a clone,
-   and neither sees the store. So anything that a person or Claude would act on is derived from the
-   log, and the store only caches it.
+   They are projections of the journal. The proposal put "session state worth restoring" in the
+   store. But an open ask must be visible to a CLI with no server and to a cloud session reading a
+   clone, and neither sees the store. So anything that a person or Claude would act on is derived
+   from the journal, and the store only caches it.
 2. **View-state tier: the store holds no state that exists nowhere else, except view state.** This
    matches the project design's decision 11 ("never the only copy of authored work"), and goes one
    step further: it is never the only copy of *any* project or session state. Deleting
    `.duet/state/` loses where the windows were. It loses no ask, verdict, pick or act.
 3. **View-state tier: the store is not built until a face needs it.** The CLI-first build has no
    layout to restore. Its projections (open asks, the last verdict per moment) are small, and the
-   server builds them in memory from the log in milliseconds at the sizes a project reaches. The
-   store arrives with the first face that has view state or a query the log can't answer quickly:
-   the Tauri app, or a log grown past a measured threshold. Its **contract** is ruled now, so
-   nothing built before it assumes otherwise ([decision 1](#decisions-for-the-owner)).
+   server builds them in memory from the journal in milliseconds at the sizes a project reaches. The
+   store arrives with the first face that has view state or a query the journal can't answer
+   quickly: the Tauri app, or a journal grown past a measured threshold. Its **contract** is ruled
+   now, so nothing built before it assumes otherwise ([decision 1](#decisions-for-the-owner)).
 
 ### The store, when it comes
 
@@ -293,10 +293,10 @@ that is stale the moment it is read.
   processes) moot by construction. It is stated so in the status when the store is built.
 - **It is a cache with a checkpoint.** A `meta` table holds the store's schema version and the
   cursor `(seq, id)` of the last event it folded in. On start the server checks the cursor against
-  the log:
+  the journal:
   - it matches: fold in the rest;
   - it doesn't match, or the schema version is not this build's: delete the store and rebuild it
-    from the log.
+    from the journal.
 
   So a schema change in a new duet never breaks a user's data.
 - **RUST-SQL-1** asks for compile-checked queries (`sqlx::query!`). rusqlite has none. The store's
@@ -309,12 +309,12 @@ that is stale the moment it is read.
 ### What is git-ignored, and what a cloud session or CI sees
 
 **Proposed, by the project design** (its §6 and §10, not yet ruled): `/.duet/run/` and
-`/.duet/state/` are ignored. `log.duet.jsonl` is committed with the authored half. This spec needs
-nothing more ignored.
+`/.duet/state/` are ignored. `journal.duet.jsonl` is committed with the authored half. This spec
+needs nothing more ignored.
 
 A cloud session without the folder attach, or CI, sees a project's clone:
-- **the log, and every authored document.** So they see every act, every ask and its answers, every
-  verdict and comp, and can run `duet asks`, `duet log show` and `duet watch --from 0`;
+- **the journal, and every authored document.** So they see every act, every ask and its answers,
+  every verdict and comp, and can run `duet asks`, `duet journal show` and `duet watch --from 0`;
 - **no server, no store, no transient topic.** That is no loss, because nothing durable lives there.
 
 A cloud session **with** the folder attach is a local CLI on the Mac. It is joined to the server if
@@ -326,7 +326,7 @@ one runs, and it sees transient topics too.
 
 **Ruled** (project design §5, proposed there; today's walk-up is in `config.rs`): a project is the
 nearest directory from the working directory up whose `.duet/` holds `project.duet`, or the one
-`DUET_PROJECT` names. **Outside a project there is no log and no bus.** Every command behaves
+`DUET_PROJECT` names. **Outside a project there is no journal and no bus.** Every command behaves
 exactly as at `main`.
 
 **Proposed: inside a project, the quick check** the ruling asks for:
@@ -362,12 +362,13 @@ path also survives a shell whose `$TMPDIR` differs, which may be the case under 
 - **Standalone is never degraded.** Everything a joined CLI can do, a standalone CLI does, except
   what only exists with a server: transient topics, and playing through the server's player while
   another face controls it. Even its events reach a running server's subscribers, late by one file
-  watch, because the server tails the log.
+  watch, because the server tails the journal.
 - **No silent half-state.** A standalone run inside a project prints nothing extra when no server is
   running. It prints one line on standard error when a server was found but not joined: "a server is
   running (duet 0.4.0, pid 4121) but its registry differs from this build's: ran here, and the
-  server sees it from the log". When a joined CLI's post fails after its action has run, it appends
-  the events itself and says so. An action is never run twice, and its events are never lost.
+  server sees it from the journal". When a joined CLI's post fails after its action has run, it
+  appends the events itself and says so. An action is never run twice, and its events are never
+  lost.
 - **The CLI never starts a server.** That includes the app: the CLI never spawns the GUI, per the
   outside facts. `[server] autostart` exists, defaults to `false`, and is [decision
   7](#decisions-for-the-owner).
@@ -379,7 +380,7 @@ path also survives a shell whose `$TMPDIR` differs, which may be the case under 
 ### The commands the CLI adds
 
 **Proposed.** Each is a registered action (`ask`, `answer`, `withdraw`) or a reader of the bus
-(`asks`, `watch`, `wait`, `log`).
+(`asks`, `watch`, `wait`, `journal`).
 
 | Command | What it does |
 |---|---|
@@ -387,18 +388,19 @@ path also survives a shell whose `$TMPDIR` differs, which may be the case under 
 | `duet asks [--all]` | lists open asks (asked, not answered or withdrawn), oldest first, with short ids |
 | `duet answer ID ANSWER [--said TEXT]` | records `ask.answered`. `ID` is any unique suffix of four or more hex digits, as git takes short hashes. It refuses an unknown, ambiguous or already-answered id, by name |
 | `duet withdraw ID [--why TEXT]` | records `ask.withdrawn` |
-| `duet watch [--from start\|now\|SEQ] [--events GLOB,…] [--not-by WHO] [--json]` | prints one line per event: through the server when joined, by tailing the log when not. Transient topics only with `--topics` and a server |
+| `duet watch [--from start\|now\|SEQ] [--events GLOB,…] [--not-by WHO] [--json]` | prints one line per event: through the server when joined, by tailing the journal when not. Transient topics only with `--topics` and a server |
 | `duet wait ID [--timeout DUR]` | blocks until the ask `ID` is answered or withdrawn, prints the answer, and exits 0. It exits 3 on timeout |
-| `duet log show [--from SEQ]` | prints the log as one readable line per event |
-| `duet log check` | checks the head, every line against its event's schema, unknown event kinds (listed, not failed), and duplicate ids. Exits non-zero on a broken line |
+| `duet journal show [--from SEQ]` | prints the journal as one readable line per event |
+| `duet journal check` | checks the head, every line against its event's schema, unknown event kinds (listed, not failed), and duplicate ids. Exits non-zero on a broken line |
 | `duet server [--background]` | runs the server in the foreground, or detached, logging to `.duet/run/server.log` |
 | `duet server stop` | asks the server to shut down cleanly |
 | `duet server status` | the diagnostic below |
 
 An **ask's `--about`** is a reference into the project: `wayfaring@2.28` (a take at a time),
 `wayfaring@2.15-3.58` (a span), `review/wayfaring.moments#3` (a moment), or a document path relative
-to the root. It is never an absolute path, so a committed log leaks no machine path. That follows PR
-the project design's rule that "the record names takes by name and digest, never by path".
+to the root. It is never an absolute path, so a committed journal leaks no machine path. That
+follows PR the project design's rule that "the record names takes by name and digest, never by
+path".
 
 ### The diagnostic: `duet server status`
 
@@ -407,14 +409,14 @@ why:
 
 ```text
 project   /Users/owner/projects/wayfaring  (found: .duet/project.duet, from the working directory)
-log       log.duet.jsonl  log 1.0, 41 events, last 0196…a2 at 2026-11-17 15:04:05
+journal   journal.duet.jsonl  journal 1.0, 41 events, last 0196…a2 at 2026-11-17 15:04:05
 lock      .duet/run/bus.lock  held by pid 4121 (alive)
 server    duet 0.4.0, bus 1, registry fnv1a:9c04e1b2a7d35f60 (matches this build)
 socket    /Users/owner/projects/wayfaring/.duet/run/bus.sock  (answered in 3 ms)
 mode      joined: commands here post to the server
 clients   2: cli (claude, watch), cli (owner)  · queue depth 0/1024, saturated 0 times
 store     not built
-owns      player: idle · models: none loaded · watching: log.duet.jsonl, review/, comps/
+owns      player: idle · models: none loaded · watching: journal.duet.jsonl, review/, comps/
 ```
 
 It exits 0 when joined, 1 when standalone, and 2 when no project is found, so a script can branch on
@@ -431,12 +433,12 @@ says `standalone`.
   `seek` are `runs: server` when joined. The playhead is a transient topic at most 30 Hz. Each play
   of a take's moment, or of a reading, records one durable `moment.played` (what, for whom, by
   whom), not one per second.
-- **The asks board.** This is temper-desktop's `AskBoard`, kept as a projection of the log. The
-  server holds no ask the log doesn't.
-- **A watch on the project.** It tails `log.duet.jsonl`, and watches `review/`, `comps/`, `parts/`
-  and `.duet/project.duet` through `notify` (8.2.2, CC0-1.0, on the allowlist). An edit made outside
-  duet is a transient `file.changed` topic with path and digest. It is not a durable event, since no
-  act went through duet ([decision 5](#decisions-for-the-owner)).
+- **The asks board.** This is temper-desktop's `AskBoard`, kept as a projection of the journal. The
+  server holds no ask the journal doesn't.
+- **A watch on the project.** It tails `journal.duet.jsonl`, and watches `review/`, `comps/`,
+  `parts/` and `.duet/project.duet` through `notify` (8.2.2, CC0-1.0, on the allowlist). An edit
+  made outside duet is a transient `file.changed` topic with path and digest. It is not a durable
+  event, since no act went through duet ([decision 5](#decisions-for-the-owner)).
 - **Loaded models, later.** One example is Basic Pitch kept warm between captures. They are
   optional, and `no-model-is-required-for-the-loop` holds: the server starts and runs with none.
 
@@ -451,16 +453,17 @@ says `standalone`.
 - **The processor only routes.** tasker-core's command processor grew to 1,164 lines mixing routing,
   validation and logic before actors cut it to about 120. duet starts from the end state: routing is
   a lookup by action name, and the logic is the registry's actions, which are the services.
-- **Actors only for what the server owns:** the player, the file watcher and the log tailer. Each
-  has its own command enum, a bounded channel, and `started`/`stopped` hooks. tasker-core's generic
-  `Handler<M>` trait and `ActorRegistry` are not taken: with three actors, plain enums are simpler.
+- **Actors only for what the server owns:** the player, the file watcher and the journal tailer.
+  Each has its own command enum, a bounded channel, and `started`/`stopped` hooks. tasker-core's
+  generic `Handler<M>` trait and `ActorRegistry` are not taken: with three actors, plain enums are
+  simpler.
 - **Two paths in to one processor.** A `Submit` from the socket, and an `Appended` from the tailer
   when it finds lines another process wrote. tasker-core takes a full message and a bare "a message
   is available" signal the same way (`*FromMessage` and `*FromMessageEvent`).
 - **The watch has a polling fallback,** as tasker-core's notifications do. `notify` can miss events,
-  for instance on a network filesystem or across a sleep. So the tailer also checks the log's length
-  every `[server] log-poll` (default `2s`). A missed watch event is then a late event, never a lost
-  one.
+  for instance on a network filesystem or across a sleep. So the tailer also checks the journal's
+  length every `[server] journal-poll` (default `2s`). A missed watch event is then a late event,
+  never a lost one.
 
 ### The server's channels
 
@@ -472,8 +475,8 @@ CONC-BOUND-2, -3 and -4 apply once these exist.
 |---|---|---|
 | commands into the sequencer | `mpsc` | the sender waits; past `[server.channels] command-timeout` (default `5s`), the client is answered `refused: busy`. A command is never dropped |
 | commands to the player | `mpsc` | the sender waits, as above |
-| file-watch notices into the tailer | `mpsc` | the notice is dropped: any number of "the log changed" means one re-read, and the poll catches up anyway |
-| durable events to subscribers | `broadcast` | a receiver that falls behind gets `RecvError::Lagged`, is sent `lagged` and disconnected, and resumes from the log |
+| file-watch notices into the tailer | `mpsc` | the notice is dropped: any number of "the journal changed" means one re-read, and the poll catches up anyway |
+| durable events to subscribers | `broadcast` | a receiver that falls behind gets `RecvError::Lagged`, is sent `lagged` and disconnected, and resumes from the journal |
 | each transient topic | `watch` | only the latest value is held, by construction |
 
 - **The types do the policy.** `broadcast`'s `Lagged` is the spec's `lagged`, and `watch` holding
@@ -495,7 +498,7 @@ CONC-BOUND-2, -3 and -4 apply once these exist.
 - **Start:** `duet server` in the foreground, or `--background`, which re-executes itself detached
   (`setsid`) and returns once the socket answers. In order:
   1. take an exclusive `flock` on `.duet/run/bus.lock`, or refuse, naming the pid that holds it;
-  2. read the log;
+  2. read the journal;
   3. bind the socket;
   4. write the lock's fields;
   5. accept clients.
@@ -509,11 +512,11 @@ CONC-BOUND-2, -3 and -4 apply once these exist.
   3. send each subscriber `bye`;
   4. stop the player;
   5. remove the socket. The lock is released when the process ends.
-- **Crash and replay:** there is nothing to recover but the log, since events are fsynced before
+- **Crash and replay:** there is nothing to recover but the journal, since events are fsynced before
   they are published and nothing durable lives elsewhere.
   - **A torn last line** (no final newline) is a write that never finished and was never published.
     The next writer, under the lock, cuts it back to the last newline and records the cut in
-    `server.log` and as a transient `log.repaired` topic. That is the only change ever made to a
+    `server.log` and as a transient `journal.repaired` topic. That is the only change ever made to a
     line already in the file ([decision 3](#decisions-for-the-owner)).
   - **Open asks** are re-derived. A `duet wait` that was connected reconnects and resumes from its
     cursor.
@@ -523,8 +526,8 @@ CONC-BOUND-2, -3 and -4 apply once these exist.
   named tokio task under one supervisor that inspects every `JoinError`. Tasks are spawned through a
   small `spawn_named!`, after tasker-core's, so each has a name in a panic message and in `duet
   server status`. A panic in a client's task drops that client and is logged. A panic in the
-  sequencer stops the server, which is restarted by hand. Its state is the log, so a restart loses
-  nothing.
+  sequencer stops the server, which is restarted by hand. Its state is the journal, so a restart
+  loses nothing.
 
 ### Where the prior art changes
 
@@ -544,7 +547,7 @@ function; an audit-only actor id; a polling fallback beside notifications; named
   gated `clippy.toml` (CONC-BOUND-1). duet's are bounded and sized from configuration
   (CONC-BOUND-2).
 - **temper-desktop's `AskBoard` holds asks in memory and cancels them when the surface goes away.**
-  duet's asks live in the log and outlive every face. An ask is withdrawn only by an act.
+  duet's asks live in the journal and outlive every face. An ask is withdrawn only by an act.
 
 ## 5. Seeing each other's actions
 
@@ -578,7 +581,7 @@ in `duet-e2e` drives both directions ([build task 3](#build-tasks)).
 - the bus adds no new way to write a file. Every write is an action's declared output;
 - an action whose input replaces an existing file must carry `replace: true` explicitly, as each
   command's `--replace` does today. The event records it, so a replacement made by `claude` is
-  visible in the log;
+  visible in the journal;
 - Claude's proposals are asks or comp entries, never edits to the owner's files.
 
 ## 6. Crate boundaries
@@ -587,15 +590,15 @@ in `duet-e2e` drives both directions ([build task 3](#build-tasks)).
 
 | Crate | Holds | Depends on | New dependencies |
 |---|---|---|---|
-| `duet-schemas` | adds the `log` stream kind: its head, the entry, and every event's body type, each with a version; the event registry beside `KINDS` | as today | none |
+| `duet-schemas` | adds the `journal` stream kind: its head, the entry, and every event's body type, each with a version; the event registry beside `KINDS` | as today | none |
 | `duet-actions` (new) | the action registry: inputs, outcomes, refusals, and each action's `run`, moved out of `duet-cli`'s modules; the `Context` and its event sink | duet-schemas and the kind crates | none |
-| `duet-bus` (new) | the log writer (lock, append, fsync, torn-tail cut) and reader (tail, cursor), the wire messages, the blocking client, and the server behind a `server` feature (tokio, the sequencer, subscriptions, the player's owner, the watch) | duet-schemas, duet-actions, duet-play | `tokio` 1.54.1 (MIT), `notify` 8.2.2 (CC0-1.0), `fs4` 1.1.0 (MIT OR Apache-2.0) for `flock` |
+| `duet-bus` (new) | the journal writer (lock, append, fsync, torn-tail cut) and reader (tail, cursor), the wire messages, the blocking client, and the server behind a `server` feature (tokio, the sequencer, subscriptions, the player's owner, the watch) | duet-schemas, duet-actions, duet-play | `tokio` 1.54.1 (MIT), `notify` 8.2.2 (CC0-1.0), `fs4` 1.1.0 (MIT OR Apache-2.0) for `flock` |
 | `duet-store` (later) | the SQLite cache | duet-bus | `rusqlite` 0.43.0, bundled (MIT) |
 | `duet-cli` | clap → registry inputs; the new commands; `duet server` runs `duet-bus`'s server | all of the above | none |
 
-- **The event types live in `duet-schemas`,** because the log is a document and its records are its
-  body. The rule that "putting a type in an envelope happens only here" stands. Payloads reuse the
-  kind crates' types where they exist, such as the take digest from PR #73.
+- **The event types live in `duet-schemas`,** because the journal is a document and its records are
+  its body. The rule that "putting a type in an envelope happens only here" stands. Payloads reuse
+  the kind crates' types where they exist, such as the take digest from PR #73.
 - **The blocking client keeps tokio out of every CLI run that doesn't serve.** The client is
   `std::os::unix::net::UnixStream` with timeouts. tokio is linked into the binary for `duet server`,
   but it starts only there.
@@ -611,14 +614,19 @@ in `duet-e2e` drives both directions ([build task 3](#build-tasks)).
 **Proposed.** These sketches show the shape only. Each kind is a Rust type with `JsonSchema`, and
 its schema is committed and gated like every other kind.
 
-### The `log` stream, 1.0
+### The `journal` stream, 1.0
+
+**Named by the owner (2026-11-17),** in review of this spec. It was `log`, but it is more than a
+log, and many things are logs: `.duet/run/server.log` is one, and stays one. It is the shared,
+ordered account of what the owner and Claude did and asked of each other, and every entry is one act
+or what came of it.
 
 The first line is the envelope with a `head`. Every later line is one **entry**.
 
 ```jsonc
 // line 1
-{"$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/log/1.0.json",
- "duet": {"kind": "log", "version": "1.0", "tool": {"name": "duet", "version": "0.4.0"}},
+{"$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/1.0.json",
+ "duet": {"kind": "journal", "version": "1.0", "tool": {"name": "duet", "version": "0.4.0"}},
  "head": {"project": "wayfaring", "id": "0196…00"}}
 // every later line
 {"id": "0196…a2", "at": "2026-11-17T15:04:05.123Z",
@@ -628,20 +636,20 @@ The first line is the envelope with a `head`. Every later line is one **entry**.
  "body": {"ask": "0196…7f3a", "answer": "two", "said": "a new word"}}
 ```
 
-- **The entry's fields are `log` 1.0's:** `id`, `at`, `by`, `cause` (optional), `event`, `v` and
-  `body`. A field added to the entry is a new minor of `log`, as for any kind.
+- **The entry's fields are `journal` 1.0's:** `id`, `at`, `by`, `cause` (optional), `event`, `v` and
+  `body`. A field added to the entry is a new minor of `journal`, as for any kind.
 - **Each event kind versions on its own** (`v`), in the same `major.minor` with the same additive
-  rule. A new event kind, or a new minor of one, does **not** change the log's version. A log lives
-  for months and is appended by every duet the owner runs, including a cloud session's older one. If
-  the head's version had to cover every event, the first event a newer duet wrote would make the
-  file unreadable to every older one. Appending can't rewrite the head.
-- **The departure from the version policy, stated:** a reader refuses a newer minor *of the log
+  rule. A new event kind, or a new minor of one, does **not** change the journal's version. A
+  journal lives for months and is appended by every duet the owner runs, including a cloud session's
+  older one. If the head's version had to cover every event, the first event a newer duet wrote
+  would make the file unreadable to every older one. Appending can't rewrite the head.
+- **The departure from the version policy, stated:** a reader refuses a newer minor *of the journal
   itself*, as for every kind. But an entry whose `event` it doesn't know, or whose `v` is newer than
-  it reads, is **kept verbatim and skipped by projections, and the skip is stated**: `duet log
+  it reads, is **kept verbatim and skipped by projections, and the skip is stated**: `duet journal
   check` lists it, and `duet asks` says "1 event of a kind this duet does not read". The policy
   refuses a newer minor because "writing it back would lose the fields it does not know". An
-  append-only log is never written back, so that reason doesn't apply. An unknown *field* inside a
-  known event at a known version is still refused, as everywhere ([decision
+  append-only journal is never written back, so that reason doesn't apply. An unknown *field* inside
+  a known event at a known version is still refused, as everywhere ([decision
   2](#decisions-for-the-owner)).
 
 ### The events, 1.0 each
@@ -660,7 +668,7 @@ The first line is the envelope with a `head`. Every later line is one **entry**.
 
 **The transient topics** are typed and versioned by the wire's `bus` version, not by any kind, since
 they are never stored: `presence`, `focus`, `playhead`, `progress`, `refused`, `file.changed` and
-`log.repaired`.
+`journal.repaired`.
 
 **Commands are not a kind.** Each command's input is its action's input type, and its schema is
 published with the registry, since an MCP tool's `inputSchema` and the app's forms come from it.
@@ -672,8 +680,8 @@ constraints the bus must not close off. They are not designs.
 
 - **The channel shim, `duet channel`.**
   - **What it is:** a stdio MCP server that Claude Code spawns. It declares
-    `capabilities.experimental['claude/channel']`, joins the bus as a client (or tails the log when
-    no server runs, as `watch` does), and pushes each matching event as
+    `capabilities.experimental['claude/channel']`, joins the bus as a client (or tails the journal
+    when no server runs, as `watch` does), and pushes each matching event as
     `notifications/claude/channel {content, meta}`.
   - **`meta` keys are identifiers** (`event`, `seq`, `ask`), since a hyphenated key is silently
     dropped.
@@ -708,7 +716,7 @@ constraints the bus must not close off. They are not designs.
 
 ## What this asks of the project layout
 
-The project design's §10 already reserves `log.duet.jsonl` (committed), `.duet/run/` and
+The project design's §10 already reserves `journal.duet.jsonl` (committed), `.duet/run/` and
 `.duet/state/` (ignored), and `DUET_PROJECT`. This spec uses them as they stand. It asks for four
 things more. These are its view, for the owner to rule with that spec, since this spec doesn't
 design the layout:
@@ -719,13 +727,13 @@ design the layout:
 2. **A stale lock is left for the next server to overwrite, not cleared by the CLI.** The `flock`
    says the lock is stale, so the file is harmless. A CLI that deleted it could race a server that
    is just starting.
-3. **`duet init` writes `log.duet.jsonl merge=union` into `.gitattributes`.** Two clones that each
-   appended merge without a conflict: git's union driver keeps both sides' lines. Order after a
+3. **`duet init` writes `journal.duet.jsonl merge=union` into `.gitattributes`.** Two clones that
+   each appended merge without a conflict: git's union driver keeps both sides' lines. Order after a
    merge is the file's order, `id`s stay unique, and a subscriber whose cursor no longer matches
    gets `resync` (§1). Projections already tolerate an answer that appears before its ask. Cloud
    sessions reach the bus through the folder attach, so this is rare, and it is not worth a
    conflict.
-4. **The log is one file, never rotated, in v1.** At a few hundred bytes an event, a year of
+4. **The journal is one file, never rotated, in v1.** At a few hundred bytes an event, a year of
    sessions is a few megabytes. Rotation, if ever needed, is a later minor of the project's layout.
 
 ## Build tasks
@@ -733,30 +741,31 @@ design the layout:
 Each names its witness. None is built before the one it needs. Tests that run the binary go in
 `crates/duet-e2e`, per CLAUDE.md.
 
-**1. The `log` kind, and the log writer and reader.**
-- **What:** `log` 1.0 and [the events](#the-events-10-each) in `duet-schemas`, with schemas,
+**1. The `journal` kind, and the journal writer and reader.**
+- **What:** `journal` 1.0 and [the events](#the-events-10-each) in `duet-schemas`, with schemas,
   examples and the gate. In `duet-bus`: append under the lock with fsync, the torn-tail cut, the
-  tail with a cursor, and `duet log show | check`.
+  tail with a cursor, and `duet journal show | check`.
 - **Witnesses:**
-  - A log round-trips exactly: read, then written, is byte-identical. Every event validates against
-    its schema.
+  - A journal round-trips exactly: read, then written, is byte-identical. Every event validates
+    against its schema.
   - Two processes appending 1 000 events each, concurrently, leave 2 001 whole lines, every `id`
     unique.
   - A file cut mid-line is cut back to the last newline by the next append, and nothing before it
     changes.
   - An entry of an unknown event kind, and one of a newer event minor, stay byte for byte as they
-    were after later appends. `log check` lists them, and an unknown *field* in a known event is
+    were after later appends. `journal check` lists them, and an unknown *field* in a known event is
     refused by name.
-  - A union merge of two appended clones reads, and `log check` reports nothing wrong.
-  - A log holding two answers to one ask (a merge, written by hand in the test) replays: the first
-    answer in file order stands, and `log check` lists the second.
+  - A union merge of two appended clones reads, and `journal check` reports nothing wrong.
+  - A journal holding two answers to one ask (a merge, written by hand in the test) replays: the
+    first answer in file order stands, and `journal check` lists the second.
 
 **2. The action registry.**
 - **Needs:** 1.
 - **What:** `duet-actions`, with every current command's work moved into it, behaviour unchanged.
   Every action emits `doc.written` for what it writes.
 - **Witnesses:**
-  - The whole existing `duet-e2e` suite passes unchanged, outside a project, with no log written.
+  - The whole existing `duet-e2e` suite passes unchanged, outside a project, with no journal
+    written.
   - The registry witness: every action has a CLI path, and every file-writing subcommand is an
     action.
   - Inside a project, `duet capture melody wayfaring` appends exactly the `doc.written` events for
@@ -772,17 +781,17 @@ Each names its witness. None is built before the one it needs. Tests that run th
     - a watcher started with `--not-by claude` receives exactly the owner's four answers, in order,
       each naming the ask it answers;
     - `duet asks` is empty after;
-    - the log holds four `ask.asked` and four `ask.answered`.
+    - the journal holds four `ask.asked` and four `ask.answered`.
   - **Mid-review,** after two answers, the server is killed (SIGKILL). The third answer is given
     standalone. The server is started again. The watcher, reconnected from its cursor, receives the
     third answer and then the fourth, with nothing twice and nothing lost.
-  - **With no server at any point,** the same script leaves the same log apart from `id`s and `at`s,
-    and `duet watch --from start` prints the same eight events.
+  - **With no server at any point,** the same script leaves the same journal apart from `id`s and
+    `at`s, and `duet watch --from start` prints the same eight events.
   - **A CLI from another build** (`DUET_E2E_BIN` pointed at an older binary) is refused joining by
     registry and runs standalone. It says so, and the server's watcher still receives its event.
   - **`duet server status` exits** 0 joined, 1 standalone with the stale lock's pid named, and 2
     outside a project.
-  - **Two standalone CLIs answer one ask at the same moment,** 100 times over. Each time the log
+  - **Two standalone CLIs answer one ask at the same moment,** 100 times over. Each time the journal
     holds exactly one `ask.answered`, and the other CLI is refused `already-answered`.
   - **Every channel at size 4** (from the test project's `duet.toml`): a watcher that stops reading
     is sent `lagged`, resumes from its cursor and misses nothing; a burst of 50 submissions all
@@ -799,7 +808,7 @@ Each names its witness. None is built before the one it needs. Tests that run th
 - **Witnesses:**
   - Claude's `duet play wayfaring@2.15-3.58 --for owner` and the owner's `duet stop`, from two
     processes, act on one player: the play stops and the topic says so.
-  - One `moment.played` is logged per play, and none per playhead update.
+  - One `moment.played` is journalled per play, and none per playhead update.
   - Standalone, `play` plays in-process as at `main`.
 
 **5. Idle exit, background mode, and the project watch.**
@@ -807,9 +816,10 @@ Each names its witness. None is built before the one it needs. Tests that run th
 - **Witnesses:**
   - A background server with `idle = "2s"` and no clients exits, and releases the lock.
   - With a `watch` connected it stays up.
-  - An edit to `comps/…` made outside duet publishes `file.changed` and logs nothing.
+  - An edit to `comps/…` made outside duet publishes `file.changed` and writes nothing to the
+    journal.
   - With the watch turned off in the test, a line appended by another process still reaches a
-    watcher within `log-poll`.
+    watcher within `journal-poll`.
 
 **6. The channel shim.**
 - **Needs:** 3. **Later, and optional:** it needs channels available and the shim's handshake
@@ -825,20 +835,20 @@ proven (ruled), and the store comes with the first face that needs it (decision 
 1. **The durable/ephemeral line** ([§2](#2-durable-and-ephemeral)). The proposal: three tiers, as
    the parent session proposed, with these changes:
    - anything a person or Claude acts on (open asks, a review in progress) is a projection of the
-     log, never store-only;
+     journal, never store-only;
    - the store holds only view state and caches;
    - the store, SQLite through rusqlite, is not built until a face needs it.
 
    *Recommended: yes.*
 2. **Event kinds version on their own, and a reader keeps an unknown event verbatim and states the
-   skip** ([The `log` stream](#the-log-stream-10)), rather than refusing the whole log. It is a
-   stated departure from the version policy, justified by its own reason: nothing writes a log back.
-   *Recommended: yes.*
+   skip** ([The `journal` stream](#the-journal-stream-10)), rather than refusing the whole journal.
+   It is a stated departure from the version policy, justified by its own reason: nothing writes a
+   journal back. *Recommended: yes.*
 3. **`seq` is the line's position, not a stored field. Lines carry a UUIDv7 `id`. A torn last line
    is cut back by the next writer** ([§1](#sequencing-and-resuming), [§4](#lifecycle)). The
    alternative stores `seq`, which a union merge breaks. *Recommended: position, with the cut.*
-4. **A refusal is published but not logged** ([§1](#commands-in-events-out)). The ideation had
-   refusals as events. *Recommended: not logged, since it changes nothing.*
+4. **A refusal is published but not journalled** ([§1](#commands-in-events-out)). The ideation had
+   refusals as events. *Recommended: not journalled, since it changes nothing.*
 5. **An edit made outside duet is a transient `file.changed`, not a durable event**
    ([§4](#what-it-owns)). *Recommended: transient. The act that matters is the next duet command
    that reads the file.*
@@ -858,15 +868,17 @@ proven (ruled), and the store comes with the first face that needs it (decision 
     yes. It keeps one execution path.*
 11. **The crates: `duet-actions` and `duet-bus` are new, events live in `duet-schemas`, and the
     store is its own crate later** ([§6](#6-crate-boundaries)). *Recommended: yes.*
-12. **`.gitattributes` gives the log `merge=union`** ([What this asks of the project
+12. **`.gitattributes` gives the journal `merge=union`** ([What this asks of the project
     layout](#what-this-asks-of-the-project-layout)), written by `duet init`. *Recommended: yes, to
     rule with the project design.*
-13. **The transition check and the append happen as one step, under the log lock**
+13. **The transition check and the append happen as one step, under the journal lock**
     ([§1](#lifecycles-as-state-machines)), so two processes can't both answer one ask. *Recommended:
     yes.*
 14. **Replay is lenient:** a transition that fails on replay is skipped, the first in file order
-    wins, and `duet log check` lists it ([§1](#lifecycles-as-state-machines)). **Ruled (owner,
+    wins, and `duet journal check` lists it ([§1](#lifecycles-as-state-machines)). **Ruled (owner,
     2026-11-17).**
+15. **The stream is the journal:** `journal.duet.jsonl`, kind `journal`, `duet journal show | check`
+    ([The `journal` stream](#the-journal-stream-10)). **Ruled (owner, 2026-11-17).**
 
 ## Not decided here
 
@@ -874,7 +886,7 @@ proven (ruled), and the store comes with the first face that needs it (decision 
 - **The MCP tools face, the channel shim's details and the Tauri app:** later faces (ruled),
   sketched in §7.
 - **Windows:** the CLI is always standalone there in v1.
-- **Rotation of the log:** not in v1.
+- **Rotation of the journal:** not in v1.
 - **Which conventions statuses change, and when:** each build task records them as it lands.
   CONC-BOUND-2/3/4 and CONC-FAIL-1/2/3 apply with task 3, and SEC-TEST-1's "nothing ships a server"
   stops being true then. RUST-SQL-1, SEC-SQL-1 and CONC-DB-* apply with the store.
