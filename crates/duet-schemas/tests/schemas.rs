@@ -490,8 +490,9 @@ fn example_grid() -> duet_drums::DrumGrid {
 /// A melody take's analysis that uses every field: each kind of event, an estimated tempo with
 /// its half and double, a given meter, an estimated downbeat, a key with its evidence, the tempo
 /// beat by beat, the grid, the quantize offsets, and the reading (1.1) with a note between keys
-/// and a note with excursions (1.6), rejoined from two decoded notes (1.7), and a note carried
-/// on over its breathy fall (1.9).
+/// and a note with excursions (1.6), rejoined from two decoded notes (1.7), a note carried
+/// on over its breathy fall (1.9), and a note made from a pitch held before the note it reaches,
+/// suggested a likely approach to it (1.11).
 pub fn example_analysis() -> Analysis {
     serde_json::from_value(json!({
         "rate": 22050,
@@ -583,6 +584,22 @@ pub fn example_analysis() -> Analysis {
                                "centre": 38.0, "between_keys": true, "confidence": 0.90625,
                                "strength": 0.5 },
                   "end": 32600, "lowest_db": -9.5, "loss_change": 2.25 }
+            ],
+            "held": [
+                { "decoded": { "start": 34100, "end": 41500, "held_from": 36400, "key": 70,
+                               "centre": 4.5, "between_keys": false, "confidence": 0.875,
+                               "strength": 0.75 },
+                  "notes": [
+                      { "start": 34100, "end": 35900, "held_from": 34600, "key": 69,
+                        "centre": 21.5, "between_keys": false, "confidence": 0.84375,
+                        "strength": 0.75 }
+                  ],
+                  "loss_change": 1.625 }
+            ],
+            "suggestions": [
+                { "start": 34100, "key": 69, "suggests": "likely-approach",
+                  "rule": "semitone-with-drift", "next_key": 70, "step": 1,
+                  "drift_cents": 43.5 }
             ]
         }
     }))

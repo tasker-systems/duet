@@ -1274,7 +1274,7 @@ fn a_basic_pitch_reader_round_trips_exactly_through_json() {
     // capture-analysis 1.8: a reading by Basic Pitch names its reader `basic-pitch`, and the
     // document writes back as the text it was read from. As 1.8 and 1.9 wrote it, it has no
     // thresholds.
-    let text = analysis_example("1.10").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
+    let text = analysis_example("1.11").replace(r#""name": "hmm""#, r#""name": "basic-pitch""#);
     assert!(
         text.contains(r#""name": "basic-pitch""#),
         "the example has no hmm reader"
@@ -1310,7 +1310,7 @@ fn a_basic_pitch_readers_thresholds_round_trip_exactly_through_json() {
         "          \"minimum_note_length_ms\": 211.3\n",
         "        }\n",
     );
-    let example = analysis_example("1.10");
+    let example = analysis_example("1.11");
     assert!(
         example.contains(hmm),
         "the example's reader is not as written here"
@@ -1345,7 +1345,7 @@ fn a_basic_pitch_readers_thresholds_round_trip_exactly_through_json() {
 fn a_notes_excursions_round_trip_exactly_through_json() {
     // capture-analysis 1.6, at the current version's example: every excursion's start, end and
     // cents read back to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.10");
+    let text = analysis_example("1.11");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1395,7 +1395,7 @@ fn rejoins_in(text: &str) -> Option<serde_json::Value> {
 fn a_readings_rejoins_round_trip_exactly_through_json() {
     // capture-analysis 1.7: every decoded note, dip and loss change a rejoin states reads back
     // to the bit, and the document writes back as the text it was read from.
-    let text = analysis_example("1.10");
+    let text = analysis_example("1.11");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1447,7 +1447,7 @@ fn a_readings_breathy_notes_round_trip_exactly_through_json() {
     // capture-analysis 1.9: every note the breathy pass carried on reads back, as decoded, with
     // its end, its quietest kept frame and its loss change to the bit, and the document writes
     // back as the text it was read from.
-    let text = analysis_example("1.10");
+    let text = analysis_example("1.11");
     let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
         panic!("read as another kind");
     };
@@ -1480,6 +1480,78 @@ fn a_document_before_breathy_notes_reads_as_one_with_none_and_writes_none() {
     assert!(doc.body.reading.as_ref().unwrap().breathy.is_empty());
     let written = doc.write().unwrap();
     assert_eq!(breathy_in(&written), None);
+    let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(again, doc);
+}
+
+/// The reading's `field` in a capture-analysis document's text, `None` where it has none.
+fn reading_field(text: &str, field: &str) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(text).unwrap();
+    value["body"]["reading"].get(field).cloned()
+}
+
+#[test]
+fn a_readings_held_notes_and_suggestions_round_trip_exactly_through_json() {
+    // capture-analysis 1.11: every note the held-pitch pass made reads back, with the note it
+    // reaches as decoded and its loss change to the bit; every suggestion reads back with its
+    // step, drift and rule; and the document writes back as the text it was read from.
+    let text = analysis_example("1.11");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    assert_eq!(doc.write().unwrap(), text);
+    let reading = doc.body.reading.as_ref().unwrap();
+    let [held] = reading.held.as_slice() else {
+        panic!("one note reached: {:?}", reading.held);
+    };
+    assert!(held.decoded.residual.is_none());
+    assert_eq!((held.decoded.start, held.decoded.held_from), (34100, 36400));
+    let [made] = held.notes.as_slice() else {
+        panic!("one note made: {:?}", held.notes);
+    };
+    assert_eq!((made.start, made.end, made.key), (34100, 35900, 69));
+    assert_eq!(made.centre.to_bits(), 21.5f32.to_bits());
+    assert_eq!(held.loss_change.to_bits(), 1.625f64.to_bits());
+    let [suggestion] = reading.suggestions.as_slice() else {
+        panic!("one suggestion: {:?}", reading.suggestions);
+    };
+    assert_eq!(
+        (
+            suggestion.start,
+            suggestion.key,
+            suggestion.next_key,
+            suggestion.step
+        ),
+        (34100, 69, 70, 1)
+    );
+    assert_eq!(suggestion.drift_cents.to_bits(), 43.5f32.to_bits());
+    assert_eq!(
+        reading_field(&text, "suggestions").unwrap()[0]["rule"],
+        serde_json::json!("semitone-with-drift")
+    );
+    assert!(
+        reading_field(&text, "held").unwrap()[0]["notes"][0]
+            .get("residual")
+            .is_none(),
+        "a made note is written without its residual"
+    );
+}
+
+#[test]
+fn a_document_before_held_notes_reads_as_one_with_none_and_writes_none() {
+    // A 1.10 document's held pitches are as its reader read them, with nothing suggested: read
+    // today, its reading states neither, and writing it states neither, rather than empty lists.
+    let text = analysis_example("1.10");
+    let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
+        panic!("read as another kind");
+    };
+    let reading = doc.body.reading.as_ref().unwrap();
+    assert!(reading.held.is_empty() && reading.suggestions.is_empty());
+    let written = doc.write().unwrap();
+    assert_eq!(reading_field(&written, "held"), None);
+    assert_eq!(reading_field(&written, "suggestions"), None);
     let AnyDocument::CaptureAnalysis(again) = AnyDocument::read(&written).unwrap() else {
         panic!("read as another kind");
     };

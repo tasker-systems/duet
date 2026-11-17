@@ -146,7 +146,8 @@ fn the_note_hmm_matches_every_melody_transcription_and_both_losses_are_reported(
 }
 
 /// Every listened take reads, by the note HMM with nothing given, in the key the owner
-/// agreed, on the tuning they agreed, with about the number of notes they heard. Nothing
+/// agreed, on the tuning they agreed, with about the number of notes they heard and about the
+/// number of excursions the reading held when they ruled on it. Nothing
 /// about any one note is held: the owner judged the melody's shape, not each note.
 #[test]
 fn every_listened_take_reads_as_the_owner_judged_it() {
@@ -199,7 +200,22 @@ fn every_listened_take_reads_as_the_owner_judged_it() {
                 take.notes, take.notes_within
             ));
         }
-        eprintln!("listened: {name}: key {want}, tuning {cents:+.1} cents, {notes} notes");
+        let excursions: usize = read
+            .notes
+            .iter()
+            .filter_map(|n| n.residual.as_ref())
+            .map(|r| r.excursions.len())
+            .sum();
+        if excursions.abs_diff(take.excursions) > take.excursions_within {
+            failures.push(format!(
+                "{name}: excursions: expected {} ± {}, found {excursions}",
+                take.excursions, take.excursions_within
+            ));
+        }
+        eprintln!(
+            "listened: {name}: key {want}, tuning {cents:+.1} cents, {notes} notes, \
+             {excursions} excursions"
+        );
     }
     assert!(
         failures.is_empty(),

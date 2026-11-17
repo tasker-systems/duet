@@ -777,6 +777,58 @@ fn a_rejoined_dip_is_stated_and_written_in_the_analysis() {
 }
 
 #[test]
+fn a_held_approach_is_made_a_note_suggested_stated_and_written_in_the_analysis() {
+    // A B-flat held first on A +40 for 0.12 s and reached by a glide of 20 ms, among plain
+    // notes: the note HMM takes the A in as the B-flat's attack, and the reading's held-pitch
+    // pass makes it a note of its own and suggests it a likely approach, saying both.
+    let dir = scratch("capture-held");
+    let notes = [(63, 0.5), (67, 0.5), (70, 1.0), (67, 0.5), (63, 1.0)];
+    let approach = |note: usize, t: f64| match t {
+        _ if note != 2 => 0.0,
+        t if t < 0.06 => -100.0,
+        t if t < 0.12 => -60.0,
+        t if t < 0.14 => -60.0 + 60.0 * (t - 0.12) / 0.02,
+        _ => 0.0,
+    };
+    let wav = take(&dir, "held.wav", &audio::notes_bent(0.5, &notes, approach));
+    let out = capture(&dir, &["melody", s(&wav), "--tempo", "120"]);
+    ok(&out, "capture melody");
+    let err = stderr(&out);
+    let stated = document_of(&dir.join("held.duet")).statements;
+    for opening in [
+        "held: 1 note made from a pitch held before the note it reaches",
+        "likely approach to the next note: ",
+    ] {
+        let line = err
+            .lines()
+            .find(|l| l.starts_with(opening))
+            .unwrap_or_else(|| panic!("no {opening:?}: {err}"));
+        assert!(stated.iter().any(|l| l == line), "{stated:?}");
+    }
+    let analysis = analysis_of(&dir.join("held.capture.duet"));
+    let reading = &analysis["reading"];
+    let keys: Vec<u64> = reading["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["key"].as_u64().unwrap())
+        .collect();
+    assert_eq!(keys, [63, 67, 69, 70, 67, 63], "{reading}");
+    let held = reading["held"]
+        .as_array()
+        .expect("the held note is written");
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0]["decoded"]["key"], 70);
+    let suggestions = reading["suggestions"]
+        .as_array()
+        .expect("the suggestion is written");
+    assert_eq!(suggestions.len(), 1, "{suggestions:?}");
+    assert_eq!(suggestions[0]["key"], 69);
+    assert_eq!(suggestions[0]["suggests"], "likely-approach");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
 fn a_given_tempo_is_not_reported_as_an_estimate() {
     let dir = scratch("capture-given");
     let wav = take(&dir, "tune.wav", &eb_major());

@@ -62,6 +62,7 @@ mod basic_pitch;
 mod breathy;
 mod error;
 mod event;
+mod held;
 mod hits;
 mod hmm;
 mod key;
@@ -83,6 +84,10 @@ pub use basic_pitch::{BasicPitch, BasicPitchRead, MODEL_SHA256};
 pub use breathy::{BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, breathe};
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};
+pub use held::{
+    APPROACH_DRIFT_CENTS, HELD_PITCH_SECS, Held, NEXT_NOTE_GAP_SECS, Suggestion, SuggestionRule,
+    Suggests, hold_apart,
+};
 pub use hits::{Hits, LaneMode};
 pub use hmm::{
     ATTACK_COST, DROPOUT, LAG_SECS, NoteModel, ONSET_LEAVE, STABLE_SIGMA_SEMITONES, VOICING_FLOOR,

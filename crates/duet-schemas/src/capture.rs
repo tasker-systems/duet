@@ -60,7 +60,17 @@ use crate::{Kind, Version};
 /// frame threshold and minimum note length, in Basic Pitch's own names, that a basic-pitch
 /// reading's notes were decoded with. Only a basic-pitch reader has them. A 1.9 basic-pitch
 /// reading has none, and was decoded with Basic Pitch's defaults (0.5, 0.3 and 127.7 ms).
+///
+/// **1.11** adds the reading's optional `held` and `suggestions`, also additive. `held` states
+/// each note the reading's held-pitch pass made from a pitch held at least the shortest note
+/// before the note it reaches: the note reached as its reader `decoded` it, the `notes` made, and
+/// the `loss_change` they made, in nats. `suggestions` states each note likely an approach to
+/// the next (`suggests`: `likely-approach`), by its `start` and `key`, with the `next_key`, the
+/// `step` to it in semitones, the held pitch's `drift_cents` toward it over its last quarter, and
+/// the `rule` that fired (`semitone-with-drift`). A suggestion changes no note. Both are omitted
+/// when there are none, so a 1.10 document reads as one whose held pitches are as its reader
+/// read them, with nothing suggested.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 10);
+    const VERSION: Version = Version::new(1, 11);
 }

@@ -252,6 +252,8 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         said.push(statement::notes_read(reading));
         said.extend(statement::breathy(reading, ANALYSIS_RATE));
         said.extend(statement::rejoined(reading));
+        said.extend(statement::held(reading));
+        said.extend(statement::suggestions(reading, ANALYSIS_RATE));
     }
     said.extend(statement::key(captured.analysis.key.as_ref()));
     captured.analysis.reading = reading;

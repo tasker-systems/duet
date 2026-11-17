@@ -157,6 +157,8 @@ pub fn rejoin(reading: Reading, frames: &PerformanceFrames, onsets: &[Event]) ->
     let mut out = Reading::of(reading.tuning, reader, notes, parts, take);
     out.rejoins = rejoins;
     out.breathy = reading.breathy;
+    out.held = reading.held;
+    out.suggestions = reading.suggestions;
     out
 }
 

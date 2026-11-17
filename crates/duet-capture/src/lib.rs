@@ -83,8 +83,9 @@ pub use duet_dsp::{
     beat_series, estimate, estimate_key, estimate_tuning, felt_quarters, is_compound, read,
 };
 pub use duet_dsp::{
-    BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, Dip, REJOIN_CENTS, Rejoin, breathe, interpret,
-    read_as_decoded, rejoin,
+    APPROACH_DRIFT_CENTS, BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, Dip, HELD_PITCH_SECS,
+    Held, NEXT_NOTE_GAP_SECS, REJOIN_CENTS, Rejoin, Suggestion, SuggestionRule, Suggests, breathe,
+    hold_apart, interpret, read_as_decoded, rejoin,
 };
 #[cfg(feature = "basic-pitch")]
 pub use duet_dsp::{BasicPitch, BasicPitchRead, MODEL_SHA256};

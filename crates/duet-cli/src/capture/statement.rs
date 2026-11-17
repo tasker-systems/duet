@@ -158,6 +158,46 @@ pub fn breathy(reading: &Reading, rate: u32) -> Option<String> {
     ))
 }
 
+/// How many notes the reading's held-pitch pass made from pitches held before the note they
+/// reach, and what they did to the loss, in nats: stated only when it made any, so that a note
+/// its reader did not read is never hidden.
+pub fn held(reading: &Reading) -> Option<String> {
+    let n: usize = reading.held.iter().map(|h| h.notes.len()).sum();
+    if n == 0 {
+        return None;
+    }
+    let change: f64 = reading.held.iter().map(|h| h.loss_change).sum();
+    Some(format!(
+        "held: {n} note{} made from a pitch held before the note it reaches, the loss {change:+.1} nats",
+        if n == 1 { "" } else { "s" }
+    ))
+}
+
+/// Each note the reading suggests is likely an approach to the next, by where it starts in
+/// seconds and its key: stated only when there is one. A suggestion changes no note.
+pub fn suggestions(reading: &Reading, rate: u32) -> Option<String> {
+    if reading.suggestions.is_empty() {
+        return None;
+    }
+    let each: Vec<String> = reading
+        .suggestions
+        .iter()
+        .map(|s| {
+            format!(
+                "{:.2} s (key {}, a semitone {} with {:+.0} cents of drift toward it)",
+                s.start as f64 / f64::from(rate),
+                s.key,
+                if s.step > 0 { "up" } else { "down" },
+                s.drift_cents
+            )
+        })
+        .collect();
+    Some(format!(
+        "likely approach to the next note: {}; kept as notes",
+        each.join(", ")
+    ))
+}
+
 /// The key, stated only when it was estimated, with its relative major or minor.
 pub fn key(key: Option<&KeyEstimate>) -> Option<String> {
     let estimate = key?;

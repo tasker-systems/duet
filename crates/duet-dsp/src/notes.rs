@@ -10,7 +10,7 @@ use crate::stage::{Mono, Stage};
 pub(crate) const SHORTEST_NOTE_SECS: f64 = 0.05;
 /// How far, in semitones, the pitch must move from where a note is held to count as leaving it.
 /// Above vibrato's usual swing of up to half a semitone, below a semitone step.
-const CHANGE_SEMITONES: f32 = 0.7;
+pub(crate) const CHANGE_SEMITONES: f32 = 0.7;
 /// How widely, in semitones, a slide's frames over [`CHANGE_HOLD_SECS`] may spread for its
 /// pitch to have arrived. A vibrato of 40 cents either side at 7 a second spreads about 0.2
 /// over that span at each turn of its swing; a glide of 7.5 semitones a second spreads this

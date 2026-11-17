@@ -346,8 +346,8 @@ impl NoteModel {
     /// `given`, A4 in absolute cents, or on the tuning estimated from the frames, as
     /// [`read`](crate::read) does, with the notes chosen by this model. Then the reading's
     /// interpretive passes are run over them ([`interpret`](crate::interpret)), the breathy
-    /// ornament and the same-key rejoin: [`NoteModel::read_as_decoded`] is the reading before
-    /// them.
+    /// ornament, the same-key rejoin and the held pitch: [`NoteModel::read_as_decoded`] is the
+    /// reading before them.
     #[must_use]
     pub fn read(
         &self,
