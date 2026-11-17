@@ -7,8 +7,7 @@ stand"), with two dropped and two changed, and added one: temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, read together with the domain model, temper
 `01a1eb48-6b7a-7797-bb2b-68f335de87e9`. The rulings are listed in
 [Decisions (ruled 2026-11-17)](#decisions-ruled-2026-11-17). Decisions 12 and 13, taken in from the
-bus design after the eleven were set out, are still open, and one line `init` writes is in tension
-with a ruling ([§3](#3-what-duet-init-writes)). What is still marked **Proposed** is the design those
+bus design after the eleven were set out, are still open. What is still marked **Proposed** is the design those
 rulings rest on: the owner ruled its decisions, not each line. Nothing here is built.
 
 **Builds on:**
@@ -117,7 +116,6 @@ porch/                              the project: any directory, outside the duet
     takes.local.toml                where named takes live on this machine      machine-local
     run/                            the server's socket and lock, when running  machine-local
     state/                          the view-state store, when a face needs it  machine-local
-  .gitattributes                    one line, in tension with decision 7 (§3)
   journal.duet.jsonl                the domain-event journal                    the journal
   takes/
     wayfaring/                      one take: its source and everything from it
@@ -296,18 +294,16 @@ It writes, and prints each path it wrote:
 2. **`.duet/duet.toml`**, only if absent: every line a comment, naming what may be set here
    (`[song] end`, `[play] soundfont`, `[lanes.*]`), so it changes nothing until edited. An existing
    one is left alone and named.
-3. **`.gitattributes`**: `journal.duet.jsonl merge=union`, appended between marker lines to an
-   existing file, so two clones that each appended to the journal merge without a conflict.
-   **Ruled** (owner, 2026-11-17, the bus design's decision 12). **In tension with project decision
-   7, for the owner to rule:** decision 7 rules that git is not duet's concern and `init` writes no
-   git file. This line is kept as the bus design ruled it until the owner rules between the two.
 
 It does not:
 - **overwrite.** A directory that already holds `.duet/project.duet` is refused, naming it. A
   `.duet/` with only config in it is adopted: it gains a project document and keeps its config.
 - **move, copy or delete anything.** Adopting files is a separate, explicit step
   ([§7](#7-adopting-scratch-work)).
-- **write a `.gitignore`, run git, or print a git line.** **Ruled** (decision 7).
+- **write a `.gitignore` or a `.gitattributes`, run git, or print a git line.** **Ruled** (decision
+  7, and its amendment of the bus design's decision 12). The journal is append-only, one event
+  per line, so it tolerates a union merge; someone who keeps a project in git may add
+  `journal.duet.jsonl merge=union` themselves, and duet doesn't write it.
 - **make directories** beyond `.duet/`.
 - **make a song.** `duet song new <name>` does that
   ([the songs design](2026-11-17-songs-and-composition-design.md)).
@@ -392,8 +388,9 @@ duet take list                                              # every take, where 
   meter and key from the take. When the take is linked to a song, it states where its estimate
   disagrees with that song's composition. A take is placed on the song's bars by the song's tempo
   map plus an offset (the click case). A value the owner gives a take (`--tempo`) is remembered on
-  the take's `given`, and used by every later capture of it, stated as given. How a take recorded
-  without a click is placed is open ([the songs design](2026-11-17-songs-and-composition-design.md#open-questions)).
+  the take's `given`, and used by every later capture of it, stated as given. A take recorded
+  without a click is placed by its estimated tempo by default, until the owner sets one (ruled,
+  temper `01a1eb48`, ruling 8; [the songs design](2026-11-17-songs-and-composition-design.md#takes-without-a-click)).
 
 **What never changes:** a given flag wins, every file still says what it is by its envelope, and
 no command needs a project. Outside one, every command works exactly as today.
@@ -411,8 +408,8 @@ no command needs a project. Outside one, every command works exactly as today.
   `.gitignore`, and never a property of a project.
 - **Git is not duet's concern.** Someone may keep a project in git, but duet neither assumes nor
   manages that: `init` writes no `.gitignore`, runs no git and prints no git line, and no command
-  reads git's state. The one git file `init` still writes, `.gitattributes`, is in tension with
-  this ruling and is for the owner to rule ([§3](#3-what-duet-init-writes)).
+  reads git's state. That includes `.gitattributes`: the owner amended the bus design's decision 12
+  so that `init` no longer writes `merge=union` for the journal ([§10](#10-what-the-layout-holds-for-the-bus)).
 - **Renders are rebuildable files in `renders/`,** with no special status. Deleting `renders/`
   loses nothing that cannot be made again.
 - **The journal names takes by name and digest, never by path,** so it holds no machine's path and
@@ -495,9 +492,10 @@ What the layout holds:
    to it under the journal lock. It carries each song's history, since a session is not a duet
    entity (the domain model, ruling 1). It names takes by name and digest, never by path
    ([§6](#6-no-sharing-status-and-no-git)).
-   - **Git merges it by union** (`.gitattributes`, written by `init`,
-     [§3](#3-what-duet-init-writes)). **Ruled** (the bus design's decision 12). **In tension with
-     project decision 7, for the owner to rule.**
+   - **`init` writes no `.gitattributes`.** The journal is append-only, one event per line, so it
+     tolerates a union merge; someone who keeps a project in git may add
+     `journal.duet.jsonl merge=union` themselves, and duet doesn't write it. **Ruled** (owner,
+     2026-11-17, temper `01a1eb60`, amending the bus design's decision 12).
    - **One file, never rotated, in v1.** A year of sessions is a few megabytes. Rotation, if ever
      needed, is a later change to the layout. **Proposed** (the bus design's layout ask 4;
      [decision 12](#still-open)).
@@ -588,7 +586,9 @@ read with the domain model (temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`).
    estimates from the take and states where it disagrees with the linked song's composition. A take
    is placed on the song's bars by the song's tempo map plus an offset (the click case). A value the
    owner gives a take is remembered for that take ([§5](#5-how-commands-find-and-use-a-project)).
-7. **`duet init` and git.** **Dropped.** `init` writes no `.gitignore` and prints no git line
+7. **`duet init` and git.** **Dropped.** `init` writes no `.gitignore` and no `.gitattributes`,
+   and prints no git line. This amends the bus design's decision 12, which had `init` write
+   `journal.duet.jsonl merge=union`
    ([§3](#3-what-duet-init-writes), [§6](#6-no-sharing-status-and-no-git)).
 8. **The takes directory is `takes/`.** **Yes.** Named for what it holds, and kept at the project
    root because a take belongs to the project and can serve several songs ([§1](#1-the-layout)).
@@ -601,8 +601,8 @@ read with the domain model (temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`).
 - **New: where a song's files live.** **One folder per song:** `songs/<song>/` holds `song.duet`
   (the song and its composition), `parts/`, `comps/` and `snapshots/` ([§1](#1-the-layout)).
 
-**What fell out of the design:** `duet project check`, the `.gitignore` block, the `kept` and
-`restriction` fields, the idea of "the authored half as its own repository", §6 as a licence
+**What fell out of the design:** `duet project check`, the `.gitignore` block and the
+`.gitattributes` line, the `kept` and `restriction` fields, the idea of "the authored half as its own repository", §6 as a licence
 boundary, and the "Shared?" column of the layout table.
 
 ### Still open
@@ -613,11 +613,6 @@ Added from the bus design after the eleven were set out, and not among the owner
     ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
 13. **A stale `.duet/run/bus.lock` is left for the next server to overwrite,** not cleared by the
     CLI ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
-
-And one tension, for the owner to rule:
-- **`init` writes `.gitattributes` with `journal.duet.jsonl merge=union`** (the bus design's ruled
-  decision 12), while decision 7 rules that git is not duet's concern. Kept as written until ruled
-  ([§3](#3-what-duet-init-writes)).
 
 ## Not decided here
 
