@@ -80,7 +80,10 @@ fn readings(by: By, frames: &PerformanceFrames, onsets: &[Event]) -> (Reading, R
             NoteModel::default().read(frames, onsets, given),
         ),
     };
-    (crate::breathe(decoded, frames, onsets), read)
+    (
+        crate::breathe(decoded, frames, onsets),
+        crate::reading::passes_stated(read),
+    )
 }
 
 fn keys(reading: &Reading) -> Vec<u8> {

@@ -58,6 +58,9 @@ downbeat = 0.25
 #   provenance    what it is, who made it, when and how
 #   licence       what it may be published under
 #   licence_file  the licence notice, beside the recording
+#   digest        the take's digest: the SHA-256 of its decoded samples, as `duet capture`
+#                 states it in `take.digest` (capture-analysis 1.13), so a file that is not this
+#                 take fails by name
 #   key           the estimated key, as ABC names it in `K:`
 #   tuning_cents, tuning_within
 #                 the estimated A4's offset from 440 Hz, in cents, and how far it may move
@@ -71,6 +74,8 @@ file = "wayfaring-stranger.flac"
 provenance = "The owner's recording of the traditional song Wayfaring Stranger, sung by James (Pete) Taylor, recorded 2026-11-15 with `duet record` (48 kHz 24-bit) and resampled to 22.05 kHz 16-bit mono"
 licence = "CC-BY-4.0"
 licence_file = "wayfaring-stranger.flac.license"
+# 22 050 Hz, 1 channel, 488 040 frames. Checked against ffmpeg's decode, hashed apart from duet.
+digest = "sha256:18148cfcdb5331d7f4c4a9e0e5b00383f463beda7c8c820da872872af1ec7cae"
 # E-flat minor, ruled by the owner (2026-11-17, temper task 01a1e95b): three of the four
 # phrases and the last note rest on E-flat, and G-flat is held where G is only an approach. The
 # Aarden-Essen profile reads it so under every reader, before and after the held-pitch pass;

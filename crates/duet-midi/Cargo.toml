@@ -19,5 +19,6 @@ midly = "0.5.3"
 thiserror = "2"
 
 [dev-dependencies]
+duet-dsp = { path = "../duet-dsp" }
 duet-schemas = { path = "../duet-schemas" }
 serde_json = { version = "1", features = ["float_roundtrip"] }

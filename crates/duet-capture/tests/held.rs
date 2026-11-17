@@ -7,7 +7,7 @@
 
 mod support;
 
-use duet_capture::{ANALYSIS_RATE, ReadNote, ReaderName, Reading, SuggestionRule, Suggests};
+use duet_capture::{ANALYSIS_RATE, Pass, ReadNote, ReaderName, Reading, SuggestionRule, Suggests};
 
 /// The keys, on the take's tuning.
 const C_3: u8 = 48;
@@ -183,4 +183,22 @@ fn the_turn_at_1_42_s_and_the_lean_at_20_05_s_are_left_as_they_were() {
     );
     let keys: Vec<u8> = during(&reading, 19.9, 20.3).iter().map(|n| n.key).collect();
     assert_eq!(keys, [D_SHARP_3, D_3]);
+}
+
+#[test]
+fn every_reader_lists_the_passes_in_the_order_they_ran() {
+    // capture-analysis 1.13: each pass ran under every reader, in the order `interpret` runs
+    // them, whether or not it changed a note. Under the rules the breathy and held-pitch passes
+    // change nothing on this take, and are still listed.
+    for reader in readers() {
+        let reading = reading(reader);
+        assert_eq!(
+            reading.passes,
+            Some(vec![Pass::Breathy, Pass::Rejoin, Pass::HeldPitch]),
+            "{reader:?}"
+        );
+        if reader == ReaderName::Rules {
+            assert!(reading.breathy.is_empty() && reading.held.is_empty());
+        }
+    }
 }

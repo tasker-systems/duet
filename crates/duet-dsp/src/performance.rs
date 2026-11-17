@@ -9,6 +9,7 @@ use crate::event::Event;
 use crate::onset::Onsets;
 use crate::pitch::{PitchFrame, PitchTrack};
 use crate::stage::{Mono, Stage};
+use crate::take::Take;
 
 /// About how long a [`FrameBlock`] is: a second of frames.
 const BLOCK_SECS: f64 = 1.0;
@@ -40,6 +41,12 @@ pub struct PerformanceHead {
     pub first_frame: u64,
     /// The unit of every block's `pitch`.
     pub unit: PitchUnit,
+    /// The audio the frames were read from: its decoded samples' digest, with their own rate,
+    /// channel count and length, as the analysis read from it states it. Added in `performance`
+    /// 1.1; absent before, meaning not stated. The stage leaves it absent, since a take's digest
+    /// is known only once all of it is read: the capture command fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take: Option<Take>,
 }
 
 impl PerformanceHead {
@@ -51,6 +58,7 @@ impl PerformanceHead {
             hop,
             first_frame,
             unit: PitchUnit::AbsoluteCents,
+            take: None,
         }
     }
 }

@@ -679,12 +679,21 @@ cannot be, that is reported after them, and they stay:
   Since 1.12 the key states the `profile` its scores were correlated with: `aarden-essen`, the
   default, or `krumhansl-kessler`. A document without one states no profile; duet wrote those
   with Krumhansl–Kessler.
+  Since 1.13 the analysis states the `take` it was read from, and the reading the `passes` that
+  ran. `take` is the SHA-256 of the file's decoded samples (`sha256:` and 64 hex digits), with
+  their own `rate`, `channels` and length in `frames`: it is the same for the same samples
+  written as FLAC or WAV, at 16 bits or re-encoded at 24, with or without tags, and different
+  once one sample moves. So two readings of one take are known to be of it by their `take`,
+  never by their names. `passes` lists `breathy`, `rejoin` and `held-pitch` in the order they
+  ran, each one listed even when it changed no note. A document without them states neither.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
-  the first frame and the unit); each later line is about a second of frames as the columns
+  the first frame, the unit, and since `performance` 1.1 the `take`, as the analysis states it);
+  each later line is about a second of frames as the columns
   `pitch` (absolute cents, `1200·log2(hz/440) + 6900`, so 6900.0 is A440, to 0.1 cent, `null`
-  when unvoiced), `voicing` and `level`. It is written as the frames settle, and kept with the
-  `.duet` and `.capture.duet`. A three-minute take's is about 370 KB.
+  when unvoiced), `voicing` and `level`. Its file is created before the take is read, and its
+  lines are written once the whole take has been read, since the head states the take's digest;
+  it is kept with the `.duet` and `.capture.duet`. A three-minute take's is about 370 KB.
 
 **Formats.** WAV, FLAC, MP3, Ogg Vorbis and AAC in M4A are read, a packet at a time, so a long
 take is never held in memory whole. A damaged stretch that cannot be decoded is heard as silence

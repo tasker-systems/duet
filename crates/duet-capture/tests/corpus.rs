@@ -6,7 +6,7 @@
 
 mod support;
 
-use duet_capture::{Loss, ReaderName};
+use duet_capture::{Digester, FileSource, Loss, ReaderName, Source, Take};
 use support::{
     TakeKind, Verdict, asked_key, compare_melody, compare_rhythm, manifest, played, read, read_by,
 };
@@ -223,6 +223,39 @@ fn every_listened_take_reads_as_the_owner_judged_it() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Every listened take's file is the take its digest pins: the SHA-256 of its decoded samples,
+/// every chunk `FileSource` yields through a `Digester`, as `duet capture` states it.
+#[test]
+fn every_listened_take_is_the_take_its_digest_pins() {
+    let manifest = manifest();
+    let mut failures = Vec::new();
+    for take in &manifest.listened {
+        let path = support::corpus_dir().join(&take.file);
+        let found = (|| -> Result<Take, String> {
+            let mut source = FileSource::open(&path).map_err(|e| e.to_string())?;
+            let mut digester = Digester::new();
+            while let Some(chunk) = source.next_chunk().map_err(|e| e.to_string())? {
+                digester.push(&chunk).map_err(|e| e.to_string())?;
+            }
+            digester.finish().ok_or_else(|| "no audio".to_owned())
+        })();
+        match found {
+            Ok(found) if found.digest.to_string() == take.digest => {
+                eprintln!(
+                    "listened: {}: {} ({} Hz, {} ch, {} frames)",
+                    take.file, found.digest, found.rate, found.channels, found.frames
+                );
+            }
+            Ok(found) => failures.push(format!(
+                "{}: digest: expected {}, found {}",
+                take.file, take.digest, found.digest
+            )),
+            Err(e) => failures.push(format!("{}: {e}", take.file)),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]

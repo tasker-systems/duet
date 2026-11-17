@@ -28,11 +28,12 @@ rustfft = "6.4.1"
 # The performance types derive their schema here: duet-schemas commits it as performance 1.0.
 schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
+# A take's digest: the SHA-256 of its decoded samples (take.rs).
+sha2 = "0.10.9"
 thiserror = "2"
 
 [dev-dependencies]
 serde_json = { version = "1", features = ["float_roundtrip"] }
-sha2 = "0.10.9"
 
 [features]
 basic-pitch = ["dep:basic-pitch-rs"]
