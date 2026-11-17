@@ -3,7 +3,9 @@ name = "duet-dsp"
 version.workspace = true
 description = "duet's audio analysis: samples in, events out, as a stream of stages that settle their output as they go. No I/O, codecs or formats."
 edition.workspace = true
-license.workspace = true
+# MIT, and Apache-2.0 for the Basic Pitch model the package ships (models/basic-pitch/, with
+# Spotify's LICENSE and NOTICE beside it).
+license = "MIT AND Apache-2.0"
 repository.workspace = true
 rust-version.workspace = true
 readme = "../../README.md"
