@@ -26,7 +26,9 @@
 //!   an ornament inside a held note is never made a note: the rise to G3 in the second F#3 at
 //!   16.39 s of "Wayfaring Stranger" follows the F#3 itself, and stays its excursion.
 //! - **The lead-in** is the run of frames before the note that have a pitch and are voiced at
-//!   least as a note must be ([`LEAST_CONFIDENCE`]), back to the note before.
+//!   least as a note must be ([`LEAST_CONFIDENCE`]), back to the note before and at most
+//!   [`HELD_PITCH_SECS`]. A pitch already held where it reaches back to is a note its reader
+//!   chose not to read (Basic Pitch's minimum note length, say), and stays unread.
 //! - **Where the made note ends:** at the first frame after the held pitch nearer where the
 //!   voice goes next (the next held pitch, or where the note is held) than where it was held,
 //!   since a slide belongs to the note it arrives at (#28), as the breathy pass ends a note.
@@ -46,7 +48,8 @@
 //! owner's legato singing. The drift is measured over the held pitch from the note's start to
 //! where the voice **reaches** the next note: its first frame [`CHANGE_SEMITONES`] (0.7) from
 //! where the note is held toward the next, within [`HELD_PITCH_SECS`] of its start, which is
-//! where the rules, the reader the findings measured, end a held pitch. So it reads the same
+//! where the rules, the reader the findings measured, end a held pitch; or, when it never moves
+//! that far, where the note ends, as the findings measured it. So it reads the same
 //! whoever ended the note: this pass ends a held pitch at its rise's midpoint, and the note HMM
 //! holds the next note from earlier.
 //!
@@ -254,9 +257,12 @@ fn split(
     // Where the note is held, as a fractional key.
     let held_at = f64::from(note.key) + f64::from(note.centre) / 100.0;
     // The lead-in: the frames before the note, back to the note before, with a pitch and voiced
-    // as a note must be, that run straight into it.
+    // as a note must be, that run straight into it, and at most a held pitch's length.
     let mut lead = inside.start;
-    let earliest = indices(frames, after, note.start).start;
+    let longest = (HELD_PITCH_SECS * f64::from(frames.rate) / hop as f64) as usize;
+    let bound = inside.start.saturating_sub(longest);
+    let since_previous = indices(frames, after, note.start).start;
+    let earliest = since_previous.max(bound);
     while lead > earliest
         && !frames.cents[lead - 1].is_nan()
         && frames.voicing[lead - 1] >= LEAST_CONFIDENCE
@@ -283,6 +289,17 @@ fn split(
         }
         if to - k < shortest {
             k += 1;
+            continue;
+        }
+        // Cut short by its length, not by the note before, with the voice held on before it.
+        let cut_short = lead == bound
+            && bound > since_previous
+            && !frames.cents[lead - 1].is_nan()
+            && frames.voicing[lead - 1] >= LEAST_CONFIDENCE;
+        if k == lead && lead < inside.start && cut_short {
+            // Held already where the lead-in can reach back to: a note its reader chose not to
+            // read, not a pitch held before this one.
+            k = to;
             continue;
         }
         let held: Vec<f32> = (k..to).map(|j| pitch(j) as f32).collect();
@@ -401,9 +418,10 @@ fn suggest(frames: &PerformanceFrames, offset: f64, notes: &[ReadNote]) -> Vec<S
 /// Where `note`'s held pitch sits over its last quarter, on average, in cents from its key: the
 /// held pitch running from the note's start to where the voice reaches `next`, the first frame
 /// from the note's `held_from` at least [`CHANGE_SEMITONES`] from where the note is held toward
-/// `next`, where the rules end a held pitch and start the next. `None` when it gets that far
-/// neither within [`HELD_PITCH_SECS`] of the note's start, as long as a held pitch lasts, nor
-/// before `next` ends, or when no frame of the last quarter is voiced.
+/// `next`, where the rules end a held pitch and start the next, searched for within
+/// [`HELD_PITCH_SECS`] of the note's start, as long as a held pitch lasts. A pitch held near
+/// enough the next note that the voice never moves that far from it ends where the note ends,
+/// as the findings measured it. `None` when no frame of the last quarter is voiced.
 fn drift(frames: &PerformanceFrames, offset: f64, note: &ReadNote, next: &ReadNote) -> Option<f64> {
     let toward = if next.key > note.key { 1.0 } else { -1.0 };
     let held = key_cents(offset, note.key) + f64::from(note.centre);
@@ -414,7 +432,7 @@ fn drift(frames: &PerformanceFrames, offset: f64, note: &ReadNote, next: &ReadNo
             let c = f64::from(frames.cents[k]);
             !c.is_nan() && (c - held) * toward >= change
         })
-        .map(|k| frames.frame(k))?;
+        .map_or(note.end, |k| frames.frame(k));
     let quarter = reaches.saturating_sub(note.start) / 4;
     let key = key_cents(offset, note.key);
     let last: Vec<f64> = indices(frames, reaches - quarter, reaches)

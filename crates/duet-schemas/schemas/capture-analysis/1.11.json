@@ -870,7 +870,7 @@
           "type": "array"
         },
         "held": {
-          "description": "Each note the reading's held-pitch pass made from a pitch held before the note it\nreaches, with that note as its reader decoded it, in order ([`hold_apart`](crate::hold_apart)).\nAdded in `capture-analysis` 1.11; omitted when there is none, and absent before, when no\nreading made one.",
+          "description": "Each note the reading's held-pitch pass made from a pitch held before the note it\nreaches, with that note as its reader decoded it, in order\n([`hold_apart`](crate::hold_apart)). Added in `capture-analysis` 1.11; omitted when there\nis none, and absent before, when no reading made one.",
           "items": {
             "$ref": "#/$defs/Held"
           },
