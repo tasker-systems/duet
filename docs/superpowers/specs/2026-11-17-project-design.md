@@ -7,8 +7,9 @@ stand"), with two dropped and two changed, and added one: temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, read together with the domain model, temper
 `01a1eb48-6b7a-7797-bb2b-68f335de87e9`. The rulings are listed in
 [Decisions (ruled 2026-11-17)](#decisions-ruled-2026-11-17). Decisions 12 and 13, taken in from the
-bus design after the eleven were set out, are still open. What is still marked **Proposed** is the design those
-rulings rest on: the owner ruled its decisions, not each line. Nothing here is built.
+bus design after the eleven were set out, are ruled there (#75). What is still marked **Proposed** is
+the design those rulings rest on: the owner ruled its decisions, not each line. Nothing here is
+built.
 
 **Builds on:**
 - [duet documents](2026-11-15-duet-documents-design.md): the `.duet` envelope, kinds, the version
@@ -497,8 +498,8 @@ What the layout holds:
      `journal.duet.jsonl merge=union` themselves, and duet doesn't write it. **Ruled** (owner,
      2026-11-17, temper `01a1eb60`, amending the bus design's decision 12).
    - **One file, never rotated, in v1.** A year of sessions is a few megabytes. Rotation, if ever
-     needed, is a later change to the layout. **Proposed** (the bus design's layout ask 4;
-     [decision 12](#still-open)).
+     needed, is a later change to the layout. **Ruled (bus design, #75):** its layout ask 4
+     ([decision 12](#from-the-bus-design)).
 2. **The server is found through a lock at a fixed path, `.duet/run/bus.lock`,** machine-local. It is
    a small TOML file naming the server's pid and **its socket's path**. The socket is usually in
    `.duet/run/` too, and falls back to `$TMPDIR` when the project's path is too long for a Unix
@@ -506,7 +507,8 @@ What the layout holds:
    6), refining this section's earlier "a fixed path for the socket".
    - **A stale lock is left for the next server to overwrite.** The CLI does not clear it: the
      `flock` already says it is stale, and a CLI that deleted it could race a server that is just
-     starting. **Proposed** (the bus design's layout ask 2; [decision 13](#still-open)). This
+     starting. **Ruled (bus design, #75):** its layout ask 2
+     ([decision 13](#from-the-bus-design)). This
      replaces this section's earlier "a stale lock is the CLI's to clear".
 3. **The state store is `.duet/state/state.sqlite`,** machine-local, holding only view state (open
    take and moment, layout, each face's last-read cursor) and caches. It is **not built until a face
@@ -602,17 +604,18 @@ read with the domain model (temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`).
   (the song and its composition), `parts/`, `comps/` and `snapshots/` ([§1](#1-the-layout)).
 
 **What fell out of the design:** `duet project check`, the `.gitignore` block and the
-`.gitattributes` line, the `kept` and `restriction` fields, the idea of "the authored half as its own repository", §6 as a licence
-boundary, and the "Shared?" column of the layout table.
+`.gitattributes` line, the `kept` and `restriction` fields, the idea of "the authored half as its
+own repository", §6 as a licence boundary, and the "Shared?" column of the layout table.
 
-### Still open
+### From the bus design
 
-Added from the bus design after the eleven were set out, and not among the owner's rulings:
+Taken in from the bus design after the eleven were set out. **Ruled (bus design, #75),** which the
+owner ruled and merged:
 
 12. **The journal is one file, never rotated, in v1**
-    ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
+    ([§10](#10-what-the-layout-holds-for-the-bus)): the bus design's layout ask 4.
 13. **A stale `.duet/run/bus.lock` is left for the next server to overwrite,** not cleared by the
-    CLI ([§10](#10-what-the-layout-holds-for-the-bus)), as the bus design asks. *Recommended: yes.*
+    CLI ([§10](#10-what-the-layout-holds-for-the-bus)): the bus design's layout ask 2.
 
 ## Not decided here
 

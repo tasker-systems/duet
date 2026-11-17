@@ -91,8 +91,8 @@ composition as two parts of one document.**
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/2.0.json",
-  "duet": { "kind": "song", "version": "2.0", "tool": { "name": "duet", "version": "0.6.0" } },
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
+  "duet": { "kind": "song", "version": "1.0", "tool": { "name": "duet", "version": "0.6.0" } },
   "body": {
     "title": "Wayfaring Stranger",
     "status": "sketch",
@@ -152,7 +152,7 @@ composition as two parts of one document.**
 - **Positions are `Position` strings,** `bar.beat.tick` from `1.1.0`, as a part already writes
   them, at the composition's `ticks_per_quarter`. One spelling of a place in time across every kind.
 - **`tempo`:** changes in order, the first at `1.1.0`. Each holds until the next. Quarter notes per
-  minute, as capture and `part` count it. A gradual change (a ritardando) is not in 2.0; it would be
+  minute, as capture and `part` count it. A gradual change (a ritardando) is not in 1.0; it would be
   an optional `curve` on a change, a minor.
 - **`meter`:** time-signature changes, the first at `1.1.0`, each on a bar line. A change off a bar
   line is refused by name.
@@ -193,12 +193,11 @@ They are separate fields of the body, so a later split into two kinds moves a fi
 
 ### The kind's name and version
 
-**Proposed: `song` 2.0.** The old `song` kind is renamed `part` now (ruled), so the name is free, and
-"song" is the owner's word for this thing. Starting it at 2.0, not 1.0, means a `song` 1.x file (a
-part written before the rename, in a scratch directory or a test) is refused by the version policy's
-own rule, naming its major and pointing at `part`, rather than failing on its first unknown field.
-The alternative is a new name (`piece`), which avoids reusing `song` at all. **For the owner to
-confirm** ([question 3](#open-questions)).
+**`song` 1.0, a new kind.** The version is settled by the owner's direction (2026-11-17): there is
+nothing on disk to migrate or retire, so the old `song` kind is simply renamed `part` and this kind
+starts fresh at 1.0, with no compatibility path between them. **The name `song` is Proposed:** the
+old kind's rename frees it, and "song" is the owner's word for this thing. The alternative is a new
+name such as `piece`. **For the owner to rule** ([question 3](#open-questions)).
 
 ## 2. Parts
 
@@ -306,7 +305,7 @@ and an agent settle and set replaces the estimate; the mapping records which.
   given keeps its estimated value, and the whole mapping is then `set`.
 - **A set mapping is never replaced by a later estimate.** Capturing the take again re-estimates and
   states any disagreement with the set mapping; it does not move the placement.
-- **One tempo for the whole take, in 2.0.** A take that drifts is placed by its overall tempo, and the
+- **One tempo for the whole take, in 1.0.** A take that drifts is placed by its overall tempo, and the
   drift is the capture's to state, as it is today. A tempo map of the take's own would be a minor.
 
 ## 5. Comps across takes
@@ -396,9 +395,9 @@ Ruled since first written, and no longer open: how a take with no click is place
    of changes carried by the part. For the transformations task ([§6](#6-operations-are-stated-changes)).
 2. **The comp lifecycle** (drafting, applied, stale, refused, with stale also caused by a change to the
    composition): Claude's reading of the comp design, not ruled ([§7](#7-lifecycles)).
-3. **The song kind's name and version:** `song` 2.0, so that an old `song` 1.x file is refused by the
-   version policy, or a new name such as `piece` ([§1](#the-kinds-name-and-version)). Raised by this
-   design, not by the rulings.
+3. **The song kind's name:** `song`, or a new name such as `piece`
+   ([§1](#the-kinds-name-and-version)). It starts at 1.0 either way. Raised by this design, not by
+   the rulings.
 
 ## What this changes in other specs
 
@@ -414,8 +413,8 @@ Ruled since first written, and no longer open: how a take with no click is place
 
 1. **The rename:** the `song` kind becomes `part` 1.0 in code, schema path and messages. **Needs:**
    nothing. **Witness:** every round trip in `crates/duet-midi/tests/roundtrip.rs` passes under the
-   new name; a `song` 1.0 file is refused naming `part`.
-2. **`song` 2.0 and the composition:** the type, `Kind`, schema and example; `duet song new | show`.
+   new name, and the committed example is `schemas/part/examples/1.0.duet`.
+2. **`song` 1.0 and the composition:** the type, `Kind`, schema and example; `duet song new | show`.
    **Needs:** 1, and the project design's task 1. **Witnesses:** a song document round-trips exactly
    and validates; a meter change off a bar line, an unknown part in a placement, and two parts of one
    name are each refused by name; `duet song status` makes each of the four allowed moves, refuses

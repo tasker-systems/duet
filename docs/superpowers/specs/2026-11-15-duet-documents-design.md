@@ -17,12 +17,12 @@ all seven are listed in [The owner's rulings](#the-owners-rulings). Everything e
 `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, ruling 7).** A part is one voice, line or groove (notes, or
 a drum grid's role in a song), and "song" now names the piece those parts belong to
 ([songs and composition](2026-11-17-songs-and-composition-design.md)). Nothing has been captured,
-distributed or committed under the old name, so there is no migration and no converter: the kind
-is `part` 1.0, its body unchanged. This design was written and built as `song` 1.0. Its kinds
-table, schema paths, views table, view headers, messages and examples now say `part`; elsewhere,
-in prose written before the rename, "a song" or "a song document" means a `part` document. `Song`, the Rust type, and the CLI's
-`duet song` commands keep their names until the code change that renames them; this amendment
-renames only the kind. See [part 1.0](#part-10).
+distributed or committed under the old name, and nothing on disk needs carrying over, so the kind
+is simply `part` 1.0, its body unchanged. This design was written and built as `song` 1.0. Its
+kinds table, schema paths, views table, view headers, messages and examples now say `part`;
+elsewhere, in prose written before the rename, "a song" or "a song document" means a `part`
+document. `Song`, the Rust type, and the CLI's `duet song` commands keep their names until the code
+change that renames them; this amendment renames only the kind. See [part 1.0](#part-10).
 
 ## The decision this builds
 
@@ -195,7 +195,7 @@ pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
 | `capture-analysis` | 1.0 | `duet_capture::Analysis` | Gains a reader. Absent values are omitted, not `null`. `tempo_alternatives` is named. |
 | `performance` | 1.0, a stream | new `duet_dsp` types, `PerformanceHead` and `FrameBlock`, written and read only through `duet-schemas` | New: the performance design's question 1, in this envelope. |
 | `project` | named, deferred | none yet | Designed in [the project design](2026-11-17-project-design.md). |
-| `song` (the piece) | **Proposed** 2.0 | none yet | A new kind, the song and its composition: [songs and composition](2026-11-17-songs-and-composition-design.md). |
+| `song` (the piece; name **Proposed**) | **Proposed** 1.0 | none yet | A new kind, the song and its composition: [songs and composition](2026-11-17-songs-and-composition-design.md). |
 | lane map | **not a kind** | | Config. |
 | `duet.toml` | **not a kind** | | Config. |
 
@@ -210,9 +210,9 @@ still to come (the songs design's build task 1).
 - **Why the rename:** "song" is the owner's word for the piece, with its identity, intent, takes,
   snapshots and composition. What this kind holds is one voice, line or groove of it: a melody, a
   bass line, a hummed idea. Calling it a song would leave the piece without a name.
-- **No migration, no converter.** Nothing has been captured, distributed or committed as `song`.
-  A `song` 1.0 file met after the rename (a scratch file, an old test output) is refused, naming
-  `part`. The name `song` is reused for the piece, a new kind
+- **Nothing to carry over.** No `song` document exists anywhere that matters, so the rename has no
+  compatibility path of any kind: `part` 1.0 is today's body under its new name. The name `song` is
+  then free for the piece, a new kind that starts at 1.0
   ([songs and composition](2026-11-17-songs-and-composition-design.md#the-kinds-name-and-version)).
 Its rules, unchanged by the rename:
 
@@ -535,9 +535,7 @@ A saved view has no extension of its own, so its first line names it:
 ```
 
 - **`notes v1`, `grid v1`:** the view and its syntax version. A change of syntax bumps it.
-- **`of part 1.0`:** the kind and the schema version the view renders. **Proposed:** a header that
-  says `of song 1.0`, written before the rename, is read as `of part 1.0`. A view is text the owner
-  may have saved, its body is unchanged by the rename, and accepting the old word costs one match.
+- **`of part 1.0`:** the kind and the schema version the view renders.
 - **`track "Drums" step 1/16`:** for a partial view, which part of the document it shows.
 - **`from <digest>`:** 16 hex digits of a 64-bit FNV-1a digest of the source document's body, as
   written. `apply --onto` checks it, and refuses when the document has changed since the view was
