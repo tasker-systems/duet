@@ -331,14 +331,18 @@ impl Midi for Song {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        // Spell each black key the way the key in force where the note starts spells it.
+        // Spell each note the way the key in force where the note starts spells it, and
+        // black keys with sharps where no key is.
         let key_ticks: Vec<(u64, Key)> = keys
             .iter()
             .map(|&(tick, k)| to_key(tick, k).map(|k| (tick, k)))
             .collect::<Result<_>>()?;
-        let flat = |start: u64, midi: u8| {
+        let spell = |start: u64, pitch: Pitch| {
             let in_force = key_ticks.partition_point(|(tick, _)| *tick <= start);
-            in_force > 0 && key_ticks[in_force - 1].1.spells_flat(midi % 12)
+            match in_force {
+                0 => pitch,
+                n => key_ticks[n - 1].1.spell(pitch),
+            }
         };
 
         let tracks = parts
@@ -380,7 +384,7 @@ impl Midi for Song {
                     .map(|n| {
                         Ok(Note::new(
                             map.position(n.start),
-                            Pitch::new(n.key)?.spelled_flat(flat(n.start, n.key)),
+                            spell(n.start, Pitch::new(n.key)?),
                             beats_from_ticks(n.len, tpq),
                             n.vel,
                         ))
