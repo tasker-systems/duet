@@ -17,7 +17,7 @@
 
 # What `abc2midi -ver` prints. The recordings were made with this version, and the local
 # oracle run fails on any other.
-abc2midi_version = "5.10 November 11 2026 abc2midi"
+abc2midi_version = "5.14 November 14 2026 abc2midi"
 # Inserted after the tune's X: line, and again at each voice in its body (after a V: line,
 # or as [I:...] fields after an inline [V:]): abc2midi starts each voice's playback
 # settings afresh, so a preamble in the header reaches the first voice only. nobeataccents gives every note the dynamic's level;
