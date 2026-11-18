@@ -10,7 +10,7 @@
 //! The design is `docs/superpowers/specs/2026-11-17-project-design.md`, §2.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -61,12 +61,14 @@ impl Project {
         self.takes.iter().find(|take| take.name == *name)
     }
 
-    /// Checks what a schema cannot: every take's name is unique, and every tempo is a positive,
-    /// finite number.
+    /// Checks what a schema cannot: every take's name is unique, no two takes share a digest
+    /// (the digest is the take's identity, so one recording is in the project once), and every
+    /// tempo is a positive, finite number.
     ///
     /// # Errors
     ///
-    /// A message naming the duplicate take, or the field whose tempo is not a tempo.
+    /// A message naming the duplicate take, the two takes that share a digest, or the field
+    /// whose tempo is not a tempo.
     pub fn check(&self) -> Result<(), String> {
         if let Some(defaults) = &self.defaults {
             check_tempo("defaults.tempo_bpm", defaults.tempo_bpm)?;
@@ -75,11 +77,21 @@ impl Project {
             }
         }
         let mut names = HashSet::new();
+        let mut digests = HashMap::new();
         for take in &self.takes {
             if !names.insert(&take.name) {
                 return Err(format!(
                     "two takes are named {:?}: a take's name is unique in the project",
                     take.name.as_str()
+                ));
+            }
+            if let Some(first) = digests.insert(take.take.digest, &take.name) {
+                return Err(format!(
+                    "takes {:?} and {:?} are one take: both have the digest {}, and a take is in \
+                     the project once",
+                    first.as_str(),
+                    take.name.as_str(),
+                    take.take.digest
                 ));
             }
             if let Some(given) = &take.given {
@@ -103,7 +115,8 @@ fn check_tempo(field: &str, tempo: Option<f64>) -> Result<(), String> {
 }
 
 /// `project` 1.0's body is a [`Project`]. A body is checked as it is read ([`Project::check`]):
-/// two takes with one name, or a tempo that is not one, are refused by name.
+/// two takes with one name, two takes with one digest, or a tempo that is not one, are refused
+/// by name.
 impl Kind for Project {
     const NAME: &'static str = "project";
     const VERSION: Version = Version::new(1, 0);

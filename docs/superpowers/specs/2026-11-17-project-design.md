@@ -250,7 +250,9 @@ decision 2), with its schema and example committed under `crates/duet-schemas/sc
 - **`takes`**, required, possibly empty: the project's sources
   ([§4](#4-sources-named-without-copying)).
   - `name`: as in the layout's rules. Unique.
-  - `take`: the variants design's `take` object, the same type. The digest is the identity.
+  - `take`: the variants design's `take` object, the same type. The digest is the identity, so
+    no two takes share one: a recording is in the project once, under one name. **Ruled**
+    (owner, 2026-11-18, on #88).
   - `file`: the source's own file name when added, without its directory. Information, for people
     and for finding it again; never a path.
   - `added`: the date it was added.
@@ -538,7 +540,8 @@ What the layout holds:
 For the build tasks below, each in the crate CLAUDE.md names:
 - **`crates/duet-schemas/tests/`:** a `project` document round-trips exactly through its reader,
   and validates against `project/1.0.json`; its committed example reads; an unknown field, a
-  duplicate take name and an unknown `given` field are each refused by name.
+  duplicate take name, two takes with one digest, and an unknown `given` field are each refused
+  by name.
 - **`crates/duet-e2e`:**
   - `init` in an empty directory writes exactly the files [§3](#3-what-duet-init-writes) lists, and
     `init` again is refused naming `.duet/project.duet`.

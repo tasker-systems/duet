@@ -1,6 +1,7 @@
 //! project 1.0: a project's document round-trips exactly through its reader and validates
 //! against the committed schema, its committed example reads, and what the format refuses is
-//! refused by name: an unknown field, two takes with one name, an unknown `given` field.
+//! refused by name: an unknown field, two takes with one name or one digest, an unknown `given`
+//! field.
 
 use std::path::Path;
 
@@ -182,6 +183,25 @@ fn a_duplicate_take_name_is_refused_by_name() {
         error.to_string().contains(r#""Wayfaring" is not a name"#),
         "{error}"
     );
+}
+
+#[test]
+fn two_takes_with_one_digest_are_refused_naming_both() {
+    let (error, valid) = read_edited(|body| {
+        body["takes"][1]["take"]["digest"] = body["takes"][0]["take"]["digest"].clone();
+    });
+    assert!(matches!(error, Error::Body { .. }), "{error:?}");
+    let said = error.to_string();
+    assert!(
+        said.contains(r#"takes "wayfaring" and "blood-sport-v2" are one take"#),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("sha256:{}", "a".repeat(64))),
+        "{said}"
+    );
+    // A schema cannot say that digests differ: the reader is what refuses it.
+    assert!(valid);
 }
 
 #[test]
