@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
+  "duet": {
+    "kind": "song",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.3.0"
+    }
+  },
+  "body": {
+    "id": "01a208ef-86a6-7e1e-9e1e-1e1e1e1e1e1e",
+    "title": "Wayfaring Stranger",
+    "status": "sketch",
+    "intent": "slow and bare; voice first, the bass enters in the second verse",
+    "composition": {
+      "ticks_per_quarter": 480,
+      "tempo": [
+        {
+          "at": "1.1.0",
+          "bpm": 92.0
+        },
+        {
+          "at": "17.1.0",
+          "bpm": 96.5
+        }
+      ],
+      "meter": [
+        {
+          "at": "1.1.0",
+          "sig": "3/4"
+        },
+        {
+          "at": "25.1.0",
+          "sig": "4/4"
+        }
+      ],
+      "key": [
+        {
+          "at": "1.1.0",
+          "key": "G minor"
+        },
+        {
+          "at": "17.1.0",
+          "key": "A minor"
+        }
+      ],
+      "sections": [
+        {
+          "name": "verse",
+          "at": "1.1.0"
+        },
+        {
+          "name": "verse",
+          "at": "9.1.0"
+        },
+        {
+          "name": "lift",
+          "at": "17.1.0"
+        },
+        {
+          "name": "coda",
+          "at": "25.1.0"
+        }
+      ],
+      "placements": [
+        {
+          "part": "melody",
+          "at": "1.1.0"
+        },
+        {
+          "part": "bass",
+          "at": "9.1.0"
+        },
+        {
+          "part": "kit",
+          "at": "9.1.0",
+          "repeat": 2
+        },
+        {
+          "part": "melody",
+          "at": "25.1.0",
+          "from": "1.1.0",
+          "to": "5.1.0"
+        }
+      ],
+      "end": "29.1.0"
+    }
+  }
+}

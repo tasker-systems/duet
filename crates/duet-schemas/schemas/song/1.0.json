@@ -1,0 +1,277 @@
+{
+  "$defs": {
+    "Composition": {
+      "additionalProperties": false,
+      "description": "How a song is written down: the tempo, meter and key maps, the sections, and where each part\nsits. Every position is a `bar.beat.tick` [`Position`] on the song's bars, at\n`ticks_per_quarter`, written as it falls: `3.4.0` in 3/4 is refused, since that place is\n`4.1.0`.",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/Position",
+          "description": "Where the song ends, when it says; otherwise the latest end of any placement."
+        },
+        "key": {
+          "description": "Key changes in order, the first at `1.1.0`, or none when no key is stated. The key is\ninformation for operations and the score: it changes no note.",
+          "items": {
+            "$ref": "#/$defs/KeyAt"
+          },
+          "type": "array"
+        },
+        "meter": {
+          "description": "Meter changes in order, the first at `1.1.0`, each on a bar line.",
+          "items": {
+            "$ref": "#/$defs/MeterAt"
+          },
+          "type": "array"
+        },
+        "placements": {
+          "description": "Where each part sits. Several over the same bars are layered.",
+          "items": {
+            "$ref": "#/$defs/Placement"
+          },
+          "type": "array"
+        },
+        "sections": {
+          "description": "Named spans in order, each from its `at` to the next section's, the last to the song's\nend. Names need not be unique.",
+          "items": {
+            "$ref": "#/$defs/Section"
+          },
+          "type": "array"
+        },
+        "tempo": {
+          "description": "Tempo changes in order, the first at `1.1.0`. Each holds until the next.",
+          "items": {
+            "$ref": "#/$defs/TempoAt"
+          },
+          "type": "array"
+        },
+        "ticks_per_quarter": {
+          "description": "The resolution tick offsets in positions are counted in.",
+          "format": "uint16",
+          "maximum": 32767,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ticks_per_quarter",
+        "tempo",
+        "meter",
+        "key",
+        "sections",
+        "placements"
+      ],
+      "type": "object"
+    },
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "Key": {
+      "description": "A key such as D minor, Bb major or D dorian, with at most 7 sharps or flats.",
+      "pattern": "^\\s*[A-Ga-g][#b]*(\\s*([Mm]|([Mm][Aa][Jj]|[Ii][Oo][Nn]|[Mm][Ii][Nn]|[Aa][Ee][Oo]|[Dd][Oo][Rr]|[Pp][Hh][Rr]|[Ll][Yy][Dd]|[Mm][Ii][Xx]|[Ll][Oo][Cc]).*))?\\s*$",
+      "type": "string"
+    },
+    "KeyAt": {
+      "additionalProperties": false,
+      "description": "A key from a place on.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "key": {
+          "$ref": "#/$defs/Key",
+          "description": "The key, such as G minor."
+        }
+      },
+      "required": [
+        "at",
+        "key"
+      ],
+      "type": "object"
+    },
+    "MeterAt": {
+      "additionalProperties": false,
+      "description": "A meter from a bar line on.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "sig": {
+          "$ref": "#/$defs/TimeSig",
+          "description": "The time signature, such as 3/4."
+        }
+      },
+      "required": [
+        "at",
+        "sig"
+      ],
+      "type": "object"
+    },
+    "Name": {
+      "description": "A name in the project: lowercase letters and digits, words joined by single hyphens, such as wayfaring or blood-sport-v2.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "type": "string"
+    },
+    "Placement": {
+      "additionalProperties": false,
+      "description": "Where a part sits on the song's bars.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position",
+          "description": "The place on the song's bars where the part's own `1.1.0` falls."
+        },
+        "from": {
+          "$ref": "#/$defs/Position",
+          "description": "Where in the part, in its own positions, the stretch that plays starts. Absent is its\nstart."
+        },
+        "part": {
+          "$ref": "#/$defs/Name",
+          "description": "The part, by its stem in the song's `parts/`."
+        },
+        "repeat": {
+          "description": "How many times the part plays back to back, for a groove. Absent is once.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "to": {
+          "$ref": "#/$defs/Position",
+          "description": "Where in the part, in its own positions, the stretch that plays ends. Absent is its end."
+        }
+      },
+      "required": [
+        "part",
+        "at"
+      ],
+      "type": "object"
+    },
+    "Position": {
+      "description": "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the part's ticks. bar.beat alone is tick 0.",
+      "pattern": "^0*[1-9][0-9]*\\.0*[1-9][0-9]*(\\.[0-9]+)?$",
+      "type": "string"
+    },
+    "Section": {
+      "additionalProperties": false,
+      "description": "A named span of the song, from its `at` to the next section's.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "name": {
+          "description": "The owner's name for it, such as `verse 2`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "at"
+      ],
+      "type": "object"
+    },
+    "Song": {
+      "additionalProperties": false,
+      "description": "A song's document: the body of `song` 1.0.",
+      "properties": {
+        "composition": {
+          "$ref": "#/$defs/Composition",
+          "description": "How the song is written down: its bars, and where each part sits on them."
+        },
+        "id": {
+          "$ref": "#/$defs/Id",
+          "description": "The song's stable id: a UUIDv7, minted by `duet song new` and never changed. Renaming\nthe song's folder or its title leaves it."
+        },
+        "intent": {
+          "description": "What the song is meant to be, in the owner's words. duet never reads it.",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/Status",
+          "description": "Where the song stands: `idea`, `sketch`, `developing` or `arranged`."
+        },
+        "title": {
+          "description": "The song's name for people. Its folder's name is its name for commands.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "status",
+        "composition"
+      ],
+      "type": "object"
+    },
+    "Status": {
+      "description": "Where a song stands: a closed state machine, set by the owner or by an agent with the\nowner, never inferred (ruling 9).\n\n```text\nidea ──▶ sketch ──▶ developing ──▶ arranged\n                        ▲              │\n                        └── reopen ────┘\n```",
+      "oneOf": [
+        {
+          "enum": [
+            "sketch",
+            "developing",
+            "arranged"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "idea",
+          "description": "Where every song starts.",
+          "type": "string"
+        }
+      ]
+    },
+    "TempoAt": {
+      "additionalProperties": false,
+      "description": "A tempo from a place on.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Position"
+        },
+        "bpm": {
+          "description": "Quarter notes per minute.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "bpm"
+      ],
+      "type": "object"
+    },
+    "TimeSig": {
+      "description": "A time signature such as 4/4 or 6/8: the denominator is 1, 2, 4, 8, 16, 32 or 64.",
+      "pattern": "^\\s*0*[1-9][0-9]*\\s*/\\s*0*(1|2|4|8|16|32|64)\\s*$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A .duet document of kind song, at schema version 1.0.",
+  "properties": {
+    "$schema": {
+      "const": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json"
+    },
+    "body": {
+      "$ref": "#/$defs/Song"
+    },
+    "duet": {
+      "$ref": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",
+      "properties": {
+        "kind": {
+          "const": "song"
+        },
+        "version": {
+          "const": "1.0"
+        }
+      }
+    }
+  },
+  "required": [
+    "duet",
+    "body"
+  ],
+  "title": "duet song 1.0",
+  "type": "object"
+}

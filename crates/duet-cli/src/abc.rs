@@ -8,10 +8,10 @@ use anyhow::{Context, Result, bail};
 use clap::{Subcommand, ValueEnum};
 use duet_abc::{Book, Dynamics, ReadOptions, Tune, WriteOptions};
 use duet_core::Part;
-use duet_schemas::{From, Notice};
+use duet_schemas::{From, Notice, Source};
 
 use crate::config::Config;
-use crate::io::{Format, FormatParser, part_format, read, same_file, with_end, write_from};
+use crate::io::{Format, FormatParser, Origin, part_format, read, same_file, with_end, write_from};
 
 #[derive(Subcommand)]
 pub enum AbcCommand {
@@ -178,7 +178,14 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             // Standard output is MIDI here unless --to says, as it always was.
             let to = to.or((output == Path::new("-")).then_some(Format::Midi));
             let to = part_format(&output, to, "duet abc render writes")?;
-            write_from(&part, &output, to, config.end, Some(&from))
+            write_from(
+                &part,
+                &output,
+                to,
+                config.end,
+                &Origin::imported(from),
+                Source::hand(),
+            )
         }
         AbcCommand::Write {
             input,

@@ -8,7 +8,7 @@ use std::path::Path;
 
 use duet_core::Part;
 use duet_e2e::{duet, ok, root, s, scratch, view_text};
-use duet_schemas::Document;
+use duet_schemas::{Document, PartBody};
 
 fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
@@ -86,7 +86,10 @@ fn six_accidental_scales_read_from_midi_are_spelled_by_the_key_in_the_view_and_t
 
         let view = view_text(&dir, &doc, "notes", &[]);
         assert_eq!(pitches(&view).join(" "), spelled, "{name}:\n{view}");
-        let part: Part = Document::read(&read(&doc)).expect("a part").body;
+        let part: Part = Document::<PartBody>::read(&read(&doc))
+            .expect("a part")
+            .body
+            .part;
         assert_eq!(
             part.tracks[0].notes[5].pitch.to_string(),
             spelled.split(' ').nth(5).unwrap(),
@@ -133,9 +136,10 @@ fn wayfaring_stranger_is_captured_in_flats_under_a_six_flat_signature() {
     .expect("copy the take");
     ok(&duet(&dir, &["capture", "melody", s(&take)]), "capture");
 
-    let part: Part = Document::read(&read(&dir.join("wayfaring-stranger.duet")))
+    let part: Part = Document::<PartBody>::read(&read(&dir.join("wayfaring-stranger.duet")))
         .expect("a part")
-        .body;
+        .body
+        .part;
     let key = part.key.expect("a key");
     assert_eq!(key.to_string(), "Eb minor");
     for note in &part.tracks[0].notes {

@@ -209,3 +209,32 @@ pub fn view_text(dir: &Path, doc: &Path, view: &str, args: &[&str]) -> String {
     text.split_once('\n')
         .map_or(String::new(), |(_, rest)| rest.to_owned())
 }
+
+/// A part document's text with its body's `id` made all zeros, so two documents of one part,
+/// each with an id of its own, compare byte for byte in everything else. The text is the
+/// document, unchanged, when it holds no id.
+#[must_use]
+pub fn without_id(document: &[u8]) -> Vec<u8> {
+    const KEY: &[u8] = b"\n    \"id\": \"";
+    let mut out = document.to_vec();
+    if let Some(at) = out.windows(KEY.len()).position(|w| w == KEY) {
+        let start = at + KEY.len();
+        for b in out.iter_mut().skip(start).take(36) {
+            if *b != b'-' {
+                *b = b'0';
+            }
+        }
+    }
+    out
+}
+
+/// A part document's body as JSON, with its `id` left out: what two documents of one part, each
+/// with an id of its own, hold alike.
+#[must_use]
+pub fn body_without_id(document: &serde_json::Value) -> serde_json::Value {
+    let mut body = document["body"].clone();
+    if let Some(fields) = body.as_object_mut() {
+        fields.remove("id");
+    }
+    body
+}

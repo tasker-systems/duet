@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use duet_e2e::{duet, duet_with, golden, notes_doc, ok, root, s, scratch};
+use duet_e2e::{body_without_id, duet, duet_with, golden, notes_doc, ok, root, s, scratch};
 use serde_json::Value;
 
 fn read(path: &Path) -> Vec<u8> {
@@ -125,8 +125,8 @@ fn a_lossless_view_is_the_identity_both_ways() {
                 "apply -o",
             );
             assert_eq!(
-                json(&fresh)["body"],
-                json(&doc)["body"],
+                body_without_id(&json(&fresh)),
+                body_without_id(&json(&doc)),
                 "{}",
                 source.display()
             );
@@ -501,7 +501,10 @@ fn apply_onto_keeps_the_envelope_and_views_drop_from() {
         &view,
     );
     ok(&o, "apply - -o");
-    assert_eq!(json(&dir.join("stdin.duet"))["body"], json(&doc)["body"]);
+    assert_eq!(
+        body_without_id(&json(&dir.join("stdin.duet"))),
+        body_without_id(&json(&doc))
+    );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 

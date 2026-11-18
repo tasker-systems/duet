@@ -14,7 +14,7 @@ use std::process::Output;
 use duet_core::Part;
 use duet_drums::DrumGrid;
 use duet_e2e::{duet, duet_with, ok, root, s, scratch};
-use duet_schemas::{AnyDocument, Document};
+use duet_schemas::{AnyDocument, Document, PartBody, Source};
 
 /// A melody in E-flat major at 120 a minute, from half a second in: the tonic triad and
 /// scale, with the tonic and dominant held longest.
@@ -113,11 +113,11 @@ fn read(path: &Path) -> String {
 
 /// The part in a part document, as duet-schemas reads it.
 fn part_of(path: &Path) -> Part {
-    document_of(path).body
+    document_of(path).body.part
 }
 
 /// A part document, as duet-schemas reads it.
-fn document_of(path: &Path) -> Document<Part> {
+fn document_of(path: &Path) -> Document<PartBody> {
     Document::read(&read(path)).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
@@ -211,7 +211,16 @@ fn part_show_reads_captures_part_document_directly() {
     let out = duet(&dir, &["part", "show", s(&path)]);
     ok(&out, "part show tune.duet");
     let shown = Part::from_text(&String::from_utf8_lossy(&out.stdout)).expect("notefmt");
-    assert_eq!(shown, doc.body);
+    assert_eq!(shown, doc.body.part);
+    // The part states its source: the take's reading, a one-take comp, naming the take by the
+    // digest the analysis states and the reader that read it.
+    let analysis = std::fs::read_to_string(dir.join("tune.capture.duet")).expect("analysis");
+    let analysis: serde_json::Value = serde_json::from_str(&analysis).expect("json");
+    let digest = analysis["body"]["take"]["digest"]
+        .as_str()
+        .expect("a digest");
+    let reading = Source::reading(digest.parse().expect("a digest"), Some("hmm".into()));
+    assert_eq!(doc.body.source, reading, "{:?}", doc.body.source);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -876,7 +885,7 @@ fn a_given_tempo_is_not_reported_as_an_estimate() {
         "{:?}",
         doc.statements
     );
-    assert_eq!(doc.body.tempo_bpm, 120.0);
+    assert_eq!(doc.body.part.tempo_bpm, 120.0);
     assert!(read(&dir.join("tune.abc")).contains("Q:1/4=120"));
     // Nor are its half and double, in the analysis.
     let json: serde_json::Value = analysis_of(&dir.join("tune.capture.duet"));

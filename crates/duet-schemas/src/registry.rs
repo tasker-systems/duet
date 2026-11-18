@@ -1,14 +1,15 @@
 //! Every kind this build knows, and a document of any of them.
 
 use duet_capture::Analysis;
-use duet_core::Part;
 use duet_drums::DrumGrid;
 use duet_dsp::PerformanceHead;
 use serde_json::Value;
 
 use crate::journal::{IndexHead, JournalHead};
+use crate::part::PartBody;
 use crate::project::Project;
 use crate::schema::{document_schema, envelope_schema, stream_schema};
+use crate::song::Song;
 use crate::{Document, Error, Kind, Result, StreamKind, Version, read_envelope};
 
 /// How a kind's files are framed.
@@ -53,10 +54,11 @@ const fn stream<K: StreamKind>() -> KindInfo {
 
 /// Every kind this build reads and writes.
 pub const KINDS: &[KindInfo] = &[
-    document::<Part>(),
+    document::<PartBody>(),
     document::<DrumGrid>(),
     document::<Analysis>(),
     document::<Project>(),
+    document::<Song>(),
     stream::<PerformanceHead>(),
     stream::<JournalHead>(),
     stream::<IndexHead>(),
@@ -81,11 +83,12 @@ pub fn kind(name: &str) -> Option<&'static KindInfo> {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum AnyDocument {
-    Part(Document<Part>),
+    Part(Document<PartBody>),
     DrumGrid(Document<DrumGrid>),
     /// Boxed: an analysis holds a take's every event and its reading, and is far the largest.
     CaptureAnalysis(Box<Document<Analysis>>),
     Project(Document<Project>),
+    Song(Document<Song>),
 }
 
 impl AnyDocument {
@@ -99,12 +102,13 @@ impl AnyDocument {
     pub fn read(text: &str) -> Result<Self> {
         let envelope = read_envelope(text)?;
         match kind(&envelope.kind) {
-            Some(info) if info.name == Part::NAME => Document::read(text).map(Self::Part),
+            Some(info) if info.name == PartBody::NAME => Document::read(text).map(Self::Part),
             Some(info) if info.name == DrumGrid::NAME => Document::read(text).map(Self::DrumGrid),
             Some(info) if info.name == Analysis::NAME => {
                 Document::read(text).map(|doc| Self::CaptureAnalysis(Box::new(doc)))
             }
             Some(info) if info.name == Project::NAME => Document::read(text).map(Self::Project),
+            Some(info) if info.name == Song::NAME => Document::read(text).map(Self::Song),
             Some(info) if info.framing == Framing::Stream => Err(Error::Framing {
                 found: "document (.duet, with a `body`)",
                 expected: "stream (.duet.jsonl), as its kind is",
@@ -124,10 +128,11 @@ impl AnyDocument {
     #[must_use]
     pub const fn kind(&self) -> &'static str {
         match self {
-            Self::Part(_) => Part::NAME,
+            Self::Part(_) => PartBody::NAME,
             Self::DrumGrid(_) => DrumGrid::NAME,
             Self::CaptureAnalysis(_) => Analysis::NAME,
             Self::Project(_) => Project::NAME,
+            Self::Song(_) => Song::NAME,
         }
     }
 
@@ -142,6 +147,7 @@ impl AnyDocument {
             Self::DrumGrid(doc) => doc.write(),
             Self::CaptureAnalysis(doc) => doc.write(),
             Self::Project(doc) => doc.write(),
+            Self::Song(doc) => doc.write(),
         }
     }
 }

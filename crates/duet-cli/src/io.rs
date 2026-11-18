@@ -22,7 +22,8 @@ use clap::error::ErrorKind;
 use duet_core::{EndRule, Part};
 use duet_drums::DrumGrid;
 use duet_midi::Midi;
-use duet_schemas::{AnyDocument, Document, From, Tool};
+use duet_schemas::journal::{DocDigest, Id};
+use duet_schemas::{AnyDocument, Document, From, PartBody, Source, Tool};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Format {
@@ -193,6 +194,11 @@ pub fn grid_path(path: &Path, what: &str) -> Result<()> {
 /// Reads a drum-grid document from a path ([`grid_path`]), refused naming its kind when it is
 /// not a drum grid. Its grid is normalized, as a hand edit may leave it loose.
 pub fn read_grid_document(path: &Path, what: &str) -> Result<DrumGrid> {
+    read_grid_with_digest(path, what).map(|(grid, _)| grid)
+}
+
+/// Reads a drum-grid document as [`read_grid_document`] does, with its body's digest as read.
+pub fn read_grid_with_digest(path: &Path, what: &str) -> Result<(DrumGrid, DocDigest)> {
     grid_path(path, what)?;
     let bytes = bytes_of(path)?;
     if path == Path::new("-") && !is_document(&bytes) {
@@ -201,9 +207,10 @@ pub fn read_grid_document(path: &Path, what: &str) -> Result<DrumGrid> {
     let text = String::from_utf8(bytes).context("a document is UTF-8 text")?;
     match AnyDocument::read(&text).with_context(|| path.display().to_string())? {
         AnyDocument::DrumGrid(doc) => {
+            let digest = body_digest(&doc.body)?;
             let mut grid = doc.body;
             grid.normalize()?;
-            Ok(grid)
+            Ok((grid, digest))
         }
         other => bail!(
             "{} is a {} document, and {what} a drum grid",
@@ -246,10 +253,72 @@ fn is_document(bytes: &[u8]) -> bool {
 }
 
 /// What `convert` read: a part with where it came from, or a drum grid from a drum-grid
-/// document.
+/// document, with that document's digest.
 pub enum Loaded {
-    Part(Part, Option<From>),
-    Grid(DrumGrid),
+    Part(Part, Origin),
+    Grid(DrumGrid, DocDigest),
+}
+
+/// What a command knows of where a part came from, beside its notes: the envelope's `from`, and
+/// the part document it was read from, if it was read from one.
+#[derive(Debug, Clone, Default)]
+pub struct Origin {
+    pub from: Option<From>,
+    pub document: Option<ReadDocument>,
+}
+
+/// A part document as it was read: where, its id and source, and its body's digest.
+#[derive(Debug, Clone)]
+pub struct ReadDocument {
+    pub path: std::path::PathBuf,
+    pub id: Id,
+    pub source: Source,
+    pub digest: DocDigest,
+}
+
+impl Origin {
+    /// An import's: where it came from, and no document.
+    pub fn imported(from: From) -> Self {
+        Self {
+            from: Some(from),
+            document: None,
+        }
+    }
+
+    /// **The rule for `source`: it follows the part.** A part written from a part document
+    /// keeps that document's source; one read from MIDI or ABC was written by hand, in another
+    /// program (the envelope's `from` says which).
+    pub fn source(&self) -> Source {
+        self.document
+            .as_ref()
+            .map_or_else(Source::hand, |doc| doc.source.clone())
+    }
+
+    /// The source of a part an operation made of this one: `generated`, naming the operation
+    /// and the document it read, when it read one.
+    pub fn generated(&self, operation: &str) -> Source {
+        generated(operation, self.document.iter().map(|doc| doc.digest))
+    }
+}
+
+/// A `generated` source: the operation, and the digest of each document it read.
+pub fn generated(operation: &str, inputs: impl IntoIterator<Item = DocDigest>) -> Source {
+    serde_json::from_value(serde_json::json!({
+        "by": "generated",
+        "operation": operation,
+        "inputs": inputs.into_iter().collect::<Vec<_>>(),
+    }))
+    .expect("a generated source is a source")
+}
+
+/// The digest a document's `doc.written` names: the FNV-1a of its body as compact JSON.
+pub fn body_digest<T: serde::Serialize>(body: &T) -> Result<DocDigest> {
+    Ok(DocDigest::of(&serde_json::to_vec(body)?))
+}
+
+/// A fresh id for a document duet makes: a UUIDv7.
+pub fn fresh_id() -> Result<Id> {
+    Ok(duet_bus::fresh_id()?)
 }
 
 /// Reads a part. `what` says what the command does with it, as in "duet play reads", for a
@@ -270,10 +339,10 @@ pub fn read(path: &Path, format: Format, what: &str) -> Result<Part> {
 ///
 /// A view's text is not read here: `duet apply` reads it, and a document it writes has no
 /// `from`, since a view is not where a part comes from.
-pub fn read_with_from(path: &Path, format: Format, what: &str) -> Result<(Part, Option<From>)> {
+pub fn read_with_from(path: &Path, format: Format, what: &str) -> Result<(Part, Origin)> {
     match read_any(path, format, what)? {
-        Loaded::Part(part, from) => Ok((part, from)),
-        Loaded::Grid(_) => bail!(
+        Loaded::Part(part, origin) => Ok((part, origin)),
+        Loaded::Grid(..) => bail!(
             "{} is a drum-grid document, and {what} a part; duet drums render makes a part of \
              one",
             path.display()
@@ -298,15 +367,28 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
     let text = || String::from_utf8(bytes.clone()).context("input is not UTF-8 text");
     // MIDI and ABC come back normalized. A hand-edited document may hold lengths or
     // positions in a loose form, so it is normalized here.
-    let (part, from) = match format {
+    let (part, origin) = match format {
         Format::Duet => {
             let doc = AnyDocument::read(&text()?).with_context(|| path.display().to_string())?;
             match doc {
-                AnyDocument::Part(doc) => (normalized(doc.body)?, doc.from),
+                AnyDocument::Part(doc) => {
+                    let document = ReadDocument {
+                        path: path.to_path_buf(),
+                        id: doc.body.id.clone(),
+                        source: doc.body.source.clone(),
+                        digest: body_digest(&doc.body)?,
+                    };
+                    let origin = Origin {
+                        from: doc.from,
+                        document: Some(document),
+                    };
+                    (normalized(doc.body.part)?, origin)
+                }
                 AnyDocument::DrumGrid(doc) => {
+                    let digest = body_digest(&doc.body)?;
                     let mut grid = doc.body;
                     grid.normalize()?;
-                    return Ok(Loaded::Grid(grid));
+                    return Ok(Loaded::Grid(grid, digest));
                 }
                 other => bail!(
                     "{} is a {} document, and {what} a part",
@@ -315,7 +397,10 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
                 ),
             }
         }
-        Format::Midi => (Part::from_midi(&bytes)?, Some(From::new("midi"))),
+        Format::Midi => (
+            Part::from_midi(&bytes)?,
+            Origin::imported(From::new("midi")),
+        ),
         Format::Abc => {
             let book = duet_abc::Book::parse(&text()?)?;
             if book.tunes().len() > 1 {
@@ -326,10 +411,10 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
                 );
             }
             let (part, from) = crate::abc::reading(&book.tunes()[0])?;
-            (part, Some(from))
+            (part, Origin::imported(from))
         }
     };
-    Ok(Loaded::Part(part, from))
+    Ok(Loaded::Part(part, origin))
 }
 
 fn normalized(mut part: Part) -> duet_core::Result<Part> {
@@ -351,15 +436,16 @@ pub fn tool() -> Tool {
     Tool::new("duet", env!("CARGO_PKG_VERSION"))
 }
 
-/// Writes the part in a format, recording no provenance. See [`write_from`].
-pub fn write(part: &Part, path: &Path, format: Format, end: EndRule) -> Result<()> {
-    write_from(part, path, format, end, None)
+/// Writes a part made from no document (a drum grid, a view) in a format, with `source`.
+pub fn write(part: &Part, path: &Path, format: Format, end: EndRule, source: Source) -> Result<()> {
+    write_from(part, path, format, end, &Origin::default(), source)
 }
 
 /// Writes the part in a format. Every file written says where the part ends, whatever
 /// default computed it: MIDI states it itself, and a document carries it as its
 /// body's `end`. A document also records `from`, where the part came from
-/// ([`read_with_from`]); the other formats have nowhere to keep it.
+/// ([`read_with_from`]), the part's `id` and its `source`; the other formats have nowhere to
+/// keep them.
 ///
 /// **The rule for `from`:** it follows the part. A command that reads a part and writes a
 /// document of it (`convert`, `part quantize`, `part show --to duet`, `abc render`) records
@@ -368,24 +454,46 @@ pub fn write(part: &Part, path: &Path, format: Format, end: EndRule) -> Result<(
 /// provenance. Quantizing keeps it: the notices still name what the import did not carry.
 /// A view carries none, so a part `duet apply` reads from one has none. A drum grid carries
 /// none yet.
+///
+/// **The rule for `id`: it follows the file** (ruling 13: minted once when the document is
+/// made, never changed). A document written over the one it was read from keeps its id; every
+/// other document written is a new one, a copy at most, and has a new id.
+///
+/// **The source is the caller's**, by [`Origin::source`] or [`Origin::generated`].
 pub fn write_from(
     part: &Part,
     path: &Path,
     format: Format,
     end: EndRule,
-    from: Option<&From>,
+    origin: &Origin,
+    source: Source,
 ) -> Result<()> {
     let part = with_end(part, end)?;
     let bytes = match format {
         Format::Duet => {
-            let mut doc = Document::new(tool(), part);
-            doc.from = from.cloned();
+            let id = match &origin.document {
+                Some(doc) if path != Path::new("-") && same_file(&doc.path, path) => doc.id.clone(),
+                _ => fresh_id()?,
+            };
+            let mut doc = Document::new(tool(), PartBody::new(id, source, part));
+            doc.from.clone_from(&origin.from);
             doc.write()?.into_bytes()
         }
         Format::Midi => part.to_midi()?,
         Format::Abc => duet_abc::write(&part, &duet_abc::WriteOptions::default())?.into_bytes(),
     };
     write_bytes(path, &bytes)
+}
+
+/// A part's document with a new id, by hand: what a test writes as a part `duet` reads.
+#[cfg(test)]
+pub fn part_document(part: Part) -> String {
+    Document::new(
+        tool(),
+        PartBody::new(fresh_id().expect("an id"), Source::hand(), part),
+    )
+    .write()
+    .expect("written")
 }
 
 /// Writes to a file, or to standard output for `-`.
@@ -413,8 +521,7 @@ mod tests {
 
     use duet_core::{Note, Part, Position, Track};
 
-    use super::{Format, grid_path, part_format, read, tool};
-    use duet_schemas::Document;
+    use super::{Format, grid_path, part_format, read};
 
     #[test]
     fn a_part_is_named_by_dot_duet_mid_or_abc_and_nothing_else() {
@@ -483,7 +590,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("duet-read-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("part.duet");
-        let text = Document::new(tool(), part).write().expect("written");
+        let text = super::part_document(part);
         std::fs::write(&path, text).expect("write");
         let read = read(&path, Format::Duet, "reads").expect("read");
         let note = &read.tracks[0].notes[0];

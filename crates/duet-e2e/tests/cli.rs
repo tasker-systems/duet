@@ -201,6 +201,18 @@ fn every_output_holds_the_same_music_and_states_its_end() {
                 assert_eq!(doc["duet"]["kind"], "part", "{stem}.duet");
                 let body = doc["body"].as_object_mut().expect("a body");
                 let stated = body.remove("end");
+                // A document's id and source are what the .json held not: an import is a new
+                // part by hand, and a grid's render is generated from the grid.
+                assert!(
+                    body.remove("id").is_some_and(|id| id.is_string()),
+                    "{name}: an id"
+                );
+                let by = body.remove("source").map(|source| source["by"].clone());
+                assert!(
+                    by.as_ref()
+                        .is_some_and(|by| by == "hand" || by == "generated"),
+                    "{name}: {by:?}"
+                );
                 assert_eq!(stated, Some(serde_json::Value::from(end)), "{name}");
                 assert_eq!(doc["body"], want, "{name}: the same part");
             }
@@ -656,11 +668,11 @@ fn without_end(doc: &Path) {
 }
 
 /// The kind that holds one voice, line or groove is `part`, and `duet part` works on it.
-/// `duet song` is no longer a command: the name is kept for the piece, a kind still to come,
-/// so it is unknown rather than an alias.
+/// `duet song` works on a song, the piece parts belong to, named by its folder: it is no alias
+/// of `duet part`, so a part's path is refused as a song's name, and nothing is written.
 #[test]
-fn duet_song_is_an_unknown_command_and_duet_part_shows_a_part() {
-    let none = scratch("song-unknown");
+fn duet_part_shows_a_part_and_duet_song_names_a_song_not_a_part() {
+    let none = scratch("song-not-part");
     let sketch = root().join("samples/sketch.notes");
     let doc = none.join("sketch.duet");
     let p = Path::new;
@@ -674,18 +686,15 @@ fn duet_song_is_an_unknown_command_and_duet_part_shows_a_part() {
     let shown = duet_out(&[p("part"), p("show"), &doc]);
     assert!(!shown.is_empty(), "duet part show printed nothing");
 
-    for args in [&[p("song"), p("show"), &doc][..], &[p("song")][..]] {
-        let out = duet_in(&none, &none.join("user"), args);
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert!(!out.status.success(), "duet {args:?} should fail");
-        assert!(
-            err.contains("unrecognized subcommand 'song'"),
-            "duet {args:?}: {err}"
-        );
-        assert!(
-            out.stdout.is_empty(),
-            "duet {args:?} wrote {:?}",
-            out.stdout
-        );
-    }
+    let out = duet_in(&none, &none.join("user"), &[p("song"), p("show"), &doc]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "duet song show of a part should fail"
+    );
+    assert!(err.contains("is not a name"), "{err}");
+    assert!(out.stdout.is_empty(), "wrote {:?}", out.stdout);
+    let out = duet_in(&none, &none.join("user"), &[p("song")]);
+    assert!(!out.status.success(), "duet song alone should fail");
+    assert!(out.stdout.is_empty(), "wrote {:?}", out.stdout);
 }

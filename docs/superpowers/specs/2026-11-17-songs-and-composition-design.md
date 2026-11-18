@@ -4,9 +4,11 @@
 folded into the domain model by the owner's ruling on the project design (temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, decision 10).
 
-**Status: Proposed. Nothing here is built.** The domain model under it is **Ruled** (owner,
-2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 11), and each point taken
-from it is marked so. Everything else is **Proposed**. What the owner has not ruled is listed in
+**Status: Proposed; songs task 2 is built** (`song` 1.0, its composition, `duet song new | show |
+status`, and a part's `id` and `source`). The domain model under it is **Ruled** (owner,
+2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 14, and 2026-11-18, temper
+`01a1ee66-f71b-763c-8117-5198cf45aa14`, rulings 15 and 16), and each point taken from it is marked
+so. Everything else is **Proposed**. What the owner has not ruled is listed in
 [Open questions](#open-questions), and each place it touches says so.
 
 **Reference pages,** drawn from the same rulings: the
@@ -75,6 +77,13 @@ disagree, the Temper decisions win.
 
 Rulings 12 to 14: owner, 2026-11-17, temper `01a1eb48`. Rulings 13 and 14 answer the bus design's
 decisions 17 and 23, ruled on #80.
+
+**Ruled (owner, 2026-11-18, temper `01a1ee66-f71b-763c-8117-5198cf45aa14`)**, in the owner's
+words "status gates nothing, add source":
+15. **A song's status gates no command.** Every command works on a song in any state; only
+    `duet song status` refuses, and only a move the state machine does not draw ([§7](#7-lifecycles)).
+16. **A part states its `source`,** comped, generated or by hand, in `part` 1.0, changed in place
+    under ruling 12 ([§2](#2-parts)). Its exact shape was settled in the build of songs task 2.
 
 **Agreed in the same discussion, as the model's working shape:**
 - **A part is one voice, line or groove** (notes, or a drum grid). It always states its source:
@@ -246,10 +255,26 @@ starts fresh at 1.0, with no compatibility path between them.
 ## 2. Parts
 
 **Ruled:** a part is one voice, line or groove, and always states its source.
-**Proposed:** the `part` kind is today's `song` 1.0 renamed, at `songs/<song>/parts/<part>.duet`,
-with a `source` designed in [the documents design](2026-11-15-duet-documents-design.md#part-10):
-`comped` (from takes, naming them and the comp when there is one), `generated` (naming the operation
-and its inputs) or `hand` (written by the owner or by Claude).
+**Ruled (owner, 2026-11-18, temper `01a1ee66`, ruling 16):** the `part` kind is today's `song` 1.0
+renamed, at `songs/<song>/parts/<part>.duet`, and it states its `source` in `part` 1.0, changed in
+place: `comped` (from takes, naming them and the comp when there is one), `generated` (naming the
+operation and its inputs) or `hand` (written by the owner or by Claude).
+
+**The shape, as built in songs task 2.** The body is `id`, `source`, then the part's own fields.
+`source` is an object whose `by` says which:
+- `{"by": "hand"}`: written by the owner or by Claude, in duet or imported from another program
+  (the envelope's `from` says from what).
+- `{"by": "comped", "takes": [{"digest": "sha256:…", "take": "wayfaring", "reading": "hmm"}],
+  "comp": "verse"}`: at least one take, each by its digest, with its project name and the reader
+  whose reading it is when known; the comp when there is one. `duet capture` writes a one-take
+  comp with no comp.
+- `{"by": "generated", "operation": "part quantize", "inputs": ["4693e75efa59623e"]}`: the
+  operation, by its command's name, and the digest of each document it read (the FNV-1a of its
+  body as compact JSON, as a view's `from` and `doc.written` name one). `part quantize` and
+  `drums render` write it. An operation's settings are not stated yet: that is the
+  transformations task's, with [question 1](#open-questions).
+
+A part without `source`, or without `id`, is refused by name. A drum grid states neither yet.
 
 - **A drum part is a `drum-grid` document** in `parts/`, placed the same way. A part is the role; the
   kind is what the file holds.
@@ -424,8 +449,9 @@ Each is **Proposed** unless marked.
     picks one and rewrites the other.
   - **A snapshot is an event recorded against the song, not a status.** Taking one never changes the
     song's state, and no state requires one.
-  - **Proposed:** the status gates nothing. Every command works on a song in any state; the status is
-    the owner's record of where the song stands.
+  - **Ruled (owner, 2026-11-18, temper `01a1ee66`, ruling 15):** the status gates nothing. Every
+    command works on a song in any state; the status is the owner's record of where the song
+    stands.
 - **A comp:** **open** ([question 2](#open-questions)). The reading on the table is drafting (entries
   being made), applied (its part written from it), stale (a variant read again, a take re-placed, or
   the composition changed under its bars since it was applied) and refused (it no longer places). The
@@ -438,8 +464,9 @@ Each is **Proposed** unless marked.
 Not ruled by the owner. Each is recorded here, not decided.
 
 Ruled since first written, and no longer open: how a take is placed (ruling 8,
-[§4](#4-how-a-take-maps-onto-the-bars)), song states (ruling 9, [§7](#7-lifecycles)), and the song
-kind's name and version (rulings 10 and 11, [§1](#the-kinds-name-and-version)).
+[§4](#4-how-a-take-maps-onto-the-bars)), song states (ruling 9, [§7](#7-lifecycles)), the song
+kind's name and version (rulings 10 and 11, [§1](#the-kinds-name-and-version)), that the status
+gates nothing (ruling 15, [§7](#7-lifecycles)), and a part's `source` (ruling 16, [§2](#2-parts)).
 
 1. **Where an operation's change is stored:** a new part plus a step in the song's history, or a chain
    of changes carried by the part. For the transformations task ([§6](#6-operations-are-stated-changes)).
@@ -467,7 +494,10 @@ kind's name and version (rulings 10 and 11, [§1](#the-kinds-name-and-version)).
    name are each refused by name; `duet song status` makes each of the four allowed moves, refuses
    every other by name, and leaves the document unchanged when it refuses; `duet song new` mints an
    id, and renaming the song's folder leaves it unchanged; a part gains its `id`; a status changed
-   by hand in `song.duet` is reported by `duet journal check`.
+   by hand in `song.duet` is reported by `duet journal check`. **Built**, except the last
+   witness, which lands with the journal follow-up (temper
+   `01a1ec52-eff4-76bd-8470-33e544e7e2bf`), since no command writes `song.status-set` until it
+   does. A song's `takes` and their `placed` come with task 3, in place under ruling 12.
 3. **Placing takes:** `placed`, `duet song place`, `duet record --song`, and capture's comparison with
    the composition. **Needs:** 2. **Witnesses:** a take recorded with `--song` has its offset to the
    frame; a take with no click is placed `estimated` with capture's tempo, and `duet song place`

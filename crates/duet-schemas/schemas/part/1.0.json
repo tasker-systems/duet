@@ -1,5 +1,27 @@
 {
   "$defs": {
+    "CompedTake": {
+      "additionalProperties": false,
+      "description": "One take a comped part drew from.",
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/TakeDigest",
+          "description": "The take's identity: the digest of its decoded samples."
+        },
+        "reading": {
+          "description": "The reader whose reading the notes are, such as `rules`, `hmm` or `basic-pitch`.\nAbsent for a rhythm take, which has one reading.",
+          "type": "string"
+        },
+        "take": {
+          "$ref": "#/$defs/Name",
+          "description": "The take's name in the project, when it has one."
+        }
+      },
+      "required": [
+        "digest"
+      ],
+      "type": "object"
+    },
     "Control": {
       "description": "A channel event other than a note.",
       "oneOf": [
@@ -87,6 +109,16 @@
         }
       ]
     },
+    "DocDigest": {
+      "description": "The 64-bit FNV-1a of the document's body as compact JSON, as 16 lowercase hex digits.",
+      "pattern": "^[0-9a-f]{16}$",
+      "type": "string"
+    },
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
     "Key": {
       "description": "A key such as D minor, Bb major or D dorian, with at most 7 sharps or flats.",
       "pattern": "^\\s*[A-Ga-g][#b]*(\\s*([Mm]|([Mm][Aa][Jj]|[Ii][Oo][Nn]|[Mm][Ii][Nn]|[Aa][Ee][Oo]|[Dd][Oo][Rr]|[Pp][Hh][Rr]|[Ll][Yy][Dd]|[Mm][Ii][Xx]|[Ll][Oo][Cc]).*))?\\s*$",
@@ -107,6 +139,11 @@
         "key"
       ],
       "type": "object"
+    },
+    "Name": {
+      "description": "A name in the project: lowercase letters and digits, words joined by single hyphens, such as wayfaring or blood-sport-v2.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "type": "string"
     },
     "Note": {
       "additionalProperties": false,
@@ -140,23 +177,16 @@
       ],
       "type": "object"
     },
-    "Pitch": {
-      "description": "A pitch in scientific notation, such as C4 (MIDI 60), F#3, Bb2, Cb5 (MIDI 71) or F##4 (MIDI 67), from C-1 to G9: a letter, up to two sharps or two flats, and the letter's octave. Its spelling is kept.",
-      "pattern": "^[A-Ga-g]([#♯]{0,2}|[b♭]{0,2})-?[0-9]+$",
-      "type": "string"
-    },
-    "Position": {
-      "description": "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the part's ticks. bar.beat alone is tick 0.",
-      "pattern": "^0*[1-9][0-9]*\\.0*[1-9][0-9]*(\\.[0-9]+)?$",
-      "type": "string"
-    },
-    "Part": {
+    "PartBody": {
       "additionalProperties": false,
-      "description": "A whole part: its tempo, meter and key, and its tracks.",
+      "description": "A part: its stable id, how it was made, and its notes and conductor, every field at one level.",
       "properties": {
         "end": {
           "$ref": "#/$defs/Position",
           "description": "Where the part ends, if it says: a bar.beat.tick position such as `9.1.0` (the bar\nline before bar 9), or one inside a bar, for a part that stops mid-bar. Nothing in\nthe part may lie past it: a note may end on it, and no note may end after it.\n\n`None` means the part names no end, and its [default end](Part::default_end)\napplies: the end of the last bar holding an event. Every writer states the end it\nuses ([`Part::stated_end`]), so a written file always says where it ends, whatever\ndefault computed it."
+        },
+        "id": {
+          "$ref": "#/$defs/Id"
         },
         "key": {
           "$ref": "#/$defs/Key",
@@ -167,6 +197,9 @@
             "$ref": "#/$defs/KeyChange"
           },
           "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
         },
         "tempo_bpm": {
           "description": "The tempo at the start, in quarter notes per minute.",
@@ -209,12 +242,103 @@
         }
       },
       "required": [
+        "id",
+        "source",
         "ticks_per_quarter",
         "tempo_bpm",
         "time_sig",
         "tracks"
       ],
+      "title": "PartBody",
       "type": "object"
+    },
+    "Pitch": {
+      "description": "A pitch in scientific notation, such as C4 (MIDI 60), F#3, Bb2, Cb5 (MIDI 71) or F##4 (MIDI 67), from C-1 to G9: a letter, up to two sharps or two flats, and the letter's octave. Its spelling is kept.",
+      "pattern": "^[A-Ga-g]([#♯]{0,2}|[b♭]{0,2})-?[0-9]+$",
+      "type": "string"
+    },
+    "Position": {
+      "description": "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the part's ticks. bar.beat alone is tick 0.",
+      "pattern": "^0*[1-9][0-9]*\\.0*[1-9][0-9]*(\\.[0-9]+)?$",
+      "type": "string"
+    },
+    "Source": {
+      "description": "How a part was made (decision 01a1ee66, the songs spec's §2). Written as an object whose `by`\nsays which.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Written by hand, by the owner or by Claude: in duet, or in another program and imported\n(the envelope's `from` says from what).",
+          "properties": {
+            "by": {
+              "const": "hand",
+              "type": "string"
+            }
+          },
+          "required": [
+            "by"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Comped from takes: a reading of each take it drew from, and the comp when there is one.\nA take's reading kept as a part is a one-take comp with no comp: the simple case.",
+          "properties": {
+            "by": {
+              "const": "comped",
+              "type": "string"
+            },
+            "comp": {
+              "$ref": "#/$defs/Name",
+              "description": "The comp in the song's `comps/` that wrote the part, by its name."
+            },
+            "takes": {
+              "description": "The takes the notes came from, at least one.",
+              "items": {
+                "$ref": "#/$defs/CompedTake"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "by",
+            "takes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Generated by an operation, which names itself and what it read, so it can be made again.",
+          "properties": {
+            "by": {
+              "const": "generated",
+              "type": "string"
+            },
+            "inputs": {
+              "description": "The digest of each document the operation read, in order.",
+              "items": {
+                "$ref": "#/$defs/DocDigest"
+              },
+              "type": "array"
+            },
+            "operation": {
+              "description": "The operation, as its command names it, such as `drums render`.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "by",
+            "operation"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TakeDigest": {
+      "description": "The SHA-256 of a take's decoded samples: the bytes `duet-take-1`, the rate as a little-endian u32, the channel count as a little-endian u16, then every sample, interleaved, as the little-endian bits of its f32.",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
     },
     "TempoChange": {
       "additionalProperties": false,
@@ -306,7 +430,7 @@
       "const": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/part/1.0.json"
     },
     "body": {
-      "$ref": "#/$defs/Part"
+      "$ref": "#/$defs/PartBody"
     },
     "duet": {
       "$ref": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/envelope/1.0.json",

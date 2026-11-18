@@ -43,12 +43,14 @@
 //! without a version change, and asks only to regenerate when its descriptions alone change:
 //! `DUET_BLESS_SCHEMAS=1 cargo test -p duet-schemas` writes them.
 //!
-//! The kinds this build knows are [`KINDS`]: `part` 1.0 and `capture-analysis` 1.0
+//! The kinds this build knows are [`KINDS`]: `part` 1.0 ([`PartBody`]: a part, its id and its
+//! source) and `capture-analysis` 1.0
 //! (duet-capture's [`Analysis`](duet_capture::Analysis)), documents, and `performance` 1.0, a
 //! stream of duet-dsp's [`PerformanceHead`](duet_dsp::PerformanceHead) and
 //! [`FrameBlock`](duet_dsp::FrameBlock)s, and a project's journal ([`journal`]): `journal-index`
 //! 1.0, the index over its segments, and `journal` 1.0, one segment, a stream of entries, each
-//! one event; and `project` 1.0 ([`Project`]), a project's document, `.duet/project.duet`.
+//! one event; `project` 1.0 ([`Project`]), a project's document, `.duet/project.duet`; and
+//! `song` 1.0 ([`Song`]), a song and its composition, `songs/<song>/song.duet`.
 //! [`AnyDocument`] reads a `.duet` of any document kind by its envelope.
 //!
 //! **The journal's events version on their own** ([`EVENTS`]), each schema committed under
@@ -78,11 +80,12 @@ mod error;
 mod frame;
 pub mod journal;
 mod kind;
-mod part;
+pub mod part;
 mod performance;
 pub mod project;
 mod registry;
 pub mod schema;
+pub mod song;
 mod version;
 
 pub use envelope::{Envelope, From, Notice, SCHEMA_BASE, Tool, schema_url};
@@ -92,9 +95,11 @@ pub use journal::{
     EVENTS, EventInfo, EventKind, IndexHead, Journal, JournalHead, JournalIndex, event_kind,
 };
 pub use kind::{Kind, StreamKind};
+pub use part::{PartBody, Source};
 pub use project::Project;
 pub use registry::{AnyDocument, ENVELOPE_INFO, Framing, KINDS, KindInfo, kind};
 pub use schema::{ENVELOPE, ENVELOPE_VERSION};
+pub use song::Song;
 pub use version::Version;
 
 #[cfg(test)]
