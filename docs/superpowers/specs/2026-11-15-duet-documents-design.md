@@ -234,6 +234,25 @@ Its rules, unchanged by the rename:
 
 #### `source`, proposed for the next free minor of part
 
+**Superseded: built in `part` 1.0, in place.** The owner ruled on 2026-11-18 (temper
+`01a1ee66-f71b-763c-8117-5198cf45aa14`) that a part states its source in `part` 1.0, changed in
+place under ruling 12, with its exact shape settled in the build of songs task 2. That shape is in
+[songs and composition §2](2026-11-17-songs-and-composition-design.md#2-parts), and it is
+**required**, not optional. It departs from the proposal below in four ways, each for the reason
+given:
+- **Tagged inside, by `by`** (`{"by": "hand"}`), not outside (`{"hand": {…}}`): one spelling with
+  a placement's `by`. It is still exactly one of three, and a new source is a new variant.
+- **`hand` names no one.** No command knows who is at the keyboard; the journal records who did
+  each act.
+- **`generated` names each input by its body's digest, not by a path.** A path changes with a
+  rename, and an operation's input may lie outside any song; the digest names the content. The
+  operation's settings are not stated yet: that waits on the transformations task.
+- **`comped` names each take by its digest, with its project name and the reader when known, and
+  the comp by its name.** A reading's passes and the reader's cost are in the capture's analysis,
+  which names the same take.
+
+What follows is the proposal as it was written.
+
 **Proposed** (the domain model's working shape: a part always states its source). An optional field
 is additive, a minor (1.1, unless the ornaments work takes 1.1 first); making it required would be a
 major, so the minor adds it optional and every writer fills it. Its absence means "not stated", as

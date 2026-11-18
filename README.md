@@ -21,7 +21,7 @@ The workspace is split by domain:
 | `duet-play` | a `Part` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Part` and score |
-| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, and the project document |
+| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, the project document, and the song and its composition |
 | `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
 | `duet-cli` | the `duet` binary |
 
@@ -134,7 +134,18 @@ duet apply sketch.notes -o - | duet play -       # play a view's text, no file i
 
 **A part holds one voice, line or groove** (notes, or a drum track): `part` 1.0, as
 [the documents design](docs/superpowers/specs/2026-11-15-duet-documents-design.md#part-10)
-describes it. The name `song` is kept for the piece a part belongs to, a kind still to come.
+describes it. A part document's body is the part's `id`, its `source`, then the part itself.
+
+- **The `id` is minted once, when the document is made, and never changes** (a UUIDv7). It
+  follows the file: a document written over the one it was read from (`duet apply --onto`,
+  `duet convert a.duet a.duet`) keeps it, and every other document written is a new part, a copy
+  at most, with a new id.
+- **The `source` says how the part was made, and follows the part**: `{"by": "hand"}` (written by
+  the owner or by Claude, here or imported from MIDI or ABC), `{"by": "comped", "takes": [...]}`
+  (read from takes, each by its digest and reader, and the comp when there is one: what `duet
+  capture` writes), or `{"by": "generated", "operation": ..., "inputs": [...]}` (made by an
+  operation, naming the digest of each document it read: `part quantize`, `drums render`). A
+  part document without either is refused, naming the field.
 
 **A document says where its part came from.** A part imported from ABC or MIDI records it in
 the envelope's `from`: `{"format": "midi"}`, or for ABC the tune's `X:` number and every
@@ -143,6 +154,35 @@ line and column, as `duet abc check` lists them. The provenance follows the part
 read and written again keeps its `from` unchanged, and so does `part quantize`. Going out to
 ABC or MIDI and in again replaces it, since that import is the part's new provenance. A
 document `duet apply -o` makes from a view has none.
+
+### Songs: `duet song`
+
+A song is a folder in a project, `songs/<song>/`, named as a take is (lowercase words joined by
+hyphens). It holds `song.duet`, a `song` 1.0 document of the song and its composition, and
+`parts/`, the song's parts, each a part or drum-grid document named by its stem.
+
+```sh
+duet song new wayfaring-stranger --title "Wayfaring Stranger" --meter 3/4 --key "G minor"
+duet song show wayfaring-stranger                 # its id, status, composition and parts
+duet song status wayfaring-stranger sketch        # idea → sketch
+```
+
+- **`song.duet` holds the song**: its `id` (minted by `duet song new`; renaming the folder or
+  the title never changes it), `title`, `status` and `intent`, and its **composition**: the
+  tempo, meter and key maps, the sections, and the placements, where each part (by its stem)
+  sits on the song's bars. Every position is a `bar.beat.tick` on those bars, written as it
+  falls. A meter change off a bar line, a map out of order or not from `1.1.0`, and a place the
+  bars write another way (`3.4.0` in 3/4 is `4.1.0`) are refused by name.
+- **The status is the owner's record of where the song stands**: idea → sketch → developing →
+  arranged, and arranged → developing to reopen. `duet song status` refuses any other move,
+  naming the song's state and the moves it allows, and leaves the song as it was. The status
+  gates no other command.
+- **`duet song show`** refuses a placement of a part the song does not have, two parts with one
+  name (`bass.duet` and `bass.DUET`), and two parts with one id (a file copied by hand), each by
+  name.
+- **A new song's composition** starts from `--tempo`, `--meter` and `--key`, or else the
+  project's defaults in `.duet/project.duet`, or else 120 bpm in 4/4 with no key. `--project`
+  names the project's root; it is the working directory by default.
 
 ### Views: `duet view` and `duet apply`
 
@@ -320,10 +360,12 @@ let part = Part::from_midi(&std::fs::read("take.mid")?)?;
 let text = part.to_text();
 let back = Part::from_text(&text)?.to_midi()?;
 
-// A part document (.duet), through duet-schemas:
-use duet_schemas::{Document, Tool};
-let doc = Document::new(Tool::new("my-tool", "1.0"), part).write()?;
-let part = Document::<Part>::read(&doc)?.body;
+// A part document (.duet), through duet-schemas: the part, its id and its source.
+use duet_schemas::journal::Id;
+use duet_schemas::{Document, PartBody, Source, Tool};
+let id: Id = "0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f6".parse()?; // mint a fresh UUIDv7
+let doc = Document::new(Tool::new("my-tool", "1.0"), PartBody::new(id, Source::hand(), part));
+let part = Document::<PartBody>::read(&doc.write()?)?.body.part;
 ```
 
 `Part`, `Track`, `Note` and `Control` derive serde's `Serialize` and `Deserialize`, so any
