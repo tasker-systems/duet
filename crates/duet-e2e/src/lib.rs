@@ -8,6 +8,10 @@
 //! earlier build, so [`bin`] runs `cargo build -p duet-cli --bin duet` once per test
 //! process and runs the executable that build reports. Set `DUET_E2E_BIN` to run another
 //! binary instead, such as one built from `main` to show that a new test fails there.
+//!
+//! nextest runs every test as its own process, so concurrent builds would relink the binary
+//! while another test runs it. Its setup script, `scripts/nextest-duet-bin.sh`, makes the same
+//! build once before the tests start and sets `DUET_E2E_BIN` to what it reports.
 
 #![forbid(unsafe_code)]
 
