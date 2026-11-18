@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/project/1.0.json",
+  "duet": {
+    "kind": "project",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.3.0"
+    }
+  },
+  "body": {
+    "title": "Porch",
+    "created": "2026-11-17",
+    "duet": "0.3",
+    "defaults": {
+      "tempo_bpm": 92.0,
+      "meter": "3/4",
+      "key": "Ab major",
+      "tuning": "+0c",
+      "grid": "1/16"
+    },
+    "takes": [
+      {
+        "name": "wayfaring",
+        "take": {
+          "digest": "sha256:9f2c41d07b3e8a65c1f0d92e4b7a3c58e06d1f9a2b4c7e8d3f5a6b0c9d1e2f34",
+          "rate": 44100,
+          "channels": 1,
+          "frames": 976080
+        },
+        "file": "wayfaring-stranger.flac",
+        "added": "2026-11-17",
+        "given": {
+          "tempo_bpm": 92.0
+        }
+      },
+      {
+        "name": "blood-sport",
+        "take": {
+          "digest": "sha256:41ab07e3c9d25f18b6a4e0c7d3f92b5a8e1c6d4f7a0b3e9c2d5f8a1b4c7e0d36",
+          "rate": 48000,
+          "channels": 1,
+          "frames": 1203200
+        },
+        "file": "Blood Sport 3.m4a",
+        "added": "2026-11-18"
+      }
+    ]
+  }
+}

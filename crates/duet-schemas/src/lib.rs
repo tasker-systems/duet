@@ -48,8 +48,8 @@
 //! stream of duet-dsp's [`PerformanceHead`](duet_dsp::PerformanceHead) and
 //! [`FrameBlock`](duet_dsp::FrameBlock)s, and a project's journal ([`journal`]): `journal-index`
 //! 1.0, the index over its segments, and `journal` 1.0, one segment, a stream of entries, each
-//! one event. [`AnyDocument`] reads a `.duet` of any document kind by its
-//! envelope.
+//! one event; and `project` 1.0 ([`Project`]), a project's document, `.duet/project.duet`.
+//! [`AnyDocument`] reads a `.duet` of any document kind by its envelope.
 //!
 //! **The journal's events version on their own** ([`EVENTS`]), each schema committed under
 //! `schemas/journal/events/<event>/<major>.<minor>.json` and gated like a kind's. A reader keeps
@@ -80,6 +80,7 @@ pub mod journal;
 mod kind;
 mod part;
 mod performance;
+pub mod project;
 mod registry;
 pub mod schema;
 mod version;
@@ -91,6 +92,7 @@ pub use journal::{
     EVENTS, EventInfo, EventKind, IndexHead, Journal, JournalHead, JournalIndex, event_kind,
 };
 pub use kind::{Kind, StreamKind};
+pub use project::Project;
 pub use registry::{AnyDocument, ENVELOPE_INFO, Framing, KINDS, KindInfo, kind};
 pub use schema::{ENVELOPE, ENVELOPE_VERSION};
 pub use version::Version;
