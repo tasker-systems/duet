@@ -1,7 +1,7 @@
 name: CI
 
 # `CI Success` is the one required check (CI-2). `scope` decides whether a change is docs only,
-# with ci-scope.sh beside this file; for a docs-only change `check` and `msrv` are skipped. `gate`
+# with ci-scope.sh beside this file; for a docs-only change the jobs that compile are skipped. `gate`
 # (CI-1) and `secrets` run on every change, docs included. Detection fails closed: anything the
 # script is unsure of, any event but pull_request and merge_group, and an error in the `scope` job
 # all run everything, and a change to the workflows or the script is never docs only.
@@ -48,7 +48,7 @@ jobs:
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
 
   # Stage 1 (CI-1): no compilation. Formatting, the conventions checks, and the supply-chain
-  # gates, which the expensive job waits on.
+  # gates, which the compiling jobs wait on.
   gate:
     name: Gate
     runs-on: ubuntu-24.04
@@ -116,10 +116,15 @@ jobs:
       - name: gitleaks (SC-SEC-1)
         run: gitleaks git --config .gitleaks.toml --redact --no-banner --exit-code 1 .
 
-  # Skipped for a docs-only change. `!cancelled()` lets it run when `scope` failed, which is the
-  # fail-closed path; it still waits on `gate` passing.
-  check:
-    name: Clippy, docs and tests
+  # The compiling jobs below run in parallel, each building only what it needs: clippy's
+  # check-mode build shares nothing with a test build, and each feature set is a build of its
+  # own. Each is skipped for a docs-only change. `!cancelled()` lets it run when `scope` failed,
+  # which is the fail-closed path; it still waits on `gate` passing.
+
+  # Lints and docs. --all-features compiles and lints duet-abc's oracle tier, which needs abc2midi
+  # and so never runs here (TEST-3): its drift gate runs in `test`.
+  lint:
+    name: Clippy and docs
     needs: [gate, scope]
     if: ${{ !cancelled() && needs.gate.result == 'success' && needs.scope.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
@@ -128,67 +133,91 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: stable
           components: clippy
-      # The build cache (SC-IN-1: pinned by commit). Only a push to main saves it, so a pull
-      # request reads main's cache and can never write one that main, or another pull request,
-      # then builds from. A merge-group run reads main's cache too (CI-6).
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      # Tool versions are pinned, and each was at least 7 days old when pinned (SC-IN-1).
-      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
-        with:
-          tool: cargo-nextest@0.9.151
-      # duet play's cpal and midir build against ALSA on Linux, by the owner's decision.
-      # Exact versions from Ubuntu 24.04's archive (SC-IN-1). libasound2-dev is the
-      # noble-updates/-security build of 2026-07-14, and pkg-config noble's release build.
-      # Ubuntu lists only the newest build in noble-updates, so this step fails, loudly, once
-      # a newer one replaces 1.2.11-1ubuntu0.3 there. Then pin the new build, once it is at
-      # least 7 days old: `apt-cache policy libasound2-dev` on the runner names it.
-      - name: ALSA headers for duet play
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1
-      # --all-features compiles and lints duet-abc's oracle tier, which needs abc2midi and so
-      # never runs here (TEST-3): its drift gate runs in the plain tests below.
       - name: Clippy (RUST-LINT-1, RUST-LINT-2)
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: rustdoc (RUST-LINT-2)
         run: cargo doc --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
-      # nextest runs every test as its own process, all binaries at once, under the ci profile
-      # in .config/nextest.toml. It does not run doctests, so `cargo test --doc` follows each run.
+
+  # The workspace's tests. nextest runs every test as its own process, all binaries at once,
+  # under the ci profile in .config/nextest.toml. It does not run doctests, so `cargo test --doc`
+  # follows. duet-e2e's setup script builds `duet` as `cargo build -p duet-cli` does, the binary
+  # a user installs, rather than with the test build's features: so it compiles apart.
+  test:
+    name: Tests
+    needs: [gate, scope]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.scope.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          nextest: "true"
       - name: Tests
+        run: cargo nextest run --locked --profile ci
+      - name: Doctests
+        run: cargo test --locked --doc
+
+  # duet-cli builds the basic-pitch reader by default, which turns the feature on for the whole
+  # workspace in `lint` and `test`. Build, lint and test once without it, so the build without a
+  # model keeps working.
+  test-no-basic-pitch:
+    name: Without the basic-pitch reader
+    needs: [gate, scope]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.scope.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          nextest: "true"
+      - name: Clippy without the basic-pitch reader
+        run: cargo clippy --locked -p duet-cli --all-targets --no-default-features -- -D warnings
+      - name: Tests without the basic-pitch reader
         run: |
-          cargo nextest run --locked --profile ci
-          cargo test --locked --doc
-      # duet-cli builds the basic-pitch reader by default, which turns the feature on for the
-      # whole workspace above. Build, lint and test once without it, so the build without a
-      # model keeps working.
-      - name: Without the basic-pitch reader
-        run: |
-          cargo clippy --locked -p duet-cli --all-targets --no-default-features -- -D warnings
           cargo nextest run --locked --profile ci -p duet-dsp -p duet-capture -p duet-cli --no-default-features
           cargo test --locked --doc -p duet-dsp -p duet-capture --no-default-features
-      # duet reads config from the user's directory and from a .duet above the working
-      # directory. The tests must not: a developer's own duet.toml must never change what
-      # they check. So run them again under a hostile config in both places.
-      # duet-e2e's nextest setup script builds the duet binary once for the run, so its tests
-      # run the working tree's binary, never a stale one.
-      - name: duet-cli and duet-e2e tests ignore the developer's config
+
+  # duet reads config from the user's directory and from a .duet above the working directory.
+  # The tests must not: a developer's own duet.toml must never change what they check. So run
+  # duet-cli's and duet-e2e's tests again under a hostile config in both places. duet-e2e's
+  # nextest setup script builds the duet binary once for the run, so its tests run the working
+  # tree's binary, never a stale one.
+  test-hostile-config:
+    name: Tests ignore the developer's config
+    needs: [gate, scope]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.scope.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          nextest: "true"
+      - name: duet-cli and duet-e2e tests under a hostile config
+        env:
+          DUET_CONFIG_DIR: ${{ github.workspace }}/crates/duet-e2e/hostile
         run: |
           mkdir .duet
           cp crates/duet-e2e/hostile/duet.toml .duet/
-          DUET_CONFIG_DIR="$PWD/crates/duet-e2e/hostile" cargo nextest run --locked --profile ci -p duet-cli -p duet-e2e
-          DUET_CONFIG_DIR="$PWD/crates/duet-e2e/hostile" cargo test --locked --doc -p duet-e2e
+          cargo nextest run --locked --profile ci -p duet-cli -p duet-e2e
+          cargo test --locked --doc -p duet-e2e
           rm -r .duet
 
-  # Skipped for a docs-only change, on the same condition as `check`.
+  # Skipped for a docs-only change, on the same condition as the jobs above.
   msrv:
     name: Builds on the declared rust-version
     needs: [gate, scope]
@@ -200,35 +229,19 @@ jobs:
         with:
           persist-credentials: false
       # Keep this in step with `rust-version` in Cargo.toml (RUST-TC-1).
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: ./.github/actions/setup-rust
         with:
           toolchain: "1.100"
-      # The build cache (SC-IN-1: pinned by commit). Only a push to main saves it, so a pull
-      # request reads main's cache and can never write one that main, or another pull request,
-      # then builds from. A merge-group run reads main's cache too (CI-6).
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      # duet play's cpal and midir build against ALSA on Linux, by the owner's decision.
-      # Exact versions from Ubuntu 24.04's archive (SC-IN-1). libasound2-dev is the
-      # noble-updates/-security build of 2026-07-14, and pkg-config noble's release build.
-      # Ubuntu lists only the newest build in noble-updates, so this step fails, loudly, once
-      # a newer one replaces 1.2.11-1ubuntu0.3 there. Then pin the new build, once it is at
-      # least 7 days old: `apt-cache policy libasound2-dev` on the runner names it.
-      - name: ALSA headers for duet play
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1
       - run: cargo check --locked --all-targets
 
-  # Passes only if `scope`, `gate` and `secrets` succeeded, and `check` and `msrv` each succeeded
-  # or were skipped because `scope` found the change docs only. Skipped for any other reason
-  # (`gate` failed, say), failed or cancelled is a failure.
+  # Passes only if `scope`, `gate` and `secrets` succeeded, and every compiling job succeeded or
+  # was skipped because `scope` found the change docs only. Skipped for any other reason (`gate`
+  # failed, say), failed or cancelled is a failure. A new compiling job belongs in `needs` and in
+  # the second loop below, or it gates nothing.
   ci-success:
     name: CI Success
     if: always()
-    needs: [scope, gate, secrets, check, msrv]
+    needs: [scope, gate, secrets, lint, test, test-no-basic-pitch, test-hostile-config, msrv]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -238,10 +251,14 @@ jobs:
           DOCS_ONLY: ${{ needs.scope.outputs.docs_only }}
           GATE: ${{ needs.gate.result }}
           SECRETS: ${{ needs.secrets.result }}
-          CHECK: ${{ needs.check.result }}
+          LINT: ${{ needs.lint.result }}
+          TEST: ${{ needs.test.result }}
+          TEST_NO_BASIC_PITCH: ${{ needs.test-no-basic-pitch.result }}
+          TEST_HOSTILE_CONFIG: ${{ needs.test-hostile-config.result }}
           MSRV: ${{ needs.msrv.result }}
         run: |
-          echo "scope=$SCOPE docs_only=$DOCS_ONLY gate=$GATE secrets=$SECRETS check=$CHECK msrv=$MSRV"
+          echo "scope=$SCOPE docs_only=$DOCS_ONLY gate=$GATE secrets=$SECRETS lint=$LINT test=$TEST"
+          echo "test-no-basic-pitch=$TEST_NO_BASIC_PITCH test-hostile-config=$TEST_HOSTILE_CONFIG msrv=$MSRV"
           failed=0
           for job in "scope=$SCOPE" "gate=$GATE" "secrets=$SECRETS"; do
             if [ "${job#*=}" != success ]; then
@@ -249,7 +266,8 @@ jobs:
               failed=1
             fi
           done
-          for job in "check=$CHECK" "msrv=$MSRV"; do
+          for job in "lint=$LINT" "test=$TEST" "test-no-basic-pitch=$TEST_NO_BASIC_PITCH" \
+            "test-hostile-config=$TEST_HOSTILE_CONFIG" "msrv=$MSRV"; do
             result="${job#*=}"
             if [ "$result" = success ]; then
               continue

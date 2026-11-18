@@ -63,13 +63,13 @@ Statuses for **duet**:
 | API-JSON-5 | n/a: no HTTP API |
 | CI-1 | gated: .github/workflows/ci.yml#gate |
 | CI-2 | gated: .github/workflows/ci.yml#ci-success |
-| CI-3 | gated: .github/workflows/ci.yml#gate, .github/workflows/ci.yml#check, crates/duet-schemas/tests/schemas.rs |
+| CI-3 | gated: .github/workflows/ci.yml#gate, .github/workflows/ci.yml#test, crates/duet-schemas/tests/schemas.rs |
 | CI-4 | uncovered: no pre-commit hook |
 | CI-5 | practiced: ci.yml triggers on merge_group; no merge queue is configured |
 | CI-6 | practiced: every job sets timeout-minutes with room for a cold cache |
 | COMPAT-1 | convention: no per-PR compatibility gate, by the release design (RELEASING.md): below 1.0 a break is declared by the bump, a version class, at release time, so no PR is charged with a break; the one compatibility judgement is the pre-publish check in tools/scripts/release/release-prepare.sh, which runs cargo-semver-checks on each library crate crates.io has, against its latest published version (the published copy, not the tree at the tag), and refuses a break the requested bump does not admit; duet declares only a version class, so it cannot tell breaks apart; the maintainer runs it, and release.yml publishes without it, so a VERSION change not made by release-prepare, or a merge to main between the check and the release PR's merge, ships unchecked |
 | COMPAT-2 | uncovered: release-prepare.sh takes the version from VERSION, while cargo-semver-checks finds its own baseline on crates.io, so there are two derivations of the last release; crate_exists in tools/scripts/release/lib/common.sh reads any failed crates.io request as a crate not published yet, and that crate is then reported as new and not API-checked, which fails open; no check runs in CI |
-| CONC-BOUND-1 | gated: .github/workflows/ci.yml#check |
+| CONC-BOUND-1 | gated: .github/workflows/ci.yml#lint |
 | CONC-BOUND-2 | n/a: no channels or queues |
 | CONC-BOUND-3 | n/a: no channels or queues |
 | CONC-BOUND-4 | n/a: no channels or queues |
@@ -105,9 +105,9 @@ Statuses for **duet**:
 | PY-VER-1 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
 | RUST-API-1 | convention: duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-dsp, duet-capture, duet-schemas and duet-bus are library crates, duet-cli is the application, and duet-e2e is an unpublished test crate; review applies the API rules to the libraries' public API |
 | RUST-API-2 | convention: the libraries are published to crates.io; the open sets are #[non_exhaustive] (the nine Error enums, Control, Part, Track, Note, DrumGrid, LaneDef, duet-dsp's Event, HitLane, LaneMode, PitchFrame, Timing, BeatTempo and KeyEstimate, duet-capture's Kind, Captured, Analysis, QuantizeOffset, Quantized and Merge, duet-core's Dtype, duet-abc's Refusal, Notice, Reading, ReadOptions, WriteOptions, Dynamics, duet-schemas' Envelope, Tool, From, Notice, Document, Stream, AnyDocument, KindInfo and Framing, its journal's By, JournalHead, IndexHead, EntryFrame, EventInfo, Party, Audience, every event body (AskAsked, AskAnswered, AskWithdrawn, MomentPlayed, VerdictGiven, TakeAdded, DocWritten), Event, Entry, Skip, Body, Line, Journal, TakeRef, Concerns, Opens, Closes, IndexLine, IndexEntry and JournalIndex, and duet-bus' Refusal, AskRecord, Refused, Replay, Cut, Appended, Place, Segment, Orphan, ProjectJournal, Cursor, Polled, Unread, Duplicate, Torn, CloseDiffers and Report) and the closed ones are exhaustive (duet-dsp's Chunk and Mono, deliberately, so other crates can build them for their own sources and stages; duet-dsp's Origin and Given and duet-capture's LeadIn, deliberately, since a value is given or estimated, the command line builds a Given, and a lead-in is none, a pickup or rest bars; Position, TimeSig, Key, Mode, the three *Change events, Lane, Levels, Span, duet-play's Event, duet-schemas' Version, and duet-bus' AskState and Step, deliberately, since a change to the ask's lifecycle is a new event version, never an edit to an arm); Book, Tune, duet-core's Tensor, and duet-play's Message, Schedule and Renderer, duet-schemas' Id, At, RelPath and SegmentStamp, and duet-bus' Writer and Tail have private fields; a new public type is judged in review |
-| RUST-API-3 | partial: should_implement_trait and derivable_impls gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
-| RUST-API-4 | partial: ptr_arg and borrowed_box gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
-| RUST-API-5 | partial: new_without_default and wrong_self_convention gate the detectable part (.github/workflows/ci.yml#check); the rest is review |
+| RUST-API-3 | partial: should_implement_trait and derivable_impls gate the detectable part (.github/workflows/ci.yml#lint); the rest is review |
+| RUST-API-4 | partial: ptr_arg and borrowed_box gate the detectable part (.github/workflows/ci.yml#lint); the rest is review |
+| RUST-API-5 | partial: new_without_default and wrong_self_convention gate the detectable part (.github/workflows/ci.yml#lint); the rest is review |
 | RUST-API-6 | uncovered: no #[must_use] audit, and must_use_candidate is not on |
 | RUST-DOC-1 | uncovered: missing_docs is not on; the public API is documented by habit |
 | RUST-ERR-1 | practiced: the Error types of duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-dsp, duet-capture, duet-schemas and duet-bus derive thiserror::Error behind Result aliases, and duet-cli returns anyhow::Result with context on file errors; nothing checks that a new error type does the same |
@@ -116,9 +116,9 @@ Statuses for **duet**:
 | RUST-ERR-4 | practiced: no unwrap outside tests; unwrap_used is held off in the table, so nothing would catch a new one |
 | RUST-FMT-1 | gated: .github/workflows/ci.yml#gate |
 | RUST-INIT-1 | convention: no ctor-style crates; judged in review |
-| RUST-LINT-1 | partial: the workspace table is pinned to the projection by the conventions check (.github/workflows/ci.yml#gate) and applied by clippy (.github/workflows/ci.yml#check); nothing checks that a new crate sets [lints] workspace = true |
-| RUST-LINT-2 | gated: .github/workflows/ci.yml#check |
-| RUST-LINT-3 | gated: .github/workflows/ci.yml#check |
+| RUST-LINT-1 | partial: the workspace table is pinned to the projection by the conventions check (.github/workflows/ci.yml#gate) and applied by clippy (.github/workflows/ci.yml#lint); nothing checks that a new crate sets [lints] workspace = true |
+| RUST-LINT-2 | gated: .github/workflows/ci.yml#lint |
+| RUST-LINT-3 | gated: .github/workflows/ci.yml#lint |
 | RUST-LINT-4 | practiced: the table was adopted after an audit that found no findings to fix |
 | RUST-LINT-5 | convention: the held-off groups stay off until a ruling opens one lint at a time |
 | RUST-MACRO-1 | convention: judged in review; the one macro_rules (string_serde in time.rs) stamps out four identical serde impls |
@@ -129,8 +129,8 @@ Statuses for **duet**:
 | RUST-SQL-1 | n/a: no database |
 | RUST-TC-1 | gated: .github/workflows/ci.yml#msrv |
 | RUST-TC-2 | practiced: edition is set once in [workspace.package]; nothing checks a crate does not override it |
-| RUST-TC-3 | gated: .github/workflows/ci.yml#check |
-| RUST-TYPE-1 | gated: .github/workflows/ci.yml#check |
+| RUST-TC-3 | gated: .github/workflows/ci.yml#lint |
+| RUST-TYPE-1 | gated: .github/workflows/ci.yml#lint |
 | RUST-TYPE-2 | convention: judged in review |
 | RUST-UNSAFE-1 | partial: every crate root (duet-core, duet-midi, duet-drums, duet-abc, duet-play, duet-dsp, duet-capture, duet-schemas, duet-bus, duet-cli, duet-e2e) declares #![forbid(unsafe_code)] and the table denies unsafe_code; nothing checks that a new crate root declares the forbid |
 | RUST-UNSAFE-2 | n/a: no unsafe code and no registered exceptions |
@@ -169,7 +169,7 @@ Statuses for **duet**:
 | SH-7 | convention: judged in review; the scripts in scripts/ orchestrate tools, and duet capture review, which replaced duet-listen.sh and its Python, is Rust |
 | TEST-1 | uncovered: no #[ignore] tests today, and nothing would catch an unregistered one |
 | TEST-2 | convention: judged in review |
-| TEST-3 | partial: CI runs every tier but one (.github/workflows/ci.yml#check). duet-abc's oracle feature runs abc2midi, which by the owner's decision runs only on a developer's machine: CI compiles and lints it (clippy --all-features) but never runs it, and gates drift against its committed recordings instead |
+| TEST-3 | partial: CI runs every tier but one (.github/workflows/ci.yml#test, .github/workflows/ci.yml#test-no-basic-pitch, .github/workflows/ci.yml#test-hostile-config). duet-abc's oracle feature runs abc2midi, which by the owner's decision runs only on a developer's machine: CI compiles and lints it (clippy --all-features) but never runs it, and gates drift against its committed recordings instead |
 | TEST-4 | n/a: no test retries |
 | TEST-5 | uncovered: no coverage floor |
 | TS-CFG-1 | n/a: no TypeScript |
