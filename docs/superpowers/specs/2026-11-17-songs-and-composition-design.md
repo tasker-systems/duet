@@ -61,6 +61,20 @@ disagree, the Temper decisions win.
     `part` starts at 1.0, and the new song document starts fresh at 1.0.
 11. **The new song document's kind is named `song`** ("keep song as the kind name"): `song` 1.0 at
     `songs/<song>/song.duet`, holding the song and its composition.
+12. **Before a first release, a format changes in place.** A change to a kind's body folds into its
+    current version; the version policy applies from the first release or the first real file.
+13. **A song and a part each have a stable id,** minted once when the document is made and never
+    changed. The name (the folder or file stem) and the title stay free to rename. The journal's
+    index lists songs and parts by id, with the name alongside, so a rename keeps the lookup of older
+    segments. Its form (a UUIDv7 in the body), how a song refers to its parts, and what a copy
+    keeps are ruled with it ([§1](#ids)).
+14. **A song's current status lives in `song.duet`; the journal records each change.** Every move is a
+    `song.status-set` event and every snapshot a `snapshot.taken` event, and `duet journal check`
+    reports any disagreement between the document and the journal. It reports; it never repairs
+    ([§7](#7-lifecycles)).
+
+Rulings 12 to 14: owner, 2026-11-17, temper `01a1eb48`. Rulings 13 and 14 answer the bus design's
+decisions 17 and 23, ruled on #80.
 
 **Agreed in the same discussion, as the model's working shape:**
 - **A part is one voice, line or groove** (notes, or a drum grid). It always states its source:
@@ -106,6 +120,7 @@ composition as two parts of one document.**
   "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
   "duet": { "kind": "song", "version": "1.0", "tool": { "name": "duet", "version": "0.6.0" } },
   "body": {
+    "id": "0193f2a4-7c1e-7b3a-9d10-5e2f8a6c4b01",
     "title": "Wayfaring Stranger",
     "status": "sketch",
     "intent": "slow and bare; voice first, the bass enters in the second verse",
@@ -135,6 +150,7 @@ composition as two parts of one document.**
 
 ### The song
 
+- **`id`**, required: the song's stable id. **Ruled** (ruling 13). See [Ids](#ids).
 - **`title`**, required: the song's name for people. The folder name (`wayfaring-stranger`) is its
   name for commands, with the take-name rule (lowercase with hyphens, unique in the project).
 - **`intent`**, optional: what the song is meant to be, in the owner's words. duet never reads it.
@@ -153,8 +169,26 @@ composition as two parts of one document.**
   ([§7](#7-lifecycles)). `duet song new` writes `idea`. A new state is a new variant of a closed
   enum: a minor, but the transitions change with it, so it comes back to the owner.
 - **History is the journal's,** not the song's. Every change to a song, its composition or its parts
-  is an event in `journal.duet.jsonl` naming the song. The song document is the state now; the
+  is an event in the journal naming the song by id. The song document is the state now; the
   journal is how it got there; snapshots are the points the owner chose to keep.
+
+### Ids
+
+**Ruled** (ruling 13): a song and a part each carry an `id`, minted once and never changed.
+- **What it is.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): a UUIDv7 in its standard text form, minted by the command that makes the
+  document (`duet song new`, a part written by `comp apply`, an operation, or by hand through
+  `duet part new`). It sorts by creation time, and needs no registry.
+- **Where it lives.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): in the body, as `id`, beside `title` for a song and as a top-level
+  body field for a part (folded into `part` 1.0 under ruling 12).
+- **Renames.** Renaming a song's folder or a part's file, or changing a title, never changes the id.
+  The journal's index names songs and parts by id, with the name alongside, so older segments stay
+  found after a rename.
+- **References.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): inside a song, `placements` and a take's `for` name a part by its stem,
+  as above, so `song.duet` stays readable by hand; `duet part rename` rewrites them in the same act
+  and records it in the journal. The journal, comps and anything outside the song name it by id.
+- **A copy is a new thing.** **Ruled** (owner, 2026-11-17, temper `01a1eb48` ruling 13): A snapshot keeps the ids it copied, since it is the same song at a
+  point in time. Duplicating a song or a part to start a new one mints new ids.
+- **Takes are unchanged:** a take's identity is its digest, as ruled in the variants design.
 
 ### The composition
 
@@ -384,7 +418,10 @@ Each is **Proposed** unless marked.
   - `duet song new` makes it at `idea`. `duet song status <song> <state>` moves it, and any move not
     drawn above (idea → developing, arranged → sketch, a state to itself) is refused, naming the
     current state and the moves allowed from it.
-  - Each move is an event in the journal, with who made it.
+  - Each move is a `song.status-set` event in the journal, with who made it. **Ruled** (ruling 14):
+    `song.duet` holds the current status and the journal holds each change. `duet journal check`
+    reports a song whose status disagrees with its last `song.status-set`, naming both; it never
+    picks one and rewrites the other.
   - **A snapshot is an event recorded against the song, not a status.** Taking one never changes the
     song's state, and no state requires one.
   - **Proposed:** the status gates nothing. Every command works on a song in any state; the status is
@@ -428,7 +465,9 @@ kind's name and version (rulings 10 and 11, [§1](#the-kinds-name-and-version)).
    **Needs:** 1, and the project design's task 1. **Witnesses:** a song document round-trips exactly
    and validates; a meter change off a bar line, an unknown part in a placement, and two parts of one
    name are each refused by name; `duet song status` makes each of the four allowed moves, refuses
-   every other by name, and leaves the document unchanged when it refuses.
+   every other by name, and leaves the document unchanged when it refuses; `duet song new` mints an
+   id, and renaming the song's folder leaves it unchanged; a part gains its `id`; a status changed
+   by hand in `song.duet` is reported by `duet journal check`.
 3. **Placing takes:** `placed`, `duet song place`, `duet record --song`, and capture's comparison with
    the composition. **Needs:** 2. **Witnesses:** a take recorded with `--song` has its offset to the
    frame; a take with no click is placed `estimated` with capture's tempo, and `duet song place`
