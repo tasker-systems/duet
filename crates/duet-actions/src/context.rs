@@ -18,13 +18,39 @@ use crate::config::Config;
 pub const PROJECT_VAR: &str = "DUET_PROJECT";
 
 /// The project's document, under its root.
-const PROJECT_FILE: &str = ".duet/project.duet";
+pub const PROJECT_FILE: &str = ".duet/project.duet";
 
-/// A project an action runs in: its root, and its name, the root directory's.
+/// A project an action runs in: its root, its name (the root directory's), and how it was found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     pub root: PathBuf,
     pub name: String,
+    pub found: Found,
+}
+
+/// How a project was found (the project design's §5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Found {
+    /// `DUET_PROJECT` named it, and this is what it said.
+    Named(std::ffi::OsString),
+    /// It is the nearest directory, from this one up, whose `.duet/` holds `project.duet`.
+    WalkedUp(PathBuf),
+}
+
+impl std::fmt::Display for Found {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Named(named) => {
+                write!(f, "named by {PROJECT_VAR}={}", Path::new(named).display())
+            }
+            Self::WalkedUp(from) => write!(
+                f,
+                "found walking up from {}: the nearest .duet/ that holds project.duet",
+                from.display()
+            ),
+        }
+    }
 }
 
 impl Project {
@@ -37,33 +63,39 @@ impl Project {
     /// When `DUET_PROJECT` names a directory that holds no `.duet/project.duet`.
     pub fn find(cwd: &Path) -> Result<Option<Self>> {
         if let Some(named) = std::env::var_os(PROJECT_VAR).filter(|v| !v.is_empty()) {
-            let root = cwd.join(named);
+            let root = cwd.join(&named);
             if !root.join(PROJECT_FILE).is_file() {
                 bail!(
                     "{PROJECT_VAR} names {}, which holds no {PROJECT_FILE}: it is no project",
                     root.display()
                 );
             }
-            return Self::at(&root).map(Some);
+            return Self::at(&root, Found::Named(named)).map(Some);
         }
-        cwd.ancestors()
-            .find(|dir| dir.join(PROJECT_FILE).is_file())
-            .map(Self::at)
+        Self::above(cwd)
+            .map(|root| Self::at(root, Found::WalkedUp(cwd.to_path_buf())))
             .transpose()
     }
 
-    /// The project whose root is `root`.
+    /// The nearest directory, from `dir` up, whose `.duet/` holds `project.duet`: the walk
+    /// [`Self::find`] makes when `DUET_PROJECT` is not set.
+    #[must_use]
+    pub fn above(dir: &Path) -> Option<&Path> {
+        dir.ancestors().find(|dir| dir.join(PROJECT_FILE).is_file())
+    }
+
+    /// The project whose root is `root`, found as `found` says.
     ///
     /// # Errors
     ///
     /// When the root cannot be made absolute.
-    pub fn at(root: &Path) -> Result<Self> {
+    pub fn at(root: &Path, found: Found) -> Result<Self> {
         let root = fs::canonicalize(root).with_context(|| root.display().to_string())?;
         let name = root.file_name().map_or_else(
             || "project".to_owned(),
             |n| n.to_string_lossy().into_owned(),
         );
-        Ok(Self { root, name })
+        Ok(Self { root, name, found })
     }
 }
 

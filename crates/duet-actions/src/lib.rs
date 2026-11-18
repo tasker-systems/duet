@@ -26,10 +26,11 @@ pub mod drums;
 pub mod io;
 pub mod part;
 pub mod play;
+pub mod project;
 pub mod record;
 mod registry;
 pub mod song;
 pub mod view;
 
-pub use context::{Context, PROJECT_VAR, Project, actor, fresh_id};
+pub use context::{Context, Found, PROJECT_FILE, PROJECT_VAR, Project, actor, fresh_id};
 pub use registry::{ACTIONS, Action, Runs, Writes, action};

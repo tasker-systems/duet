@@ -156,6 +156,33 @@ read and written again keeps its `from` unchanged, and so does `part quantize`. 
 ABC or MIDI and in again replaces it, since that import is the part's new provenance. A
 document `duet apply -o` makes from a view has none.
 
+### Projects: `duet init` and `duet project`
+
+A project is a directory whose `.duet/` holds `project.duet`, a `project` 1.0 document: its
+title, the date it was made, the duet that made it, its defaults and its takes. Its songs are
+the folders in `songs/`. No command needs a project; inside one, each document an action writes
+is recorded in the project's [journal](#the-journal).
+
+```sh
+duet init                    # the working directory becomes a project
+duet init ~/Music/porch      # makes the directory if it is missing
+duet init --title "Porch"    # the title is the directory's name otherwise
+duet project path            # the project found here, and how it was found
+duet project show            # its document, each take and where it was found, and every song
+```
+
+- **`duet init` writes two files and prints each:** `.duet/project.duet`, with no defaults and
+  no takes, and `.duet/duet.toml` if there is none, every line a comment. It writes nothing
+  else: no song, no other directory, no journal, and no `.gitignore` or `.gitattributes`. Git
+  is not duet's concern.
+- **It refuses** a directory that holds a project already, naming its `.duet/project.duet`; a
+  directory inside another project, naming that project, unless `--nested` is given; and the
+  home directory itself. A `.duet/` that holds only config is adopted: it gains a project
+  document and keeps its config byte for byte.
+- **A command finds its project** as the nearest directory, from the working directory up,
+  whose `.duet/` holds `project.duet`, or the one `DUET_PROJECT=<dir>` names, for scripts and
+  tests. A `.duet/` without a `project.duet` is config only, as it has always been.
+
 ### Songs: `duet song`
 
 A song is a folder in a project, `songs/<song>/`, named as a take is (lowercase words joined by

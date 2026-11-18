@@ -266,6 +266,8 @@ fn readers_write_nothing_in_a_project() {
         vec!["drums", "lanes"],
         vec!["config", "show"],
         vec!["config", "path"],
+        vec!["project", "path"],
+        vec!["project", "show"],
         vec!["journal", "show"],
         vec!["journal", "check"],
     ] {
