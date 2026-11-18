@@ -14,7 +14,7 @@
 //!   (gaps bridged), `steps`, `bends`, `legato` and `gapped`. The whole take has its `melody`
 //!   only.
 //!
-//! The plots and clips are `compare`'s ([`super::compare::Window`]), so a moment never draws or
+//! The plots and clips are `compare`'s (`super::compare::Window`), so a moment never draws or
 //! plays differently here than there.
 //!
 //! **The moments file** is plain text, one moment per line: `FROM TO LABEL`, in seconds from the
@@ -48,6 +48,7 @@ use super::compare::{
     LENGTH_SLACK_SECS, Window, analysis, excursions, performance, reading_of, svg, take, wav,
     with_suffix, write_bytes_new,
 };
+use schemars::JsonSchema;
 
 /// The renderings each moment's clips are made in, with the name each is given on the page and
 /// in a clip's file name.
@@ -64,7 +65,7 @@ const RENDERINGS: [(&str, wav::Gaps, wav::Render); 5] = [
 const SAME_NOTE_SECS: f64 = 0.03;
 
 /// What `duet capture review` is given.
-#[derive(Args)]
+#[derive(Debug, Args, JsonSchema)]
 pub struct ReviewArgs {
     /// The take's recording, as `duet capture melody` read it: the clips' left channel.
     input: PathBuf,

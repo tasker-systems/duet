@@ -15,7 +15,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context as _, Result, bail};
 use clap::ValueEnum;
 use clap::builder::{EnumValueParser, PossibleValue, TypedValueParser};
 use clap::error::ErrorKind;
@@ -24,8 +24,12 @@ use duet_drums::DrumGrid;
 use duet_midi::Midi;
 use duet_schemas::journal::{DocDigest, Id};
 use duet_schemas::{AnyDocument, Document, From, PartBody, Source, Tool};
+use schemars::JsonSchema;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+use crate::Context;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum Format {
     /// A duet document (.duet), read by its envelope.
     Duet,
@@ -39,7 +43,7 @@ pub enum Format {
 /// The parser of `--from` and `--to`: a [`Format`] by its name. The text formats these flags
 /// once named (`text`, `drums`) are refused with where text went: `duet view` and
 /// `duet apply`.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct FormatParser;
 
 impl TypedValueParser for FormatParser {
@@ -254,6 +258,7 @@ fn is_document(bytes: &[u8]) -> bool {
 
 /// What `convert` read: a part with where it came from, or a drum grid from a drum-grid
 /// document, with that document's digest.
+#[derive(Debug)]
 pub enum Loaded {
     Part(Part, Origin),
     Grid(DrumGrid, DocDigest),
@@ -316,10 +321,7 @@ pub fn body_digest<T: serde::Serialize>(body: &T) -> Result<DocDigest> {
     Ok(DocDigest::of(&serde_json::to_vec(body)?))
 }
 
-/// A fresh id for a document duet makes: a UUIDv7.
-pub fn fresh_id() -> Result<Id> {
-    Ok(duet_bus::fresh_id()?)
-}
+pub use crate::context::fresh_id;
 
 /// Reads a part. `what` says what the command does with it, as in "duet play reads", for a
 /// document of another kind. Standard input is read by what it holds: a document when its
@@ -437,8 +439,14 @@ pub fn tool() -> Tool {
 }
 
 /// Writes a part made from no document (a drum grid, a view) in a format, with `source`.
-pub fn write(part: &Part, path: &Path, format: Format, end: EndRule, source: Source) -> Result<()> {
-    write_from(part, path, format, end, &Origin::default(), source)
+pub fn write(
+    ctx: &Context,
+    part: &Part,
+    path: &Path,
+    format: Format,
+    source: Source,
+) -> Result<()> {
+    write_from(ctx, part, path, format, &Origin::default(), source)
 }
 
 /// Writes the part in a format. Every file written says where the part ends, whatever
@@ -461,14 +469,14 @@ pub fn write(part: &Part, path: &Path, format: Format, end: EndRule, source: Sou
 ///
 /// **The source is the caller's**, by [`Origin::source`] or [`Origin::generated`].
 pub fn write_from(
+    ctx: &Context,
     part: &Part,
     path: &Path,
     format: Format,
-    end: EndRule,
     origin: &Origin,
     source: Source,
 ) -> Result<()> {
-    let part = with_end(part, end)?;
+    let part = with_end(part, ctx.config().end)?;
     let bytes = match format {
         Format::Duet => {
             let id = match &origin.document {
@@ -482,11 +490,15 @@ pub fn write_from(
         Format::Midi => part.to_midi()?,
         Format::Abc => duet_abc::write(&part, &duet_abc::WriteOptions::default())?.into_bytes(),
     };
-    write_bytes(path, &bytes)
+    write_bytes(ctx, path, &bytes)
 }
 
 /// A part's document with a new id, by hand: what a test writes as a part `duet` reads.
-#[cfg(test)]
+///
+/// # Panics
+///
+/// When the operating system gives no randomness for the id.
+#[must_use]
 pub fn part_document(part: Part) -> String {
     Document::new(
         tool(),
@@ -496,15 +508,17 @@ pub fn part_document(part: Part) -> String {
     .expect("written")
 }
 
-/// Writes to a file, or to standard output for `-`.
-pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path == Path::new("-") {
-        io::stdout()
-            .write_all(bytes)
-            .context("writing standard output")
-    } else {
-        fs::write(path, bytes).with_context(|| path.display().to_string())
-    }
+/// Writes to a file, or to standard output for `-`, through the action's context, which
+/// records a document it writes ([`Context::write`]).
+pub fn write_bytes(ctx: &Context, path: &Path, bytes: &[u8]) -> Result<()> {
+    ctx.write(path, bytes)
+}
+
+/// Writes text to standard output.
+pub fn stdout(text: &str) -> Result<()> {
+    io::stdout()
+        .write_all(text.as_bytes())
+        .map_err(|e| anyhow::anyhow!("writing standard output: {e}"))
 }
 
 /// Whether two paths name the same existing file.

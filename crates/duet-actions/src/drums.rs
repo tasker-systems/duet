@@ -8,71 +8,95 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context as _, Result, bail};
 use clap::Subcommand;
 use duet_core::{Grid, Part};
 use duet_drums::DrumGrid;
 
+use crate::Context;
 use crate::config::Config;
 use crate::io::{
     Format, FormatParser, generated, grid_document, grid_path, part_format, read,
     read_grid_document, read_grid_with_digest, same_file, with_end, write, write_bytes,
 };
+use clap::Args;
+use schemars::JsonSchema;
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum DrumsCommand {
     /// Render a drum grid as a part: a part document (.duet), MIDI (.mid or .midi) or ABC
     /// (.abc) by the output's name, or a part document on standard output.
-    Render {
-        /// The grid: a drum-grid document (.duet), or - for one on standard input.
-        input: PathBuf,
-        /// The part to write, or - for a part document on standard output (another format
-        /// with --to). Must not be the input.
-        output: PathBuf,
-        #[arg(long, value_parser = FormatParser)]
-        to: Option<Format>,
-    },
+    Render(RenderInput),
     /// Read a part's drum track into a drum grid. Nothing is moved to fit: a note off
     /// the grid, or on a key no lane plays, is refused by name. Note lengths, controls
     /// and other tracks are not part of a grid, and are left out.
-    Read {
-        /// The part to read (a .duet document, MIDI or ABC by its name), or - for standard
-        /// input: a document if it starts with {, MIDI, or ABC with --from abc.
-        input: PathBuf,
-        /// The grid to write: a drum-grid document (.duet), which keeps any velocity, or - for
-        /// one on standard output. Must not be the input.
-        output: PathBuf,
-        /// The step, such as 1/16 for sixteenths or 1/8t for triplet eighths.
-        #[arg(long)]
-        grid: Grid,
-        /// The drum track's name. Needed only when the part has no single track on
-        /// channel 10.
-        #[arg(long)]
-        track: Option<String>,
-        /// How many bars the grid runs to. Without it, the grid runs to the part's end:
-        /// the one it names, or else the bar line after its last bar with a note or
-        /// control. A hit or a tempo, meter or key change past the bars is refused.
-        #[arg(long)]
-        bars: Option<u32>,
-        /// Snap each velocity to the nearest of the grid view's levels (g, x, X) as the track
-        /// is read. Without it, every velocity is kept.
-        #[arg(long)]
-        snap_levels: bool,
-        #[arg(long, value_parser = FormatParser)]
-        from: Option<Format>,
-    },
+    Read(ReadInput),
     /// Write a copy of a drum-grid document with every velocity snapped to the nearest of the
     /// grid view's levels (g, x, X), and say how many moved. The input is never changed.
-    Snap {
-        /// The grid to read, as for `render`.
-        input: PathBuf,
-        /// The grid to write, as for `read`. Must not be the input.
-        output: PathBuf,
-    },
+    Snap(SnapInput),
     /// List the lanes of the gm map, as config extends or changes it: each name, its
     /// key, and its aliases.
-    Lanes,
+    Lanes(LanesInput),
 }
+
+/// Render a drum grid as a part: a part document (.duet), MIDI (.mid or .midi) or ABC
+/// (.abc) by the output's name, or a part document on standard output.
+#[derive(Debug, Args, JsonSchema)]
+pub struct RenderInput {
+    /// The grid: a drum-grid document (.duet), or - for one on standard input.
+    pub input: PathBuf,
+    /// The part to write, or - for a part document on standard output (another format
+    /// with --to). Must not be the input.
+    pub output: PathBuf,
+    #[arg(long, value_parser = FormatParser)]
+    pub to: Option<Format>,
+}
+
+/// Read a part's drum track into a drum grid. Nothing is moved to fit: a note off
+/// the grid, or on a key no lane plays, is refused by name. Note lengths, controls
+/// and other tracks are not part of a grid, and are left out.
+#[derive(Debug, Args, JsonSchema)]
+pub struct ReadInput {
+    /// The part to read (a .duet document, MIDI or ABC by its name), or - for standard
+    /// input: a document if it starts with {, MIDI, or ABC with --from abc.
+    pub input: PathBuf,
+    /// The grid to write: a drum-grid document (.duet), which keeps any velocity, or - for
+    /// one on standard output. Must not be the input.
+    pub output: PathBuf,
+    /// The step, such as 1/16 for sixteenths or 1/8t for triplet eighths.
+    #[arg(long)]
+    pub grid: Grid,
+    /// The drum track's name. Needed only when the part has no single track on
+    /// channel 10.
+    #[arg(long)]
+    pub track: Option<String>,
+    /// How many bars the grid runs to. Without it, the grid runs to the part's end:
+    /// the one it names, or else the bar line after its last bar with a note or
+    /// control. A hit or a tempo, meter or key change past the bars is refused.
+    #[arg(long)]
+    pub bars: Option<u32>,
+    /// Snap each velocity to the nearest of the grid view's levels (g, x, X) as the track
+    /// is read. Without it, every velocity is kept.
+    #[arg(long)]
+    pub snap_levels: bool,
+    #[arg(long, value_parser = FormatParser)]
+    pub from: Option<Format>,
+}
+
+/// Write a copy of a drum-grid document with every velocity snapped to the nearest of the
+/// grid view's levels (g, x, X), and say how many moved. The input is never changed.
+#[derive(Debug, Args, JsonSchema)]
+pub struct SnapInput {
+    /// The grid to read, as for `render`.
+    pub input: PathBuf,
+    /// The grid to write, as for `read`. Must not be the input.
+    pub output: PathBuf,
+}
+
+/// List the lanes of the gm map, as config extends or changes it: each name, its
+/// key, and its aliases.
+#[derive(Debug, Args, JsonSchema)]
+pub struct LanesInput {}
 
 /// Reads a drum-grid document ([`read_grid_document`]). `duet convert` and the `duet drums`
 /// commands all read grids here.
@@ -82,13 +106,14 @@ pub fn read_grid(path: &Path, what: &str) -> Result<DrumGrid> {
 
 /// Writes a grid as a drum-grid document, which holds any velocity, to a `.duet` or to standard
 /// output. `duet convert` and the `duet drums` commands all write grids here.
-pub fn write_grid(grid: &DrumGrid, path: &Path, what: &str) -> Result<()> {
+pub fn write_grid(ctx: &Context, grid: &DrumGrid, path: &Path, what: &str) -> Result<()> {
     grid_path(path, what)?;
-    write_bytes(path, grid_document(grid)?.as_bytes())
+    write_bytes(ctx, path, grid_document(grid)?.as_bytes())
 }
 
 /// How to read a part's drum track into a grid: `duet drums read`'s flags, which
 /// `duet convert` takes too.
+#[derive(Debug)]
 pub struct ReadOptions {
     /// The step.
     pub grid: Grid,
@@ -144,22 +169,23 @@ pub fn refuse_overwrite(input: &Path, output: &Path, what: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
+pub fn run(ctx: &Context, command: DrumsCommand) -> Result<()> {
+    let config = ctx.config();
     match command {
-        DrumsCommand::Render { input, output, to } => {
+        DrumsCommand::Render(RenderInput { input, output, to }) => {
             refuse_overwrite(&input, &output, "render")?;
             let to = part_format(&output, to, "render writes")?;
             // The part is generated from the grid, naming it.
             let (grid, digest) = read_grid_with_digest(&input, "render reads")?;
             write(
+                ctx,
                 &grid.to_part()?,
                 &output,
                 to,
-                config.end,
                 generated("drums render", [digest]),
             )
         }
-        DrumsCommand::Read {
+        DrumsCommand::Read(ReadInput {
             input,
             output,
             grid,
@@ -167,7 +193,7 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
             bars,
             snap_levels,
             from,
-        } => {
+        }) => {
             refuse_overwrite(&input, &output, "read")?;
             let from = part_format(&input, from, "read reads")?;
             grid_path(&output, "read writes")?;
@@ -178,18 +204,18 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
                 snap_levels,
             };
             let drums = grid_of_part(&read(&input, from, "read reads")?, &options, config)?;
-            write_grid(&drums, &output, "read writes")
+            write_grid(ctx, &drums, &output, "read writes")
         }
-        DrumsCommand::Snap { input, output } => {
+        DrumsCommand::Snap(SnapInput { input, output }) => {
             refuse_overwrite(&input, &output, "snap")?;
             grid_path(&output, "snap writes")?;
             let grid = read_grid(&input, "snap reads")?;
             let snapped = grid.snapped_to_levels();
             let moved = moved_velocities(&grid, &snapped);
             eprintln!("duet: snapped {moved} velocities to the levels");
-            write_grid(&snapped, &output, "snap writes")
+            write_grid(ctx, &snapped, &output, "snap writes")
         }
-        DrumsCommand::Lanes => {
+        DrumsCommand::Lanes(LanesInput {}) => {
             let map = &config.lanes;
             let mut out = format!("# lane map {}, channel {}\n", map.name(), map.channel());
             let width = map.lanes().map(|l| l.name.len()).max().unwrap_or(1);
@@ -237,101 +263,5 @@ fn report_left_out(part: &Part, track: Option<&str>, grid: &DrumGrid) {
             "duet: read the drum track; left out {others} other track(s), and {controls} \
              control(s) on the drum track"
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::{Path, PathBuf};
-
-    use duet_core::Part;
-    use duet_drums::DrumGrid;
-
-    use crate::io::{grid_document, read_grid_document};
-    use crate::tests::run_hermetic;
-
-    fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("duet-drums-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        dir
-    }
-
-    fn duet(args: &[&str]) -> anyhow::Result<()> {
-        run_hermetic(args)
-    }
-
-    fn grid_at(path: &Path) -> DrumGrid {
-        read_grid_document(path, "reads").expect("a drum-grid document")
-    }
-
-    #[test]
-    fn a_grid_renders_to_midi_and_reads_back_the_same() {
-        let dir = temp("render");
-        let grid = "grid 1/8\n\n[bars 1-2]\nhh    | x x x x x x x x | x x x x x x X . |\nsnare | . . X . . . X g | . . X . . . X . |\nkick  | X . . . X X . . | X . . . X . . . |\n";
-        let want = DrumGrid::from_text(grid).expect("parse");
-        std::fs::write(
-            dir.join("beat.duet"),
-            grid_document(&want).expect("document"),
-        )
-        .expect("write");
-        let p = |name: &str| dir.join(name).to_str().expect("utf-8").to_owned();
-        duet(&["drums", "render", &p("beat.duet"), &p("beat.mid")]).expect("render");
-        duet(&[
-            "drums",
-            "read",
-            &p("beat.mid"),
-            &p("back.duet"),
-            "--grid",
-            "1/8",
-        ])
-        .expect("read");
-        assert_eq!(grid_at(&dir.join("back.duet")), want);
-        std::fs::remove_dir_all(&dir).expect("clean up");
-    }
-
-    #[test]
-    fn off_level_velocities_are_refused_in_the_view_until_snapped() {
-        let dir = temp("snap");
-        let part = "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n";
-        let part = Part::from_text(part).expect("parse");
-        std::fs::write(dir.join("take.duet"), crate::io::part_document(part)).expect("write");
-        let p = |name: &str| dir.join(name).to_str().expect("utf-8").to_owned();
-        let read = |out: &str, snap: bool| {
-            let (take, out) = (p("take.duet"), p(out));
-            let mut args = vec![
-                "drums",
-                "read",
-                take.as_str(),
-                out.as_str(),
-                "--grid",
-                "1/16",
-            ];
-            if snap {
-                args.push("--snap-levels");
-            }
-            duet(&args)
-        };
-        let view = |of: &str, out: &str| duet(&["view", &p(of), "--as", "grid", "-o", &p(out)]);
-
-        read("exact.duet", false).expect("a document keeps 100");
-        let exact = grid_at(&dir.join("exact.duet"));
-        assert_eq!(exact.vel.data().iter().filter(|&&v| v == 100).count(), 1);
-        let err = view("exact.duet", "exact.drums").expect_err("100 is not a level");
-        assert!(err.to_string().contains("--snap-levels"), "{err}");
-        assert!(!dir.join("exact.drums").exists(), "nothing is written");
-
-        read("snapped.duet", true).expect("snapped as read");
-        duet(&["drums", "snap", &p("snapped.duet"), &p("snapped-2.duet")]).expect("snap");
-        let (a, b) = (
-            grid_at(&dir.join("snapped.duet")),
-            grid_at(&dir.join("snapped-2.duet")),
-        );
-        assert_eq!(a, b, "a snapped grid snaps to itself");
-        view("snapped.duet", "snapped.drums").expect("a snapped grid has a view");
-        let a = std::fs::read_to_string(dir.join("snapped.drums")).expect("a");
-        // 100 is nearest x (90); 64 is nearest g (40).
-        assert!(a.contains("kick  | x"), "{a}");
-        assert!(a.contains("snare | . . . . g"), "{a}");
-        std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }

@@ -24,6 +24,8 @@ duet-capture.workspace = true
 duet-drums.workspace = true
 # The capture tests read back the documents duet writes, with the reader duet uses.
 duet-schemas.workspace = true
+# The journal tests read a project's journal as duet does.
+duet-bus.workspace = true
 # The tests compare written MIDI event by event, and JSON and TOML as values.
 midly = "0.5.3"
 toml = "1"

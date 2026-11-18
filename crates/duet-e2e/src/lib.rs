@@ -104,7 +104,9 @@ pub fn scratch(name: &str) -> PathBuf {
 }
 
 /// Runs `duet` in `cwd`, with `user` as its user config directory (and `user/data` as its
-/// data directory) and `stdin` on standard input. With `cwd` a scratch directory, no project `.duet` is found above it.
+/// data directory) and `stdin` on standard input. With `cwd` a scratch directory, no project
+/// `.duet` is found above it. Neither the developer's `DUET_PROJECT` nor who they are
+/// (`DUET_ACTOR`, `CLAUDECODE`) reaches it.
 ///
 /// # Panics
 ///
@@ -115,12 +117,35 @@ pub fn duet_with<S: AsRef<std::ffi::OsStr>>(
     args: &[S],
     stdin: &[u8],
 ) -> Output {
-    let mut child = Command::new(bin())
+    duet_env(cwd, user, args, stdin, &[])
+}
+
+/// Runs `duet` as [`duet_with`] does, with `env` set too, such as `DUET_ACTOR`.
+///
+/// # Panics
+///
+/// When the binary cannot be started or its input written.
+pub fn duet_env<S: AsRef<std::ffi::OsStr>>(
+    cwd: &Path,
+    user: &Path,
+    args: &[S],
+    stdin: &[u8],
+    env: &[(&str, &str)],
+) -> Output {
+    let mut command = Command::new(bin());
+    command
         .args(args)
         .current_dir(cwd)
         .env("DUET_CONFIG_DIR", user)
         // Nor does a SoundFont the developer has installed: duet play looks here.
         .env("DUET_DATA_DIR", user.join("data"))
+        .env_remove("DUET_PROJECT")
+        .env_remove("DUET_ACTOR")
+        .env_remove("CLAUDECODE");
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

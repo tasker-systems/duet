@@ -10,15 +10,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
 use clap::Args;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use duet_play::{Renderer, Schedule, load_soundfont, send_timed};
 use etcetera::{AppStrategy, AppStrategyArgs, choose_app_strategy};
 
+use crate::Context;
 use crate::config::Config;
 use crate::io::{Format, FormatParser, part_format, read};
+use schemars::JsonSchema;
 
 /// The environment variable naming the directory duet's installed files are in, such as
 /// its SoundFont, overriding the platform's data directory.
@@ -28,7 +30,7 @@ pub const DATA_DIR_VAR: &str = "DUET_DATA_DIR";
 /// the binary.
 pub const SOUNDFONT_NAME: &str = "default.sf2";
 
-#[derive(Args)]
+#[derive(Debug, Args, JsonSchema)]
 pub struct PlayArgs {
     /// The part to play: a .duet document, MIDI or ABC by its name, or - for standard input
     /// (a document if it starts with {, MIDI, or ABC with --from abc). A view's text plays
@@ -46,7 +48,8 @@ pub struct PlayArgs {
     port: Option<String>,
 }
 
-pub fn run(args: PlayArgs, config: &Config) -> Result<()> {
+pub fn run(ctx: &Context, args: PlayArgs) -> Result<()> {
+    let config = ctx.config();
     let format = part_format(&args.input, args.from, "duet play reads")?;
     let part = read(&args.input, format, "duet play reads")?;
     let schedule = Schedule::from_part(&part)?;
@@ -172,7 +175,7 @@ pub fn pick_port(names: &[String], wanted: &str) -> Result<usize> {
 /// What a port must be sent when playing stops early, so nothing is left sounding: a
 /// note-off for each key still held, then sustain off and all notes off on each channel
 /// used.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct PortCleanup {
     held: std::collections::BTreeMap<(u8, u8), u32>,
     channels: std::collections::BTreeSet<u8>,

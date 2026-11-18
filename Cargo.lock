@@ -631,6 +631,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "duet-actions"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cpal",
+ "ctrlc",
+ "duet-abc",
+ "duet-capture",
+ "duet-core",
+ "duet-drums",
+ "duet-midi",
+ "duet-play",
+ "duet-schemas",
+ "etcetera",
+ "getrandom 0.4.3",
+ "midir",
+ "schemars",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "duet-bus"
 version = "0.3.0"
 dependencies = [
@@ -666,21 +690,12 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
- "cpal",
- "ctrlc",
- "duet-abc",
+ "duet-actions",
  "duet-bus",
- "duet-capture",
  "duet-core",
  "duet-drums",
- "duet-midi",
- "duet-play",
  "duet-schemas",
- "etcetera",
- "midir",
- "serde",
  "serde_json",
- "toml",
 ]
 
 [[package]]
@@ -726,6 +741,7 @@ dependencies = [
 name = "duet-e2e"
 version = "0.0.0"
 dependencies = [
+ "duet-bus",
  "duet-capture",
  "duet-core",
  "duet-drums",

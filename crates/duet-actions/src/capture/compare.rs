@@ -15,17 +15,17 @@
 //! `.compare.svg` and `.compare.wav` in place of `.capture.duet`), and a window's after its
 //! window too (`STEM.compare.33.0-34.3.svg`), so it never collides with the whole take's:
 //!
-//! - **the plot** ([`svg`]): the performance's pitch in cents, the reading's notes as bars at
+//! - **the plot** (`svg`): the performance's pitch in cents, the reading's notes as bars at
 //!   `tuning + 100·key`, the residual shaded between them, between-keys notes marked, and the
 //!   onsets as ticks;
-//! - **the audio** ([`wav`]): the take on the left, as the analysis heard it (one channel, at
+//! - **the audio** (`wav`): the take on the left, as the analysis heard it (one channel, at
 //!   the analysis rate, so it lines up with the frames sample for sample), and the reading on
 //!   the right as a sine at the take's own tuning, gliding only through each note's slide in:
 //!   its scoop where the residual measured one, else up to where its held pitch begins. It holds
-//!   through a gap between notes shorter than [`wav::BRIDGE_SECS`] and is silent through a
+//!   through a gap between notes shorter than `wav::BRIDGE_SECS` and is silent through a
 //!   longer one, so a dropped note is heard as silence; `--legato` holds it through every gap
 //!   and `--gapped` silences it in every gap;
-//!   `--render` chooses what it plays inside a note ([`wav::Render`]): `melody`, the keys only (the
+//!   `--render` chooses what it plays inside a note (`wav::Render`): `melody`, the keys only (the
 //!   default); `steps`, the keys with each excursion held at its key plus its offset; `bends`,
 //!   the keys plus the residual, the performance's own pitch. A `steps` or `bends` run's outputs
 //!   carry its name after the window's (`STEM.compare.33.0-34.3.steps.wav`), so the three never
@@ -55,13 +55,14 @@ use duet_capture::{
 use duet_schemas::{Document, Stream};
 
 use super::write_new;
+use schemars::JsonSchema;
 
 /// The performance's frames may end up to this long after the take's last sample, in seconds:
 /// a frame sits at the middle of its window, and the last window is padded.
 pub(super) const LENGTH_SLACK_SECS: f64 = 0.1;
 
 /// What `duet capture compare` is given.
-#[derive(Args)]
+#[derive(Debug, Args, JsonSchema)]
 pub struct CompareArgs {
     /// The take's recording, as `duet capture melody` read it: the plot's and the audio's
     /// timeline, and the audio's left channel.
