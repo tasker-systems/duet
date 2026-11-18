@@ -1008,6 +1008,19 @@ Each names its witness. None is built before the one it needs. Tests that run th
   - Inside a project, `duet capture melody wayfaring` appends exactly the `doc.written` events for
     the files it wrote, each relative, with its digest.
   - An action given `replace` records `replaced: true`.
+- **Built** (bus task 2, temper `01a1eac1-f6df-74bc-b023-c7f49274084a`):
+  - `duet-actions` holds every command's work. Each action's input is one type that derives
+    clap's `Args` and `JsonSchema`, and `ACTIONS` declares its `name`, CLI path, `emits`, `runs`
+    (all `anywhere`) and `writes`.
+  - An action writes through its `Context`, which records each document it writes. A document is
+    a `.duet`, or a `.duet.jsonl` stream, whose digest is its head and every later line.
+  - Inside a project, the CLI appends a `doc.written` for each, all caused by one command id, at
+    `[journal] segment-size`. `replaced` is whether a file was there, so the witness for
+    `replace` is `apply --onto` and `song status`: no action takes a `replace` flag today.
+  - The project is found as §3 rules it: `DUET_PROJECT`, or the nearest `.duet/project.duet`
+    up. That is enough for the witness; `duet init` is still the project design's task.
+  - `duet capture melody` takes the take's path. Naming a take by its project name waits on
+    the project's `take add`.
 
 **3. The four-moment by-ear review, through the bus.** *The proving ground.*
 - **Needs:** 1, 2, and the project design's build task 1 (`duet init`).

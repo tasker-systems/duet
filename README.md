@@ -23,7 +23,8 @@ The workspace is split by domain:
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Part` and score |
 | `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, the project document, and the song and its composition |
 | `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
-| `duet-cli` | the `duet` binary |
+| `duet-actions` | every command's work, as registered actions with typed inputs, each recording the documents it writes |
+| `duet-cli` | the `duet` binary: clap over the actions, and inside a project their `doc.written` events appended to the journal |
 
 ## How the formats fit together
 

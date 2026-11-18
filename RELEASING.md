@@ -7,7 +7,7 @@ temper's, cut down to one lane.
 ## The shared version
 
 Every published crate (duet-core, duet-midi, duet-abc, duet-drums, duet-dsp, duet-capture,
-duet-play, duet-schemas, duet-bus, duet-cli) has the same version: `[workspace.package].version`, which each
+duet-play, duet-schemas, duet-bus, duet-actions, duet-cli) has the same version: `[workspace.package].version`, which each
 inherits. The repo-root `VERSION` file holds it too, and each crate's entry in
 `[workspace.dependencies]` names it. `tools/scripts/release/update-versions.sh` is the one writer
 of all of them. A crate whose source did not change still gets the new version, so the one tag
