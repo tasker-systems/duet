@@ -824,12 +824,16 @@ and two events the domain model assumes ([decisions 16–23](#decisions-for-the-
 
 **Songs, parts and takes, the domain's project-level elements.**
 - The closing record of each segment lists:
-  - the songs, and the parts by `<song>/<part>`, since a part belongs to one song;
+  - the songs and the parts, **by id, with the name alongside** for reading (owner, 2026-11-17,
+    temper `01a1eb48` ruling 13). A part belongs to one song, so its name is `<song>/<part>`;
   - the takes, by name and digest, since a take is named by both and never by path.
-- **Songs and parts by a stable id, if the songs-and-composition spec gives them one,** with the
-  name beside it for reading (owner, 2026-11-17). Until it does they are listed by name, accepting
-  that a rename loses per-song lookup of older segments. That spec gives a song no stable id today,
-  so the index names them, a dependency on that spec recorded here.
+- **A song and a part each have a stable id,** minted once when the document is made and never
+  changed by a rename of the folder, the file or the title (ruling 13). So a rename keeps the
+  lookup of older segments. The id's form is the songs-and-composition spec's (proposed there as a
+  UUIDv7, #81).
+- **Until a song or a part carries its id,** which comes with that spec's build task 2, the
+  index writer takes the id from wherever an event names one. An event that names none
+  contributes the name alone.
 - **What is not named:**
   - **a session:** it is not a duet entity (domain model, temper `01a1eb48`);
   - **comps, snapshots and renders:** each belongs to a song, so the song finds their segments.
@@ -930,9 +934,12 @@ their kinds, and none is built with the journal:
   same way, the first transition in order standing.
 - **`snapshot.taken`:** `song`, the snapshot's name, and the digest of what it froze. A snapshot is
   an event against the song, not a status, so it changes no state.
-- **Where a song's current status lives belongs to the songs-and-composition spec,** a dependency
-  recorded here, not ruled here. The recommendation going to it: `song.duet` holds the current
-  status, the journal records each change, and `journal check` reports a disagreement.
+- **A song's current status lives in `song.duet`, and the journal records each change** (owner,
+  2026-11-17, temper `01a1eb48` ruling 14). Each move is a `song.status-set`, each snapshot a
+  `snapshot.taken`. `duet journal check` reports any disagreement between the document and the
+  journal, naming both sides, and never repairs it.
+- **That report waits on the songs build:** nothing reads `song.duet` until the songs spec's build
+  task 2, so it is not among build task 1's witnesses.
 - `comp.marked` and `comp.applied` are already listed. They wait on the comp document, as the comp
   events do in #79.
 
@@ -1130,8 +1137,7 @@ to this design, in [The journal's index and segments](#the-journals-index-and-se
 17. **The index names songs, parts (`<song>/<part>`) and takes (by name and digest)** in each
     segment's closing record, and never a session. Each event kind states what it concerns, and
     comps, snapshots and renders are found through their song. **Ruled (owner, 2026-11-17),** with
-    songs and parts by a stable id, the name beside it, once the songs spec gives them one; by name
-    until then.
+    songs and parts listed by their stable id, the name alongside (temper `01a1eb48` ruling 13).
 18. **The file name's timestamp is UTC ISO 8601 basic to the millisecond:**
     `journal.20261117T150405123Z.duet.jsonl`, stepped a millisecond forward when taken. **Ruled (owner, 2026-11-17).**
 19. **Replay folds the segments in index order. `seq` is a position within a segment, and a cursor
@@ -1148,9 +1154,10 @@ to this design, in [The journal's index and segments](#the-journals-index-and-se
     ruling 12). **Ruled (owner, 2026-11-17).**
 23. **Two durable events the domain model assumes are added:** `song.status-set`, which makes the
     song's status a second lifecycle in the journal, and `snapshot.taken`. Their kinds are owned
-    by the songs-and-composition spec. **Ruled (owner, 2026-11-17).** Where a song's current status
-    lives is that spec's, recorded as a dependency: the recommendation is `song.duet` holds it, the
-    journal records each change, and `journal check` reports a disagreement.
+    by the songs-and-composition spec. **Ruled (owner, 2026-11-17).** A song's current status lives
+    in `song.duet`, the journal records each change, and `journal check` reports a disagreement,
+    naming both sides, and never repairs (temper `01a1eb48` ruling 14). That check waits on the
+    songs build.
 
 ## Not decided here
 
