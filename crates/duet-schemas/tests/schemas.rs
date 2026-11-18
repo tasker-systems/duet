@@ -27,10 +27,11 @@ use duet_schemas::journal::{
     Entry, EventInfo, Id, IndexLine, MomentPlayed, Opens, Party, RelPath, SegmentStamp, TakeAdded,
     TakeRef, VerdictGiven,
 };
+use duet_schemas::project::{Defaults, Given, ProjectTake};
 use duet_schemas::{
     AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, EVENTS, Framing, From, IndexHead, Journal,
-    JournalHead, JournalIndex, KINDS, KindInfo, Notice, Stream, Tool, Version, read_envelope,
-    schema,
+    JournalHead, JournalIndex, KINDS, KindInfo, Notice, Project, Stream, Tool, Version,
+    read_envelope, schema,
 };
 use serde_json::{Value, json};
 
@@ -713,6 +714,9 @@ fn example(name: &str) -> AnyDocument {
             example_analysis(),
         )));
     }
+    if name == "project" {
+        return AnyDocument::Project(Document::new(Tool::new("duet", "0.3.0"), example_project()));
+    }
     assert_eq!(name, "part", "no example is defined for {name}");
     let mut doc = Document::new(Tool::new("duet", "0.2.0"), example_part());
     let mut from = From::new("abc");
@@ -721,6 +725,47 @@ fn example(name: &str) -> AnyDocument {
     doc.from = Some(from);
     doc.statements = vec!["the slur on bar 2 is notation only, and is not carried".into()];
     AnyDocument::Part(doc)
+}
+
+/// A project that uses every field: every default, a take with something given and one
+/// without, each named by its digest.
+fn example_project() -> Project {
+    let date = |s: &str| s.parse().unwrap();
+    let mut project = Project::new("Porch", date("2026-11-17"), Version::new(0, 3));
+    let mut defaults = Defaults::default();
+    defaults.tempo_bpm = Some(92.0);
+    defaults.meter = Some("3/4".parse().unwrap());
+    defaults.key = Some("Ab".parse().unwrap());
+    defaults.tuning = Some("+0c".parse().unwrap());
+    defaults.grid = Some("1/16".parse().unwrap());
+    project.defaults = Some(defaults);
+    let take = |digest: &str, rate: u32, frames: u64| {
+        serde_json::from_value(json!({
+            "digest": digest, "rate": rate, "channels": 1, "frames": frames
+        }))
+        .unwrap()
+    };
+    let mut wayfaring = ProjectTake::new(
+        "wayfaring".parse().unwrap(),
+        take(EXAMPLE_DIGEST, 44_100, 976_080),
+        "wayfaring-stranger.flac".parse().unwrap(),
+        date("2026-11-17"),
+    );
+    let mut given = Given::default();
+    given.tempo_bpm = Some(92.0);
+    wayfaring.given = Some(given);
+    let blood_sport = ProjectTake::new(
+        "blood-sport".parse().unwrap(),
+        take(
+            "sha256:41ab07e3c9d25f18b6a4e0c7d3f92b5a8e1c6d4f7a0b3e9c2d5f8a1b4c7e0d36",
+            48_000,
+            1_203_200,
+        ),
+        "Blood Sport 3.m4a".parse().unwrap(),
+        date("2026-11-18"),
+    );
+    project.takes = vec![wayfaring, blood_sport];
+    project
 }
 
 /// A grid that uses every field: a meter change (so bars differ in length), its own levels,

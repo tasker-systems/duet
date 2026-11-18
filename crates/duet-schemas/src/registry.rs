@@ -7,6 +7,7 @@ use duet_dsp::PerformanceHead;
 use serde_json::Value;
 
 use crate::journal::{IndexHead, JournalHead};
+use crate::project::Project;
 use crate::schema::{document_schema, envelope_schema, stream_schema};
 use crate::{Document, Error, Kind, Result, StreamKind, Version, read_envelope};
 
@@ -55,6 +56,7 @@ pub const KINDS: &[KindInfo] = &[
     document::<Part>(),
     document::<DrumGrid>(),
     document::<Analysis>(),
+    document::<Project>(),
     stream::<PerformanceHead>(),
     stream::<JournalHead>(),
     stream::<IndexHead>(),
@@ -83,6 +85,7 @@ pub enum AnyDocument {
     DrumGrid(Document<DrumGrid>),
     /// Boxed: an analysis holds a take's every event and its reading, and is far the largest.
     CaptureAnalysis(Box<Document<Analysis>>),
+    Project(Document<Project>),
 }
 
 impl AnyDocument {
@@ -101,6 +104,7 @@ impl AnyDocument {
             Some(info) if info.name == Analysis::NAME => {
                 Document::read(text).map(|doc| Self::CaptureAnalysis(Box::new(doc)))
             }
+            Some(info) if info.name == Project::NAME => Document::read(text).map(Self::Project),
             Some(info) if info.framing == Framing::Stream => Err(Error::Framing {
                 found: "document (.duet, with a `body`)",
                 expected: "stream (.duet.jsonl), as its kind is",
@@ -123,6 +127,7 @@ impl AnyDocument {
             Self::Part(_) => Part::NAME,
             Self::DrumGrid(_) => DrumGrid::NAME,
             Self::CaptureAnalysis(_) => Analysis::NAME,
+            Self::Project(_) => Project::NAME,
         }
     }
 
@@ -136,6 +141,7 @@ impl AnyDocument {
             Self::Part(doc) => doc.write(),
             Self::DrumGrid(doc) => doc.write(),
             Self::CaptureAnalysis(doc) => doc.write(),
+            Self::Project(doc) => doc.write(),
         }
     }
 }

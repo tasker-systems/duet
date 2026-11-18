@@ -21,7 +21,7 @@ The workspace is split by domain:
 | `duet-play` | a `Part` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Part` and score |
-| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, and the journal's kinds and events |
+| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, and the project document |
 | `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
 | `duet-cli` | the `duet` binary |
 
