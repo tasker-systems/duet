@@ -21,7 +21,8 @@ The workspace is split by domain:
 | `duet-play` | a `Part` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Part` and score |
-| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy |
+| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, and the journal's kinds and events |
+| `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
 | `duet-cli` | the `duet` binary |
 
 ## How the formats fit together
@@ -911,6 +912,28 @@ tempo that changes within a take (drift is reported in the analysis, not correct
 tests are measured against, each with a hand-checked transcription. Its
 [README](crates/duet-capture/corpus/README.md) says how to add a take.
 
+## The journal
+
+A project's journal is the shared, ordered account of what the owner and Claude did and asked of
+each other. Its entries are events (`ask.asked`, `ask.answered`, `doc.written`, …), one per line.
+It is an **index**, `journal.duet.jsonl`, over **segments**, `journal.<stamp>.duet.jsonl`:
+- each index line opens a segment and closes the one before it;
+- a new segment starts when the current one reaches 1 MiB. The size is `[journal] segment-size`
+  in `duet.toml`, read once a command writes the journal; nothing writes one yet.
+
+Each event kind versions on its own, so an entry this duet does not read, of a newer duet's event,
+is kept as it is and stated, never refused. The design is
+[`docs/superpowers/specs/2026-11-17-bus-design.md`](docs/superpowers/specs/2026-11-17-bus-design.md),
+"The journal's index and segments".
+
+```sh
+duet journal show    # every entry: its segment and seq, when, who, the event and its body
+duet journal check   # what this duet keeps unread, what replay skips; exits 1 if anything is wrong
+```
+
+Both read the project in the working directory, or the root or `journal.duet.jsonl` given.
+Neither writes.
+
 ## Configuration
 
 `duet` reads `duet.toml` and `duet.local.toml` from two places, each file over the ones
@@ -968,11 +991,18 @@ Builds on the latest stable Rust (1.100 or later, edition 2024). On Linux, `duet
 audio and MIDI crates need the ALSA headers: `apt install libasound2-dev pkg-config` (or your
 distribution's package).
 
+The tests run under [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`,
+or `mise use cargo:cargo-nextest`), configured in `.config/nextest.toml`. nextest does not run
+doctests, so `cargo test --doc` runs them:
+
 ```sh
-cargo test --locked
+cargo nextest run --locked
+cargo test --locked --doc
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo fmt --all --check
 ```
+
+`cargo test --locked` still runs everything, one test binary at a time.
 
 Releasing (crates.io, the tag and the GitHub Release) runs through `cargo make` and is described
 in [RELEASING.md](RELEASING.md).
@@ -1025,7 +1055,8 @@ envelope's, is generated from the Rust types and committed under `crates/duet-sc
 with an example document beside it. The gate fails when a committed schema's shape differs from
 the code at the same version (bump the kind's version), and asks only to regenerate when its
 descriptions alone changed. Every committed example must still read, and validate against its
-schema. To write a new or regenerated schema:
+schema. The journal's events are gated the same way, each under
+`schemas/journal/events/<event>/`, at its own version. To write a new or regenerated schema:
 
 ```sh
 DUET_BLESS_SCHEMAS=1 cargo test -p duet-schemas
@@ -1057,7 +1088,8 @@ oracle checks its version against the manifest.
 `crates/duet-e2e` holds the tests that drive the `duet` binary end to end. It is never
 published. Each test run builds the binary with `cargo build -p duet-cli --bin duet` and runs
 what that build reports, so a test never runs a stale binary (set `DUET_E2E_BIN` to run
-another, such as one built from `main`). Its `golden/` holds what `duet` wrote from the
+another, such as one built from `main`). Under nextest the build runs once, before the tests,
+in `scripts/nextest-duet-bin.sh`. Its `golden/` holds what `duet` wrote from the
 samples before a part could name an end, and a test checks that every file written now holds
 the same music, event for event, and differs only by stating its end. CI runs it again, with
 duet-cli's tests, under the hostile config in `crates/duet-e2e/hostile`, so no test reads a

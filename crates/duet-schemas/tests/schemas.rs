@@ -22,9 +22,15 @@ use duet_core::{
     Control, Key, Note, Part, Pitch, Position, TempoChange, TimeChange, TimeSig, Track,
 };
 use duet_dsp::{FrameBlock, PerformanceHead};
+use duet_schemas::journal::{
+    AskAnswered, AskAsked, AskWithdrawn, At, Audience, By, Closes, Concerns, DocDigest, DocWritten,
+    Entry, EventInfo, Id, IndexLine, MomentPlayed, Opens, Party, RelPath, SegmentStamp, TakeAdded,
+    TakeRef, VerdictGiven,
+};
 use duet_schemas::{
-    AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, Framing, From, KINDS, KindInfo, Notice, Stream,
-    Tool, Version, read_envelope,
+    AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, EVENTS, Framing, From, IndexHead, Journal,
+    JournalHead, JournalIndex, KINDS, KindInfo, Notice, Stream, Tool, Version, read_envelope,
+    schema,
 };
 use serde_json::{Value, json};
 
@@ -106,8 +112,46 @@ enum Verdict {
 }
 
 fn verdict(info: &KindInfo, committed: Option<&Value>, generated: &Value) -> Verdict {
-    let (name, version) = (info.name, info.version);
-    let path = schema_path(name, version);
+    let what = if info.name == ENVELOPE {
+        Target::Envelope
+    } else {
+        Target::Kind
+    };
+    verdict_at(what, info.name, info.version, committed, generated)
+}
+
+/// What a schema is the schema of: the envelope, a kind, or a journal event kind, which
+/// versions on its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Target {
+    Envelope,
+    Kind,
+    Event,
+}
+
+fn target_path(what: Target, name: &str, version: Version) -> String {
+    match what {
+        Target::Event => event_path(name, version),
+        _ => schema_path(name, version),
+    }
+}
+
+/// `schemas/journal/events/<name>/<version>.json`, as messages name it.
+fn event_path(name: &str, version: Version) -> String {
+    format!(
+        "crates/duet-schemas/schemas/{}/{version}.json",
+        schema::event_schema_name(name)
+    )
+}
+
+fn verdict_at(
+    what: Target,
+    name: &str,
+    version: Version,
+    committed: Option<&Value>,
+    generated: &Value,
+) -> Verdict {
+    let path = target_path(what, name, version);
     let Some(committed) = committed else {
         return Verdict::Missing(format!(
             "{name} {version} has no committed schema: {path} is missing. Write it with \
@@ -121,7 +165,14 @@ fn verdict(info: &KindInfo, committed: Option<&Value>, generated: &Value) -> Ver
             "{name} {version}: only descriptions changed in {path}. Regenerate it with \
              `{BLESS}=1 cargo test -p duet-schemas`; no version change is needed"
         ))
-    } else if name == ENVELOPE {
+    } else if what == Target::Event {
+        Verdict::Shape(format!(
+            "the schema of the journal event {name} changed at the same version {version} \
+             ({path}). Bump {name}'s own version (its `v`) by the rule in the design's version \
+             policy: minor for an additive change, major for any other. The journal's version \
+             does not move"
+        ))
+    } else if what == Target::Envelope {
         Verdict::Shape(format!(
             "the schema of the envelope changed at {version} ({path}). A change to the \
              envelope's shape is a new major version of every kind: move ENVELOPE_VERSION and \
@@ -163,6 +214,79 @@ fn every_schema_is_committed_and_current() {
         "the schema gate:\n- {}",
         failures.join("\n- ")
     );
+}
+
+/// The gate for each journal event kind's body schema, which versions on its own: committed
+/// and current at the event's version, by the same verdicts as a kind's.
+#[test]
+fn every_event_schema_is_committed_and_current() {
+    let bless = std::env::var_os(BLESS).is_some();
+    let mut failures = Vec::new();
+    for info in EVENTS {
+        let generated = (info.schema)();
+        let path = repo_path(&event_path(info.name, info.version));
+        let committed = read_json(&path);
+        match verdict_at(
+            Target::Event,
+            info.name,
+            info.version,
+            committed.as_ref(),
+            &generated,
+        ) {
+            Verdict::Current => {}
+            Verdict::Missing(_) | Verdict::Descriptions(_) if bless => {
+                write_json(&path, &generated)
+            }
+            Verdict::Missing(why) | Verdict::Descriptions(why) | Verdict::Shape(why) => {
+                failures.push(why);
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "the event schema gate:\n- {}",
+        failures.join("\n- ")
+    );
+}
+
+fn event_info(name: &str) -> &'static EventInfo {
+    duet_schemas::event_kind(name).unwrap()
+}
+
+#[test]
+fn the_gate_fails_on_a_field_added_to_an_event_at_the_same_version_naming_the_event() {
+    let info = event_info("ask.answered");
+    let committed = (info.schema)();
+    let mut generated = committed.clone();
+    generated["properties"]["mood"] = json!({ "type": "string" });
+    let Verdict::Shape(why) = verdict_at(
+        Target::Event,
+        info.name,
+        info.version,
+        Some(&committed),
+        &generated,
+    ) else {
+        panic!("a new field at the same version must fail as a shape change");
+    };
+    assert!(
+        why.contains("ask.answered") && why.contains("its `v`"),
+        "{why}"
+    );
+    assert!(why.contains("journal's version does not move"), "{why}");
+}
+
+/// A new event kind changes no committed schema but its own: the journal's schema does not
+/// name any event, so it stays current however many there are.
+#[test]
+fn the_journal_schema_names_no_event() {
+    let journal = (duet_schemas::kind("journal").unwrap().schema)().to_string();
+    for info in EVENTS {
+        assert!(
+            !journal.contains(info.name),
+            "journal's schema names {}",
+            info.name
+        );
+    }
 }
 
 fn part_info() -> &'static KindInfo {
@@ -385,6 +509,15 @@ fn check_stream_example(info: &KindInfo, version: Version, text: &str, relative:
         "performance" => Stream::<PerformanceHead>::read(text)
             .and_then(|stream| stream.write())
             .unwrap_or_else(|e| panic!("{relative}: {e}")),
+        "journal" => {
+            check_journal_events(text, relative);
+            Journal::read(text)
+                .and_then(|journal| journal.write())
+                .unwrap_or_else(|e| panic!("{relative}: {e}"))
+        }
+        "journal-index" => JournalIndex::read(text)
+            .and_then(|index| index.write())
+            .unwrap_or_else(|e| panic!("{relative}: {e}")),
         other => panic!("no stream reader is named for {other}"),
     };
     let schema = committed_schema(info.name, version);
@@ -408,6 +541,35 @@ fn check_stream_example(info: &KindInfo, version: Version, text: &str, relative:
     }
 }
 
+/// Each entry of a journal's example validates its body against its event kind's committed
+/// schema at its `v`, and the example holds every event kind this build knows.
+fn check_journal_events(text: &str, relative: &str) {
+    let mut seen = Vec::new();
+    for (n, line) in text.lines().enumerate().skip(1) {
+        let entry: Value = serde_json::from_str(line).unwrap();
+        let (name, v) = (
+            entry["event"].as_str().unwrap(),
+            entry["v"].as_str().unwrap(),
+        );
+        let version: Version = v.parse().unwrap();
+        let path = repo_path(&event_path(name, version));
+        let schema = read_json(&path).unwrap_or_else(|| panic!("{}: no schema", path.display()));
+        assert_valid(
+            &validator(&schema),
+            &entry["body"],
+            &format!("{relative}:{} ({name} {v})", n + 1),
+        );
+        seen.push(name.to_string());
+    }
+    for info in EVENTS {
+        assert!(
+            seen.iter().any(|name| name == info.name),
+            "{relative} has no {} entry",
+            info.name
+        );
+    }
+}
+
 /// The text of the example committed at a kind's current version, when blessing writes it.
 fn example_text(info: &KindInfo) -> String {
     match info.framing {
@@ -419,6 +581,12 @@ fn example_text(info: &KindInfo) -> String {
 /// A stream's example: every column, voiced and unvoiced frames, a short last block, and the
 /// take (1.1).
 fn example_stream(name: &str) -> String {
+    if name == "journal" {
+        return example_journal();
+    }
+    if name == "journal-index" {
+        return example_index();
+    }
     assert_eq!(name, "performance", "no example is defined for {name}");
     let mut head = PerformanceHead::new(22_050, 256, 512);
     head.take = Some(
@@ -445,6 +613,93 @@ fn example_stream(name: &str) -> String {
         .unwrap(),
     ];
     stream.write().unwrap()
+}
+
+fn id(n: u8) -> Id {
+    Id::from_parts(1_795_446_245_000 + u64::from(n), [n; 10])
+}
+
+/// A journal's example: one entry of every event kind, every optional field used once, and a
+/// `cause`.
+fn example_journal() -> String {
+    let head = JournalHead::new("wayfaring", id(20), example_stamp(1));
+    let mut text = Journal::head_line(&Tool::new("duet", "0.3.0"), &head).unwrap();
+    let claude = By::new("claude", "cli");
+    let owner = By::new("owner", "cli");
+    let at = |n: u8| At::from_unix_ms(1_795_446_245_000 + 1000 * u64::from(n));
+    let mut asked = AskAsked::new("Which of the two endings do you hear as the tune?");
+    asked.about = Some("wayfaring@2.15-3.58".into());
+    asked.options = vec!["one".into(), "two".into()];
+    asked.clips = vec!["wayfaring@2.15-2.58".into(), "wayfaring@3.15-3.58".into()];
+    asked.to = Some(Party::Owner);
+    let mut answered = AskAnswered::new(id(1), "two");
+    answered.said = Some("a new word".into());
+    let mut withdrawn = AskWithdrawn::new(id(3));
+    withdrawn.why = Some("asked twice".into());
+    let mut verdict = VerdictGiven::new("wayfaring@2.15-3.58", "no audible difference");
+    verdict.ask = Some(id(1));
+    let digest = EXAMPLE_DIGEST.parse().unwrap();
+    let entries = [
+        Entry::new(id(1), at(1), claude.clone(), asked),
+        Entry::new(id(2), at(2), owner.clone(), answered),
+        Entry::new(id(3), at(3), claude.clone(), AskAsked::new("Again?")),
+        Entry::new(id(4), at(4), claude.clone(), withdrawn),
+        Entry::new(
+            id(5),
+            at(5),
+            claude.clone(),
+            MomentPlayed::new("wayfaring@2.15-3.58", Audience::Owner, "take"),
+        ),
+        Entry::new(id(6), at(6), owner.clone(), verdict),
+        Entry::new(id(7), at(7), owner, TakeAdded::new("wayfaring", digest)),
+        Entry::new(
+            id(8),
+            at(8),
+            claude,
+            DocWritten::new(
+                "takes/wayfaring.capture.duet".parse().unwrap(),
+                "capture-analysis",
+                Version::new(1, 13),
+                DocDigest(0x0123_4567_89ab_cdef),
+                false,
+            ),
+        ),
+    ];
+    for (n, mut entry) in entries.into_iter().enumerate() {
+        if n == 7 {
+            entry.cause = Some(id(7));
+        }
+        text.push_str(&entry.line().unwrap());
+    }
+    text
+}
+
+/// The stamp of the example's `n`th segment.
+fn example_stamp(n: u64) -> SegmentStamp {
+    SegmentStamp::new(At::from_unix_ms(1_795_446_245_000 + 86_400_000 * (n - 1)))
+}
+
+/// An index's example: the first line opens a segment, the second closes it with every field of
+/// its summary and opens the next.
+fn example_index() -> String {
+    let head = IndexHead::new("wayfaring", id(0));
+    let mut text = JournalIndex::head_line(&Tool::new("duet", "0.3.0"), &head).unwrap();
+    let first = Opens::new(example_stamp(1), id(20), example_stamp(1).at());
+    text.push_str(&IndexLine::new(first, None).line().unwrap());
+    let mut concerns = Concerns::new();
+    concerns.songs = vec!["wayfaring".into()];
+    concerns.parts = vec!["wayfaring/lead".into()];
+    concerns.takes = vec![TakeRef::new("wayfaring", EXAMPLE_DIGEST.parse().unwrap())];
+    let closes = Closes::new(
+        example_stamp(1),
+        At::from_unix_ms(1_795_446_253_000),
+        8,
+        id(8),
+        concerns,
+    );
+    let second = Opens::new(example_stamp(2), id(21), example_stamp(2).at());
+    text.push_str(&IndexLine::new(second, Some(closes)).line().unwrap());
+    text
 }
 
 /// The example committed at a kind's current version, when blessing writes it.
@@ -837,6 +1092,81 @@ fn the_hand_written_patterns_match_what_reads() {
         ],
         &["H4", "C", "4", "C#x4", "", "C###4", "Cbbb4", "C#b4"],
         &|s| s.parse::<Pitch>().is_ok(),
+    );
+    let journal_defs = json!({
+        "Id": schema_of::<Id>(),
+        "At": schema_of::<At>(),
+        "RelPath": schema_of::<RelPath>(),
+        "DocDigest": schema_of::<DocDigest>(),
+        "SegmentStamp": schema_of::<SegmentStamp>(),
+    });
+    let check_journal =
+        |def: &str, reads: &[&str], refused: &[&str], parses: &dyn Fn(&str) -> bool| {
+            let validator = jsonschema::validator_for(&journal_defs[def]).unwrap();
+            for s in reads {
+                assert!(parses(s), "{def}: {s:?} should parse");
+                assert!(
+                    validator.is_valid(&json!(s)),
+                    "{def}: the pattern refuses {s:?}"
+                );
+            }
+            for s in refused {
+                assert!(!parses(s), "{def}: {s:?} should not parse");
+                assert!(
+                    !validator.is_valid(&json!(s)),
+                    "{def}: the pattern accepts {s:?}"
+                );
+            }
+        };
+    check_journal(
+        "Id",
+        &[
+            "0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f6",
+            "00000000-0000-7000-b000-000000000000",
+        ],
+        &[
+            "0196F1A2-7b3c-7d4e-8f90-a1b2c3d4e5f6",
+            "0196f1a2-7b3c-4d4e-8f90-a1b2c3d4e5f6",
+            "",
+        ],
+        &|s| s.parse::<Id>().is_ok(),
+    );
+    check_journal(
+        "At",
+        &["2026-11-17T15:04:05.123Z", "1970-01-01T00:00:00.000Z"],
+        &[
+            "2026-11-17T15:04:05Z",
+            "2026-11-17 15:04:05.123Z",
+            "2026-11-17T15:04:05.123",
+        ],
+        &|s| s.parse::<At>().is_ok(),
+    );
+    check_journal(
+        "RelPath",
+        &["comps/a.duet", ".hidden", "..x", "a/...", "a b/c"],
+        &["/abs", "a/../b", "./a", "a//b", "a/", "", "..", "a\\b"],
+        &|s| s.parse::<RelPath>().is_ok(),
+    );
+    check_journal(
+        "SegmentStamp",
+        &["20261117T150405123Z", "19700101T000000000Z"],
+        &[
+            "2026-11-17T15:04:05.123Z",
+            "20261117T150405Z",
+            "20261117T150405123",
+            "",
+        ],
+        &|s| s.parse::<SegmentStamp>().is_ok(),
+    );
+    check_journal(
+        "DocDigest",
+        &["0123456789abcdef"],
+        &[
+            "0123456789ABCDEF",
+            "0123456789abcde",
+            "fnv1a:0123456789abcdef",
+        ],
+        &|s| s.parse::<DocDigest>().is_ok(),
     );
     // Every value the writer writes matches too.
     let validator = jsonschema::validator_for(&defs["Pitch"]).unwrap();

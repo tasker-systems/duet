@@ -25,6 +25,7 @@ duet-abc.workspace = true
 duet-capture.workspace = true
 duet-play.workspace = true
 duet-schemas.workspace = true
+duet-bus.workspace = true
 serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"
 clap = { version = "4", features = ["derive"] }

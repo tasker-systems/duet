@@ -1,0 +1,28 @@
+{
+  "$defs": {
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/ask.withdrawn/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is ask.withdrawn and whose `v` is 1.0.",
+  "properties": {
+    "ask": {
+      "$ref": "#/$defs/Id",
+      "description": "The ask withdrawn: its entry's id."
+    },
+    "why": {
+      "description": "Why, if said.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask"
+  ],
+  "title": "duet journal event ask.withdrawn 1.0",
+  "type": "object"
+}

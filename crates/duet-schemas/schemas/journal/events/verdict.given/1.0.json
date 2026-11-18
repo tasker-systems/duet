@@ -1,0 +1,33 @@
+{
+  "$defs": {
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/verdict.given/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is verdict.given and whose `v` is 1.0.",
+  "properties": {
+    "about": {
+      "description": "What it is about: a reference, as an ask's `about` is.",
+      "type": "string"
+    },
+    "ask": {
+      "$ref": "#/$defs/Id",
+      "description": "The ask it answers, if it answers one."
+    },
+    "verdict": {
+      "description": "The verdict, in the owner's words.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "about",
+    "verdict"
+  ],
+  "title": "duet journal event verdict.given 1.0",
+  "type": "object"
+}
