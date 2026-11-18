@@ -23,9 +23,10 @@ use duet_actions::config::{self, Config, Dirs};
 use duet_actions::drums::DrumsCommand;
 use duet_actions::io::{stdout, tool};
 use duet_actions::part::PartCommand;
+use duet_actions::project::{InitInput, ProjectCommand};
 use duet_actions::song::SongCommand;
 use duet_actions::{Context, Project, abc, actor, capture, convert, drums, fresh_id, part, play};
-use duet_actions::{record, song, view};
+use duet_actions::{project, record, song, view};
 use duet_bus::Writer;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
@@ -38,6 +39,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Make a project: .duet/project.duet, and .duet/duet.toml when there is none. A directory
+    /// that holds a project already is refused, as is one inside another project unless
+    /// --nested is given, and the home directory itself. A .duet/ that holds only config is
+    /// adopted, its config kept as it is. Nothing else is written: no song, no other directory,
+    /// no git file.
+    Init(InitInput),
+    /// Read the project a command runs in: the nearest directory up whose .duet/ holds
+    /// project.duet, or the one DUET_PROJECT names.
+    #[command(subcommand)]
+    Project(ProjectCommand),
     /// Convert between formats. A .duet is a document, read by its envelope: a part, or a
     /// drum grid. .mid (.midi, .smf) is MIDI and .abc is ABC. No other name means a format:
     /// --from and --to name one, standard input is a document when it starts with {, and
@@ -106,8 +117,19 @@ fn run(cli: Cli, dirs: &Dirs, project: Option<Project>) -> Result<()> {
     // always has.
     let loads = !matches!(
         cli.command,
-        Command::Song(_) | Command::Record(_) | Command::Config(_) | Command::Journal(_)
+        Command::Init(_)
+            | Command::Project(_)
+            | Command::Song(_)
+            | Command::Record(_)
+            | Command::Config(_)
+            | Command::Journal(_)
     );
+    // `init` makes a project, and runs in none: it journals nothing (duet_actions::project).
+    let project = if matches!(cli.command, Command::Init(_)) {
+        None
+    } else {
+        project
+    };
     let config = if loads {
         Config::load(dirs)?
     } else {
@@ -115,6 +137,8 @@ fn run(cli: Cli, dirs: &Dirs, project: Option<Project>) -> Result<()> {
     };
     let ctx = Context::new(project, config);
     let ran = match cli.command {
+        Command::Init(input) => project::init(&ctx, input),
+        Command::Project(command) => project::run(&ctx, command),
         Command::Convert(input) => convert::run(&ctx, input),
         Command::Part(command) => part::run(&ctx, command),
         Command::Song(command) => song::run(&ctx, command),

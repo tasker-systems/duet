@@ -4,7 +4,7 @@
 use schemars::JsonSchema;
 use serde_json::Value;
 
-use crate::{abc, capture, convert, drums, part, play, record, song, view};
+use crate::{abc, capture, convert, drums, part, play, project, record, song, view};
 
 /// Where an action runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +84,28 @@ const fn writing(
 
 /// Every action, in the CLI's order.
 pub const ACTIONS: &[Action] = &[
+    // `init` journals nothing: it makes the project, and the project's account begins with the
+    // first action run in it (the project design's §3 lists all `init` writes).
+    writing(
+        "init",
+        &["init"],
+        &[],
+        writes(
+            ".duet/project.duet, new, and .duet/duet.toml when absent",
+            false,
+        ),
+        schema::<project::InitInput>,
+    ),
+    reads(
+        "project.path",
+        &["project", "path"],
+        schema::<project::PathInput>,
+    ),
+    reads(
+        "project.show",
+        &["project", "show"],
+        schema::<project::ShowInput>,
+    ),
     writing(
         "convert",
         &["convert"],

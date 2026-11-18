@@ -203,6 +203,43 @@ fn read_song(dir: &Path) -> Result<Document<Song>> {
     Document::read(&text).with_context(|| path.display().to_string())
 }
 
+/// One folder under a project's `songs/`, as `duet project show` lists it: its name, and its song,
+/// or why it holds none.
+pub(crate) struct Listed {
+    pub folder: String,
+    pub song: std::result::Result<Song, String>,
+}
+
+/// Every folder under `root`'s `songs/`, sorted by name, each with the song its `song.duet` holds
+/// or why it holds none: no `song.duet`, a name that is no song's name, or a document that does
+/// not read. A file directly in `songs/` is no song, and is left out.
+pub(crate) fn listed(root: &Path) -> Result<Vec<Listed>> {
+    let songs = root.join("songs");
+    if !songs.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&songs).with_context(|| songs.display().to_string())? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let folder = entry.file_name().to_string_lossy().into_owned();
+        let song = match folder.parse::<Name>() {
+            Err(why) => Err(format!("is no song's name: {why}")),
+            Ok(_) if !entry.path().join(SONG_FILE).is_file() => {
+                Err(format!("holds no {SONG_FILE}"))
+            }
+            Ok(_) => read_song(&entry.path())
+                .map(|doc| doc.body)
+                .map_err(|e| format!("{e:#}")),
+        };
+        out.push(Listed { folder, song });
+    }
+    out.sort_by(|a, b| a.folder.cmp(&b.folder));
+    Ok(out)
+}
+
 /// Writes the song through a file beside it, renamed over it, so a song is never left half
 /// written.
 fn write_song(ctx: &Context, path: &Path, doc: &Document<Song>) -> Result<()> {
