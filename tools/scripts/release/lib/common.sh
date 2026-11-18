@@ -16,7 +16,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 # workspace dependencies, and its dev-dependencies that carry a version, must be published first.
 # duet-e2e is `publish = false`. The two dev-dependency cycles back to duet-schemas (from duet-midi
 # and duet-drums) are path-only, so cargo strips them and they constrain nothing here.
-CRATES=(duet-core duet-midi duet-abc duet-drums duet-dsp duet-capture duet-play duet-schemas duet-cli)
+CRATES=(duet-core duet-midi duet-abc duet-drums duet-dsp duet-capture duet-play duet-schemas duet-bus duet-cli)
 
 SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 

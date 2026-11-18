@@ -1,0 +1,38 @@
+{
+  "$defs": {
+    "Audience": {
+      "description": "Whom a moment was played for.",
+      "enum": [
+        "owner",
+        "claude",
+        "both"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/moment.played/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is moment.played and whose `v` is 1.0.",
+  "properties": {
+    "for": {
+      "$ref": "#/$defs/Audience",
+      "description": "Whom it was played for."
+    },
+    "rendering": {
+      "description": "How it was rendered: `take`, `melody`, `steps`, `bends`, …",
+      "type": "string"
+    },
+    "what": {
+      "description": "What was played: a reference, as an ask's `about` is.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "what",
+    "for",
+    "rendering"
+  ],
+  "title": "duet journal event moment.played 1.0",
+  "type": "object"
+}

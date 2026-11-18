@@ -1,0 +1,55 @@
+{
+  "$defs": {
+    "DocDigest": {
+      "description": "The 64-bit FNV-1a of the document's body as compact JSON, as 16 lowercase hex digits.",
+      "pattern": "^[0-9a-f]{16}$",
+      "type": "string"
+    },
+    "RelPath": {
+      "description": "A path relative to the project's root, with `/` between its parts and no empty, `.` or `..` part.",
+      "pattern": "^([^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)(/([^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+))*$",
+      "type": "string"
+    },
+    "Version": {
+      "description": "A kind's schema version, <major>.<minor>, such as 1.0.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/doc.written/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is doc.written and whose `v` is 1.0.",
+  "properties": {
+    "digest": {
+      "$ref": "#/$defs/DocDigest",
+      "description": "The digest of its body."
+    },
+    "kind": {
+      "description": "The document's kind, as its envelope names it.",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "type": "string"
+    },
+    "path": {
+      "$ref": "#/$defs/RelPath",
+      "description": "Where, relative to the project's root."
+    },
+    "replaced": {
+      "description": "Whether it replaced a file that was there.",
+      "type": "boolean"
+    },
+    "version": {
+      "$ref": "#/$defs/Version",
+      "description": "The kind's version it was written at."
+    }
+  },
+  "required": [
+    "path",
+    "kind",
+    "version",
+    "digest",
+    "replaced"
+  ],
+  "title": "duet journal event doc.written 1.0",
+  "type": "object"
+}

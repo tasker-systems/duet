@@ -1779,3 +1779,40 @@ fn a_performances_take_round_trips_exactly_through_json() {
     assert!(!written.contains(r#""take""#), "{written}");
     assert_eq!(Stream::<PerformanceHead>::read(&written).unwrap(), older);
 }
+
+/// A project's journal round-trips exactly: a segment and the index, read, then written, are
+/// byte-identical. Every entry
+/// this build reads is written again from its event, so its text is duet's own; an entry of an
+/// event kind it does not read, or of a newer minor, is kept as its text, spacing and key order
+/// included.
+#[test]
+fn a_journal_round_trips_exactly_with_entries_this_duet_does_not_read() {
+    use duet_schemas::Journal;
+    let example = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../duet-schemas/schemas/journal/examples/1.0.duet.jsonl"
+    ))
+    .unwrap();
+    let journal = Journal::read(&example).unwrap();
+    assert!(journal.lines.iter().all(|l| l.read().is_some()));
+    assert_eq!(journal.write().unwrap(), example);
+
+    let unknown = r#"{"id":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f6","at":"2026-11-17T15:04:05.123Z","by":{"who":"owner","face":"app"},"event":"lyric.sung","v":"1.0","body":{ "z": 1, "a": [2, 3] }}"#;
+    let newer = r#"{"id":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f7","at":"2026-11-17T15:04:06.000Z","by":{"who":"claude","face":"mcp"},"event":"ask.asked","v":"1.7","body":{"urgency":"high","question":"Louder?"}}"#;
+    let mixed = format!("{example}{unknown}\n{newer}\n");
+    let journal = Journal::read(&mixed).unwrap();
+    assert_eq!(
+        journal.lines.iter().filter(|l| l.read().is_none()).count(),
+        2
+    );
+    assert_eq!(journal.write().unwrap(), mixed);
+
+    // The index over the segments round-trips the same way.
+    let index = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../duet-schemas/schemas/journal-index/examples/1.0.duet.jsonl"
+    ))
+    .unwrap();
+    let read = duet_schemas::JournalIndex::read(&index).unwrap();
+    assert_eq!(read.write().unwrap(), index);
+}
