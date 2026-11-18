@@ -991,11 +991,18 @@ Builds on the latest stable Rust (1.100 or later, edition 2024). On Linux, `duet
 audio and MIDI crates need the ALSA headers: `apt install libasound2-dev pkg-config` (or your
 distribution's package).
 
+The tests run under [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`,
+or `mise use cargo:cargo-nextest`), configured in `.config/nextest.toml`. nextest does not run
+doctests, so `cargo test --doc` runs them:
+
 ```sh
-cargo test --locked
+cargo nextest run --locked
+cargo test --locked --doc
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo fmt --all --check
 ```
+
+`cargo test --locked` still runs everything, one test binary at a time.
 
 Releasing (crates.io, the tag and the GitHub Release) runs through `cargo make` and is described
 in [RELEASING.md](RELEASING.md).
@@ -1081,7 +1088,8 @@ oracle checks its version against the manifest.
 `crates/duet-e2e` holds the tests that drive the `duet` binary end to end. It is never
 published. Each test run builds the binary with `cargo build -p duet-cli --bin duet` and runs
 what that build reports, so a test never runs a stale binary (set `DUET_E2E_BIN` to run
-another, such as one built from `main`). Its `golden/` holds what `duet` wrote from the
+another, such as one built from `main`). Under nextest the build runs once, before the tests,
+in `scripts/nextest-duet-bin.sh`. Its `golden/` holds what `duet` wrote from the
 samples before a part could name an end, and a test checks that every file written now holds
 the same music, event for event, and differs only by stating its end. CI runs it again, with
 duet-cli's tests, under the hostile config in `crates/duet-e2e/hostile`, so no test reads a
