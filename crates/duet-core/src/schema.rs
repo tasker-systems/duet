@@ -47,7 +47,7 @@ pub(crate) const KEY: &str = concat!(
 /// `1/` and a note value, with `t` for a triplet.
 pub(crate) const GRID: &str = r"^\s*1/0*[1-9][0-9]*t?\s*$";
 /// A letter, sharps or flats, and an octave from -1.
-pub(crate) const PITCH: &str = r"^[A-Ga-g][#b♯♭]*-?[0-9]+$";
+pub(crate) const PITCH: &str = r"^[A-Ga-g]([#♯]{0,2}|[b♭]{0,2})-?[0-9]+$";
 
 string_schema!(
     Position,
@@ -77,5 +77,5 @@ string_schema!(
     Pitch,
     "Pitch",
     PITCH,
-    "A pitch in scientific notation, such as C4 (MIDI 60), F#3 or Bb2, from C-1 to G9. Its spelling is kept."
+    "A pitch in scientific notation, such as C4 (MIDI 60), F#3, Bb2, Cb5 (MIDI 71) or F##4 (MIDI 67), from C-1 to G9: a letter, up to two sharps or two flats, and the letter's octave. Its spelling is kept."
 );

@@ -12,9 +12,7 @@ use duet_core::{Key, Mode, Position, Song, TimeSig, Track};
 
 use crate::error::{Error, Result};
 use crate::ratio::Ratio;
-use crate::read::{
-    DEFAULT_VELOCITY, DYNAMICS, NATURAL, default_channel, key_alterations, pickup_meter,
-};
+use crate::read::{DEFAULT_VELOCITY, DYNAMICS, default_channel, key_alterations, pickup_meter};
 
 /// What to do with a velocity that is not one of the dynamics' levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -124,40 +122,9 @@ fn length_text(ticks: u64, unit_ticks: u64) -> String {
     }
 }
 
-/// The letter (C = 0) of a natural pitch class, if it is one.
-fn natural_letter(pc: u8) -> Option<u8> {
-    NATURAL.iter().position(|n| *n == pc).map(|l| l as u8)
-}
-
-/// Spells a pitch as a letter and an alteration.
-///
-/// A black key is spelled as the pitch is (its flat flag), since that is what a song
-/// carries: A# stays `^A` in F major. A white key is its natural letter, except where the
-/// key signature spells it as E#, B#, Cb or Fb (in F# major, MIDI F is E#) and no accidental
-/// is in force on that letter in the bar: then it is written under the key, with no
-/// accidental. An E#, B#, Cb or Fb would otherwise need an accidental the reader refuses.
-fn spell(midi: u8, flat: bool, key: Key, bar_acc: &[Option<i8>; 7]) -> (u8, i8) {
-    let pc = midi % 12;
-    if let Some(letter) = natural_letter(pc) {
-        let alt = key_alterations(key);
-        for l in 0..7usize {
-            let in_key = (i32::from(NATURAL[l]) + i32::from(alt[l])).rem_euclid(12);
-            if alt[l] != 0 && in_key == i32::from(pc) && bar_acc[l].is_none() {
-                return (l as u8, alt[l]);
-            }
-        }
-        (letter, 0)
-    } else if flat {
-        (natural_letter((pc + 1) % 12).unwrap_or(0), -1)
-    } else {
-        (natural_letter((pc + 11) % 12).unwrap_or(0), 1)
-    }
-}
-
-fn note_name(midi: u8, letter: u8, alter: i8) -> String {
-    let natural = i32::from(midi) - i32::from(alter);
-    let octave = natural.div_euclid(12) - 1;
-    let upper = ['C', 'D', 'E', 'F', 'G', 'A', 'B'][usize::from(letter)];
+fn note_name(pitch: duet_core::Pitch) -> String {
+    let octave = pitch.octave();
+    let upper = ['C', 'D', 'E', 'F', 'G', 'A', 'B'][usize::from(pitch.letter())];
     if octave >= 5 {
         let mut s = upper.to_ascii_lowercase().to_string();
         s.push_str(&"'".repeat((octave - 5) as usize));
@@ -246,19 +213,23 @@ impl TrackWriter<'_> {
             out.push('[');
         }
         for i in notes {
+            // A note is written as the song spells it: Cb5 is `c` under K:Ebm and `_c`
+            // under K:C, and B4 is `=B` under K:Ebm.
             let pitch = self.track.notes[i].pitch;
-            let (letter, alter) = spell(pitch.midi(), pitch.is_flat(), self.key, &self.bar_acc);
+            let (letter, alter) = (pitch.letter(), pitch.alteration());
             let in_force = self.bar_acc[usize::from(letter)]
                 .unwrap_or(key_alterations(self.key)[usize::from(letter)]);
             if alter != in_force {
-                out.push(match alter {
-                    -1 => '_',
-                    0 => '=',
-                    _ => '^',
+                out.push_str(match alter {
+                    -2 => "__",
+                    -1 => "_",
+                    0 => "=",
+                    1 => "^",
+                    _ => "^^",
                 });
                 self.bar_acc[usize::from(letter)] = Some(alter);
             }
-            out.push_str(&note_name(pitch.midi(), letter, alter));
+            out.push_str(&note_name(pitch));
         }
         if chord {
             out.push(']');
@@ -861,26 +832,16 @@ mod tests {
     }
 
     #[test]
-    fn pitches_are_spelled_by_the_key_then_by_their_own_spelling() {
-        let key = |s: &str| s.parse::<Key>().unwrap();
-        // In F# major, MIDI F is E#, written E under the key.
-        let none = [None; 7];
-        assert_eq!(spell(65, false, key("F# major"), &none), (2, 1));
-        // After an E natural in the bar, it is written as F, which needs only =.
-        let mut e_natural = none;
-        e_natural[2] = Some(0);
-        assert_eq!(spell(65, false, key("F# major"), &e_natural), (3, 0));
-        // In D minor, C# is outside the signature.
-        assert_eq!(spell(61, false, key("D minor"), &none), (0, 1));
-        assert_eq!(spell(70, true, key("C major"), &none), (6, -1));
-        // A# keeps its own spelling in F major, where the key would say Bb.
-        assert_eq!(spell(70, false, key("F major"), &none), (5, 1));
-        assert_eq!(note_name(60, 0, 0), "C");
-        assert_eq!(note_name(72, 0, 0), "c");
-        assert_eq!(note_name(86, 1, 0), "d'");
-        assert_eq!(note_name(59, 6, 0), "B,");
-        assert_eq!(note_name(47, 6, 0), "B,,");
-        assert_eq!(note_name(60, 6, 1), "B,", "B#3 is MIDI 60");
+    fn notes_are_named_on_the_letter_they_are_spelled_on() {
+        let name = |s: &str| note_name(s.parse().unwrap());
+        assert_eq!(name("C4"), "C");
+        assert_eq!(name("C5"), "c");
+        assert_eq!(name("D6"), "d'");
+        assert_eq!(name("B3"), "B,");
+        assert_eq!(name("B2"), "B,,");
+        assert_eq!(name("B#3"), "B,", "B#3 is MIDI 60");
+        assert_eq!(name("Cb5"), "c", "Cb5 is MIDI 71");
+        assert_eq!(name("E#4"), "E");
     }
 
     /// A song whose first bar is `first`, then `meter` from the change at `change_tick`, with

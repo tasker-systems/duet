@@ -1,7 +1,10 @@
 name: CI
 
-# `CI Success` is the one required check (CI-2). Every job below is always in scope: the
-# workspace is one small crate, so there is no change-scope detection to fail open.
+# `CI Success` is the one required check (CI-2). `scope` decides whether a change is docs only,
+# with ci-scope.sh beside this file; for a docs-only change `check` and `msrv` are skipped. `gate`
+# (CI-1) and `secrets` run on every change, docs included. Detection fails closed: anything the
+# script is unsure of, any event but pull_request and merge_group, and an error in the `scope` job
+# all run everything, and a change to the workflows or the script is never docs only.
 
 on:
   push:
@@ -13,6 +16,37 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether the change is docs only. Its one output, `docs_only`, is `true` only when
+  # ci-scope.sh printed `docs` and exited 0; every other outcome leaves it `false`. The jobs that
+  # skip read the output as `!= 'true'`, so an empty output (this job failed) runs them too.
+  scope:
+    name: Change scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.decide.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Both ends of the diff and their merge base must be in the checkout.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Docs-only change?
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: |
+          docs_only=false
+          if decision="$(bash .github/workflows/ci-scope.sh "$EVENT" "$BASE" "$HEAD")"; then
+            if [ "$decision" = docs ]; then
+              docs_only=true
+            fi
+          fi
+          echo "docs_only=$docs_only"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+
   # Stage 1 (CI-1): no compilation. Formatting, the conventions checks, and the supply-chain
   # gates, which the expensive job waits on.
   gate:
@@ -82,9 +116,12 @@ jobs:
       - name: gitleaks (SC-SEC-1)
         run: gitleaks git --config .gitleaks.toml --redact --no-banner --exit-code 1 .
 
+  # Skipped for a docs-only change. `!cancelled()` lets it run when `scope` failed, which is the
+  # fail-closed path; it still waits on `gate` passing.
   check:
     name: Clippy, docs and tests
-    needs: gate
+    needs: [gate, scope]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.scope.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -135,9 +172,11 @@ jobs:
           DUET_CONFIG_DIR="$PWD/crates/duet-e2e/hostile" cargo test --locked -p duet-cli -p duet-e2e
           rm -r .duet
 
+  # Skipped for a docs-only change, on the same condition as `check`.
   msrv:
     name: Builds on the declared rust-version
-    needs: gate
+    needs: [gate, scope]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.scope.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -161,21 +200,43 @@ jobs:
             libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1
       - run: cargo check --locked --all-targets
 
+  # Passes only if `scope`, `gate` and `secrets` succeeded, and `check` and `msrv` each succeeded
+  # or were skipped because `scope` found the change docs only. Skipped for any other reason
+  # (`gate` failed, say), failed or cancelled is a failure.
   ci-success:
     name: CI Success
     if: always()
-    needs: [gate, secrets, check, msrv]
+    needs: [scope, gate, secrets, check, msrv]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Every job passed
+      - name: Every in-scope job passed
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          SCOPE: ${{ needs.scope.result }}
+          DOCS_ONLY: ${{ needs.scope.outputs.docs_only }}
+          GATE: ${{ needs.gate.result }}
+          SECRETS: ${{ needs.secrets.result }}
+          CHECK: ${{ needs.check.result }}
+          MSRV: ${{ needs.msrv.result }}
         run: |
-          echo "results: $RESULTS"
-          for result in $RESULTS; do
-            if [ "$result" != success ]; then
-              echo "a required job did not succeed"
-              exit 1
+          echo "scope=$SCOPE docs_only=$DOCS_ONLY gate=$GATE secrets=$SECRETS check=$CHECK msrv=$MSRV"
+          failed=0
+          for job in "scope=$SCOPE" "gate=$GATE" "secrets=$SECRETS"; do
+            if [ "${job#*=}" != success ]; then
+              echo "${job%%=*} did not succeed: it runs on every change"
+              failed=1
             fi
           done
+          for job in "check=$CHECK" "msrv=$MSRV"; do
+            result="${job#*=}"
+            if [ "$result" = success ]; then
+              continue
+            fi
+            if [ "$result" = skipped ] && [ "$SCOPE" = success ] && [ "$DOCS_ONLY" = true ]; then
+              echo "${job%%=*} skipped: the change is docs only"
+              continue
+            fi
+            echo "${job%%=*} is $result, and the change is not docs only"
+            failed=1
+          done
+          exit "$failed"

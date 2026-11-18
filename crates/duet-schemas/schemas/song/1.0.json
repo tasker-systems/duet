@@ -141,8 +141,8 @@
       "type": "object"
     },
     "Pitch": {
-      "description": "A pitch in scientific notation, such as C4 (MIDI 60), F#3 or Bb2, from C-1 to G9. Its spelling is kept.",
-      "pattern": "^[A-Ga-g][#b♯♭]*-?[0-9]+$",
+      "description": "A pitch in scientific notation, such as C4 (MIDI 60), F#3, Bb2, Cb5 (MIDI 71) or F##4 (MIDI 67), from C-1 to G9: a letter, up to two sharps or two flats, and the letter's octave. Its spelling is kept.",
+      "pattern": "^[A-Ga-g]([#♯]{0,2}|[b♭]{0,2})-?[0-9]+$",
       "type": "string"
     },
     "Position": {

@@ -661,6 +661,11 @@ fn example_song() -> Song {
         Note::new(pos("1.2.0"), pitch("F#4"), 1.0, 80),
         Note::new(pos("2.1.0"), pitch("Bb3"), 1.5, 64),
         Note::new(pos("4.1.0"), pitch("C5"), 0.333, 100),
+        // Spellings beyond a sharp or flat on a black key: Cb, E#, a double sharp and flat.
+        Note::new(pos("4.2.0"), pitch("Cb5"), 0.5, 80),
+        Note::new(pos("4.3.0"), pitch("E#4"), 0.5, 80),
+        Note::new(pos("4.4.0"), pitch("F##4"), 0.5, 80),
+        Note::new(pos("5.1.0"), pitch("Bbb3"), 0.5, 80),
     ];
     lead.controls = vec![
         Control::Cc {
@@ -693,7 +698,7 @@ fn the_example_song_is_a_song_duet_can_write() {
 
 #[test]
 fn written_songs_validate_against_the_committed_schema() {
-    let schema = committed_schema("song", Version::new(1, 0));
+    let schema = committed_schema("song", song_info().version);
     let validator = validator(&schema);
     let minimal = Song::default();
     let mut untitled = example_song();
@@ -712,7 +717,7 @@ fn written_songs_validate_against_the_committed_schema() {
 
 #[test]
 fn the_schema_refuses_what_the_reader_refuses() {
-    let schema = committed_schema("song", Version::new(1, 0));
+    let schema = committed_schema("song", song_info().version);
     let validator = validator(&schema);
     let good: Value = serde_json::from_str(&example(song_info().name).write().unwrap()).unwrap();
     type Break = fn(&mut Value);
@@ -749,6 +754,12 @@ fn the_schema_refuses_what_the_reader_refuses() {
         !validator.is_valid(&doc),
         "the schema accepts another $schema"
     );
+    // The pitch pattern refuses what no spelling keeps.
+    for pitch in ["C###4", "C#b4"] {
+        let mut doc = good.clone();
+        doc["body"]["tracks"][0]["notes"][0]["pitch"] = json!(pitch);
+        assert!(!validator.is_valid(&doc), "the schema accepts {pitch}");
+    }
 }
 
 /// Each hand-written pattern matches every form its type writes and its reader takes, and
@@ -821,16 +832,20 @@ fn the_hand_written_patterns_match_what_reads() {
     );
     check(
         "Pitch",
-        &["C4", "C#4", "Db4", "Bb2", "c#-1", "G9", "Cb4", "A♯3", "E♭5"],
-        &["H4", "C", "4", "C#x4", ""],
+        &[
+            "C4", "C#4", "Db4", "Bb2", "c#-1", "G9", "Cb4", "A♯3", "E♭5", "F##4", "Bbb3", "C♯♯4",
+        ],
+        &["H4", "C", "4", "C#x4", "", "C###4", "Cbbb4", "C#b4"],
         &|s| s.parse::<Pitch>().is_ok(),
     );
     // Every value the writer writes matches too.
     let validator = jsonschema::validator_for(&defs["Pitch"]).unwrap();
     for midi in 0..=127 {
-        for flat in [false, true] {
-            let p = Pitch::new(midi).unwrap().spelled_flat(flat).to_string();
-            assert!(validator.is_valid(&json!(p)), "{p}");
+        for alter in -2..=2 {
+            if let Some(p) = Pitch::new(midi).unwrap().spelled(alter) {
+                let p = p.to_string();
+                assert!(validator.is_valid(&json!(p)), "{p}");
+            }
         }
     }
 }

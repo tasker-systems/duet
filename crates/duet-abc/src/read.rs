@@ -115,7 +115,8 @@ pub(crate) fn key_alterations(key: Key) -> [i8; 7] {
 #[derive(Debug, Clone)]
 struct EvNote {
     midi: u8,
-    flat: bool,
+    /// The letter's alteration, as written or as the key and bar give it.
+    alter: i8,
     letter: u8,
     octave: i32,
     tie: bool,
@@ -223,6 +224,16 @@ pub(crate) struct Reader {
     header_program: Option<u8>,
     header_channel: Option<u8>,
     x_line: usize,
+}
+
+/// A MIDI note spelled with the alteration of the letter it was written on: `c` under
+/// `K:Ebm` is Cb5, `^E` is E#, `^^F` is F##. Every note the reader makes is a letter and at
+/// most two sharps or flats, so its spelling always exists.
+fn spelled(midi: u8, alter: i8) -> Result<Pitch> {
+    let pitch = Pitch::new(midi)?;
+    Ok(pitch
+        .spelled(alter)
+        .unwrap_or_else(|| pitch.spelled_flat(alter < 0)))
 }
 
 fn parse_err(span: Span, msg: impl Into<String>) -> Error {
@@ -697,33 +708,26 @@ impl Reader {
         let voice = &mut self.voices[v];
         let letter = usize::from(n.letter);
         let explicit = match n.acc {
-            Some(Acc::DoubleFlat | Acc::DoubleSharp) => {
-                return Err(refuse(span, subset::ENHARMONIC, n.text.clone()));
-            }
-            Some(Acc::Sharp) if matches!(n.letter, 2 | 6) => {
-                return Err(refuse(span, subset::ENHARMONIC, n.text.clone()));
-            }
-            Some(Acc::Flat) if matches!(n.letter, 0 | 3) => {
-                return Err(refuse(span, subset::ENHARMONIC, n.text.clone()));
-            }
+            Some(Acc::DoubleFlat) => Some(-2),
+            Some(Acc::DoubleSharp) => Some(2),
             Some(Acc::Sharp) => Some(1),
             Some(Acc::Flat) => Some(-1),
             Some(Acc::Natural) => Some(0),
             None => None,
         };
-        let (midi, flat) = if let Some(alter) = explicit {
+        let (midi, alter) = if let Some(alter) = explicit {
             voice.bar_acc[letter] = Some(alter);
-            (None, alter < 0)
+            (None, alter)
         } else if let Some(t) = voice
             .tied
             .iter()
             .find(|t| t.letter == n.letter && t.octave == n.octave)
         {
             // A tie carries the first note's pitch, accidental included, across a bar line.
-            (Some(t.midi), t.flat)
+            (Some(t.midi), t.alter)
         } else {
             let alter = voice.bar_acc[letter].unwrap_or(key_alterations(voice.key)[letter]);
-            (None, alter < 0)
+            (None, alter)
         };
         let midi = match midi {
             Some(m) => i32::from(m),
@@ -740,7 +744,7 @@ impl Reader {
             .ok_or_else(|| parse_err(span, format!("'{}' is outside the MIDI range", n.text)))?;
         Ok(EvNote {
             midi,
-            flat,
+            alter,
             letter: n.letter,
             octave: n.octave,
             tie: false,
@@ -984,7 +988,7 @@ struct RawNote {
     start: u64,
     len: u64,
     midi: u8,
-    flat: bool,
+    alter: i8,
     vel: u8,
 }
 
@@ -1187,7 +1191,7 @@ fn lay_out(items: &[Item], order: &[usize], meter: TimeSig, x_line: usize) -> Re
                                 start: tick,
                                 len,
                                 midi: n.midi,
-                                flat: n.flat,
+                                alter: n.alter,
                                 vel,
                             });
                             laid.notes.len() - 1
@@ -1563,7 +1567,7 @@ impl Reader {
             for n in &l.notes {
                 track.notes.push(Note::new(
                     map.position(n.start),
-                    Pitch::new(n.midi)?.spelled_flat(n.flat),
+                    spelled(n.midi, n.alter)?,
                     beats_from_ticks(n.len, TPQ),
                     n.vel,
                 ));
