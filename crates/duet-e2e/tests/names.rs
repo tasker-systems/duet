@@ -10,7 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
-use duet_e2e::{duet, duet_with, golden, ok, root, s, scratch, view_text};
+use duet_e2e::{
+    body_without_id, duet, duet_with, golden, ok, root, s, scratch, view_text, without_id,
+};
 
 /// Runs duet and checks it refuses, saying each of `want`, and writes nothing to `out`.
 fn refused(dir: &Path, args: &[&str], out: &Path, want: &[&str]) {
@@ -324,11 +326,12 @@ fn standard_input_is_sniffed_for_a_document() {
     );
     let o = duet_with(&dir, &none, &["apply", "-", "-o", "-"], &notes);
     ok(&o, "text in, a document out");
-    assert_eq!(o.stdout, doc, "the same document");
+    // The same document, but a new part with an id of its own.
+    assert_eq!(without_id(&o.stdout), without_id(&doc), "the same document");
     // A document in is a document out, and its view is the text.
     let o = duet_with(&dir, &none, &["convert", "-", "-"], &doc);
     ok(&o, "a document in, a document out");
-    assert_eq!(o.stdout, doc);
+    assert_eq!(without_id(&o.stdout), without_id(&doc));
     let o = duet_with(&dir, &none, &["view", "-", "--as", "notes"], &doc);
     ok(&o, "a document in, its view out");
     let shown = String::from_utf8(o.stdout).expect("utf-8");
@@ -469,7 +472,11 @@ fn convert_goes_between_documents_midi_and_abc() {
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
     };
     let (a, b) = (json(&doc), json(&p("b.duet")));
-    assert_eq!(b["body"], a["body"], "MIDI keeps the part");
+    assert_eq!(
+        body_without_id(&b),
+        body_without_id(&a),
+        "MIDI keeps the part"
+    );
     assert_eq!(
         b["duet"]["from"],
         serde_json::json!({ "format": "midi" }),

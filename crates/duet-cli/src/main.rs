@@ -14,6 +14,7 @@ mod journal;
 mod part;
 mod play;
 mod record;
+mod song;
 mod view;
 
 use std::path::{Path, PathBuf};
@@ -27,8 +28,9 @@ use crate::abc::AbcCommand;
 use crate::capture::CaptureCommand;
 use crate::config::{Config, Dirs};
 use crate::drums::{DrumsCommand, ReadOptions};
-use crate::io::{Format, FormatParser, Loaded, part_format, read_any, write_from};
+use crate::io::{Format, FormatParser, Loaded, Origin, part_format, read_any, write_from};
 use crate::part::PartCommand;
+use crate::song::SongCommand;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
 #[derive(Parser)]
@@ -83,6 +85,10 @@ enum Command {
     /// Work on a part: show it, or quantize it.
     #[command(subcommand)]
     Part(PartCommand),
+    /// Work on a song in a project: make one, show it, or move its status. A song is its
+    /// folder, `songs/<song>/`, holding song.duet (the song and its composition) and parts/.
+    #[command(subcommand)]
+    Song(SongCommand),
     /// Work on drum grids: render one as a part, read one from a part's drum track,
     /// snap its velocities, or list the lanes.
     #[command(subcommand)]
@@ -148,6 +154,7 @@ fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
             &Config::load(dirs)?,
         ),
         Command::Part(command) => part::run(command, &Config::load(dirs)?),
+        Command::Song(command) => song::run(command),
         Command::Drums(command) => drums::run(command, &Config::load(dirs)?),
         Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
         Command::Capture(command) => capture::run(command, &Config::load(dirs)?),
@@ -197,11 +204,11 @@ fn convert(
     let read = read_any(input, format, "convert reads")?;
     let to = part_format(output, to, "convert writes")?;
     // Whether a drum-grid document is written.
-    let to_grid = to == Format::Duet && (matches!(read, Loaded::Grid(_)) || any_grid_flag);
+    let to_grid = to == Format::Duet && (matches!(read, Loaded::Grid(..)) || any_grid_flag);
     // Grid to grid with no step named: a straight copy, read and written as `drums snap`
     // does, so nothing a part cannot hold (an unplayed lane, the grid's own levels, in a
     // document any velocity) is lost.
-    if let (Loaded::Grid(source), true, None) = (&read, to_grid, grid) {
+    if let (Loaded::Grid(source, _), true, None) = (&read, to_grid, grid) {
         let given: Vec<&str> = [(track.is_some(), "--track"), (bars.is_some(), "--bars")]
             .into_iter()
             .filter_map(|(set, flag)| set.then_some(flag))
@@ -221,9 +228,17 @@ fn convert(
         };
         return drums::write_grid(&copy, output, "convert writes");
     }
-    let (part, from) = match read {
-        Loaded::Part(part, from) => (part, from),
-        Loaded::Grid(grid) => (grid.to_part()?, None),
+    // A part read keeps its source; one made of a grid was generated from it.
+    let (part, origin, source) = match read {
+        Loaded::Part(part, origin) => {
+            let source = origin.source();
+            (part, origin, source)
+        }
+        Loaded::Grid(grid, digest) => (
+            grid.to_part()?,
+            Origin::default(),
+            io::generated("convert", [digest]),
+        ),
     };
     if !to_grid {
         if any_grid_flag {
@@ -245,7 +260,7 @@ fn convert(
                 output.display()
             );
         }
-        return write_from(&part, output, to, config.end, from.as_ref());
+        return write_from(&part, output, to, config.end, &origin, source);
     }
     let Some(grid) = grid else {
         bail!(

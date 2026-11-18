@@ -24,6 +24,10 @@
     ]
   },
   "body": {
+    "id": "01a208ef-868f-7707-8707-070707070707",
+    "source": {
+      "by": "hand"
+    },
     "title": "The Example Reel",
     "ticks_per_quarter": 480,
     "tempo_bpm": 112.5,

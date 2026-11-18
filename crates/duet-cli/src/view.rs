@@ -73,12 +73,14 @@ use clap::{Args, ValueEnum};
 use duet_core::time::beats_from_ticks;
 use duet_core::{Grid, Note, Part, Pitch, Position};
 use duet_drums::DrumGrid;
-use duet_schemas::{AnyDocument, Document, Kind, Version};
+use duet_schemas::{AnyDocument, Document, Kind, PartBody, Version};
 use serde::Serialize;
 
 use crate::config::Config;
 use crate::drums::{ReadOptions, grid_of_part, levels_for};
-use crate::io::{Format, part_format, read_with_from, same_file, tool, with_end, write_bytes};
+use crate::io::{
+    Format, fresh_id, part_format, read_with_from, same_file, tool, with_end, write_bytes,
+};
 
 /// A view of a document.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
@@ -206,7 +208,7 @@ impl Header {
             return Ok(Some(Header::of("grid", "drum-grid", DrumGrid::VERSION)));
         }
         if line.starts_with("# notefmt v1") {
-            return Ok(Some(Header::of("notes", "part", Part::VERSION)));
+            return Ok(Some(Header::of("notes", "part", PartBody::VERSION)));
         }
         let Some(rest) = line.strip_prefix("# duet ") else {
             return Ok(None);
@@ -284,7 +286,7 @@ impl Header {
     }
 
     fn partial(&self) -> bool {
-        self.view == ViewName::Grid && self.kind == Part::NAME
+        self.view == ViewName::Grid && self.kind == PartBody::NAME
     }
 
     /// Refuses a view version or a schema version this duet does not read, by name.
@@ -299,7 +301,7 @@ impl Header {
             );
         }
         let reads = match (self.view, self.kind.as_str()) {
-            (_, k) if k == Part::NAME => Part::VERSION,
+            (_, k) if k == PartBody::NAME => PartBody::VERSION,
             (ViewName::Grid, k) if k == DrumGrid::NAME => DrumGrid::VERSION,
             (view, kind) => bail!("{shown}: a {} view is of no kind {kind}", view.name()),
         };
@@ -369,7 +371,7 @@ fn digest<T: Serialize>(body: &T) -> Result<u64> {
 
 /// A document a view is rendered from or applied onto.
 enum Source {
-    Part(Document<Part>),
+    Part(Document<PartBody>),
     Grid(Document<DrumGrid>),
 }
 
@@ -390,15 +392,16 @@ fn text_of(path: &Path) -> Result<String> {
 fn load(path: &Path, what: &str) -> Result<Source> {
     let format = part_format(path, None, what)?;
     if format != Format::Duet {
-        let (part, from) = read_with_from(path, format, what)?;
-        let mut doc = Document::new(tool(), part);
-        doc.from = from;
+        // A part read from MIDI or ABC is in no document yet: one made of it is new.
+        let (part, origin) = read_with_from(path, format, what)?;
+        let mut doc = Document::new(tool(), PartBody::new(fresh_id()?, origin.source(), part));
+        doc.from = origin.from;
         return Ok(Source::Part(doc));
     }
     let text = text_of(path)?;
     match AnyDocument::read(&text).with_context(|| path.display().to_string())? {
         AnyDocument::Part(mut doc) => {
-            doc.body.normalize()?;
+            doc.body.part.normalize()?;
             Ok(Source::Part(doc))
         }
         AnyDocument::DrumGrid(mut doc) => {
@@ -438,14 +441,14 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
                 );
             }
             let header = Header {
-                digest: Some(digest(&doc.body)?),
-                ..Header::of("notes", Part::NAME, Part::VERSION)
+                digest: Some(digest(&doc.body.part)?),
+                ..Header::of("notes", PartBody::NAME, PartBody::VERSION)
             };
             framed(
                 &header,
                 &doc.statements,
                 &[],
-                &with_end(&doc.body, config.end)?.to_text(),
+                &with_end(&doc.body.part, config.end)?.to_text(),
             )
         }
         (Source::Grid(doc), None | Some(ViewName::Grid)) => {
@@ -469,21 +472,21 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
                      never guesses it"
                 );
             };
-            let track = drum_track_name(&doc.body, args.track.as_deref(), config)?;
+            let track = drum_track_name(&doc.body.part, args.track.as_deref(), config)?;
             let options = ReadOptions {
                 grid: step,
                 track: Some(track.clone()),
                 bars: args.bars,
                 snap_levels: false,
             };
-            let exact = grid_of_part(&doc.body, &options, config)?;
+            let exact = grid_of_part(&doc.body.part, &options, config)?;
             let (grid, said) = shown_levels(&exact, args.snap_levels)?;
             let header = Header {
                 track: Some(track),
                 step: Some(step),
                 bars: args.bars,
-                digest: Some(digest(&doc.body)?),
-                ..Header::of("grid", Part::NAME, Part::VERSION)
+                digest: Some(digest(&doc.body.part)?),
+                ..Header::of("grid", PartBody::NAME, PartBody::VERSION)
             };
             framed(&header, &doc.statements, &said, &grid.to_text()?)
         }
@@ -628,8 +631,14 @@ fn apply_new(
         ViewName::Notes => {
             let mut part = Part::from_text(text)?;
             part.normalize()?;
-            // Every document duet writes states where its part ends, as `convert` does.
-            Document::new(tool(), with_end(&part, config.end)?).write()?
+            // Every document duet writes states where its part ends, as `convert` does. A
+            // new document is a new part, written by hand, with an id of its own.
+            let body = PartBody::new(
+                fresh_id()?,
+                duet_schemas::Source::hand(),
+                with_end(&part, config.end)?,
+            );
+            Document::new(tool(), body).write()?
         }
         ViewName::Grid => {
             let grid = read_grid_view(text, config)?;
@@ -679,7 +688,7 @@ fn apply_onto(
     }
     let source = load(onto, "apply --onto reads")?;
     let now = match &source {
-        Source::Part(doc) => digest(&doc.body)?,
+        Source::Part(doc) => digest(&doc.body.part)?,
         Source::Grid(doc) => digest(&doc.body)?,
     };
     if let Some(was) = header.and_then(|h| h.digest)
@@ -703,11 +712,19 @@ fn apply_onto(
         view == ViewName::Grid && matches!(source, Source::Part(_)),
         Header::partial,
     );
+    // A part written over its document keeps its id; written elsewhere, it is a new part, with
+    // an id of its own (ruling 13).
+    let mut source = source;
+    if let Source::Part(doc) = &mut source
+        && !(output == onto || same_file(output, onto))
+    {
+        doc.body.id = fresh_id()?;
+    }
     let bytes = match (source, view) {
         (Source::Part(mut doc), ViewName::Notes) => {
             let mut part = Part::from_text(text)?;
             part.normalize()?;
-            doc.body = part;
+            doc.body.part = part;
             doc.tool = tool();
             doc.write()?
         }
@@ -730,15 +747,15 @@ fn apply_onto(
                     args.view.display()
                 );
             };
-            let track = drum_track_name(&doc.body, track.as_deref(), config)?;
+            let track = drum_track_name(&doc.body.part, track.as_deref(), config)?;
             let shown = read_grid_view(text, config)?;
-            merge_track(&mut doc.body, &shown, &track, step, bars, config)?;
+            merge_track(&mut doc.body.part, &shown, &track, step, bars, config)?;
             doc.tool = tool();
             doc.write()?
         }
         (source, view) => {
             let kind = match source {
-                Source::Part(_) => Part::NAME,
+                Source::Part(_) => PartBody::NAME,
                 Source::Grid(_) => DrumGrid::NAME,
             };
             bail!(

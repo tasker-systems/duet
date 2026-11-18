@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use duet_e2e::{duet, golden, ok, root, s, scratch};
+use duet_e2e::{body_without_id, duet, golden, ok, root, s, scratch, without_id};
 use serde_json::{Value, json};
 
 /// An ABC tune with a slur over two notes, on line 6.
@@ -100,7 +100,11 @@ fn out_to_abc_and_in_again_gives_the_same_body_and_a_new_provenance() {
     let again = dir.join("again.duet");
     ok(&duet(&dir, &["convert", s(&out), s(&again)]), "in again");
     let (first, again) = (json_of(&first), json_of(&again));
-    assert_eq!(again["body"], first["body"], "the same part");
+    assert_eq!(
+        body_without_id(&again),
+        body_without_id(&first),
+        "the same part"
+    );
     // The new import is the new provenance: duet's own ABC holds no slur, so it records
     // none, and the first import's notices are gone.
     let from = &again["duet"]["from"];
@@ -134,13 +138,21 @@ fn a_document_read_and_written_again_keeps_its_from() {
     ok(&duet(&dir, &["convert", s(&abc), s(&doc)]), "in");
     let from = json_of(&doc)["duet"]["from"].clone();
 
-    // Read and written again: the document is byte for byte the same.
+    // Read and written again: the document is byte for byte the same, but for the id of the
+    // new part a copy is.
     let again = dir.join("b.duet");
     ok(&duet(&dir, &["convert", s(&doc), s(&again)]), "rewritten");
-    assert_eq!(std::fs::read(&again).unwrap(), std::fs::read(&doc).unwrap());
+    assert_eq!(
+        without_id(&std::fs::read(&again).unwrap()),
+        without_id(&std::fs::read(&doc).unwrap())
+    );
     let shown = duet(&dir, &["part", "show", s(&doc), "--to", "duet"]);
     ok(&shown, "part show --to duet");
-    assert_eq!(shown.stdout, std::fs::read(&doc).unwrap(), "part show too");
+    assert_eq!(
+        without_id(&shown.stdout),
+        without_id(&std::fs::read(&doc).unwrap()),
+        "part show too"
+    );
 
     // Quantizing keeps it: the notices still name what the import did not carry.
     let quantized = dir.join("q.duet");

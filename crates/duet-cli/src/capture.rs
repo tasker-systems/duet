@@ -280,7 +280,28 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
         captured.part.ticks_per_quarter,
     );
     let part_said = [said.clone(), vec![lead_in.clone()]].concat();
-    let mut part = Document::new(tool(), with_end(&captured.part, config.end)?);
+    // The part is the take's reading: a one-take comp, naming the take by its digest and the
+    // reader that read it. A take that held no audio has no digest, and its part was made by
+    // capture from nothing.
+    let source = match &captured.analysis.take {
+        Some(take) => {
+            let reader = captured
+                .analysis
+                .reading
+                .as_ref()
+                .and_then(|reading| reading.reader.as_ref())
+                .and_then(|reader| serde_json::to_value(reader.name).ok())
+                .and_then(|name| name.as_str().map(String::from));
+            duet_schemas::Source::reading(take.digest, reader)
+        }
+        None => crate::io::generated("capture", []),
+    };
+    let body = duet_schemas::PartBody::new(
+        crate::io::fresh_id()?,
+        source,
+        with_end(&captured.part, config.end)?,
+    );
+    let mut part = Document::new(tool(), body);
     part.statements.clone_from(&part_said);
     let part = part.write()?;
     let analysis = Document::new(tool(), captured.analysis).write()?;

@@ -15,8 +15,8 @@ use duet_drums::DrumGrid;
 
 use crate::config::Config;
 use crate::io::{
-    Format, FormatParser, grid_document, grid_path, part_format, read, read_grid_document,
-    same_file, with_end, write, write_bytes,
+    Format, FormatParser, generated, grid_document, grid_path, part_format, read,
+    read_grid_document, read_grid_with_digest, same_file, with_end, write, write_bytes,
 };
 
 #[derive(Subcommand)]
@@ -149,11 +149,14 @@ pub fn run(command: DrumsCommand, config: &Config) -> Result<()> {
         DrumsCommand::Render { input, output, to } => {
             refuse_overwrite(&input, &output, "render")?;
             let to = part_format(&output, to, "render writes")?;
+            // The part is generated from the grid, naming it.
+            let (grid, digest) = read_grid_with_digest(&input, "render reads")?;
             write(
-                &read_grid(&input, "render reads")?.to_part()?,
+                &grid.to_part()?,
                 &output,
                 to,
                 config.end,
+                generated("drums render", [digest]),
             )
         }
         DrumsCommand::Read {
@@ -243,9 +246,8 @@ mod tests {
 
     use duet_core::Part;
     use duet_drums::DrumGrid;
-    use duet_schemas::Document;
 
-    use crate::io::{grid_document, read_grid_document, tool};
+    use crate::io::{grid_document, read_grid_document};
     use crate::tests::run_hermetic;
 
     fn temp(name: &str) -> PathBuf {
@@ -292,11 +294,7 @@ mod tests {
         let dir = temp("snap");
         let part = "[track \"Kit\" ch10]\n1.1.0 C2 0.25 100\n1.2.0 D2 0.25 64\n";
         let part = Part::from_text(part).expect("parse");
-        std::fs::write(
-            dir.join("take.duet"),
-            Document::new(tool(), part).write().expect("document"),
-        )
-        .expect("write");
+        std::fs::write(dir.join("take.duet"), crate::io::part_document(part)).expect("write");
         let p = |name: &str| dir.join(name).to_str().expect("utf-8").to_owned();
         let read = |out: &str, snap: bool| {
             let (take, out) = (p("take.duet"), p(out));

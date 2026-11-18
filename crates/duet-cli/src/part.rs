@@ -47,7 +47,10 @@ pub fn run(command: PartCommand, config: &Config) -> Result<()> {
             let from = part_format(&input, from, "part show reads")?;
             let (part, origin) = read_with_from(&input, from, "part show reads")?;
             match to {
-                Some(to) => write_from(&part, Path::new("-"), to, config.end, origin.as_ref()),
+                Some(to) => {
+                    let source = origin.source();
+                    write_from(&part, Path::new("-"), to, config.end, &origin, source)
+                }
                 None => write_bytes(
                     Path::new("-"),
                     with_end(&part, config.end)?.to_text().as_bytes(),
@@ -70,14 +73,17 @@ pub fn run(command: PartCommand, config: &Config) -> Result<()> {
             let from = part_format(&input, from, "quantize reads")?;
             let to = part_format(&output, to, "quantize writes")?;
             // Quantizing keeps where the part came from: the notices still name what the
-            // import did not carry.
+            // import did not carry. It is an operation, so the part it writes is generated,
+            // naming the document it read.
             let (part, origin) = read_with_from(&input, from, "quantize reads")?;
+            let source = origin.generated("part quantize");
             write_from(
                 &part.quantized(grid)?,
                 &output,
                 to,
                 config.end,
-                origin.as_ref(),
+                &origin,
+                source,
             )
         }
     }
@@ -86,9 +92,8 @@ pub fn run(command: PartCommand, config: &Config) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use duet_core::Part;
-    use duet_schemas::Document;
 
-    use crate::io::{Format, read, tool};
+    use crate::io::{Format, read};
     use crate::tests::run_hermetic;
 
     #[test]
@@ -97,9 +102,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
         let take = dir.join("take.duet");
         let played = "[track \"P\" ch1]\n1.1.10 C4 0.48 80\n";
-        let played = Document::new(tool(), Part::from_text(played).expect("parse"))
-            .write()
-            .expect("document");
+        let played = crate::io::part_document(Part::from_text(played).expect("parse"));
         std::fs::write(&take, &played).expect("write");
         let cli = |out: &std::path::Path| {
             run_hermetic(&[

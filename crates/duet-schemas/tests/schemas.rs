@@ -27,11 +27,13 @@ use duet_schemas::journal::{
     Entry, EventInfo, Id, IndexLine, MomentPlayed, Opens, Party, RelPath, SegmentStamp, TakeAdded,
     TakeRef, VerdictGiven,
 };
+use duet_schemas::part::CompedTake;
 use duet_schemas::project::{Defaults, Given, ProjectTake};
+use duet_schemas::song::{Composition, KeyAt, MeterAt, Placement, Section, Status, TempoAt};
 use duet_schemas::{
     AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, EVENTS, Framing, From, IndexHead, Journal,
-    JournalHead, JournalIndex, KINDS, KindInfo, Notice, Project, Stream, Tool, Version,
-    read_envelope, schema,
+    JournalHead, JournalIndex, KINDS, KindInfo, Notice, PartBody, Project, Song, Source, Stream,
+    Tool, Version, read_envelope, schema,
 };
 use serde_json::{Value, json};
 
@@ -335,7 +337,7 @@ fn a_description_only_change_asks_to_regenerate_without_a_version_change() {
     let committed = (part_info().schema)();
     let mut generated = committed.clone();
     generated["$defs"]["Note"]["properties"]["vel"]["description"] = json!("How hard.");
-    generated["$defs"]["Part"]["description"] = json!("A part, reworded.");
+    generated["$defs"]["PartBody"]["description"] = json!("A part, reworded.");
     let Verdict::Descriptions(why) = verdict(part_info(), Some(&committed), &generated) else {
         panic!("a reworded description was not seen as one");
     };
@@ -717,14 +719,52 @@ fn example(name: &str) -> AnyDocument {
     if name == "project" {
         return AnyDocument::Project(Document::new(Tool::new("duet", "0.3.0"), example_project()));
     }
+    if name == "song" {
+        return AnyDocument::Song(Document::new(Tool::new("duet", "0.3.0"), example_song()));
+    }
     assert_eq!(name, "part", "no example is defined for {name}");
-    let mut doc = Document::new(Tool::new("duet", "0.2.0"), example_part());
+    let mut doc = Document::new(Tool::new("duet", "0.2.0"), part_body(example_part()));
     let mut from = From::new("abc");
     from.tune = Some("1".into());
     from.notices.push(Notice::new(7, 9, "slur", "("));
     doc.from = Some(from);
     doc.statements = vec!["the slur on bar 2 is notation only, and is not carried".into()];
     AnyDocument::Part(doc)
+}
+
+/// A song that uses every field: an intent, a tempo, meter and key change, sections with a
+/// name twice, and placements layered, repeated and cut to a stretch, with a stated end.
+fn example_song() -> Song {
+    let mut composition = Composition::new(92.0, "3/4".parse().unwrap(), "G minor".parse().ok());
+    composition.tempo.push(TempoAt::new(pos("17.1.0"), 96.5));
+    composition
+        .meter
+        .push(MeterAt::new(pos("25.1.0"), "4/4".parse().unwrap()));
+    composition
+        .key
+        .push(KeyAt::new(pos("17.1.0"), "A minor".parse().unwrap()));
+    composition.sections = vec![
+        Section::new("verse", pos("1.1.0")),
+        Section::new("verse", pos("9.1.0")),
+        Section::new("lift", pos("17.1.0")),
+        Section::new("coda", pos("25.1.0")),
+    ];
+    let mut kit = Placement::new("kit".parse().unwrap(), pos("9.1.0"));
+    kit.repeat = Some(2);
+    let mut tail = Placement::new("melody".parse().unwrap(), pos("25.1.0"));
+    tail.from = Some(pos("1.1.0"));
+    tail.to = Some(pos("5.1.0"));
+    composition.placements = vec![
+        Placement::new("melody".parse().unwrap(), pos("1.1.0")),
+        Placement::new("bass".parse().unwrap(), pos("9.1.0")),
+        kit,
+        tail,
+    ];
+    composition.end = Some(pos("29.1.0"));
+    let mut song = Song::new(id(30), "Wayfaring Stranger", composition);
+    song.status = Status::Sketch;
+    song.intent = Some("slow and bare; voice first, the bass enters in the second verse".into());
+    song
 }
 
 /// A project that uses every field: every default, a take with something given and one
@@ -1008,11 +1048,45 @@ fn written_parts_validate_against_the_committed_schema() {
     untitled.tracks[0].program = None;
     untitled.tracks[0].controls.clear();
     for part in [example_part(), minimal, untitled] {
-        let text = Document::new(Tool::new("duet", "0.2.0"), part)
+        for source in sources() {
+            let text = Document::new(
+                Tool::new("duet", "0.2.0"),
+                PartBody::new(id(7), source, part.clone()),
+            )
             .write()
             .unwrap();
-        assert_valid(&validator, &serde_json::from_str(&text).unwrap(), &text);
+            assert_valid(&validator, &serde_json::from_str(&text).unwrap(), &text);
+        }
     }
+}
+
+/// A part's body: the part, by hand, with an id.
+fn part_body(part: Part) -> PartBody {
+    PartBody::new(id(7), Source::hand(), part)
+}
+
+/// One source of each kind, and a comped one with every field.
+fn sources() -> Vec<Source> {
+    let digest = EXAMPLE_DIGEST.parse().unwrap();
+    let mut take = CompedTake::new(digest);
+    take.take = Some("wayfaring".parse().unwrap());
+    take.reading = Some("basic-pitch".into());
+    let full = serde_json::from_value(json!({
+        "by": "comped",
+        "takes": [take, CompedTake::new(digest)],
+        "comp": "verse-comp",
+    }))
+    .unwrap();
+    let generated = serde_json::from_value(json!({
+        "by": "generated", "operation": "drums render", "inputs": ["00ff00ff00ff00ff"]
+    }))
+    .unwrap();
+    vec![
+        Source::hand(),
+        Source::reading(digest, Some("rules".into())),
+        full,
+        generated,
+    ]
 }
 
 #[test]
@@ -1021,8 +1095,26 @@ fn the_schema_refuses_what_the_reader_refuses() {
     let validator = validator(&schema);
     let good: Value = serde_json::from_str(&example(part_info().name).write().unwrap()).unwrap();
     type Break = fn(&mut Value);
-    let cases: [(&str, Break); 8] = [
+    let cases: [(&str, Break); 14] = [
         ("an unknown body field", |d| d["body"]["swing"] = json!(0.6)),
+        ("a part with no id", |d| {
+            d["body"].as_object_mut().unwrap().remove("id");
+        }),
+        ("a part with no source", |d| {
+            d["body"].as_object_mut().unwrap().remove("source");
+        }),
+        ("an id that is not a UUIDv7", |d| {
+            d["body"]["id"] = json!("0196f1a2-7b3c-4d4e-8f90-a1b2c3d4e5f6")
+        }),
+        ("a source of no kind", |d| {
+            d["body"]["source"] = json!({ "by": "magic" })
+        }),
+        ("a source with an unknown field", |d| {
+            d["body"]["source"] = json!({ "by": "hand", "who": "claude" })
+        }),
+        ("a comped source with no takes", |d| {
+            d["body"]["source"] = json!({ "by": "comped" })
+        }),
         ("an unknown note field", |d| {
             d["body"]["tracks"][0]["notes"][0]["len"] = json!(1)
         }),
@@ -1235,6 +1327,7 @@ fn an_unknown_field_inside_a_part_body_is_refused_by_name() {
         ("/body/tracks/0/notes/0", "len"),
         ("/body/tracks/0/controls/0", "channel"),
         ("/body/tempo_changes/0", "ramp"),
+        ("/body/source", "who"),
     ] {
         let mut broken = doc.clone();
         broken.pointer_mut(path).unwrap()[field] = json!(1);
