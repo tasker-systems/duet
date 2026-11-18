@@ -1,7 +1,7 @@
 //! `duet view` and `duet apply`: a document's text views rendered, edited and read back.
 //!
 //! - Lossless views are the identity: document → view → document, and view → document → view.
-//! - A partial grid view of a song, applied back unedited, leaves the song equal, and each
+//! - A partial grid view of a part, applied back unedited, leaves the part equal, and each
 //!   one-cell edit changes exactly one note.
 //! - What a view cannot place is refused by name, and the document is left as it was.
 //! - Today's `.notes` and `.drums` files read through `apply` by their `# notefmt` lines.
@@ -42,8 +42,8 @@ fn under_header(view: &str) -> &str {
 fn an_old_notes_file_applies_and_views_back_identical_under_a_new_header() {
     let dir = scratch("views-old-notes");
     for (old, kind) in [
-        (root().join("samples/sketch.notes"), "notes v1 of song 1.0"),
-        (golden("sketch-from-midi.notes"), "notes v1 of song 1.0"),
+        (root().join("samples/sketch.notes"), "notes v1 of part 1.0"),
+        (golden("sketch-from-midi.notes"), "notes v1 of part 1.0"),
         (
             root().join("samples/groove.drums"),
             "grid v1 of drum-grid 1.0",
@@ -78,7 +78,7 @@ fn a_lossless_view_is_the_identity_both_ways() {
     let sources: Vec<PathBuf> = vec![
         golden("sketch.mid"),
         golden("groove.mid"),
-        root().join("crates/duet-schemas/schemas/song/examples/1.0.duet"),
+        root().join("crates/duet-schemas/schemas/part/examples/1.0.duet"),
         root().join("crates/duet-schemas/schemas/drum-grid/examples/1.0.duet"),
     ];
     for (i, source) in sources.iter().enumerate() {
@@ -135,7 +135,7 @@ fn a_lossless_view_is_the_identity_both_ways() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// A song with three tracks, controls on its drum track, note lengths other than one step and
+/// A part with three tracks, controls on its drum track, note lengths other than one step and
 /// a velocity off the levels.
 const BAND: &str = "tpq 480\ntempo 100\ntime 4/4\nend 3.1.0\n\n\
     [track \"Keys\" ch1 prog4]\n1.1.0 C4 2 80\n2.1.0 E4 1.5 70\n\n\
@@ -186,12 +186,12 @@ fn kit(doc: &Path) -> Vec<Value> {
 }
 
 #[test]
-fn a_partial_grid_view_applied_unedited_leaves_the_song_equal() {
+fn a_partial_grid_view_applied_unedited_leaves_the_part_equal() {
     let dir = scratch("views-silent");
     let doc = band(&dir);
     let view = render_kit(&dir, &doc);
     assert!(
-        view.starts_with("# duet grid v1 of song 1.0 track \"Kit\" step 1/16 from "),
+        view.starts_with("# duet grid v1 of part 1.0 track \"Kit\" step 1/16 from "),
         "{view}"
     );
     assert!(
@@ -376,7 +376,7 @@ fn what_a_view_cannot_place_is_refused_by_name_and_nothing_changes() {
         "tempo.view",
         &view.replacen("\ntempo 100\n", "\ntempo 140\n", 1),
         &[
-            "the view changes the song's tempo",
+            "the view changes the part's tempo",
             "change it in the notes view",
         ],
     );
@@ -401,8 +401,8 @@ fn what_a_view_cannot_place_is_refused_by_name_and_nothing_changes() {
     );
     try_view(
         "schema.view",
-        &view.replacen("of song 1.0", "of song 1.3", 1),
-        &["view of song 1.3; this duet reads song up to 1.0"],
+        &view.replacen("of part 1.0", "of part 1.3", 1),
+        &["view of part 1.3; this duet reads part up to 1.0"],
     );
 
     // A document changed since the view was rendered is refused, naming both digests, unless
@@ -416,7 +416,7 @@ fn what_a_view_cannot_place_is_refused_by_name_and_nothing_changes() {
             &dir,
             &["apply", s(&notes), "--onto", s(&doc), "--as", "notes"],
         ),
-        "change the song",
+        "change the part",
     );
     let changed = read(&doc);
     refused(
@@ -505,7 +505,7 @@ fn apply_onto_keeps_the_envelope_and_views_drop_from() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// `apply -o` writes a document as every writer does, stating where its song ends: a view
+/// `apply -o` writes a document as every writer does, stating where its part ends: a view
 /// that names no end, as an old `.notes` file may not, gets the default's.
 #[test]
 fn apply_o_states_the_end_of_a_view_that_names_none() {

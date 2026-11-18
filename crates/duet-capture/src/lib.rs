@@ -1,7 +1,7 @@
-//! duet capture: audio in, analysis events out, and a `Song` assembled from them.
+//! duet capture: audio in, analysis events out, and a `Part` assembled from them.
 //!
 //! This crate holds the ends of the chain: reading a file ([`FileSource`], through Symphonia)
-//! and assembling the settled events into a `Song` ([`assemble`], [`quantize_apart`]). The
+//! and assembling the settled events into a `Part` ([`assemble`], [`quantize_apart`]). The
 //! analysis between them, from [`Prepare`] to [`estimate`] and [`estimate_key`], is pure DSP and
 //! lives in `duet-dsp`; its types are re-exported here, so a caller needs only this crate.
 //!
@@ -22,10 +22,10 @@
 //!   [`Timing`]: tempo, meter and downbeat, each an [`Origin`] (given, or estimated with a
 //!   confidence). [`beat_series`] gives the tempo from each beat to the next.
 //! - [`estimate_key`] gives a melody's [`KeyEstimate`].
-//! - [`assemble`] places the events as a `Song` by the timing, and returns a [`Captured`]: the
-//!   song, what was done before the downbeat ([`LeadIn`]), and the [`Analysis`] behind it.
+//! - [`assemble`] places the events as a `Part` by the timing, and returns a [`Captured`]: the
+//!   part, what was done before the downbeat ([`LeadIn`]), and the [`Analysis`] behind it.
 //!   [`quantize_offsets`] fills in how far quantizing moved each note ([`QuantizeOffset`]).
-//! - [`quantize_apart`] quantizes the song for its score, refining the grid until no two notes
+//! - [`quantize_apart`] quantizes the part for its score, refining the grid until no two notes
 //!   share a step, and [`merge_collisions`] merges what the finest grid still cannot part.
 //!
 //! [`FileSource`], [`Source`], [`assemble`] and what it returns, and the score are this crate's;
@@ -33,12 +33,12 @@
 //!
 //! Times inside the chain are sample frames at the analysis rate, not musical positions:
 //! musical time does not exist until a tempo does. [`Timing`] carries the beat period actually
-//! measured, and [`assemble`] converts frames to beats with it; the song states the whole bpm.
+//! measured, and [`assemble`] converts frames to beats with it; the part states the whole bpm.
 //!
 //! # The stream rule
 //!
 //! The stream rule, from the design's anti-goals: "A stage that buffers the entire take to
-//! do its work, other than the final assembly into a `Song`, is a design failure."
+//! do its work, other than the final assembly into a `Part`, is a design failure."
 //! Live input would otherwise be a rewrite. A [`Stage`] takes input a piece at a time, holds it
 //! back only until its output is settled, and reports how long that takes
 //! ([`Stage::latency_frames`]). [`estimate`] and [`assemble`] are functions over the settled

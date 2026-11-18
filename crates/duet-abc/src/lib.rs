@@ -1,8 +1,8 @@
-//! Reading and writing a subset of ABC 2.1 as duet [`Song`](duet_core::Song)s.
+//! Reading and writing a subset of ABC 2.1 as duet [`Part`](duet_core::Part)s.
 //!
 //! ABC is the shared score format: a tune people and LLMs can read and discuss. A
-//! [`Song`](duet_core::Song) is the exact performance every duet format converts through.
-//! This crate reads the part of ABC that a song can hold exactly, and writes a song back
+//! [`Part`](duet_core::Part) is the exact performance every duet format converts through.
+//! This crate reads the part of ABC that a part can hold exactly, and writes a part back
 //! as ABC, without quantizing it.
 //!
 //! ```
@@ -10,17 +10,17 @@
 //!
 //! let abc = "X:1\nT:Scale\nM:4/4\nL:1/8\nQ:1/4=96\nK:D dorian\nD2E2 F2G2 | A8 |]\n";
 //! let book = Book::parse(abc)?;
-//! let reading = book.tune(1).expect("tune 1").to_song(&ReadOptions::default())?;
-//! assert_eq!(reading.song.key.unwrap().to_string(), "D dorian");
-//! let written = write(&reading.song, &WriteOptions::default())?;
-//! let again = Book::parse(&written)?.tunes()[0].to_song(&ReadOptions::default())?;
-//! assert_eq!(again.song, reading.song);
+//! let reading = book.tune(1).expect("tune 1").to_part(&ReadOptions::default())?;
+//! assert_eq!(reading.part.key.unwrap().to_string(), "D dorian");
+//! let written = write(&reading.part, &WriteOptions::default())?;
+//! let again = Book::parse(&written)?.tunes()[0].to_part(&ReadOptions::default())?;
+//! assert_eq!(again.part, reading.part);
 //! # Ok::<(), duet_abc::Error>(())
 //! ```
 //!
 //! # The subset
 //!
-//! **Read and carried into the song:** the header fields `X:`, `T:`, `M:`, `L:`, `Q:`,
+//! **Read and carried into the part:** the header fields `X:`, `T:`, `M:`, `L:`, `Q:`,
 //! `K:` (with a mode) and `V:`; notes with octaves, accidentals and lengths; rests,
 //! multi-bar rests, bar lines, ties, broken rhythm, tuplets up to `(9`, chords; repeats
 //! and endings, unfolded; inline `[M:]`, `[L:]`, `[Q:]` and `[K:]` in a single-voice tune;
@@ -54,7 +54,7 @@
 //!
 //! **One place this crate parts from both.** A `:|` with no `|:` goes back to the start of
 //! the tune in the standard (§4.8) and in abc2midi, which replays a pickup there and warns
-//! of the short bar that makes. A song cannot hold a short bar in its middle, so this
+//! of the short bar that makes. A part cannot hold a short bar in its middle, so this
 //! crate goes back to the first full bar after the pickup. abc2midi's warning means the
 //! corpus cannot record the case; a test pins this crate's reading instead. Write `|:`
 //! after the pickup and all three agree.

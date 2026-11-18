@@ -1,17 +1,17 @@
 //! Reading and writing Standard MIDI Files with midly.
 //!
-//! [`Midi`] adds [`Midi::from_midi`] and [`Midi::to_midi`] to [`Song`]: bring it into
-//! scope and a song reads and writes MIDI.
+//! [`Midi`] adds [`Midi::from_midi`] and [`Midi::to_midi`] to [`Part`]: bring it into
+//! scope and a part reads and writes MIDI.
 //!
 //! ```
-//! use duet_core::Song;
+//! use duet_core::Part;
 //! use duet_midi::Midi;
 //!
-//! let song = Song::from_text(
+//! let part = Part::from_text(
 //!     "tempo 92\ntime 4/4\nkey D minor\nend 2.1.0\n\n[track \"Piano\" ch1 prog0]\n1.1.0 D4 1 80\n",
 //! )?;
-//! let midi = song.to_midi()?;
-//! assert_eq!(Song::from_midi(&midi)?, song);
+//! let midi = part.to_midi()?;
+//! assert_eq!(Part::from_midi(&midi)?, part);
 //! # Ok::<(), duet_midi::Error>(())
 //! ```
 //!
@@ -30,7 +30,7 @@ use midly::{
 use duet_core::time::{
     Key, Mode, TimeSig, beats_from_ticks, bpm_from_micros, micros_from_bpm, ticks_from_beats,
 };
-use duet_core::{Control, KeyChange, Note, Pitch, Song, TempoChange, TimeChange, TimeMap, Track};
+use duet_core::{Control, KeyChange, Note, Part, Pitch, TempoChange, TimeChange, TimeMap, Track};
 
 /// Everything that can go wrong reading or writing MIDI.
 #[derive(Debug, thiserror::Error)]
@@ -39,13 +39,13 @@ pub enum Error {
     /// The MIDI file could not be parsed, or uses a feature this crate does not support.
     #[error("MIDI error: {0}")]
     Midi(String),
-    /// The song cannot be written as MIDI, such as a note nested inside one of the same
+    /// The part cannot be written as MIDI, such as a note nested inside one of the same
     /// pitch.
-    #[error("invalid song: {0}")]
+    #[error("invalid part: {0}")]
     Invalid(String),
-    /// The song itself is invalid.
+    /// The part itself is invalid.
     #[error(transparent)]
-    Song(#[from] duet_core::Error),
+    Part(#[from] duet_core::Error),
 }
 
 impl Error {
@@ -56,7 +56,7 @@ impl Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Reading and writing a [`Song`] as a Standard MIDI File.
+/// Reading and writing a [`Part`] as a Standard MIDI File.
 pub trait Midi: Sized {
     /// Reads a Standard MIDI File.
     fn from_midi(bytes: &[u8]) -> Result<Self>;
@@ -102,7 +102,7 @@ fn last_per_tick<T: Copy>(mut events: Vec<(u64, T)>) -> Vec<(u64, T)> {
     out
 }
 
-impl Midi for Song {
+impl Midi for Part {
     /// Reads a Standard MIDI File.
     ///
     /// Notes, tempo, time signature and key changes, track names, program changes,
@@ -112,14 +112,14 @@ impl Midi for Song {
     /// velocities are dropped. A MIDI track that uses
     /// several channels becomes one [`Track`] per channel.
     ///
-    /// The file's end (its latest end of track) becomes the song's [end](Song::end) when
+    /// The file's end (its latest end of track) becomes the part's [end](Part::end) when
     /// some track's end of track comes after the event before it, or when it lies past
     /// every event kept. A file whose tracks each end at their last event names no end.
     ///
     /// Black keys are spelled by the key in force where each note starts. A format 0
     /// file's track name is its sequence name, so it becomes the title. Names that are
     /// not UTF-8 are read with U+FFFD in place of each invalid byte.
-    fn from_midi(bytes: &[u8]) -> Result<Song> {
+    fn from_midi(bytes: &[u8]) -> Result<Part> {
         let smf = Smf::parse(bytes).map_err(|e| Error::Midi(e.to_string()))?;
         let tpq = match smf.header.timing {
             Timing::Metrical(tpq) => tpq.as_int(),
@@ -399,28 +399,28 @@ impl Midi for Song {
         // their last event names none.
         let end = (trailing_time || file_end > last_kept).then(|| map.position(file_end));
 
-        let mut song = Song::default();
-        song.title = title;
-        song.ticks_per_quarter = tpq;
-        song.tempo_bpm = bpm_from_micros(initial_tempo);
-        song.time_sig = initial_sig;
-        song.key = key;
-        song.tempo_changes = tempo_changes;
-        song.time_changes = time_changes;
-        song.key_changes = key_changes;
-        song.end = end;
-        song.tracks = tracks;
-        Ok(song)
+        let mut part = Part::default();
+        part.title = title;
+        part.ticks_per_quarter = tpq;
+        part.tempo_bpm = bpm_from_micros(initial_tempo);
+        part.time_sig = initial_sig;
+        part.key = key;
+        part.tempo_changes = tempo_changes;
+        part.time_changes = time_changes;
+        part.key_changes = key_changes;
+        part.end = end;
+        part.tracks = tracks;
+        Ok(part)
     }
 
-    /// Writes the song as a format 1 Standard MIDI File: a first track with the title,
+    /// Writes the part as a format 1 Standard MIDI File: a first track with the title,
     /// tempo, time signature and key, then one track per [`Track`]. A key in a mode other
     /// than major or minor is written as its signature plus a `duet:key D dorian` text
     /// event at the same tick.
     ///
-    /// Every track ends at the song's [stated end](Song::stated_end): the end it names,
+    /// Every track ends at the part's [stated end](Part::stated_end): the end it names,
     /// or else its default. Anything past a named end is refused by name
-    /// ([`Song::check_end`]).
+    /// ([`Part::check_end`]).
     fn to_midi(&self) -> Result<Vec<u8>> {
         let tpq = self.ticks_per_quarter;
         if tpq == 0 || tpq > 0x7FFF {
@@ -699,7 +699,7 @@ fn finish_track(
     let delta = end.map_or(0, |end| end.saturating_sub(last));
     if delta > 0x0FFF_FFFF {
         return Err(Error::invalid(
-            "the gap before the song's end is too long for MIDI",
+            "the gap before the part's end is too long for MIDI",
         ));
     }
     out.push(TrackEvent {

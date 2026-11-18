@@ -23,7 +23,7 @@ mod support;
 use std::collections::BTreeSet;
 
 use support::{
-    Difference, N, apply_differences, compare, manifest, mapped_back, notes_of, our_song,
+    Difference, N, apply_differences, compare, manifest, mapped_back, notes_of, our_part,
     our_written, read_file, recording,
 };
 
@@ -90,8 +90,8 @@ fn every_tune_is_recorded() {
 /// The checks the comparison itself must pass, on made-up notes: a listed difference that
 /// no longer occurs fails, and so does a recording without abc2midi's one-tick onset.
 fn the_comparison_fails_where_it_must() {
-    let song = duet_core::Song::from_text("[track \"P\" ch1]\n1.1.0 C4 1 95\n").expect("song");
-    let ours = notes_of(&song);
+    let part = duet_core::Part::from_text("[track \"P\" ch1]\n1.1.0 C4 1 95\n").expect("part");
+    let ours = notes_of(&part);
     let stale = Difference {
         what: "velocity".into(),
         notes: "all".into(),
@@ -100,7 +100,7 @@ fn the_comparison_fails_where_it_must() {
         reason: "made up".into(),
     };
     assert!(
-        apply_differences(&song, &ours, &[stale]).is_err(),
+        apply_differences(&part, &ours, &[stale]).is_err(),
         "a listed difference that no longer occurs must fail"
     );
     let on_time: Vec<N> = vec![(0, 480, 60, 1, 95)];
@@ -110,12 +110,12 @@ fn the_comparison_fails_where_it_must() {
     );
 
     // The tempo map and programs are compared too, not just the notes.
-    let ours = duet_core::Song::from_text(
+    let ours = duet_core::Part::from_text(
         "tempo 168\ntempo 80 at 2.1.0\n\n[track \"P\" ch1 prog73]\n1.1.0 C4 1 95\n",
     )
-    .expect("song");
+    .expect("part");
     let theirs = |header: &str, prog: u8| {
-        duet_core::Song::from_text(&format!(
+        duet_core::Part::from_text(&format!(
             "{header}\n\n[track \"P\" ch1]\n1.1.1 prog {prog}\n1.1.1 C4 0.998 95\n"
         ))
         .expect("recording")
@@ -152,7 +152,7 @@ fn our_abc_reading_agrees_with_recorded_abc2midi() {
     let mut failures = Vec::new();
     let mut compared = 0;
     for entry in &m.tune {
-        let ours = our_song(entry);
+        let ours = our_part(entry);
         let rec = match recording(&format!("{}.abc2midi.txt", entry.name)) {
             Ok(r) => r,
             Err(e) => {
@@ -178,7 +178,7 @@ fn our_written_abc_agrees_with_recorded_abc2midi() {
         if let Some(reason) = &entry.writer_refuses {
             // A tune listed as one the writer refuses must still be refused; when it is
             // not, it needs its written files recorded.
-            let written = duet_abc::write(&our_song(entry), &duet_abc::WriteOptions::default());
+            let written = duet_abc::write(&our_part(entry), &duet_abc::WriteOptions::default());
             assert!(
                 matches!(&written, Err(duet_abc::Error::Unwritable { why, .. }) if why.contains("triplet")),
                 "{}: the manifest says the writer refuses it ({reason}), but it wrote it; \
@@ -199,8 +199,8 @@ fn our_written_abc_agrees_with_recorded_abc2midi() {
             ));
             continue;
         }
-        // abc2midi's reading of it carries the song's notes.
-        let ours = our_song(entry);
+        // abc2midi's reading of it carries the part's notes.
+        let ours = our_part(entry);
         let rec = match recording(&format!("{}.written.abc2midi.txt", entry.name)) {
             Ok(r) => r,
             Err(e) => {
@@ -221,7 +221,7 @@ mod live {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use duet_core::Song;
+    use duet_core::Part;
     use duet_midi::Midi;
 
     use super::support::{Manifest, corpus, manifest, our_written, read_file};
@@ -331,8 +331,8 @@ mod live {
             ));
         }
         let bytes = std::fs::read(&mid).map_err(|e| format!("{label}: no MIDI file: {e}"))?;
-        let song = Song::from_midi(&bytes).map_err(|e| format!("{label}: {e}"))?;
-        Ok(song.to_text())
+        let part = Part::from_midi(&bytes).map_err(|e| format!("{label}: {e}"))?;
+        Ok(part.to_text())
     }
 
     fn version() -> String {

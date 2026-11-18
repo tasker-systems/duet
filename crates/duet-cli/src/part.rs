@@ -1,4 +1,4 @@
-//! `duet song`: work on a song in the notefmt hub, whatever format it is stored in.
+//! `duet part`: work on a part in the notefmt hub, whatever format it is stored in.
 
 use std::path::{Path, PathBuf};
 
@@ -8,27 +8,27 @@ use duet_core::Grid;
 
 use crate::config::Config;
 use crate::io::{
-    Format, FormatParser, read_with_from, same_file, song_format, with_end, write_bytes, write_from,
+    Format, FormatParser, part_format, read_with_from, same_file, with_end, write_bytes, write_from,
 };
 
 #[derive(Subcommand)]
-pub enum SongCommand {
-    /// Print a song as notefmt text (or in another format with --to).
+pub enum PartCommand {
+    /// Print a part as notefmt text (or in another format with --to).
     Show {
-        /// The song to read: a .duet document, MIDI or ABC by its name, or - for standard
+        /// The part to read: a .duet document, MIDI or ABC by its name, or - for standard
         /// input (a document if it starts with {, MIDI, or ABC with --from abc).
         input: PathBuf,
         #[arg(long, value_parser = FormatParser)]
         from: Option<Format>,
-        /// Print the song in this format instead of as notefmt text.
+        /// Print the part in this format instead of as notefmt text.
         #[arg(long, value_parser = FormatParser)]
         to: Option<Format>,
     },
     /// Write a copy with every note snapped to a grid. The input is never changed.
     Quantize {
-        /// The song to read, by its name or on standard input as for `song show`.
+        /// The part to read, by its name or on standard input as for `part show`.
         input: PathBuf,
-        /// The song to write, by its name, or - for a song document on standard output
+        /// The part to write, by its name, or - for a part document on standard output
         /// (another format with --to). Must not be the input.
         output: PathBuf,
         /// The grid, such as 1/16 for sixteenths or 1/8t for triplet eighths.
@@ -41,20 +41,20 @@ pub enum SongCommand {
     },
 }
 
-pub fn run(command: SongCommand, config: &Config) -> Result<()> {
+pub fn run(command: PartCommand, config: &Config) -> Result<()> {
     match command {
-        SongCommand::Show { input, from, to } => {
-            let from = song_format(&input, from, "song show reads")?;
-            let (song, origin) = read_with_from(&input, from, "song show reads")?;
+        PartCommand::Show { input, from, to } => {
+            let from = part_format(&input, from, "part show reads")?;
+            let (part, origin) = read_with_from(&input, from, "part show reads")?;
             match to {
-                Some(to) => write_from(&song, Path::new("-"), to, config.end, origin.as_ref()),
+                Some(to) => write_from(&part, Path::new("-"), to, config.end, origin.as_ref()),
                 None => write_bytes(
                     Path::new("-"),
-                    with_end(&song, config.end)?.to_text().as_bytes(),
+                    with_end(&part, config.end)?.to_text().as_bytes(),
                 ),
             }
         }
-        SongCommand::Quantize {
+        PartCommand::Quantize {
             input,
             output,
             grid,
@@ -67,13 +67,13 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
                     output.display()
                 );
             }
-            let from = song_format(&input, from, "quantize reads")?;
-            let to = song_format(&output, to, "quantize writes")?;
-            // Quantizing keeps where the song came from: the notices still name what the
+            let from = part_format(&input, from, "quantize reads")?;
+            let to = part_format(&output, to, "quantize writes")?;
+            // Quantizing keeps where the part came from: the notices still name what the
             // import did not carry.
-            let (song, origin) = read_with_from(&input, from, "quantize reads")?;
+            let (part, origin) = read_with_from(&input, from, "quantize reads")?;
             write_from(
-                &song.quantized(grid)?,
+                &part.quantized(grid)?,
                 &output,
                 to,
                 config.end,
@@ -85,7 +85,7 @@ pub fn run(command: SongCommand, config: &Config) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use duet_core::Song;
+    use duet_core::Part;
     use duet_schemas::Document;
 
     use crate::io::{Format, read, tool};
@@ -97,13 +97,13 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
         let take = dir.join("take.duet");
         let played = "[track \"P\" ch1]\n1.1.10 C4 0.48 80\n";
-        let played = Document::new(tool(), Song::from_text(played).expect("parse"))
+        let played = Document::new(tool(), Part::from_text(played).expect("parse"))
             .write()
             .expect("document");
         std::fs::write(&take, &played).expect("write");
         let cli = |out: &std::path::Path| {
             run_hermetic(&[
-                "song",
+                "part",
                 "quantize",
                 take.to_str().expect("utf-8 path"),
                 out.to_str().expect("utf-8 path"),

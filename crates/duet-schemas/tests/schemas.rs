@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use duet_capture::Analysis;
 use duet_core::{
-    Control, Key, Note, Pitch, Position, Song, TempoChange, TimeChange, TimeSig, Track,
+    Control, Key, Note, Part, Pitch, Position, TempoChange, TimeChange, TimeSig, Track,
 };
 use duet_dsp::{FrameBlock, PerformanceHead};
 use duet_schemas::journal::{
@@ -289,24 +289,24 @@ fn the_journal_schema_names_no_event() {
     }
 }
 
-fn song_info() -> &'static KindInfo {
-    duet_schemas::kind("song").unwrap()
+fn part_info() -> &'static KindInfo {
+    duet_schemas::kind("part").unwrap()
 }
 
 #[test]
-fn the_gate_fails_on_a_field_added_to_song_at_the_same_version_naming_song() {
-    let committed = (song_info().schema)();
+fn the_gate_fails_on_a_field_added_to_part_at_the_same_version_naming_part() {
+    let committed = (part_info().schema)();
     let mut generated = committed.clone();
-    generated["$defs"]["Song"]["properties"]["swing"] = json!({ "type": "number" });
-    let Verdict::Shape(why) = verdict(song_info(), Some(&committed), &generated) else {
+    generated["$defs"]["Part"]["properties"]["swing"] = json!({ "type": "number" });
+    let Verdict::Shape(why) = verdict(part_info(), Some(&committed), &generated) else {
         panic!("a new field passed the gate");
     };
     assert!(
-        why.contains("the schema of song changed at the same version 1.0"),
+        why.contains("the schema of part changed at the same version 1.0"),
         "{why}"
     );
     assert!(
-        why.contains("crates/duet-schemas/schemas/song/1.0.json"),
+        why.contains("crates/duet-schemas/schemas/part/1.0.json"),
         "{why}"
     );
 }
@@ -331,11 +331,11 @@ fn the_gate_fails_on_a_field_added_to_the_envelope_or_from_naming_the_envelope()
 
 #[test]
 fn a_description_only_change_asks_to_regenerate_without_a_version_change() {
-    let committed = (song_info().schema)();
+    let committed = (part_info().schema)();
     let mut generated = committed.clone();
     generated["$defs"]["Note"]["properties"]["vel"]["description"] = json!("How hard.");
-    generated["$defs"]["Song"]["description"] = json!("A song, reworded.");
-    let Verdict::Descriptions(why) = verdict(song_info(), Some(&committed), &generated) else {
+    generated["$defs"]["Part"]["description"] = json!("A part, reworded.");
+    let Verdict::Descriptions(why) = verdict(part_info(), Some(&committed), &generated) else {
         panic!("a reworded description was not seen as one");
     };
     assert!(
@@ -350,11 +350,11 @@ fn a_description_only_change_asks_to_regenerate_without_a_version_change() {
 
 #[test]
 fn a_missing_schema_fails_naming_the_file_and_how_to_write_it() {
-    let Verdict::Missing(why) = verdict(song_info(), None, &(song_info().schema)()) else {
+    let Verdict::Missing(why) = verdict(part_info(), None, &(part_info().schema)()) else {
         panic!("a missing file passed the gate");
     };
     assert!(
-        why.contains("crates/duet-schemas/schemas/song/1.0.json"),
+        why.contains("crates/duet-schemas/schemas/part/1.0.json"),
         "{why}"
     );
     assert!(
@@ -368,12 +368,12 @@ fn a_property_named_description_is_shape_not_description() {
     let committed = json!({ "properties": { "description": { "type": "string" } } });
     let generated = json!({ "properties": { "description": { "type": "number" } } });
     assert!(matches!(
-        verdict(song_info(), Some(&committed), &generated),
+        verdict(part_info(), Some(&committed), &generated),
         Verdict::Shape(_)
     ));
     let removed = json!({ "properties": {} });
     assert!(matches!(
-        verdict(song_info(), Some(&committed), &removed),
+        verdict(part_info(), Some(&committed), &removed),
         Verdict::Shape(_)
     ));
 }
@@ -713,14 +713,14 @@ fn example(name: &str) -> AnyDocument {
             example_analysis(),
         )));
     }
-    assert_eq!(name, "song", "no example is defined for {name}");
-    let mut doc = Document::new(Tool::new("duet", "0.2.0"), example_song());
+    assert_eq!(name, "part", "no example is defined for {name}");
+    let mut doc = Document::new(Tool::new("duet", "0.2.0"), example_part());
     let mut from = From::new("abc");
     from.tune = Some("1".into());
     from.notices.push(Notice::new(7, 9, "slur", "("));
     doc.from = Some(from);
     doc.statements = vec!["the slur on bar 2 is notation only, and is not carried".into()];
-    AnyDocument::Song(doc)
+    AnyDocument::Part(doc)
 }
 
 /// A grid that uses every field: a meter change (so bars differ in length), its own levels,
@@ -887,27 +887,27 @@ fn pitch(s: &str) -> Pitch {
     s.parse().unwrap()
 }
 
-/// A song that uses every field and every control.
-fn example_song() -> Song {
-    let mut song = Song::default();
-    song.title = Some("The Example Reel".into());
-    song.ticks_per_quarter = 480;
-    song.tempo_bpm = 112.5;
-    song.time_sig = TimeSig::new(4, 4).unwrap();
-    song.key = Some("D dorian".parse::<Key>().unwrap());
-    song.tempo_changes = vec![TempoChange {
+/// A part that uses every field and every control.
+fn example_part() -> Part {
+    let mut part = Part::default();
+    part.title = Some("The Example Reel".into());
+    part.ticks_per_quarter = 480;
+    part.tempo_bpm = 112.5;
+    part.time_sig = TimeSig::new(4, 4).unwrap();
+    part.key = Some("D dorian".parse::<Key>().unwrap());
+    part.tempo_changes = vec![TempoChange {
         at: pos("3.1.0"),
         bpm: 108.0,
     }];
-    song.time_changes = vec![TimeChange {
+    part.time_changes = vec![TimeChange {
         at: pos("4.1.0"),
         time_sig: TimeSig::new(6, 8).unwrap(),
     }];
-    song.key_changes = vec![duet_core::KeyChange {
+    part.key_changes = vec![duet_core::KeyChange {
         at: pos("4.1.0"),
         key: "Bb major".parse().unwrap(),
     }];
-    song.end = Some(pos("6.1.0"));
+    part.end = Some(pos("6.1.0"));
     let mut lead = Track::new("fiddle", 1);
     lead.program = Some(40);
     lead.notes = vec![
@@ -939,31 +939,31 @@ fn example_song() -> Song {
     ];
     let mut bass = Track::new("bass", 2);
     bass.notes = vec![Note::new(pos("1.1.0"), pitch("D2"), 4.0, 1)];
-    song.tracks = vec![lead, bass];
-    song
+    part.tracks = vec![lead, bass];
+    part
 }
 
 #[test]
-fn the_example_song_is_a_song_duet_can_write() {
-    let song = example_song();
-    song.check_end().unwrap();
-    assert_eq!(song.stated_end().unwrap(), pos("6.1.0"));
-    assert_eq!(Song::from_text(&song.to_text()).unwrap(), song);
+fn the_example_part_is_a_part_duet_can_write() {
+    let part = example_part();
+    part.check_end().unwrap();
+    assert_eq!(part.stated_end().unwrap(), pos("6.1.0"));
+    assert_eq!(Part::from_text(&part.to_text()).unwrap(), part);
 }
 
 #[test]
-fn written_songs_validate_against_the_committed_schema() {
-    let schema = committed_schema("song", song_info().version);
+fn written_parts_validate_against_the_committed_schema() {
+    let schema = committed_schema("part", part_info().version);
     let validator = validator(&schema);
-    let minimal = Song::default();
-    let mut untitled = example_song();
+    let minimal = Part::default();
+    let mut untitled = example_part();
     untitled.title = None;
     untitled.key = None;
     untitled.end = None;
     untitled.tracks[0].program = None;
     untitled.tracks[0].controls.clear();
-    for song in [example_song(), minimal, untitled] {
-        let text = Document::new(Tool::new("duet", "0.2.0"), song)
+    for part in [example_part(), minimal, untitled] {
+        let text = Document::new(Tool::new("duet", "0.2.0"), part)
             .write()
             .unwrap();
         assert_valid(&validator, &serde_json::from_str(&text).unwrap(), &text);
@@ -972,9 +972,9 @@ fn written_songs_validate_against_the_committed_schema() {
 
 #[test]
 fn the_schema_refuses_what_the_reader_refuses() {
-    let schema = committed_schema("song", song_info().version);
+    let schema = committed_schema("part", part_info().version);
     let validator = validator(&schema);
-    let good: Value = serde_json::from_str(&example(song_info().name).write().unwrap()).unwrap();
+    let good: Value = serde_json::from_str(&example(part_info().name).write().unwrap()).unwrap();
     type Break = fn(&mut Value);
     let cases: [(&str, Break); 8] = [
         ("an unknown body field", |d| d["body"]["swing"] = json!(0.6)),
@@ -1004,7 +1004,7 @@ fn the_schema_refuses_what_the_reader_refuses() {
         assert!(!validator.is_valid(&doc), "the schema accepts {what}");
     }
     let mut doc = good.clone();
-    doc["$schema"] = json!(duet_schemas::schema_url("song", Version::new(1, 1)));
+    doc["$schema"] = json!(duet_schemas::schema_url("part", Version::new(1, 1)));
     assert!(
         !validator.is_valid(&doc),
         "the schema accepts another $schema"
@@ -1181,8 +1181,8 @@ fn the_hand_written_patterns_match_what_reads() {
 }
 
 #[test]
-fn an_unknown_field_inside_a_song_body_is_refused_by_name() {
-    let text = example(song_info().name).write().unwrap();
+fn an_unknown_field_inside_a_part_body_is_refused_by_name() {
+    let text = example(part_info().name).write().unwrap();
     let mut doc: Value = serde_json::from_str(&text).unwrap();
     for (path, field) in [
         ("/body", "swing"),

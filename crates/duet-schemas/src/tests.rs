@@ -327,7 +327,7 @@ fn an_unknown_field_in_the_frame_or_the_envelope_is_refused_by_name() {
 #[test]
 fn a_mismatched_schema_is_refused_naming_both() {
     let other_version = schema_url("tune", Version::new(1, 1));
-    let other_kind = schema_url("song", Version::new(1, 2));
+    let other_kind = schema_url("part", Version::new(1, 2));
     for schema in [
         json!(other_version),
         json!(other_kind),

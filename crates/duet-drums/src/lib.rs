@@ -1,6 +1,6 @@
 //! The duet drum grid: a drum part as a lanes × steps velocity matrix.
 //!
-//! A [`DrumGrid`] has the conductor of a [`duet_core::Song`] (resolution, tempo, meter
+//! A [`DrumGrid`] has the conductor of a [`duet_core::Part`] (resolution, tempo, meter
 //! and their changes), a step such as `1/16`, a list of named lanes each playing one
 //! MIDI key, and, for every bar, a velocity per lane and step. It has two forms:
 //!
@@ -15,11 +15,11 @@
 //! Lane names come from a [`LaneMap`]. The built-in `gm` map covers every General MIDI
 //! Level 1 percussion key (35 to 81) on channel 10.
 //!
-//! A grid converts to a song ([`DrumGrid::to_song`]) and back ([`DrumGrid::from_song`])
-//! exactly: grid → song → grid gives the same grid, as long as its lanes are in the map's
+//! A grid converts to a part ([`DrumGrid::to_part`]) and back ([`DrumGrid::from_part`])
+//! exactly: grid → part → grid gives the same grid, as long as its lanes are in the map's
 //! row order and each is played at least once. No bar count is needed: when a grid ends
-//! in empty bars, or inside its last bar ([`DrumGrid::end`]), the song names that end.
-//! Reading a song never moves or alters a note to make it fit; what does not fit is
+//! in empty bars, or inside its last bar ([`DrumGrid::end`]), the part names that end.
+//! Reading a part never moves or alters a note to make it fit; what does not fit is
 //! refused by name.
 //!
 //! ```
@@ -27,8 +27,8 @@
 //!
 //! let text = "grid 1/8\n\n[bars 1]\nsnare | . . x . . . x . |\nkick  | x . . . x . . . |\n";
 //! let grid = DrumGrid::from_text(text)?;
-//! let song = grid.to_song()?;
-//! let back = DrumGrid::from_song(&song, grid.grid, &LaneMap::gm(), None, None)?;
+//! let part = grid.to_part()?;
+//! let back = DrumGrid::from_part(&part, grid.grid, &LaneMap::gm(), None, None)?;
 //! assert_eq!(back, grid);
 //! assert_eq!(DrumGrid::from_text(&grid.to_text()?)?, grid);
 //! # Ok::<(), duet_drums::Error>(())
@@ -39,10 +39,10 @@
 mod error;
 mod grid;
 mod lanes;
-mod song;
+mod part;
 mod text;
 
 pub use error::{Error, Result};
 pub use grid::{DrumGrid, Lane, Levels};
 pub use lanes::{LaneDef, LaneMap, LanePatch};
-pub use song::DRUM_TRACK;
+pub use part::DRUM_TRACK;

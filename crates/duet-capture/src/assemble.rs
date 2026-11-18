@@ -1,14 +1,14 @@
-//! Assembly: a take's settled events as a [`Song`], the one step that keeps the whole take,
+//! Assembly: a take's settled events as a [`Part`], the one step that keeps the whole take,
 //! and only as events.
 //!
 //! A frame becomes a position by the take's measured beat period, not its stated tempo: a
 //! frame is `(frame - downbeat) / beat_period_frames` quarter notes from the downbeat, at the
-//! song's 480 ticks per quarter. The song states the tempo as `Timing` gives it (a whole bpm
+//! part's 480 ticks per quarter. The part states the tempo as `Timing` gives it (a whole bpm
 //! when estimated), so a note keeps its true beat however the tempo was rounded.
 
 use duet_abc::pickup_meter_for;
 use duet_core::time::beats_from_ticks;
-use duet_core::{Grid, Key, Note, Pitch, Position, Song, TimeChange, TimeSig, Track};
+use duet_core::{Grid, Key, Note, Part, Pitch, Position, TimeChange, TimeSig, Track};
 use duet_drums::LaneMap;
 use duet_dsp::{
     BeatTempo, Event, HitLane, KeyEstimate, Reading, Take, Timing, beat_series, estimate_key,
@@ -50,7 +50,7 @@ pub enum Kind {
     },
 }
 
-/// What was done with the events before the downbeat, since a song cannot hold a position
+/// What was done with the events before the downbeat, since a part cannot hold a position
 /// before `1.1.0`. Nothing is ever dropped.
 ///
 /// Deliberately exhaustive: there was nothing before the downbeat, or it became a pickup, or
@@ -67,17 +67,17 @@ pub enum LeadIn {
     RestBar,
 }
 
-/// A take as a song, with the timing it was placed by, what was done before the downbeat, and
+/// A take as a part, with the timing it was placed by, what was done before the downbeat, and
 /// the analysis behind it.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Captured {
-    pub song: Song,
+    pub part: Part,
     pub timing: Timing,
     pub lead_in: LeadIn,
     /// The tick the downbeat bar starts at: 0 with no lead-in, the pickup's length after a
     /// pickup, or the length of the rest bars after them. Quantizing keeps bar lines where
-    /// they are, so it is where the take's bar 1 is in the quantized song too.
+    /// they are, so it is where the take's bar 1 is in the quantized part too.
     pub downbeat_tick: u64,
     pub analysis: Analysis,
 }
@@ -110,7 +110,7 @@ pub struct Analysis {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid: Option<Grid>,
     /// How far quantizing moved each note. Assembly leaves it empty: the grid is chosen
-    /// later, and [`quantize_offsets`] fills it once the song is quantized.
+    /// later, and [`quantize_offsets`] fills it once the part is quantized.
     pub offsets: Vec<QuantizeOffset>,
     /// A melody's reading: the tuning its notes were read on, and each note's key, its held
     /// pitch's distance from that key, and whether it is between keys. Added in
@@ -133,7 +133,7 @@ pub struct QuantizeOffset {
     pub moved_steps: f64,
 }
 
-/// The take's events as a song, placed by `timing`, with the analysis behind it. Every
+/// The take's events as a part, placed by `timing`, with the analysis behind it. Every
 /// frame is on the input timeline at `rate`, and the events come in the order they settled,
 /// which is the order they start in.
 ///
@@ -142,7 +142,7 @@ pub struct QuantizeOffset {
 ///   [`Event::Hit`]s on `drums`, on the lane map's channel, each the key of its lane and a
 ///   sixteenth long (`HIT_BEATS`), or up to the next hit on its key when that is sooner. Other events are kept in the analysis only.
 /// - **Key:** a melody's is `key` when given, used exactly, or else estimated from its notes
-///   ([`estimate_key`]). It is the song's key, and black keys are spelled by it; no note's MIDI
+///   ([`estimate_key`]). It is the part's key, and black keys are spelled by it; no note's MIDI
 ///   number changes.
 /// - **Velocity** is relative to the take: `strength / strongest`, mapped in a straight line
 ///   from 20 (`VELOCITY_FLOOR`) at no strength to 127 for the strongest. Two takes that differ
@@ -175,8 +175,8 @@ pub fn assemble(
         }
     };
 
-    let mut song = Song::default();
-    let tpq = song.ticks_per_quarter;
+    let mut part = Part::default();
+    let tpq = part.ticks_per_quarter;
     let place = Placer {
         downbeat: *timing.downbeat_frame.value() as f64,
         period: timing.beat_period_frames,
@@ -191,19 +191,19 @@ pub fn assemble(
         .max(0) as u64;
     let (lead_in, offset) = lead_in(lead_ticks, meter, tpq, kind);
 
-    song.tempo_bpm = *timing.tempo_bpm.value();
-    song.time_sig = match lead_in {
+    part.tempo_bpm = *timing.tempo_bpm.value();
+    part.time_sig = match lead_in {
         LeadIn::Pickup(sig) => sig,
         LeadIn::None | LeadIn::RestBar => meter,
     };
     if let LeadIn::Pickup(_) = lead_in {
-        song.time_changes.push(TimeChange {
+        part.time_changes.push(TimeChange {
             at: Position::bar(2),
             time_sig: meter,
         });
     }
-    song.key = estimate.as_ref().map(|e| *e.key.value());
-    let map = song.time_map()?;
+    part.key = estimate.as_ref().map(|e| *e.key.value());
+    let map = part.time_map()?;
 
     let (name, channel) = match kind {
         Kind::Melody => ("melody", MELODY_CHANNEL),
@@ -224,7 +224,7 @@ pub fn assemble(
             }
         };
         let mut pitch = Pitch::new(p.key)?;
-        if let Some(key) = song.key {
+        if let Some(key) = part.key {
             pitch = key.spell(pitch);
         }
         track.notes.push(Note::new(
@@ -234,7 +234,7 @@ pub fn assemble(
             velocity(p.strength, strongest),
         ));
     }
-    song.tracks.push(track);
+    part.tracks.push(track);
 
     let analysis = Analysis {
         rate,
@@ -248,7 +248,7 @@ pub fn assemble(
         reading: None,
     };
     Ok(Captured {
-        song,
+        part,
         timing: timing.clone(),
         lead_in,
         downbeat_tick: offset,
@@ -394,21 +394,21 @@ fn velocity(strength: f32, strongest: f32) -> u8 {
 ///
 /// Milliseconds are read at `ms_per_quarter`, the length of a quarter note in the take: for a
 /// captured take, `1000 * beat_period_frames / rate`, the measured period its notes were placed
-/// by, not the whole bpm the song states.
+/// by, not the whole bpm the part states.
 ///
-/// Fails when `grid` cannot divide the songs' ticks per quarter, or a position is not in the
-/// song, neither of which a song quantized to `grid` can have.
+/// Fails when `grid` cannot divide the parts' ticks per quarter, or a position is not in the
+/// part, neither of which a part quantized to `grid` can have.
 pub fn quantize_offsets(
-    raw: &Song,
-    quantized: &Song,
+    raw: &Part,
+    quantized: &Part,
     grid: Grid,
     ms_per_quarter: f64,
 ) -> Result<Vec<QuantizeOffset>> {
     let step = grid.step_ticks(raw.ticks_per_quarter)? as f64;
     let ms_per_tick = ms_per_quarter / f64::from(raw.ticks_per_quarter);
     let (raw_map, quantized_map) = (raw.time_map()?, quantized.time_map()?);
-    let notes = |song: &Song| -> Vec<Position> {
-        song.tracks
+    let notes = |part: &Part| -> Vec<Position> {
+        part.tracks
             .iter()
             .flat_map(|t| t.notes.iter().map(|n| n.at))
             .collect()
@@ -499,7 +499,7 @@ mod tests {
     }
 
     fn starts(captured: &Captured) -> Vec<Position> {
-        captured.song.tracks[0].notes.iter().map(|n| n.at).collect()
+        captured.part.tracks[0].notes.iter().map(|n| n.at).collect()
     }
 
     #[test]
@@ -517,20 +517,20 @@ mod tests {
             starts(&captured),
             [Position::new(1, 1, 0), Position::new(1, 2, 0)]
         );
-        assert_eq!(captured.song.tracks[0].notes[0].beats, 1.0);
-        assert_eq!(captured.song.tracks[0].notes[1].beats, 0.5);
-        assert_eq!(captured.song.ticks_per_quarter, 480);
-        assert_eq!(captured.song.tracks.len(), 1);
-        assert_eq!(captured.song.tracks[0].name, "melody");
+        assert_eq!(captured.part.tracks[0].notes[0].beats, 1.0);
+        assert_eq!(captured.part.tracks[0].notes[1].beats, 0.5);
+        assert_eq!(captured.part.ticks_per_quarter, 480);
+        assert_eq!(captured.part.tracks.len(), 1);
+        assert_eq!(captured.part.tracks[0].name, "melody");
         assert_eq!(captured.lead_in, LeadIn::None);
     }
 
     #[test]
-    fn a_given_tempo_is_the_songs_tempo() {
+    fn a_given_tempo_is_the_parts_tempo() {
         let events = [note(1.0, 0.5, 60, 0.03)];
         let captured =
             assemble(&events, RATE, &given(97.0, "4/4", 1.0), None, &Kind::Melody).unwrap();
-        assert_eq!(captured.song.tempo_bpm, 97.0);
+        assert_eq!(captured.part.tempo_bpm, 97.0);
     }
 
     #[test]
@@ -566,9 +566,9 @@ mod tests {
         events.extend(times.iter().map(|&t| note(t, period / 2.0, 60, 0.03)));
 
         let captured = assemble(&events, RATE, &timing, None, &Kind::Melody).unwrap();
-        assert_eq!(captured.song.tempo_bpm, 92.0);
-        let map = captured.song.time_map().unwrap();
-        let fortieth = map.tick(captured.song.tracks[0].notes[40].at).unwrap();
+        assert_eq!(captured.part.tempo_bpm, 92.0);
+        let map = captured.part.time_map().unwrap();
+        let fortieth = map.tick(captured.part.tracks[0].notes[40].at).unwrap();
         assert!(
             fortieth.abs_diff(40 * 480) <= 1,
             "beat 40 is at tick {fortieth}"
@@ -591,10 +591,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(captured.lead_in, LeadIn::Pickup(meter("1/4")));
-        assert_eq!(captured.song.time_sig, meter("1/4"));
-        assert_eq!(captured.song.time_changes.len(), 1);
-        assert_eq!(captured.song.time_changes[0].at, Position::bar(2));
-        assert_eq!(captured.song.time_changes[0].time_sig, meter("4/4"));
+        assert_eq!(captured.part.time_sig, meter("1/4"));
+        assert_eq!(captured.part.time_changes.len(), 1);
+        assert_eq!(captured.part.time_changes[0].at, Position::bar(2));
+        assert_eq!(captured.part.time_changes[0].time_sig, meter("4/4"));
         assert_eq!(starts(&captured), [Position::bar(1), Position::bar(2)]);
     }
 
@@ -611,8 +611,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(captured.lead_in, LeadIn::RestBar);
-        assert_eq!(captured.song.time_sig, meter("4/4"));
-        assert!(captured.song.time_changes.is_empty());
+        assert_eq!(captured.part.time_sig, meter("4/4"));
+        assert!(captured.part.time_changes.is_empty());
         assert_eq!(
             starts(&captured),
             [Position::new(1, 1, 240), Position::bar(2)]
@@ -629,7 +629,7 @@ mod tests {
         let captured =
             assemble(&events, RATE, &given(120.0, "4/4", 1.0), None, &beatbox()).unwrap();
         assert_eq!(captured.lead_in, LeadIn::RestBar);
-        assert_eq!(captured.song.time_sig, meter("4/4"));
+        assert_eq!(captured.part.time_sig, meter("4/4"));
         assert_eq!(
             starts(&captured),
             [Position::new(1, 4, 0), Position::bar(2)]
@@ -671,12 +671,12 @@ mod tests {
                 .count();
             let captured = assemble(&events, RATE, &timing, None, &kind).unwrap();
             assert_eq!(captured.lead_in, lead_in);
-            assert_eq!(captured.song.tracks[0].notes.len(), played, "{lead_in:?}");
+            assert_eq!(captured.part.tracks[0].notes.len(), played, "{lead_in:?}");
             assert_eq!(captured.analysis.events, events);
-            captured.song.check_end().unwrap();
-            let mut normalized = captured.song.clone();
+            captured.part.check_end().unwrap();
+            let mut normalized = captured.part.clone();
             normalized.normalize().unwrap();
-            assert_eq!(normalized, captured.song, "{lead_in:?}: already normal");
+            assert_eq!(normalized, captured.part, "{lead_in:?}: already normal");
         }
     }
 
@@ -689,7 +689,7 @@ mod tests {
         ];
         let timing = given(120.0, "4/4", 1.0);
         let captured = assemble(&events, RATE, &timing, None, &beatbox()).unwrap();
-        let drums = &captured.song.tracks[0];
+        let drums = &captured.part.tracks[0];
         assert_eq!(drums.name, "drums");
         assert_eq!(drums.channel, 10);
         let keys: Vec<u8> = drums.notes.iter().map(|n| n.pitch.midi()).collect();
@@ -705,7 +705,7 @@ mod tests {
             asked: Some("hat".into()),
         };
         let captured = assemble(&asked, RATE, &timing, None, &tapped).unwrap();
-        let keys: Vec<u8> = captured.song.tracks[0]
+        let keys: Vec<u8> = captured.part.tracks[0]
             .notes
             .iter()
             .map(|n| n.pitch.midi())
@@ -736,7 +736,7 @@ mod tests {
         ];
         let captured =
             assemble(&events, RATE, &given(120.0, "4/4", 1.0), None, &beatbox()).unwrap();
-        let notes = &captured.song.tracks[0].notes;
+        let notes = &captured.part.tracks[0].notes;
         assert_eq!(notes[1].beats, 0.25);
         let first_end = 480.0 * notes[0].beats;
         let second_start = f64::from(notes[1].at.tick);
@@ -772,7 +772,7 @@ mod tests {
         let velocities = |events: &[Event]| {
             let captured =
                 assemble(events, RATE, &given(120.0, "4/4", 1.0), None, &Kind::Melody).unwrap();
-            captured.song.tracks[0]
+            captured.part.tracks[0]
                 .notes
                 .iter()
                 .map(|n| n.vel)
@@ -791,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn a_given_key_is_the_songs_key() {
+    fn a_given_key_is_the_parts_key() {
         // A C major scale, which would be estimated with C major's signature (as A minor, its
         // relative: Aarden–Essen reads an evenly walked scale so).
         let events: Vec<Event> = [60, 62, 64, 65, 67, 69, 71, 72]
@@ -802,12 +802,12 @@ mod tests {
         let eb = Key::new(-3, false).unwrap();
         let timing = given(120.0, "4/4", 1.0);
         let captured = assemble(&events, RATE, &timing, Some(eb), &Kind::Melody).unwrap();
-        assert_eq!(captured.song.key, Some(eb));
+        assert_eq!(captured.part.key, Some(eb));
         let estimate = captured.analysis.key.as_ref().unwrap();
         assert_eq!(estimate.key, Origin::Given(eb));
 
         let unasked = assemble(&events, RATE, &timing, None, &Kind::Melody).unwrap();
-        assert_eq!(unasked.song.key.map(|k| k.sharps), Some(0));
+        assert_eq!(unasked.part.key.map(|k| k.sharps), Some(0));
     }
 
     #[test]
@@ -828,8 +828,8 @@ mod tests {
             &Kind::Melody,
         )
         .unwrap();
-        assert_eq!(captured.song.key.map(|k| k.sharps), Some(-3));
-        let notes = &captured.song.tracks[0].notes;
+        assert_eq!(captured.part.key.map(|k| k.sharps), Some(-3));
+        let notes = &captured.part.tracks[0].notes;
         let got: Vec<u8> = notes.iter().map(|n| n.pitch.midi()).collect();
         assert_eq!(got, midi);
         let spelled: Vec<String> = notes.iter().map(|n| n.pitch.to_string()).collect();
@@ -888,9 +888,9 @@ mod tests {
         )
         .unwrap();
         let grid: Grid = "1/16".parse().unwrap();
-        let quantized = captured.song.quantized(grid).unwrap();
+        let quantized = captured.part.quantized(grid).unwrap();
         let quarter_ms = 1000.0 * captured.timing.beat_period_frames / f64::from(RATE);
-        let offsets = quantize_offsets(&captured.song, &quantized, grid, quarter_ms).unwrap();
+        let offsets = quantize_offsets(&captured.part, &quantized, grid, quarter_ms).unwrap();
         assert_eq!(offsets.len(), 2);
         assert_eq!(offsets[0].note, 0);
         assert!((offsets[0].moved_ms + 30.0).abs() < 1.0, "{offsets:?}");
@@ -912,9 +912,9 @@ mod tests {
         let events = [note(1.155, 0.1, 60, 0.03)];
         let captured = assemble(&events, RATE, &timing, None, &Kind::Melody).unwrap();
         let grid: Grid = "1/16".parse().unwrap();
-        let quantized = captured.song.quantized(grid).unwrap();
+        let quantized = captured.part.quantized(grid).unwrap();
         let quarter_ms = 1000.0 * timing.beat_period_frames / f64::from(RATE);
-        let offsets = quantize_offsets(&captured.song, &quantized, grid, quarter_ms).unwrap();
+        let offsets = quantize_offsets(&captured.part, &quantized, grid, quarter_ms).unwrap();
         // 0.155 s at 122 is 151 ticks, which quantizes to 120: 31 ticks earlier.
         let at_122 = -31.0 * 60_000.0 / 122.0 / 480.0;
         assert!((offsets[0].moved_ms - at_122).abs() < 1e-9, "{offsets:?}");
@@ -935,8 +935,8 @@ mod tests {
             let captured = assemble(&take(first), RATE, &timing, None, &kind).unwrap();
             assert_eq!(captured.lead_in, lead_in);
             assert_eq!(captured.downbeat_tick, tick, "{lead_in:?}");
-            let map = captured.song.time_map().unwrap();
-            assert_eq!(map.tick(captured.song.tracks[0].notes[1].at).unwrap(), tick);
+            let map = captured.part.time_map().unwrap();
+            assert_eq!(map.tick(captured.part.tracks[0].notes[1].at).unwrap(), tick);
         }
 
         // A rhythm starting a bar and a half early gets two rest bars.
@@ -993,7 +993,7 @@ mod tests {
             },
         ];
         let captured = assemble(&hits, RATE, &timing, None, &beatbox()).unwrap();
-        let notes = &captured.song.tracks[0].notes;
+        let notes = &captured.part.tracks[0].notes;
         assert_eq!(notes[0].at, notes[1].at, "they share a tick");
         assert!(notes.iter().all(|n| n.beats > 0.0), "{notes:?}");
 
@@ -1005,7 +1005,7 @@ mod tests {
             strength: 0.03,
         }];
         let captured = assemble(&blip, RATE, &timing, None, &Kind::Melody).unwrap();
-        let beats = captured.song.tracks[0].notes[0].beats;
+        let beats = captured.part.tracks[0].notes[0].beats;
         assert_eq!(duet_core::time::ticks_from_beats(beats, 480).unwrap(), 1);
     }
 }

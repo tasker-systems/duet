@@ -1,9 +1,9 @@
-//! Round-trip tests on generated MIDI files: MIDI to song, through the text, JSON and
+//! Round-trip tests on generated MIDI files: MIDI to part, through the text, JSON and
 //! TOML forms, and back to MIDI, checking every kept event survives to the tick.
 
 use std::collections::{HashMap, VecDeque};
 
-use duet_core::{Grid, Position, Song};
+use duet_core::{Grid, Part, Position};
 use duet_midi::Midi;
 use duet_schemas::{AnyDocument, Document, Tool};
 use midly::num::{u4, u7, u15, u24, u28};
@@ -362,53 +362,53 @@ fn played_take(tpq: u16, format: Format) -> (Vec<u8>, Vec<RawNote>) {
     (bytes, expected)
 }
 
-/// The song as every writer gives it back: with its end stated.
-fn stated(song: &Song) -> Song {
-    let mut song = song.clone();
-    song.end = Some(song.stated_end().unwrap());
-    song
+/// The part as every writer gives it back: with its end stated.
+fn stated(part: &Part) -> Part {
+    let mut part = part.clone();
+    part.end = Some(part.stated_end().unwrap());
+    part
 }
 
-/// The song through a `song` document and back, exactly: the body reads back equal, the text
+/// The part through a `part` document and back, exactly: the body reads back equal, the text
 /// writes back identical, and the body is byte for byte what the `.json` writer wrote before
 /// documents (`serde_json::to_string_pretty`), one level in.
-fn check_document(song: &Song) {
-    let text = Document::new(Tool::new("duet", "test"), song.clone())
+fn check_document(part: &Part) {
+    let text = Document::new(Tool::new("duet", "test"), part.clone())
         .write()
         .unwrap();
-    let back = Document::<Song>::read(&text).unwrap();
+    let back = Document::<Part>::read(&text).unwrap();
     assert_eq!(
-        &back.body, song,
-        "song document round-trip; it was:\n{text}"
+        &back.body, part,
+        "part document round-trip; it was:\n{text}"
     );
     assert_eq!(
         back.write().unwrap(),
         text,
         "the document writes back identical"
     );
-    let AnyDocument::Song(any) = AnyDocument::read(&text).unwrap() else {
-        panic!("not read as a song");
+    let AnyDocument::Part(any) = AnyDocument::read(&text).unwrap() else {
+        panic!("not read as a part");
     };
-    assert_eq!(&any.body, song, "read by its envelope");
+    assert_eq!(&any.body, part, "read by its envelope");
 
     // The notes view of the document's body reads back to the body: the lossless view is the
     // identity.
     // The view always states the end, as every writer does.
     let view = back.body.to_text();
-    let mut want = song.clone();
+    let mut want = part.clone();
     want.end = Some(want.stated_end().unwrap());
     assert_eq!(
-        Song::from_text(&view).unwrap(),
+        Part::from_text(&view).unwrap(),
         want,
         "the notes view; it was:\n{view}"
     );
     assert_eq!(
-        Song::from_text(&view).unwrap().to_text(),
+        Part::from_text(&view).unwrap().to_text(),
         view,
         "the view is stable"
     );
 
-    let json = serde_json::to_string_pretty(song).unwrap();
+    let json = serde_json::to_string_pretty(part).unwrap();
     let body = format!("  \"body\": {}\n}}\n", json.replace('\n', "\n  "));
     assert!(
         text.ends_with(&body),
@@ -425,16 +425,16 @@ fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
 
     // The generated file's tracks each end at their last event, so it names no end; every
     // form written from it states the default.
-    let read = Song::from_midi(bytes).unwrap();
+    let read = Part::from_midi(bytes).unwrap();
     assert_eq!(read.end, None);
-    let song = stated(&read);
+    let part = stated(&read);
 
-    // Text, JSON and TOML all give back the same song.
+    // Text, JSON and TOML all give back the same part.
     let text = read.to_text();
-    let from_text = Song::from_text(&text).unwrap();
-    assert_eq!(from_text, song, "text round-trip; text was:\n{text}");
+    let from_text = Part::from_text(&text).unwrap();
+    assert_eq!(from_text, part, "text round-trip; text was:\n{text}");
     assert_eq!(from_text.to_text(), text, "text is stable");
-    check_document(&song);
+    check_document(&part);
     check_document(&read);
 
     // Writing MIDI keeps every note, control and meta event to the tick.
@@ -446,8 +446,8 @@ fn check_round_trip(bytes: &[u8], expected_notes: &[RawNote]) {
     assert_eq!(rewritten.sigs, original.sigs);
     assert_eq!(rewritten.keys, original.keys);
 
-    // And reading it again gives the same song.
-    assert_eq!(Song::from_midi(&written).unwrap(), song);
+    // And reading it again gives the same part.
+    assert_eq!(Part::from_midi(&written).unwrap(), part);
 }
 
 #[test]
@@ -467,28 +467,28 @@ fn format_0_file_round_trips_exactly() {
 #[test]
 fn reads_musical_positions() {
     let (bytes, _) = played_take(480, Format::Parallel);
-    let song = Song::from_midi(&bytes).unwrap();
-    assert_eq!(song.title.as_deref(), Some("Sketch in D"));
-    assert_eq!(song.tempo_bpm, 92.0);
-    assert_eq!(song.time_sig.to_string(), "4/4");
-    assert_eq!(song.key.unwrap().to_string(), "D minor");
-    let changes: Vec<String> = song
+    let part = Part::from_midi(&bytes).unwrap();
+    assert_eq!(part.title.as_deref(), Some("Sketch in D"));
+    assert_eq!(part.tempo_bpm, 92.0);
+    assert_eq!(part.time_sig.to_string(), "4/4");
+    assert_eq!(part.key.unwrap().to_string(), "D minor");
+    let changes: Vec<String> = part
         .time_changes
         .iter()
         .map(|c| format!("{} at {}", c.time_sig, c.at))
         .collect();
     // 6/8 at bar 5; 3/4 halfway through bar 6 (the fourth eighth), so bar 7 starts there.
     assert_eq!(changes, ["6/8 at 5.1.0", "3/4 at 6.4.0"]);
-    assert_eq!(song.tempo_changes[0].at.to_string(), "6.1.0");
-    assert_eq!(song.tempo_changes[0].bpm, 100.0);
+    assert_eq!(part.tempo_changes[0].at.to_string(), "6.1.0");
+    assert_eq!(part.tempo_changes[0].bpm, 100.0);
 
-    let names: Vec<(&str, u8)> = song
+    let names: Vec<(&str, u8)> = part
         .tracks
         .iter()
         .map(|t| (t.name.as_str(), t.channel))
         .collect();
     assert_eq!(names, [("Piano", 1), ("Rhythm", 2), ("Rhythm", 10)]);
-    let piano = &song.tracks[0];
+    let piano = &part.tracks[0];
     assert_eq!(piano.program, Some(0));
     // D minor spells black keys with flats.
     assert!(piano.notes.iter().any(|n| n.pitch.to_string() == "Bb4"));
@@ -499,7 +499,7 @@ fn reads_musical_positions() {
         .map(|n| n.pitch.to_string())
         .collect();
     assert_eq!(chord, ["A3", "C4", "E5"]);
-    assert_eq!(song.tracks[1].program, Some(33));
+    assert_eq!(part.tracks[1].program, Some(33));
 }
 
 #[test]
@@ -519,14 +519,14 @@ key Bb major
 2.1.0   cc1   64
 2.1.0   bend  +1024
 "#;
-    let song = Song::from_text(text).unwrap();
-    assert_eq!(song.ticks_per_quarter, 480);
-    let lead = &song.tracks[0];
+    let part = Part::from_text(text).unwrap();
+    assert_eq!(part.ticks_per_quarter, 480);
+    let lead = &part.tracks[0];
     assert_eq!((lead.channel, lead.program), (3, Some(73)));
     assert_eq!(lead.notes.len(), 5);
     assert_eq!(lead.controls.len(), 2);
 
-    let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+    let back = Part::from_midi(&part.to_midi().unwrap()).unwrap();
     let notes: Vec<String> = back.tracks[0]
         .notes
         .iter()
@@ -547,7 +547,7 @@ key Bb major
 #[test]
 fn errors_name_the_line() {
     let text = "tempo 92\n\n[track \"Piano\" ch1]\n1.1.0 D4 1 80\n1.2.0 H4 1 80\n";
-    let err = Song::from_text(text).unwrap_err().to_string();
+    let err = Part::from_text(text).unwrap_err().to_string();
     assert!(err.starts_with("line 5:"), "{err}");
     assert!(err.contains("H4"), "{err}");
 
@@ -561,7 +561,7 @@ fn errors_name_the_line() {
         ("[track \"P\" ch1]\n1.1.0 D4 1", 2),
         ("[track \"P\" ch1]\n1.1.0 cc64 128", 2),
     ] {
-        match Song::from_text(bad) {
+        match Part::from_text(bad) {
             Err(duet_core::Error::Parse { line: l, .. }) => assert_eq!(l, line, "{bad}"),
             other => panic!("{bad}: expected a parse error, got {other:?}"),
         }
@@ -572,18 +572,18 @@ fn errors_name_the_line() {
 fn sample_sketch_round_trips() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/sketch.notes");
     let text = std::fs::read_to_string(path).unwrap();
-    let song = Song::from_text(&text).unwrap();
-    let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
-    assert_eq!(back, song);
+    let part = Part::from_text(&text).unwrap();
+    let back = Part::from_midi(&part.to_midi().unwrap()).unwrap();
+    assert_eq!(back, part);
     assert_eq!(back.to_text(), text, "the sample is in canonical form");
     assert!(text.contains("\nend 5.1.0\n"), "the sample states its end");
-    check_document(&song);
+    check_document(&part);
 }
 
 #[test]
 fn track_names_with_brackets_round_trip() {
     let names = ["Pad [verb]", "]", "[a] \"b\" ]c[", "x\\]"];
-    let mut song = Song::default();
+    let mut part = Part::default();
     for (i, name) in names.iter().enumerate() {
         let mut track = duet_core::Track::new(*name, i as u8 + 1);
         track.notes.push(duet_core::Note::new(
@@ -592,31 +592,31 @@ fn track_names_with_brackets_round_trip() {
             1.0,
             80,
         ));
-        song.tracks.push(track);
+        part.tracks.push(track);
     }
-    let from_midi = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+    let from_midi = Part::from_midi(&part.to_midi().unwrap()).unwrap();
     let text = from_midi.to_text();
-    let back = Song::from_text(&text).unwrap();
+    let back = Part::from_text(&text).unwrap();
     assert_eq!(back, from_midi, "{text}");
     let got: Vec<&str> = back.tracks.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(got, names);
 
-    let track = &Song::from_text("[track \"Pad [verb]\" ch2 prog5]  # strings\n")
+    let track = &Part::from_text("[track \"Pad [verb]\" ch2 prog5]  # strings\n")
         .unwrap()
         .tracks[0];
     assert_eq!((track.name.as_str(), track.channel), ("Pad [verb]", 2));
     assert_eq!(track.program, Some(5));
 
     for bad in ["[track \"Pad [verb]\" ch1", "[track \"Pad ch1]"] {
-        match Song::from_text(bad) {
+        match Part::from_text(bad) {
             Err(duet_core::Error::Parse { line: 1, .. }) => {}
             other => panic!("{bad}: expected a parse error on line 1, got {other:?}"),
         }
     }
 }
 
-fn notes_of(song: &Song) -> Vec<String> {
-    song.tracks[0]
+fn notes_of(part: &Part) -> Vec<String> {
+    part.tracks[0]
         .notes
         .iter()
         .map(|n| format!("{} {} {} {}", n.at, n.pitch, n.beats, n.vel))
@@ -632,8 +632,8 @@ fn same_pitch_notes_that_start_together_keep_their_lengths() {
         "1.1.0 C4 0 110\n1.1.0 C4 0.5 100\n1.1.0 C4 2 50\n",
     ] {
         let text = format!("[track \"P\" ch1]\n{lines}");
-        let song = Song::from_text(&text).unwrap();
-        let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+        let part = Part::from_text(&text).unwrap();
+        let back = Part::from_midi(&part.to_midi().unwrap()).unwrap();
         let mut got = notes_of(&back);
         got.sort();
         assert_eq!(
@@ -651,16 +651,16 @@ fn overlapping_same_pitch_notes_round_trip_but_nested_ones_are_refused() {
                 1.1.0 C4 1 80\n1.1.240 C4 1 90\n\
                 2.1.0 D4 2 80\n2.2.0 D4 1 90\n\
                 3.1.0 E4 1 80\n3.2.0 E4 0 90\n";
-    let song = Song::from_text(text).unwrap();
-    let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
-    assert_eq!(notes_of(&back), notes_of(&song));
+    let part = Part::from_text(text).unwrap();
+    let back = Part::from_midi(&part.to_midi().unwrap()).unwrap();
+    assert_eq!(notes_of(&back), notes_of(&part));
 
     // A note inside a longer note of the same pitch would come back changed, so writing
     // MIDI refuses it and names both notes.
     for inner in ["1.2.0 C4 0.5 100", "1.2.0 C4 0 100", "1.4.0 C4 0.5 100"] {
         let text = format!("[track \"P\" ch1]\n1.1.0 C4 4 80\n{inner}\n1.2.0 D4 0.5 70\n");
-        let song = Song::from_text(&text).unwrap();
-        let err = song.to_midi().unwrap_err().to_string();
+        let part = Part::from_text(&text).unwrap();
+        let err = part.to_midi().unwrap_err().to_string();
         assert!(
             err.contains("C4 at 1.2.0") || err.contains("C4 at 1.4.0"),
             "{err}"
@@ -669,7 +669,7 @@ fn overlapping_same_pitch_notes_round_trip_but_nested_ones_are_refused() {
     }
     // The same notes on different channels are separate notes and are fine.
     let text = "[track \"A\" ch1]\n1.1.0 C4 4 80\n[track \"B\" ch2]\n1.2.0 C4 0.5 100\n";
-    assert!(Song::from_text(text).unwrap().to_midi().is_ok());
+    assert!(Part::from_text(text).unwrap().to_midi().is_ok());
 }
 
 #[test]
@@ -679,8 +679,8 @@ fn black_keys_are_spelled_by_the_key_in_force() {
     // new key.
     let text = "key D major\nkey Bb major at 3.1.0\n\n[track \"P\" ch1]\n\
                 1.1.0 F#4 1 80\n2.1.0 A#4 1 80\n3.1.0 Bb4 1 80\n3.2.0 Eb4 1 80\n";
-    let song = Song::from_text(text).unwrap();
-    let back = Song::from_midi(&song.to_midi().unwrap()).unwrap();
+    let part = Part::from_text(text).unwrap();
+    let back = Part::from_midi(&part.to_midi().unwrap()).unwrap();
     assert_eq!(
         notes_of(&back),
         [
@@ -690,7 +690,7 @@ fn black_keys_are_spelled_by_the_key_in_force() {
             "3.2.0 Eb4 1 80"
         ]
     );
-    assert_eq!(back, stated(&song));
+    assert_eq!(back, stated(&part));
 }
 
 #[test]
@@ -726,7 +726,7 @@ fn six_accidental_keys_and_double_accidentals_keep_their_spelling_through_midi_t
             let pitch = duet_core::Pitch::new(*midi).unwrap();
             text.push_str(&format!("{}.1.0 {pitch} 1 80\n", i + 1));
         }
-        let back = Song::from_midi(&Song::from_text(&text).unwrap().to_midi().unwrap()).unwrap();
+        let back = Part::from_midi(&Part::from_text(&text).unwrap().to_midi().unwrap()).unwrap();
         let got: Vec<String> = back.tracks[0]
             .notes
             .iter()
@@ -740,8 +740,8 @@ fn six_accidental_keys_and_double_accidentals_keep_their_spelling_through_midi_t
             .collect();
         assert_eq!(midi, notes, "{key}: a note changed");
 
-        // The spelled song through MIDI again, the notes view and a song document: exact.
-        assert_eq!(Song::from_midi(&back.to_midi().unwrap()).unwrap(), back);
+        // The spelled part through MIDI again, the notes view and a part document: exact.
+        assert_eq!(Part::from_midi(&back.to_midi().unwrap()).unwrap(), back);
         let view = back.to_text();
         for name in spelled.split(' ') {
             assert!(
@@ -749,19 +749,19 @@ fn six_accidental_keys_and_double_accidentals_keep_their_spelling_through_midi_t
                 "{name} not in the view:\n{view}"
             );
         }
-        assert_eq!(Song::from_text(&view).unwrap(), back, "{view}");
+        assert_eq!(Part::from_text(&view).unwrap(), back, "{view}");
         check_document(&back);
     }
 
     // A hand-written Cb, B#, E#, Fb, double sharp or double flat keeps its spelling through
-    // the text and a document, in any key: the spelling is the song's, and MIDI does not
+    // the text and a document, in any key: the spelling is the part's, and MIDI does not
     // carry it.
     let text = "key C major\n\n[track \"P\" ch1]\n\
                 1.1.0 Cb5 1 80\n2.1.0 B#3 1 80\n3.1.0 E#4 1 80\n4.1.0 Fb4 1 80\n\
                 5.1.0 F##4 1 80\n6.1.0 Bbb3 1 80\n";
-    let song = stated(&Song::from_text(text).unwrap());
+    let part = stated(&Part::from_text(text).unwrap());
     assert_eq!(
-        notes_of(&song),
+        notes_of(&part),
         [
             "1.1.0 Cb5 1 80",
             "2.1.0 B#3 1 80",
@@ -771,22 +771,22 @@ fn six_accidental_keys_and_double_accidentals_keep_their_spelling_through_midi_t
             "6.1.0 Bbb3 1 80"
         ]
     );
-    let midi: Vec<u8> = song.tracks[0]
+    let midi: Vec<u8> = part.tracks[0]
         .notes
         .iter()
         .map(|n| n.pitch.midi())
         .collect();
     assert_eq!(midi, [71, 60, 65, 64, 67, 57]);
-    check_document(&song);
+    check_document(&part);
 }
 
 #[test]
 fn format_0_sequence_name_is_the_title() {
     let (bytes, _) = played_take(480, Format::SingleTrack);
-    let song = Song::from_midi(&bytes).unwrap();
-    assert_eq!(song.title.as_deref(), Some("Sketch in D"));
+    let part = Part::from_midi(&bytes).unwrap();
+    assert_eq!(part.title.as_deref(), Some("Sketch in D"));
     // The tracks split from the one MIDI track by channel have no names of their own.
-    let names: Vec<(&str, u8)> = song
+    let names: Vec<(&str, u8)> = part
         .tracks
         .iter()
         .map(|t| (t.name.as_str(), t.channel))
@@ -797,8 +797,8 @@ fn format_0_sequence_name_is_the_title() {
     );
     // Written as format 1, the title and names come back unchanged.
     assert_eq!(
-        Song::from_midi(&song.to_midi().unwrap()).unwrap(),
-        stated(&song)
+        Part::from_midi(&part.to_midi().unwrap()).unwrap(),
+        stated(&part)
     );
 }
 
@@ -817,9 +817,9 @@ fn names_that_are_not_utf8_are_read_with_replacement_characters() {
             ]),
         ],
     );
-    let song = Song::from_midi(&bytes).unwrap();
-    assert_eq!(song.title.as_deref(), Some("Caf\u{FFFD}"));
-    assert_eq!(song.tracks[0].name, "Pi\u{FFFD}no");
+    let part = Part::from_midi(&bytes).unwrap();
+    assert_eq!(part.title.as_deref(), Some("Caf\u{FFFD}"));
+    assert_eq!(part.tracks[0].name, "Pi\u{FFFD}no");
 }
 
 #[test]
@@ -832,7 +832,7 @@ fn header_lines_after_a_track_say_where_they_belong() {
         ("title \"Late\"", "title"),
     ] {
         let text = format!("[track \"P\" ch1]\n1.1.0 C4 1 80\n{line}\n");
-        match Song::from_text(&text) {
+        match Part::from_text(&text) {
             Err(duet_core::Error::Parse { line: 3, msg }) => {
                 assert!(msg.contains(&format!("'{kw}' is a header line")), "{msg}");
                 assert!(msg.contains("before the first [track]"), "{msg}");
@@ -852,20 +852,20 @@ fn on_grid(map: &duet_core::TimeMap, tick: u64, step: u64) -> bool {
 fn a_quantized_take_lies_on_its_grid() {
     for tpq in [96, 384, 480, 960] {
         let (bytes, _) = played_take(tpq, Format::Parallel);
-        let song = Song::from_midi(&bytes).unwrap();
-        let map = song.time_map().unwrap();
+        let part = Part::from_midi(&bytes).unwrap();
+        let map = part.time_map().unwrap();
         for grid in ["1/4", "1/8", "1/16", "1/8t", "1/16t"] {
             let grid: Grid = grid.parse().unwrap();
             let step = grid.step_ticks(tpq).unwrap();
-            let q = song.quantized(grid).unwrap();
+            let q = part.quantized(grid).unwrap();
             let case = format!("{grid} at {tpq} tpq");
 
             // Only notes move: everything else is as it was.
-            assert_eq!(q.tracks.len(), song.tracks.len(), "{case}");
-            assert_eq!(q.tempo_changes, song.tempo_changes, "{case}");
-            assert_eq!(q.time_changes, song.time_changes, "{case}");
-            assert_eq!(q.key_changes, song.key_changes, "{case}");
-            for (qt, t) in q.tracks.iter().zip(&song.tracks) {
+            assert_eq!(q.tracks.len(), part.tracks.len(), "{case}");
+            assert_eq!(q.tempo_changes, part.tempo_changes, "{case}");
+            assert_eq!(q.time_changes, part.time_changes, "{case}");
+            assert_eq!(q.key_changes, part.key_changes, "{case}");
+            for (qt, t) in q.tracks.iter().zip(&part.tracks) {
                 assert_eq!(
                     (&qt.name, qt.channel, qt.program),
                     (&t.name, t.channel, t.program)
@@ -909,7 +909,7 @@ fn a_quantized_take_lies_on_its_grid() {
 #[test]
 fn quantizing_rounds_to_the_nearest_step_and_keeps_collapsed_notes() {
     let eighths: Grid = "1/8".parse().unwrap();
-    let song = Song::from_text(
+    let part = Part::from_text(
         "tpq 480\ntime 4/4\n\n[track \"P\" ch1]\n\
          1.1.10 C4 0.48 80\n\
          1.2.120 D4 0.5 81\n\
@@ -918,7 +918,7 @@ fn quantizing_rounds_to_the_nearest_step_and_keeps_collapsed_notes() {
     )
     .unwrap();
     assert_eq!(
-        notes_of(&song.quantized(eighths).unwrap()),
+        notes_of(&part.quantized(eighths).unwrap()),
         [
             // Start and end each go to the nearest eighth.
             "1.1.0 C4 0.5 80",
@@ -930,12 +930,12 @@ fn quantizing_rounds_to_the_nearest_step_and_keeps_collapsed_notes() {
             "1.4.0 F4 0 83",
         ]
     );
-    // The song quantizing was called on is unchanged.
-    assert_eq!(notes_of(&song)[0], "1.1.10 C4 0.48 80");
+    // The part quantizing was called on is unchanged.
+    assert_eq!(notes_of(&part)[0], "1.1.10 C4 0.48 80");
 
     // A 6/8 bar cut short after three eighths: on a quarter grid its last step is one
     // eighth long, because the bar line is always on the grid.
-    let cut = Song::from_text(
+    let cut = Part::from_text(
         "tpq 480\ntime 6/8\ntime 4/4 at 1.4.0\n\n[track \"P\" ch1]\n\
          1.3.200 G4 1 84\n\
          1.2.10 A4 0.05 85\n",
@@ -955,8 +955,8 @@ fn quantizing_rounds_to_the_nearest_step_and_keeps_collapsed_notes() {
 #[test]
 fn a_grid_finer_than_the_resolution_is_refused_by_name() {
     let (bytes, _) = played_take(96, Format::Parallel);
-    let song = Song::from_midi(&bytes).unwrap();
-    let err = song
+    let part = Part::from_midi(&bytes).unwrap();
+    let err = part
         .quantized("1/5".parse().unwrap())
         .unwrap_err()
         .to_string();
@@ -971,12 +971,12 @@ fn no_read_write_or_conversion_quantizes_unasked() {
     // A played take is off every grid. Going through every format and back to MIDI keeps
     // it off the grid exactly, and quantizing a copy leaves the original as it was.
     let (bytes, expected) = played_take(480, Format::Parallel);
-    let song = Song::from_midi(&bytes).unwrap();
-    let before = song.clone();
-    let _ = song.quantized("1/16".parse().unwrap()).unwrap();
-    assert_eq!(song, before, "quantizing changed the song it was called on");
-    let through_all = Song::from_text(&song.to_text()).unwrap();
-    let through_all = Document::<Song>::read(
+    let part = Part::from_midi(&bytes).unwrap();
+    let before = part.clone();
+    let _ = part.quantized("1/16".parse().unwrap()).unwrap();
+    assert_eq!(part, before, "quantizing changed the part it was called on");
+    let through_all = Part::from_text(&part.to_text()).unwrap();
+    let through_all = Document::<Part>::read(
         &Document::new(Tool::new("duet", "test"), through_all)
             .write()
             .unwrap(),
@@ -1015,7 +1015,7 @@ fn track_ending_at(
     out
 }
 
-/// Witness for a song's end: a MIDI file's end of track survives MIDI → song → MIDI,
+/// Witness for a part's end: a MIDI file's end of track survives MIDI → part → MIDI,
 /// through text, JSON and TOML too, whether it falls on a bar line or inside a bar, at
 /// several resolutions and meters, and with the tracks ending at different ticks (the
 /// file's end is the latest). Every track of the written file ends there.
@@ -1047,15 +1047,15 @@ fn a_midi_files_end_of_track_survives() {
         );
         let bytes = save(Format::Parallel, tpq, vec![conductor, notes]);
 
-        let song = Song::from_midi(&bytes).unwrap();
-        let map = song.time_map().unwrap();
+        let part = Part::from_midi(&bytes).unwrap();
+        let map = part.time_map().unwrap();
         let want = map.position(file_end);
-        assert_eq!(song.end, Some(want), "tpq {tpq}, {num}/2^{den_power}");
-        assert!(song.to_text().contains(&format!("\nend {want}\n")));
+        assert_eq!(part.end, Some(want), "tpq {tpq}, {num}/2^{den_power}");
+        assert!(part.to_text().contains(&format!("\nend {want}\n")));
 
-        let from_text = Song::from_text(&song.to_text()).unwrap();
-        assert_eq!(from_text, song, "text");
-        check_document(&song);
+        let from_text = Part::from_text(&part.to_text()).unwrap();
+        assert_eq!(from_text, part, "text");
+        check_document(&part);
 
         let written = from_text.to_midi().unwrap();
         assert_eq!(
@@ -1065,37 +1065,37 @@ fn a_midi_files_end_of_track_survives() {
         );
         assert_eq!(events(&written).notes, events(&bytes).notes);
         assert_eq!(
-            Song::from_midi(&written).unwrap(),
-            song,
-            "MIDI → song → MIDI → song"
+            Part::from_midi(&written).unwrap(),
+            part,
+            "MIDI → part → MIDI → part"
         );
     }
 }
 
-/// A song that names an end keeps it through MIDI and back, when the end falls on a bar
+/// A part that names an end keeps it through MIDI and back, when the end falls on a bar
 /// line, inside a bar, and exactly where the last note ends: the first track holds only
-/// the conductor, ends after its last event, and so says where the song ends.
+/// the conductor, ends after its last event, and so says where the part ends.
 #[test]
-fn a_songs_end_survives_midi() {
+fn a_parts_end_survives_midi() {
     for end in ["3.1.0", "2.3.240", "2.2.0", "9.1.0"] {
         let text = format!(
             "tpq 480\ntempo 100\ntime 4/4\nend {end}\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n1.3.0 D4 1.5 80\n"
         );
-        let song = Song::from_text(&text).unwrap();
+        let part = Part::from_text(&text).unwrap();
         assert_eq!(
-            song.end.map(|e| e.to_string()),
+            part.end.map(|e| e.to_string()),
             Some(end.to_owned()),
             "{end}"
         );
-        let midi = song.to_midi().unwrap();
-        assert_eq!(Song::from_midi(&midi).unwrap(), song, "end {end}");
+        let midi = part.to_midi().unwrap();
+        assert_eq!(Part::from_midi(&midi).unwrap(), part, "end {end}");
     }
     // An end is read like any position: offsets past a beat or a bar carry on.
-    let song = Song::from_text("time 4/4\nend 2.4.960\n").unwrap();
-    assert_eq!(song.end.map(|e| e.to_string()).as_deref(), Some("3.2.0"));
+    let part = Part::from_text("time 4/4\nend 2.4.960\n").unwrap();
+    assert_eq!(part.end.map(|e| e.to_string()).as_deref(), Some("3.2.0"));
 }
 
-/// Anything past a song's end is refused by name, in every place a song is made or
+/// Anything past a part's end is refused by name, in every place a part is made or
 /// written, and never cut to fit: a note that ends past it, a control, a tempo, meter or
 /// key change, and a note that quantizing would push past it.
 #[test]
@@ -1104,83 +1104,83 @@ fn what_lies_past_the_end_is_refused_by_name_never_truncated() {
     let cases = [
         (
             "end 2.1.0\n\n[track \"P\" ch1]\n1.4.0 C4 1.5 80\n",
-            "track 'P': the C4 at 1.4.0, which ends at 2.1.240, lies past the song's end at 2.1.0",
+            "track 'P': the C4 at 1.4.0, which ends at 2.1.240, lies past the part's end at 2.1.0",
         ),
         (
             "end 2.1.0\n\n[track \"P\" ch1]\n2.1.1 cc64 0\n",
-            "track 'P': the cc64 at 2.1.1 lies past the song's end at 2.1.0",
+            "track 'P': the cc64 at 2.1.1 lies past the part's end at 2.1.0",
         ),
         (
             "end 2.1.0\n\n[track \"P\" ch1]\n3.1.0 bend 10\n",
-            "track 'P': the bend at 3.1.0 lies past the song's end",
+            "track 'P': the bend at 3.1.0 lies past the part's end",
         ),
         (
             "end 2.1.0\ntempo 90 at 2.2.0\n",
-            "the tempo 90 change at 2.2.0 lies past the song's end at 2.1.0",
+            "the tempo 90 change at 2.2.0 lies past the part's end at 2.1.0",
         ),
         (
             "end 2.1.0\ntime 3/4 at 3.1.0\n",
-            "the time 3/4 change at 3.1.0 lies past the song's end at 2.1.0",
+            "the time 3/4 change at 3.1.0 lies past the part's end at 2.1.0",
         ),
         (
             "end 2.1.0\nkey D minor at 2.1.1\n",
-            "the key D minor change at 2.1.1 lies past the song's end at 2.1.0",
+            "the key D minor change at 2.1.1 lies past the part's end at 2.1.0",
         ),
     ];
     for (body, want) in cases {
         let text = format!("{head}{body}");
-        let err = Song::from_text(&text).expect_err(want).to_string();
+        let err = Part::from_text(&text).expect_err(want).to_string();
         assert!(err.contains(want), "{err}\nshould say: {want}");
 
-        // The same song built in code is refused by MIDI, JSON's reader path and quantize.
-        let mut song =
-            Song::from_text(&format!("{head}{}", body.replacen("end 2.1.0\n", "", 1))).unwrap();
-        song.end = Some("2.1.0".parse().unwrap());
-        let err = song.to_midi().expect_err(want).to_string();
+        // The same part built in code is refused by MIDI, JSON's reader path and quantize.
+        let mut part =
+            Part::from_text(&format!("{head}{}", body.replacen("end 2.1.0\n", "", 1))).unwrap();
+        part.end = Some("2.1.0".parse().unwrap());
+        let err = part.to_midi().expect_err(want).to_string();
         assert!(err.contains(want), "MIDI: {err}");
-        let err = song.clone().normalize().expect_err(want).to_string();
+        let err = part.clone().normalize().expect_err(want).to_string();
         assert!(err.contains(want), "normalize: {err}");
     }
 
     // A note ending on the end is fine; quantizing it past the end is refused.
-    let song = Song::from_text(&format!(
+    let part = Part::from_text(&format!(
         "{head}end 2.1.0\n\n[track \"P\" ch1]\n1.4.250 C4 0.479 80\n"
     ))
     .unwrap();
-    let before = song.clone();
-    let err = song
+    let before = part.clone();
+    let err = part
         .quantized(Grid::new(4, false).unwrap())
         .expect_err("quantizing moves the note to 2.1.0 and gives it one step")
         .to_string();
     assert!(
-        err.contains("the C4 at 2.1.0, which ends at 2.2.0, lies past the song's end at 2.1.0"),
+        err.contains("the C4 at 2.1.0, which ends at 2.2.0, lies past the part's end at 2.1.0"),
         "{err}"
     );
-    assert_eq!(song, before, "never changed");
+    assert_eq!(part, before, "never changed");
 }
 
 /// With no end named, every writer states the default end: the text says `end`, and
 /// every MIDI track ends there. A MIDI file whose tracks each end at their last event
 /// names no end, so the default applies when it is read.
 #[test]
-fn a_song_with_no_end_states_its_default_end() {
-    let song = Song::from_text(
+fn a_part_with_no_end_states_its_default_end() {
+    let part = Part::from_text(
         "tpq 480\ntempo 90 at 1.3.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n2.1.0 cc64 0\n",
     )
     .unwrap();
-    assert_eq!(song.end, None);
+    assert_eq!(part.end, None);
     assert!(
-        song.to_text().contains("\nend 3.1.0\n"),
+        part.to_text().contains("\nend 3.1.0\n"),
         "{}",
-        song.to_text()
+        part.to_text()
     );
-    let midi = song.to_midi().unwrap();
+    let midi = part.to_midi().unwrap();
     assert_eq!(
         ends_of_track(&midi),
         vec![3840, 3840],
         "every track ends at 3.1.0"
     );
-    assert_eq!(Song::from_midi(&midi).unwrap(), stated(&song));
+    assert_eq!(Part::from_midi(&midi).unwrap(), stated(&part));
 
     // A file from another tool, each track ending at its last event: no end, so the
     // default applies, and the music is the same.
@@ -1189,13 +1189,13 @@ fn a_song_with_no_end_states_its_default_end() {
         480,
         vec![track(vec![(0, on(0, 60, 80)), (480, off(0, 60, true))])],
     );
-    let read = Song::from_midi(&bytes).unwrap();
+    let read = Part::from_midi(&bytes).unwrap();
     assert_eq!(read.end, None);
     assert_eq!(read.stated_end().unwrap().to_string(), "2.1.0");
 
-    // The default never comes before a tempo, meter or key change, so a song that names
+    // The default never comes before a tempo, meter or key change, so a part that names
     // no end is never refused for one.
-    let late = Song::from_text("tempo 90 at 9.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n").unwrap();
+    let late = Part::from_text("tempo 90 at 9.1.0\n\n[track \"P\" ch1]\n1.1.0 C4 1 80\n").unwrap();
     let midi = late.to_midi().unwrap();
     assert_eq!(ends_of_track(&midi), vec![8 * 1920, 8 * 1920]);
 }
@@ -1226,9 +1226,9 @@ fn a_key_with_a_mode_round_trips_through_text_a_document_and_midi() {
     let text = "key D dorian\nkey E phrygian at 3.1.0\nkey G mixolydian at 4.1.0\n\
                 key F lydian at 5.1.0\nkey B locrian at 6.1.0\nkey Bb major at 7.1.0\n\n\
                 [track \"P\" ch1]\n1.1.0 D4 1 80\n7.1.0 Bb4 1 80\n";
-    let song = Song::from_text(text).unwrap();
-    assert_eq!(song.key.unwrap().to_string(), "D dorian");
-    let keys: Vec<String> = song.key_changes.iter().map(|c| c.key.to_string()).collect();
+    let part = Part::from_text(text).unwrap();
+    assert_eq!(part.key.unwrap().to_string(), "D dorian");
+    let keys: Vec<String> = part.key_changes.iter().map(|c| c.key.to_string()).collect();
     assert_eq!(
         keys,
         [
@@ -1239,19 +1239,19 @@ fn a_key_with_a_mode_round_trips_through_text_a_document_and_midi() {
             "Bb major"
         ]
     );
-    let song = stated(&song);
+    let part = stated(&part);
 
-    let text = song.to_text();
+    let text = part.to_text();
     assert!(text.contains("key D dorian\n"), "{text}");
-    assert_eq!(Song::from_text(&text).unwrap(), song, "text round-trip");
-    let doc = Document::new(Tool::new("duet", "test"), song.clone())
+    assert_eq!(Part::from_text(&text).unwrap(), part, "text round-trip");
+    let doc = Document::new(Tool::new("duet", "test"), part.clone())
         .write()
         .unwrap();
     assert!(doc.contains("\"key\": \"D dorian\""), "{doc}");
-    check_document(&song);
+    check_document(&part);
 
     // MIDI holds each key's own signature, and a duet:key event beside each mode.
-    let midi = song.to_midi().unwrap();
+    let midi = part.to_midi().unwrap();
     let ev = events(&midi);
     assert_eq!(
         ev.keys,
@@ -1275,7 +1275,7 @@ fn a_key_with_a_mode_round_trips_through_text_a_document_and_midi() {
         ],
         "major and minor need no text event"
     );
-    assert_eq!(Song::from_midi(&midi).unwrap(), song, "MIDI round-trip");
+    assert_eq!(Part::from_midi(&midi).unwrap(), part, "MIDI round-trip");
 }
 
 #[test]
@@ -1292,8 +1292,8 @@ fn a_duet_key_event_that_disagrees_with_the_signature_is_ignored() {
             (480, off(0, 62, false)),
         ])],
     );
-    let song = Song::from_midi(&bytes).unwrap();
-    assert_eq!(song.key.unwrap().to_string(), "D major");
+    let part = Part::from_midi(&bytes).unwrap();
+    assert_eq!(part.key.unwrap().to_string(), "D major");
 
     // The same when only the minor flag moved: D dorian edited to A minor keeps no sharps.
     let bytes = save(
@@ -1306,8 +1306,8 @@ fn a_duet_key_event_that_disagrees_with_the_signature_is_ignored() {
             (480, off(0, 62, false)),
         ])],
     );
-    let song = Song::from_midi(&bytes).unwrap();
-    assert_eq!(song.key.unwrap().to_string(), "A minor");
+    let part = Part::from_midi(&bytes).unwrap();
+    assert_eq!(part.key.unwrap().to_string(), "A minor");
 }
 
 #[test]

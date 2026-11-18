@@ -53,7 +53,7 @@ string_schema!(
     Position,
     "Position",
     POSITION,
-    "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the song's ticks. bar.beat alone is tick 0."
+    "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the part's ticks. bar.beat alone is tick 0."
 );
 string_schema!(
     TimeSig,

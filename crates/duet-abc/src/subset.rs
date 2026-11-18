@@ -3,7 +3,7 @@
 //!
 //! A refused construct is valid ABC that this version does not read. Each has a stable
 //! name, which is the `construct` of [`Error::Unsupported`](crate::Error::Unsupported), and
-//! a reason. A notation-only construct is read and dropped: it changes nothing a `Song`
+//! a reason. A notation-only construct is read and dropped: it changes nothing a `Part`
 //! holds, and [`check`](crate::check) lists every one with its line.
 
 use crate::error::Error;
@@ -37,9 +37,9 @@ refusals! {
     CHORD_SYMBOL = "chord symbol":
         "abc2midi turns chord symbols into accompaniment notes";
     LYRICS_ALIGNED = "lyrics (w:)":
-        "a Song has no lyrics yet";
+        "a Part has no lyrics yet";
     LYRICS_AFTER = "lyrics (W:)":
-        "a Song has no lyrics yet";
+        "a Part has no lyrics yet";
     HORNPIPE = "R:hornpipe":
         "abc2midi plays it swung";
     PARTS = "parts (P:)":
@@ -49,7 +49,7 @@ refusals! {
     MULTI_VOICE_REPEAT = "repeat without a start in a multi-voice tune":
         "abc2midi does not support it";
     FREE_METER = "free meter (M:none, or no M:)":
-        "a Song has no free meter; the standard reads a tune with no M: as free meter (§3.1.6)";
+        "a Part has no free meter; the standard reads a tune with no M: as free meter (§3.1.6)";
     UNIT_TEMPO = "Q: unit-length tempo":
         "deprecated: the standard reads it as unit lengths per minute (§10.1), abc2midi as quarters";
     PROPAGATE = "%%propagate-accidentals <not|octave>":
@@ -65,7 +65,7 @@ refusals! {
     CLEF = "clef, transpose or octave property":
         "each changes pitch on playback";
     MULTI_VOICE_KEY = "[K:] inside a multi-voice tune":
-        "it is per-voice in ABC, but song-wide in a Song";
+        "it is per-voice in ABC, but part-wide in a Part";
     MACRO = "macro (m:)":
         "text substitution, a v2 candidate";
     USER_SYMBOL = "user symbol (U:)":
@@ -83,9 +83,9 @@ refusals! {
     OLD_CHORD = "old chord syntax +CEG+":
         "it is deprecated, and clashes with +deco+";
     MULTI_VOICE_CHANGE = "[M:] or [Q:] inside a multi-voice tune":
-        "a Song's meter and tempo are song-wide; the standard repeats inline fields per voice (§7.3)";
+        "a Part's meter and tempo are part-wide; the standard repeats inline fields per voice (§7.3)";
     OVERLAY = "voice overlay (&)":
-        "a Song track holds one line of notes or chords; splitting into voices is a v2 candidate";
+        "a Part track holds one line of notes or chords; splitting into voices is a v2 candidate";
     SYMBOL_LINE = "symbol line (s:)":
         "it carries decorations and chord symbols, which are refused";
     COMPLEX_METER = "complex meter (M:(2+3+2)/8)":
@@ -93,10 +93,10 @@ refusals! {
     TRIPLE_REPEAT = "repeat played more than twice (|::, ::|, or a third ending)":
         "abc2midi plays a third pass; the standard ties more than two endings to P: (§4.10), a v2 candidate";
     LATE_PROGRAM = "%%MIDI program or channel after a voice's first note":
-        "a Song track has one program and channel from its start";
+        "a Part track has one program and channel from its start";
 }
 
-/// Notation-only constructs: accepted with a notice, and not carried into the song.
+/// Notation-only constructs: accepted with a notice, and not carried into the part.
 pub(crate) const SLUR: &str = "slur";
 pub(crate) const INFO_FIELD: &str = "information field";
 pub(crate) const ANNOTATION: &str = "annotation";

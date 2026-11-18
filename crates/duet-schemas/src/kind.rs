@@ -16,7 +16,7 @@ use crate::Version;
 /// is refused by name rather than dropped. Its `JsonSchema` is the committed schema's body, so it
 /// must describe what the type writes: derived, or written by hand for a type serialized by hand.
 pub trait Kind: Serialize + DeserializeOwned + JsonSchema {
-    /// The kind's name, lowercase with hyphens: `song`, `drum-grid`.
+    /// The kind's name, lowercase with hyphens: `part`, `drum-grid`.
     const NAME: &'static str;
     /// The version this build reads up to and writes.
     const VERSION: Version;

@@ -374,7 +374,7 @@ impl FromStr for Key {
 
 string_serde!(Key);
 
-/// One stretch of the song in a single time signature.
+/// One stretch of the part in a single time signature.
 #[derive(Debug, Clone, Copy)]
 struct Segment {
     start_tick: u64,

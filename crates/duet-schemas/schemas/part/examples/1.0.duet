@@ -1,7 +1,7 @@
 {
-  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/part/1.0.json",
   "duet": {
-    "kind": "song",
+    "kind": "part",
     "version": "1.0",
     "tool": {
       "name": "duet",

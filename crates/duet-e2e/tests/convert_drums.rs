@@ -31,7 +31,7 @@ fn applied(dir: &Path, name: &str, text: &Path) -> PathBuf {
     doc
 }
 
-/// A song's notes text from a file, read into a song document with `duet apply`.
+/// A part's notes text from a file, read into a part document with `duet apply`.
 fn notes_of(dir: &Path, name: &str, path: &Path) -> PathBuf {
     notes_doc(dir, name, &std::fs::read_to_string(path).expect("notes"))
 }
@@ -45,7 +45,7 @@ fn convert_reads_every_grid_as_drums_render_does() {
     for grid in grids(&dir) {
         let stem = grid.file_stem().and_then(|n| n.to_str()).expect("a name");
         // A .duet from convert keeps the grid (a drum-grid document); `drums render` makes a
-        // song, so the two are compared on MIDI, by name and on standard output. (ABC refuses
+        // part, so the two are compared on MIDI, by name and on standard output. (ABC refuses
         // a drum part.)
         for (ext, to) in [("mid", None), ("-", Some("midi"))] {
             let (a, b) = if ext == "-" {
@@ -83,7 +83,7 @@ fn convert_reads_every_grid_as_drums_render_does() {
 
 /// A grid's text keeps the `map gm` rule as `duet apply` reads it: a config that moves gm lanes
 /// does not move them in text, the move is said on standard error, and the alias the config
-/// adds still reads. `convert` and `drums render` then make the same song of the document.
+/// adds still reads. `convert` and `drums render` then make the same part of the document.
 #[test]
 fn convert_reads_drums_text_under_the_map_gm_rule() {
     let dir = scratch("gm");
@@ -141,18 +141,18 @@ fn convert_reads_drums_text_under_the_map_gm_rule() {
 
 /// Runs `convert` and `drums read` with the same arguments and checks they agree: the
 /// same exit, the same standard error, and the same bytes written.
-fn same_as_drums_read(dir: &Path, song: &Path, out_name: &str, flags: &[&str]) -> Output {
+fn same_as_drums_read(dir: &Path, part: &Path, out_name: &str, flags: &[&str]) -> Output {
     let a = dir.join(format!("convert-{out_name}"));
     let b = dir.join(format!("read-{out_name}"));
     let _ = std::fs::remove_file(&a);
     let _ = std::fs::remove_file(&b);
-    let mut conv_args = vec!["convert", s(song), s(&a)];
+    let mut conv_args = vec!["convert", s(part), s(&a)];
     conv_args.extend(flags);
-    let mut read_args = vec!["drums", "read", s(song), s(&b)];
+    let mut read_args = vec!["drums", "read", s(part), s(&b)];
     read_args.extend(flags);
     let conv = duet(dir, &conv_args);
     let read = duet(dir, &read_args);
-    let what = format!("{} to {out_name} {flags:?}", song.display());
+    let what = format!("{} to {out_name} {flags:?}", part.display());
     assert_eq!(conv.status.code(), read.status.code(), "{what}: exit");
     // The two name their own output files; nothing else may differ.
     let conv_err = String::from_utf8_lossy(&conv.stderr).replace(s(&a), "OUT");
@@ -169,7 +169,7 @@ fn same_as_drums_read(dir: &Path, song: &Path, out_name: &str, flags: &[&str]) -
     conv
 }
 
-/// Equivalence, writing: for the golden songs with a drum track, and a song with other
+/// Equivalence, writing: for the golden parts with a drum track, and a part with other
 /// tracks and controls, `convert … g.duet --grid` writes the same drum-grid document and the
 /// same standard error as `drums read`, with every flag.
 #[test]
@@ -187,7 +187,7 @@ fn convert_writes_every_grid_as_drums_read_does() {
         &duet(&dir, &["convert", s(&golden("groove.mid")), s(&doc)]),
         "groove.duet",
     );
-    let songs: [PathBuf; 4] = [
+    let parts: [PathBuf; 4] = [
         golden("groove.mid"),
         notes_of(&dir, "groove-notes.notes", &golden("groove.notes")),
         doc,
@@ -200,9 +200,9 @@ fn convert_writes_every_grid_as_drums_read_does() {
         &["--grid", "1/16", "--track", "Kit"],
     ];
     let mut written = 0;
-    for song in &songs {
+    for part in &parts {
         for flags in flag_sets {
-            if same_as_drums_read(&dir, song, "g.duet", flags)
+            if same_as_drums_read(&dir, part, "g.duet", flags)
                 .status
                 .success()
             {
@@ -212,7 +212,7 @@ fn convert_writes_every_grid_as_drums_read_does() {
     }
     // groove's track is "Drums", so --track Kit is refused for it, the same both ways.
     assert_eq!(written, 3 * 3 + 4);
-    let out = same_as_drums_read(&dir, &songs[3], "g.duet", &["--grid", "1/16"]);
+    let out = same_as_drums_read(&dir, &parts[3], "g.duet", &["--grid", "1/16"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("left out 1 other track(s), and 1 control(s)"),
@@ -222,7 +222,7 @@ fn convert_writes_every_grid_as_drums_read_does() {
 }
 
 /// `convert` refuses what `drums read` refuses, with the same words: a note off the grid,
-/// a key no lane plays, a hit past --bars, and a song with no drum track. A velocity off the
+/// a key no lane plays, a hit past --bars, and a part with no drum track. A velocity off the
 /// levels is no refusal for either, since a drum-grid document keeps it exactly: the two
 /// agree on it, and the grid's view is what refuses it, until --snap-levels.
 #[test]
@@ -251,8 +251,8 @@ fn convert_refuses_what_drums_read_refuses() {
         ),
     ];
     for (name, text, written) in cases {
-        let song = notes_doc(&dir, &format!("{name}.notes"), text);
-        let conv = same_as_drums_read(&dir, &song, "g.duet", &["--grid", "1/16", "--bars", "1"]);
+        let part = notes_doc(&dir, &format!("{name}.notes"), text);
+        let conv = same_as_drums_read(&dir, &part, "g.duet", &["--grid", "1/16", "--bars", "1"]);
         assert_eq!(conv.status.success(), written, "{name}");
     }
     let off_level = dir.join("off-level.duet");
@@ -394,16 +394,16 @@ fn a_grid_text_on_standard_input_and_output() {
         &["drums", "render", "-", "-"],
         &applied_out.stdout,
     );
-    ok(&o, "a grid to a song");
-    let song = duet_with(&dir, &none, &["view", "-", "--as", "notes"], &o.stdout);
-    ok(&song, "the song's view");
+    ok(&o, "a grid to a part");
+    let part = duet_with(&dir, &none, &["view", "-", "--as", "notes"], &o.stdout);
+    ok(&part, "the part's view");
     let want = std::fs::read(golden("groove.notes")).expect("golden");
-    let got = String::from_utf8(song.stdout).expect("utf-8");
+    let got = String::from_utf8(part.stdout).expect("utf-8");
     let got = got.split_once('\n').map_or("", |(_, rest)| rest);
     assert_eq!(
         got.replace("end 3.1.0\n", ""),
         String::from_utf8(want).expect("utf-8"),
-        "the grid as a song"
+        "the grid as a part"
     );
 
     // A grid's text in, a document out: the drum-grid document `drums snap` writes.

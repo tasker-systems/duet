@@ -217,9 +217,9 @@ fn analysis_of(take: &[f32], given: &Given, reader: Reader) -> Analysis {
     let timing = estimate(&events, RATE, given).unwrap();
     let mut captured = assemble(&events, RATE, &timing, None, &Kind::Melody).unwrap();
     let ms_per_quarter = 1000.0 * timing.beat_period_frames / f64::from(RATE);
-    let q = quantize_apart(&captured.song, "1/16".parse().unwrap(), &Kind::Melody).unwrap();
+    let q = quantize_apart(&captured.part, "1/16".parse().unwrap(), &Kind::Melody).unwrap();
     captured.analysis.offsets =
-        quantize_offsets(&captured.song, &q.song, q.grid, ms_per_quarter).unwrap();
+        quantize_offsets(&captured.part, &q.part, q.grid, ms_per_quarter).unwrap();
     captured.analysis.grid = Some(q.grid);
     captured.analysis.reading = Some(reading);
     captured.analysis.take = digester.finish();

@@ -7,20 +7,20 @@ in ticks and note numbers (midicsv). **duet** is the tool for that. Its first fo
 **notefmt**, turns a MIDI file into one readable note per line, in bars, beats and note
 names, and turns it back into MIDI without losing a tick. Its second, the **drum grid**,
 writes a drum part as one row per drum and one column per step. It also reads and writes
-**ABC**, the shared score format, through the part of ABC a song can hold exactly, and
+**ABC**, the shared score format, through the part of ABC a part can hold exactly, and
 refuses the rest by name.
 
 The workspace is split by domain:
 
 | Crate | Holds |
 |---|---|
-| `duet-core` | the `Song` every format converts through, quantizing, and the notefmt text |
+| `duet-core` | the `Part` every format converts through, quantizing, and the notefmt text |
 | `duet-midi` | reading and writing Standard MIDI Files |
-| `duet-drums` | the drum grid, its lane maps, and grid ⇄ `Song` |
-| `duet-abc` | a subset of ABC 2.1 ⇄ `Song`, and the corpus that checks it against abc2midi |
-| `duet-play` | a `Song` as timed MIDI events, and a SoundFont synth that renders them |
+| `duet-drums` | the drum grid, its lane maps, and grid ⇄ `Part` |
+| `duet-abc` | a subset of ABC 2.1 ⇄ `Part`, and the corpus that checks it against abc2midi |
+| `duet-play` | a `Part` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
-| `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Song` and score |
+| `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Part` and score |
 | `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, and the journal's kinds and events |
 | `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
 | `duet-cli` | the `duet` binary |
@@ -28,19 +28,19 @@ The workspace is split by domain:
 ## How the formats fit together
 
 **ABC is a score, and notefmt is a performance.** They are different kinds of text, and the
-`Song` sits between them. Every format converts through one in-memory `Song`: notes at
+`Part` sits between them. Every format converts through one in-memory `Part`: notes at
 bar.beat.tick positions with exact tick lengths, velocities, channels, programs, controls,
-and tempo, meter and key changes. notefmt is the text form that shows a `Song` exactly. The
+and tempo, meter and key changes. notefmt is the text form that shows a `Part` exactly. The
 drum grid and ABC are readable, grid-shaped views of part of one, for discussing it.
 
 ```mermaid
 flowchart LR
-    MIDI["MIDI (.mid)"] <-->|lossless| Song(("Song"))
-    Song <-->|lossless| TXT["notefmt (.notes)<br/>a performance, exact"]
-    Song <-->|lossless| DOC["a song document (.duet)<br/>the Song, versioned"]
-    Song <-->|"a drum track on its grid"| DRUMS[".drums<br/>a drum part"]
-    Song <-->|"a score-shaped song"| ABC[".abc<br/>a melodic score"]
-    Q["duet song quantize<br/>(an explicit step)"] -.->|"makes a played take score-shaped"| Song
+    MIDI["MIDI (.mid)"] <-->|lossless| Part(("Part"))
+    Part <-->|lossless| TXT["notefmt (.notes)<br/>a performance, exact"]
+    Part <-->|lossless| DOC["a part document (.duet)<br/>the Part, versioned"]
+    Part <-->|"a drum track on its grid"| DRUMS[".drums<br/>a drum part"]
+    Part <-->|"a score-shaped part"| ABC[".abc<br/>a melodic score"]
+    Q["duet part quantize<br/>(an explicit step)"] -.->|"makes a played take score-shaped"| Part
 ```
 
 - **notefmt holds whatever MIDI holds that duet keeps.** A note can start 10 ticks late, last
@@ -51,12 +51,12 @@ flowchart LR
 - **ABC holds a score.** Lengths are fractions of a unit note, bars are full, pitches are
   spelled against a key, and velocity is one of eight dynamics. ABC also carries notation a
   performance has no use for: repeats, slurs, beaming, annotations. It is the format people
-  and LLMs already read and talk about as music. ABC → `Song` → ABC keeps every note of the
+  and LLMs already read and talk about as music. ABC → `Part` → ABC keeps every note of the
   subset duet reads; notation-only marks are listed and dropped, and repeats come back written
   out.
-- **Writing ABC works only for a song that is already score-shaped.** A played take is
+- **Writing ABC works only for a part that is already score-shaped.** A played take is
   refused by name, naming the note, and never snapped quietly. Quantizing is a step you
-  choose: `duet song quantize`, then `duet abc write`.
+  choose: `duet part quantize`, then `duet abc write`.
 - **The drum grid is the same idea for drums**, which ABC refuses. ABC covers pitched lines.
 
 | | notefmt `.notes` | `.drums` | `.abc` |
@@ -64,7 +64,7 @@ flowchart LR
 | What it is | a performance, exact | a drum part on a step grid | a melodic score |
 | Unit | ticks | steps | fractions of a note |
 | Velocity | any, 1 to 127 | three levels as text (any in a drum-grid `.duet`) | eight dynamics |
-| Lossless with `Song` | yes | for what fits the grid | for the subset |
+| Lossless with `Part` | yes | for what fits the grid | for the subset |
 | For | capture, DAWs, exact edits, diffs | discussing a groove | discussing and sharing a tune |
 
 notefmt is also where anything is checked exactly. The ABC tests compare in it: abc2midi's
@@ -102,46 +102,46 @@ The full example is [samples/sketch.notes](samples/sketch.notes).
 ```sh
 cargo install --path crates/duet-cli
 
-duet convert take.mid take.duet                  # MIDI to a song document
+duet convert take.mid take.duet                  # MIDI to a part document
 duet convert take.duet take.mid                  # and back
 duet view take.mid > take.notes                  # MIDI to notefmt text, a view
 duet apply take.notes -o take.duet               # text to a document
-duet song show take.duet                         # print as text
-duet song quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
+duet part show take.duet                         # print as text
+duet part quantize take.mid take-q.mid --grid 1/16   # a copy snapped to sixteenths
 ```
 
 **A file's envelope means the same to every command.** A `.duet` file is a duet document,
 read by its envelope: the kind it names decides what it is, never the file's name, so a
-command that reads a song refuses a document of another kind, naming the kind. `.mid`
+command that reads a part refuses a document of another kind, naming the kind. `.mid`
 (`.midi`, `.smf`) and `.abc` are the outside formats, read and written by their names. No
 other name means a format, and `--from` and `--to` name one (`duet`, `midi` or `abc`). notefmt
 text and a drum grid's text are [views](#views-duet-view-and-duet-apply) of a document: only
 `duet view` writes them and only `duet apply` reads them. Any other command refuses a `.notes`,
 `.drums` or `.txt` name, or any name that is not a format's, pointing at `duet apply <file> -o
 <new.duet>`. `.json`, `.toml`, `.drums.json` and `.drums.toml` are no longer read or written: a
-song document's body is what a song's `.json` held. Use `-` for standard input or output.
+part document's body is what a part's `.json` held. Use `-` for standard input or output.
 Standard input is read by what it holds: a document when its first non-blank byte is `{`, MIDI
 when it starts with `MThd`, and ABC with `--from abc`; text there is refused, pointing at
 `duet apply - -o -`. Standard output is a document unless `--to` names another format (`abc
-render` writes MIDI, and `song show` prints notefmt text), so one command pipes into the next:
+render` writes MIDI, and `part show` prints notefmt text), so one command pipes into the next:
 
 ```sh
 duet apply sketch.notes -o - | duet play -       # play a view's text, no file in between
 ```
 
-`convert` reads and writes [drum-grid documents](#drum-grids) too; writing one from a song needs
+`convert` reads and writes [drum-grid documents](#drum-grids) too; writing one from a part needs
 `--grid`.
 
-**The `song` kind is to be renamed `part`** (owner, 2026-11-17): a code change still to come
-renames the kind, its schema and its messages. Until then duet reads and writes `song` 1.0 as
-described here ([the documents design](docs/superpowers/specs/2026-11-15-duet-documents-design.md)).
+**A part holds one voice, line or groove** (notes, or a drum track): `part` 1.0, as
+[the documents design](docs/superpowers/specs/2026-11-15-duet-documents-design.md#part-10)
+describes it. The name `song` is kept for the piece a part belongs to, a kind still to come.
 
-**A document says where its song came from.** A song imported from ABC or MIDI records it in
+**A document says where its part came from.** A part imported from ABC or MIDI records it in
 the envelope's `from`: `{"format": "midi"}`, or for ABC the tune's `X:` number and every
 notation-only construct the reader read but did not carry (a slur, an annotation), each at its
-line and column, as `duet abc check` lists them. The provenance follows the song: a `.duet`
-read and written again keeps its `from` unchanged, and so does `song quantize`. Going out to
-ABC or MIDI and in again replaces it, since that import is the song's new provenance. A
+line and column, as `duet abc check` lists them. The provenance follows the part: a `.duet`
+read and written again keeps its `from` unchanged, and so does `part quantize`. Going out to
+ABC or MIDI and in again replaces it, since that import is the part's new provenance. A
 document `duet apply -o` makes from a view has none.
 
 ### Views: `duet view` and `duet apply`
@@ -151,9 +151,9 @@ and `duet apply` reads an edited one back: a working surface a person or an agen
 it plays as intended.
 
 ```sh
-duet view take.duet > take.notes                          # a song's notes view
+duet view take.duet > take.notes                          # a part's notes view
 duet view beat.duet -o beat.drums                         # a drum grid's grid view
-duet view take.duet --as grid --grid 1/16 > kit.drums     # one drum track of a song, as a grid
+duet view take.duet --as grid --grid 1/16 > kit.drums     # one drum track of a part, as a grid
 duet apply take.notes --onto take.duet                    # read the edited view back
 duet apply kit.drums --onto take.duet                     # only the drum track changes
 duet apply old.notes -o old.duet                          # a lossless view into a new document
@@ -161,46 +161,46 @@ duet apply old.notes -o old.duet                          # a lossless view into
 
 | View | Of | Drops |
 |---|---|---|
-| `notes` | a song | nothing: every field of song 1.0, normalized, with its end stated |
+| `notes` | a part | nothing: every field of part 1.0, normalized, with its end stated |
 | `grid` | a drum grid | nothing, while every velocity is 0 or one of its three levels |
-| `grid` | one drum track of a song, at a step | everything but that track's starts and velocities |
+| `grid` | one drum track of a part, at a step | everything but that track's starts and velocities |
 
 Every view drops the envelope's `tool` and `from`, and shows its `statements` as `# ` comments
 under the header. Comments added to a view are not read back. A velocity off the levels is
 refused, naming its lane, bar and step, unless `--snap-levels` shows it snapped.
 
 **The header line** names the view and the document it came from, so a view reads back without
-a file name: `# duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41`, or `# duet grid v1 of song 1.0
+a file name: `# duet notes v1 of part 1.0 from 3f9a1c0d5e2b7a41`, or `# duet grid v1 of part 1.0
 track "Drums" step 1/16 from …` for a partial view. The digest is a 64-bit FNV-1a of the source
 document's body: `apply --onto` refuses a document changed since the view was rendered, naming
 both digests, unless `--force`. A newer view version or a schema version this duet does not read
 is refused by name. Today's `# notefmt v1` and `# notefmt drums v1` lines read as `notes v1 of
-song 1.0` and `grid v1 of drum-grid 1.0`, so every `.notes` and `.drums` file applies. A view
+part 1.0` and `grid v1 of drum-grid 1.0`, so every `.notes` and `.drums` file applies. A view
 with no header needs `--as notes` or `--as grid`.
 
 **Applying onto the source** goes cell by cell, with no ids. A lossless view replaces the body
-and keeps the source's envelope (`from` and `statements`). A grid view of a song changes only the
+and keeps the source's envelope (`from` and `statements`). A grid view of a part changes only the
 drum track it names: an unchanged cell keeps its note exactly, its length and velocity (a
 velocity shown snapped included); a changed level sets that note's velocity; a new hit is a note
 one step long; an emptied cell removes the note. A conductor line (tempo, meter, key, end), the
 step or the channel changed in a partial view, and a lane or bar added or removed there, are
-refused by name: change the conductor in the notes view, which shows the whole song. A lossy view
+refused by name: change the conductor in the notes view, which shows the whole part. A lossy view
 makes no document of its own: `-o` refuses it, naming `--onto`.
 
 **`view` and `apply` are the one way to text.** `--from text`, `--to text`, `--from drums` and
 `--to drums` were removed: clap refuses each, pointing here. A one-shot pipes instead:
-`duet apply x.notes -o - | duet play -`. `duet song show` still prints a song as notefmt text,
+`duet apply x.notes -o - | duet play -`. `duet part show` still prints a part as notefmt text,
 with no header, for reading.
 
 ### The text format
 
 **Header**, before the first track. Every line is optional; the defaults are 480 ticks
 per quarter, 120 bpm and 4/4. A header line after a `[track]` line is an error: tempo, meter and
-key are the whole song's, so they are never written inside a track.
+key are the whole part's, so they are never written inside a track.
 
 | Line | Meaning |
 | --- | --- |
-| `title "Name"` | Song name: the MIDI sequence name (see below) |
+| `title "Name"` | Part name: the MIDI sequence name (see below) |
 | `tpq 480` | Ticks per quarter note: the file's resolution |
 | `tempo 92` | Tempo at the start, in quarter notes per minute |
 | `time 6/8` | Time signature at the start |
@@ -208,7 +208,7 @@ key are the whole song's, so they are never written inside a track.
 | `tempo 96 at 9.1.0` | Tempo change |
 | `time 3/4 at 17.1.0` | Time signature change |
 | `key A minor at 33.1.0` | Key change |
-| `end 41.1.0` | Where the song ends, when it says (see below) |
+| `end 41.1.0` | Where the part ends, when it says (see below) |
 
 **Tracks** start with `[track "Name" ch1 prog0]`: a name, a MIDI channel from 1 to 16 and
 optionally the General MIDI program (0 to 127) at the start. Then one event per line:
@@ -236,25 +236,25 @@ optionally the General MIDI program (0 to 127) at the start. Then one event per 
   fraction like `1/3` for a triplet.
 - Lines starting with `#` are comments, and so is anything after a word that starts with `#`.
 
-### Where a song ends
+### Where a part ends
 
-A song names its end with `end`, a position like any other: `end 9.1.0` is the bar line
+A part names its end with `end`, a position like any other: `end 9.1.0` is the bar line
 before bar 9, and `end 8.3.0` stops halfway through bar 8, for a pickup ending. Every format
-keeps it: the header line in text and drum grids, `end` in a song document's body, and MIDI's
+keeps it: the header line in text and drum grids, `end` in a part document's body, and MIDI's
 end of track, where every track ends.
 
 **Every file `duet` writes states its end**, so a file shared between people means the same
 on every machine, whatever defaults each has set.
 
 - A note may end exactly on the end. Anything past it is refused, naming it and the end:
-  `track 'Piano': the D4 at 8.4.0, which ends at 9.1.240, lies past the song's end at 9.1.0`.
+  `track 'Piano': the D4 at 8.4.0, which ends at 9.1.240, lies past the part's end at 9.1.0`.
   That goes for notes, controls and tempo, meter or key changes, when reading, writing MIDI
   and quantizing. Nothing is cut to fit.
-- A song that names no end gets the default: the bar line after the last bar holding a
+- A part that names no end gets the default: the bar line after the last bar holding a
   note or control, and never before a tempo, meter or key change. `duet.toml` can change
   the default (see [Configuration](#configuration)). A file written from it states that
   end, so it reads the same wherever it goes.
-- Reading MIDI, the file's end (its latest end of track) becomes the song's when some
+- Reading MIDI, the file's end (its latest end of track) becomes the part's when some
   track's end of track comes after the event before it, or when it lies past every event
   kept. A file whose tracks each end exactly at their last event cannot say whether it means
   an end there or none, so it reads as naming none and the default applies; the music is
@@ -288,14 +288,14 @@ written back byte for byte. Notes and everything else above are unaffected.
 
 One thing MIDI cannot hold: a note that starts after another note of the same pitch and
 channel and ends before it. MIDI has no note ids, so its note-off would end the outer note
-instead. Converting such a song to MIDI is an error that names both notes. Notes that only
+instead. Converting such a part to MIDI is an error that names both notes. Notes that only
 overlap, or that start together, are kept exactly.
 
 Nothing is quantized unless you ask: played timing comes through as it was played.
 
 ### Quantizing
 
-`duet song quantize` (or `Song::quantized` in the library) writes a copy with every note's
+`duet part quantize` (or `Part::quantized` in the library) writes a copy with every note's
 start and end moved to the nearest point of a grid. The input is never changed.
 
 - The grid is written `1/16` for sixteenths or `1/8t` for triplet eighths. A grid whose step
@@ -313,20 +313,20 @@ start and end moved to the nearest point of a grid. The input is never changed.
 ### As a library
 
 ```rust
-use duet_core::Song;
-use duet_midi::Midi; // adds Song::from_midi and Song::to_midi
+use duet_core::Part;
+use duet_midi::Midi; // adds Part::from_midi and Part::to_midi
 
-let song = Song::from_midi(&std::fs::read("take.mid")?)?;
-let text = song.to_text();
-let back = Song::from_text(&text)?.to_midi()?;
+let part = Part::from_midi(&std::fs::read("take.mid")?)?;
+let text = part.to_text();
+let back = Part::from_text(&text)?.to_midi()?;
 
-// A song document (.duet), through duet-schemas:
+// A part document (.duet), through duet-schemas:
 use duet_schemas::{Document, Tool};
-let doc = Document::new(Tool::new("my-tool", "1.0"), song).write()?;
-let song = Document::<Song>::read(&doc)?.body;
+let doc = Document::new(Tool::new("my-tool", "1.0"), part).write()?;
+let part = Document::<Part>::read(&doc)?.body;
 ```
 
-`Song`, `Track`, `Note` and `Control` derive serde's `Serialize` and `Deserialize`, so any
+`Part`, `Track`, `Note` and `Control` derive serde's `Serialize` and `Deserialize`, so any
 serde format works. Positions, pitches, keys and time signatures serialize as the same
 strings the text format uses.
 
@@ -358,8 +358,8 @@ from 1 to 127.
 
 ```sh
 duet apply groove.drums -o groove.duet           # the grid's text to a drum-grid document
-duet drums render groove.duet groove.mid         # to MIDI (or a song .duet)
-duet drums read take.mid take.duet --grid 1/16   # a song's drum track to a drum-grid document
+duet drums render groove.duet groove.mid         # to MIDI (or a part .duet)
+duet drums read take.mid take.duet --grid 1/16   # a part's drum track to a drum-grid document
 duet view take.duet --as grid > take.drums       # and its text, to read or edit
 duet drums snap take.duet snapped.duet           # velocities snapped to g, x and X
 duet drums lanes                                 # the lanes and their keys
@@ -368,9 +368,9 @@ duet drums lanes                                 # the lanes and their keys
 The grid side of each `duet drums` command (`render`'s input, `read`'s output, `snap`'s both)
 is a drum-grid document: a `.duet`, read by its envelope, or `-` for one on standard input or
 output. Any other name is refused rather than misread: a grid's text (`.drums`, or any name that
-is not a format's), pointing at `duet apply`; a song's (`.mid`, `.abc`); a stream
-(`.duet.jsonl`); or `.json` and `.toml`. A song document there is refused, naming its kind. The
-song side is a song's, as for every other command.
+is not a format's), pointing at `duet apply`; a part's (`.mid`, `.abc`); a stream
+(`.duet.jsonl`); or `.json` and `.toml`. A part document there is refused, naming its kind. The
+part side is a part's, as for every other command.
 
 **`drums snap` stays.** `duet view --snap-levels` shows a grid snapped, but `duet apply --onto`
 then keeps each velocity exact wherever its level is unchanged, by design, so snapping through
@@ -379,7 +379,7 @@ the count of what moved. `drums snap` is the one step that commits snapped veloc
 document and says how many moved.
 
 `duet convert` goes between grids and every other format as well, by the same code:
-reading a grid it writes what `duet drums render` writes, and writing one from a song it
+reading a grid it writes what `duet drums render` writes, and writing one from a part it
 takes `duet drums read`'s `--grid`, `--track`, `--bars` and `--snap-levels`, and writes and
 refuses what `duet drums read` does.
 
@@ -391,13 +391,13 @@ duet convert groove.duet sixteenths.duet --grid 1/16           # re-stepped
 ```
 
 A `.duet` output keeps what was read: a drum-grid document read is written as one, and so is a
-grid made from a song with `--grid`. A song is written as a song document; `duet drums render` makes a song of a grid.
+grid made from a part with `--grid`. A part is written as a part document; `duet drums render` makes a part of a grid.
 
-Writing a grid from a song without `--grid` is refused, naming it: the step is never
+Writing a grid from a part without `--grid` is refused, naming it: the step is never
 guessed. From a grid to a grid, with no `--grid`, the grid is copied as it is, read and
 written as `drums snap` does but without snapping: a lane with no hits, the grid's own
 `vel` levels and any velocity survive; `--snap-levels` snaps them. With `--grid`, the grid goes through a
-song at that step, as `drums render` then `drums read` would, so lanes with no hits are
+part at that step, as `drums render` then `drums read` would, so lanes with no hits are
 dropped. A grid flag that would do nothing (`--track` or `--bars` without `--grid` from a
 grid, or any grid flag for an output that is not a grid) is refused too, so no flag is
 silently ignored.
@@ -438,20 +438,20 @@ use an alias, and the grid then uses the lane's own name. Rows are written cymba
 then hats, toms, snare, kick and percussion. A user's or project's `duet.toml` can add lanes, move them and give them aliases (see
 [Configuration](#configuration)).
 
-**To and from a song.** Rendering gives one track named `Drums` on the grid's channel:
-each hit is a note on its lane's key, one step long, with its velocity. Reading a song
+**To and from a part.** Rendering gives one track named `Drums` on the grid's channel:
+each hit is a note on its lane's key, one step long, with its velocity. Reading a part
 takes its drum track (the one on channel 10, or the one `--track` names) and keeps only
 note starts and velocities: lengths, controls and other tracks are left out, and `duet`
 says how many. Nothing is moved to fit. A note off the grid (quantize it first, with
-`duet song quantize`), on a key no lane plays, or on the same lane and step as another is
-refused by name. The grid runs to `--bars` when it is given, or else to the song's end, the
+`duet part quantize`), on a key no lane plays, or on the same lane and step as another is
+refused by name. The grid runs to `--bars` when it is given, or else to the part's end, the
 one it names or its default (a mid-bar end, which must be on a step, becomes the grid's
 `end`). `--bars` never cuts anything: a hit or a tempo, meter or key change past it is
 refused by name.
 
-Rendering gives the song the grid's end, so trailing empty bars and a mid-bar end survive.
+Rendering gives the part the grid's end, so trailing empty bars and a mid-bar end survive.
 
-Grid → song → grid gives back the same grid, through MIDI too, with no bar count asked for,
+Grid → part → grid gives back the same grid, through MIDI too, with no bar count asked for,
 trailing empty bars and a mid-bar end included, when its lanes are in the map's row order
 and each is played at least once, as the writer leaves them.
 
@@ -464,9 +464,9 @@ exactly halfway between two levels goes to the louder one. Nothing snaps unless 
 ## ABC
 
 ```sh
-duet abc check tunes.abc                      # what each tune holds that a song does not carry
+duet abc check tunes.abc                      # what each tune holds that a part does not carry
 duet abc render tunes.abc tune.mid --tune 2   # one tune as MIDI (or .duet)
-duet abc write take.duet take.abc --unit 1/4  # a song as ABC, X:1
+duet abc write take.duet take.abc --unit 1/4  # a part as ABC, X:1
 duet convert tune.abc tune.mid                # .abc works both ways, for a file of one tune
 ```
 
@@ -479,7 +479,7 @@ a short first bar of its own time signature, so its notes keep abc2midi's ticks 
 
 **Notation only.** Slurs, annotations, information fields such as `C:` and `N:`, voice
 properties other than the name, other `%%` directives and the spacer `y` are read and not
-carried into the song. `duet abc check` lists each with its line, and `render` says how many
+carried into the part. `duet abc check` lists each with its line, and `render` says how many
 there were.
 
 **Refused by name.** Everything else is refused with its line and column and the name of
@@ -493,15 +493,15 @@ an error naming the bar; abc2midi plays it as written, without a warning.
 
 **One place duet parts from both.** A `:|` with no `|:` goes back to the start of the tune,
 in the standard and in abc2midi, so a pickup is replayed there (abc2midi warns of the short
-bar). A song cannot hold a short bar in its middle, so duet goes back to the first full bar
+bar). A part cannot hold a short bar in its middle, so duet goes back to the first full bar
 after the pickup instead. Write `|:` after the pickup and all three agree.
 
 **Writing.** Nothing is quantized. A note off the 1/64-note grid that is not in a triplet
 group (three equal slots filling whole beats, each note one or two of them) is refused,
-naming its track and position (quantize it first with `duet song quantize`). So are a velocity that is not a dynamic's level
+naming its track and position (quantize it first with `duet part quantize`). So are a velocity that is not a dynamic's level
 (`--dynamics nearest` snaps it, and the ABC says so in a comment), a tempo that is not a
 whole bpm, a track on channel 10 (drums are the drum grid's), and notes that overlap
-without starting and ending together. ABC needs a key, so a song with none is written in C
+without starting and ending together. ABC needs a key, so a part with none is written in C
 major. The ABC written is canonical: reading it and writing it again gives the same text.
 
 **Where it comes from.** `duet-abc` was written from the ABC 2.1 standard and from
@@ -509,7 +509,7 @@ abcMIDI's documentation of how abc2midi plays what the standard leaves open. No 
 source file was opened, and none is copied. abc2midi is only ever run as a separate
 program, on a developer's machine, to check this crate's reading (see Development).
 
-## Playing a song
+## Playing a part
 
 ```sh
 duet play take.duet                        # through the built-in synth, to the speakers
@@ -518,7 +518,7 @@ duet play take.duet --port "IAC Driver"    # to a MIDI port: Logic, a synth, a D
 duet apply take.notes -o - | duet play -   # a view's text, through apply
 ```
 
-- **The built-in synth** sounds the song with a General MIDI SoundFont (`.sf2`): every note
+- **The built-in synth** sounds the part with a General MIDI SoundFont (`.sf2`): every note
   at its position, length, pitch, channel, program and velocity, with its controls and tempo
   changes. Channel 10 is drums. It needs nothing else running.
 - **The SoundFont** is `--soundfont`, else `[play] soundfont` in duet.toml, else the one duet
@@ -532,7 +532,7 @@ duet apply take.notes -o - | duet play -   # a view's text, through apply
   once it is enabled in Audio MIDI Setup. An unknown name lists the ports there are. If
   playing stops early, on Ctrl-C or a failed send, duet turns off every note it left
   sounding and the sustain pedal on each channel it used.
-- **What plays is the song's MIDI file**, exactly as `duet convert take.duet take.mid` writes
+- **What plays is the part's MIDI file**, exactly as `duet convert take.duet take.mid` writes
   it, with every track merged. At one moment, notes ending come before programs and controls,
   and those before notes starting, so one track's note never cuts off another's. MIDI cannot
   say which of two overlapping notes on one key a note-off ends, so the key is held until the
@@ -620,8 +620,8 @@ overwrites a file that exists (the whole capture is refused before anything is w
 the take is analysed, the `.duet` and the `.capture.duet` are always written; if the score then
 cannot be, that is reported after them, and they stay:
 
-- `STEM.duet`: the exact performance, unquantized, at the detected times, as a song document.
-  Quantizing never replaces it. Every duet command reads it by its envelope: `duet song show
+- `STEM.duet`: the exact performance, unquantized, at the detected times, as a part document.
+  Quantizing never replaces it. Every duet command reads it by its envelope: `duet part show
   STEM.duet` prints it as notefmt text.
 - `STEM.abc` for a melody, or `STEM.grid.duet` for a rhythm: the score, the `.duet` quantized
   to `--grid`. A rhythm's score is a drum-grid document, which keeps every velocity exactly;
@@ -944,7 +944,7 @@ before it:
 2. a project's `.duet/` directory: the nearest one from the working directory up
 
 ```toml
-[song]
+[part]
 end = { round-up = 4 }   # or "last-bar", the built-in
 
 [play]
@@ -958,11 +958,11 @@ aliases = ["sh2"]
 aliases = ["bd", "boom"]
 ```
 
-- **`[song] end`** is the end a song that names none gets when a file is written.
+- **`[part] end`** is the end a part that names none gets when a file is written.
   `"last-bar"` is the bar line after the last bar holding a note or control. `{ round-up = 4 }`
   carries that on to the next multiple of 4 bars. The end is always written into the file, so
-  someone with other defaults reads the same song.
-- **`[play] soundfont`** is the SoundFont `duet play` sounds songs with, over the installed
+  someone with other defaults reads the same part.
+- **`[play] soundfont`** is the SoundFont `duet play` sounds parts with, over the installed
   one. `--soundfont` is over both.
 - **`[lanes.<name>]`** adds a lane to the `gm` map, or changes one. The fields are `key`,
   `group` (one of the map's groups, or `other`) and `aliases`. A file never removes a
@@ -1016,7 +1016,7 @@ scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's 
   it at `default.sf2` in the data directory, so `duet play` sounds with no flags. It keeps a
   file already there with that sha256, and refuses to overwrite any other.
 - **`port-check.sh`** (macOS) starts FluidSynth as a CoreMIDI port, sounding what it receives
-  through the speakers and logging every event, then plays a song to it with `--port`.
+  through the speakers and logging every event, then plays a part to it with `--port`.
   Played to the end, it passes when every note arrived and no key is left on. Interrupted, it
   passes when duet says it stopped, its last messages reset every channel it used (sustain
   off, all notes off), and no key is left on. This is the only check of `--port` against a
@@ -1041,8 +1041,8 @@ overlapping notes, and a format 0 file with several channels, at 96, 384, 480 an
 per quarter, and check every kept event survives MIDI to text to MIDI unchanged. Those in
 `crates/duet-drums/tests` generate drum grids in several meters (with a change of meter),
 grids and resolutions, with any velocity, ending in empty bars or inside a bar, and check
-grid → song → grid, through MIDI and drum-grid documents, and the text form all round-trip
-unchanged. Every song the MIDI tests build also round-trips through a song document.
+grid → part → grid, through MIDI and drum-grid documents, and the text form all round-trip
+unchanged. Every part the MIDI tests build also round-trips through a part document.
 `crates/duet-schemas/tests/schemas.rs` is the schema gate. Each kind's JSON Schema, and the
 envelope's, is generated from the Rust types and committed under `crates/duet-schemas/schemas/`,
 with an example document beside it. The gate fails when a committed schema's shape differs from
@@ -1082,7 +1082,7 @@ oracle checks its version against the manifest.
 published. Each test run builds the binary with `cargo build -p duet-cli --bin duet` and runs
 what that build reports, so a test never runs a stale binary (set `DUET_E2E_BIN` to run
 another, such as one built from `main`). Its `golden/` holds what `duet` wrote from the
-samples before a song could name an end, and a test checks that every file written now holds
+samples before a part could name an end, and a test checks that every file written now holds
 the same music, event for event, and differs only by stating its end. CI runs it again, with
 duet-cli's tests, under the hostile config in `crates/duet-e2e/hostile`, so no test reads a
 developer's own config.
