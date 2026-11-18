@@ -1,0 +1,27 @@
+[package]
+name = "duet-bus"
+version.workspace = true
+description = "duet's event bus: the project's journal, appended under one lock, read from a cursor, replayed and checked."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["midi", "music", "journal", "llm"]
+categories = ["multimedia::audio"]
+
+[lints]
+workspace = true
+
+[dependencies]
+duet-schemas.workspace = true
+# The 74 random bits of each entry's UUIDv7, from the operating system. Already in the tree
+# through rand.
+getrandom = "0.4.3"
+thiserror = "2"
+
+[dev-dependencies]
+# Validates every line the writer writes against the committed schemas. No default features: no
+# HTTP or file resolver, so every reference resolves to a committed file.
+jsonschema = { version = "0.60.2", default-features = false }
+serde_json = { version = "1", features = ["float_roundtrip"] }

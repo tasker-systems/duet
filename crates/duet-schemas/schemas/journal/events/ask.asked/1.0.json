@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "Party": {
+      "description": "Which party an ask is for.",
+      "enum": [
+        "owner",
+        "claude"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/ask.asked/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is ask.asked and whose `v` is 1.0.",
+  "properties": {
+    "about": {
+      "description": "What it is about: a reference, as duet names a take, a span of one, or a document.",
+      "type": "string"
+    },
+    "clips": {
+      "description": "What to listen to before answering: references, as `about` is.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "options": {
+      "description": "The answers offered, if the ask offers a choice.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "question": {
+      "description": "The question, in the asker's words.",
+      "type": "string"
+    },
+    "to": {
+      "$ref": "#/$defs/Party",
+      "description": "Whom it is for. Absent: the other party than the one who asked."
+    }
+  },
+  "required": [
+    "question"
+  ],
+  "title": "duet journal event ask.asked 1.0",
+  "type": "object"
+}
