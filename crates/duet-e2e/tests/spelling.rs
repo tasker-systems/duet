@@ -1,12 +1,12 @@
 //! Notes in a key of six accidentals, or with a double sharp for a leading tone, are spelled as
-//! the key spells them, in the song, its notes view and the ABC duet writes: Cb under E-flat
+//! the key spells them, in the part, its notes view and the ABC duet writes: Cb under E-flat
 //! minor's six flats, E# under F-sharp major's six sharps, F## leading to G-sharp minor, and the
 //! E-flat minor of "Wayfaring Stranger" (`crates/duet-capture/corpus`, CC BY 4.0) in flats under a
 //! six-flat signature.
 
 use std::path::Path;
 
-use duet_core::Song;
+use duet_core::Part;
 use duet_e2e::{duet, ok, root, s, scratch, view_text};
 use duet_schemas::Document;
 
@@ -86,11 +86,11 @@ fn six_accidental_scales_read_from_midi_are_spelled_by_the_key_in_the_view_and_t
 
         let view = view_text(&dir, &doc, "notes", &[]);
         assert_eq!(pitches(&view).join(" "), spelled, "{name}:\n{view}");
-        let song: Song = Document::read(&read(&doc)).expect("a song").body;
+        let part: Part = Document::read(&read(&doc)).expect("a part").body;
         assert_eq!(
-            song.tracks[0].notes[5].pitch.to_string(),
+            part.tracks[0].notes[5].pitch.to_string(),
             spelled.split(' ').nth(5).unwrap(),
-            "{name}: the song document spells as the view does"
+            "{name}: the part document spells as the view does"
         );
 
         let out = dir.join(format!("{name}.abc"));
@@ -133,12 +133,12 @@ fn wayfaring_stranger_is_captured_in_flats_under_a_six_flat_signature() {
     .expect("copy the take");
     ok(&duet(&dir, &["capture", "melody", s(&take)]), "capture");
 
-    let song: Song = Document::read(&read(&dir.join("wayfaring-stranger.duet")))
-        .expect("a song")
+    let part: Part = Document::read(&read(&dir.join("wayfaring-stranger.duet")))
+        .expect("a part")
         .body;
-    let key = song.key.expect("a key");
+    let key = part.key.expect("a key");
     assert_eq!(key.to_string(), "Eb minor");
-    for note in &song.tracks[0].notes {
+    for note in &part.tracks[0].notes {
         assert_eq!(
             note.pitch,
             key.spell(note.pitch),

@@ -14,7 +14,7 @@
 //! so `~/.config/duet`; Known Folders on Windows), or `DUET_CONFIG_DIR` when it is set.
 //!
 //! ```toml
-//! [song]
+//! [part]
 //! end = "last-bar"            # or { round-up = 4 }
 //!
 //! [play]
@@ -88,7 +88,7 @@ impl Dirs {
 
 /// The merged configuration, and where each value came from.
 pub struct Config {
-    /// How a song that names no end gets one when a file is written.
+    /// How a part that names no end gets one when a file is written.
     pub end: EndRule,
     end_from: String,
     /// The drum kit's lanes, for reading a MIDI drum track: the built-in map with every
@@ -99,7 +99,7 @@ pub struct Config {
     pub text_lanes: LaneMap,
     /// What files set that does not apply to reading .drums text, said when it is read.
     pub text_notices: Vec<String>,
-    /// The SoundFont `duet play` sounds a song with, when a file names one, and that file.
+    /// The SoundFont `duet play` sounds a part with, when a file names one, and that file.
     pub soundfont: Option<(PathBuf, String)>,
     /// Every file's lane patches, in the order they were read.
     patches: Vec<(String, LanePatch)>,
@@ -110,7 +110,7 @@ pub struct Config {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawFile {
-    song: Option<RawSong>,
+    part: Option<RawPart>,
     play: Option<RawPlay>,
     lanes: Option<toml::Table>,
 }
@@ -123,12 +123,12 @@ struct RawPlay {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawSong {
+struct RawPart {
     end: Option<toml::Value>,
 }
 
 fn end_rule(value: &toml::Value) -> Result<EndRule> {
-    let bad = || anyhow!("[song] end is \"last-bar\" or {{ round-up = <bars> }}");
+    let bad = || anyhow!("[part] end is \"last-bar\" or {{ round-up = <bars> }}");
     match value {
         toml::Value::String(s) if s == "last-bar" => Ok(EndRule::LastBar),
         toml::Value::Table(t) if t.len() == 1 => {
@@ -138,7 +138,7 @@ fn end_rule(value: &toml::Value) -> Result<EndRule> {
                 .ok_or_else(bad)?;
             match u32::try_from(n) {
                 Ok(n) if n > 0 => Ok(EndRule::RoundUp(n)),
-                _ => bail!("[song] end: round-up is a whole number of bars, 1 or more, not {n}"),
+                _ => bail!("[part] end: round-up is a whole number of bars, 1 or more, not {n}"),
             }
         }
         _ => Err(bad()),
@@ -183,7 +183,7 @@ impl Config {
         let text = fs::read_to_string(path)?;
         let raw: RawFile = toml::from_str(&text)?;
         let from = path.display().to_string();
-        if let Some(end) = raw.song.and_then(|s| s.end) {
+        if let Some(end) = raw.part.and_then(|s| s.end) {
             self.end = end_rule(&end)?;
             self.end_from.clone_from(&from);
         }
@@ -231,7 +231,7 @@ impl Config {
             _ => "\"last-bar\"".to_owned(),
         };
         // Writing to a String cannot fail.
-        let _ = writeln!(out, "[song]\nend = {end}  # {}", self.end_from);
+        let _ = writeln!(out, "[part]\nend = {end}  # {}", self.end_from);
         match &self.soundfont {
             Some((path, from)) => {
                 let _ = writeln!(

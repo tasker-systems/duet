@@ -1,7 +1,7 @@
 [package]
 name = "duet-play"
 version.workspace = true
-description = "Play a duet Song: the timed MIDI events it sounds as, and a SoundFont synth that renders them."
+description = "Play a duet Part: the timed MIDI events it sounds as, and a SoundFont synth that renders them."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

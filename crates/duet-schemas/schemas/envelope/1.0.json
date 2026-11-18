@@ -2,7 +2,7 @@
   "$defs": {
     "From": {
       "additionalProperties": false,
-      "description": "Where a body came from, when it was imported from an outside format (ABC, MIDI).\n\nIt is a fact about this file, not about the music, so it lives in the envelope: two\ndocuments with the same body are the same song.",
+      "description": "Where a body came from, when it was imported from an outside format (ABC, MIDI).\n\nIt is a fact about this file, not about the music, so it lives in the envelope: two\ndocuments with the same body are the same part.",
       "properties": {
         "format": {
           "description": "The outside format: `abc` or `midi`.",
@@ -91,7 +91,7 @@
       "description": "Where the body came from, if it was imported."
     },
     "kind": {
-      "description": "The kind's name, lowercase with hyphens: `song`, `drum-grid`.",
+      "description": "The kind's name, lowercase with hyphens: `part`, `drum-grid`.",
       "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
       "type": "string"
     },

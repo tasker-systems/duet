@@ -2,7 +2,7 @@
   "$defs": {
     "DrumGrid": {
       "additionalProperties": false,
-      "description": "A drum part as a matrix: [`DrumGrid::vel`] is one lanes × steps tensor for the whole\ngrid, whose row for a lane is every step of every bar in order, and 0 means no hit.\n[`DrumGrid::bar_steps`] gives each bar's step count, from bar 1, so bar lines are read\nfrom it.\n\nThe conductor (resolution, tempo, meter, key and their changes) means exactly what\nthe same fields of a [`Song`] mean. Every bar must be a whole number of steps of\n[`DrumGrid::grid`], so each column is one step wide.",
+      "description": "A drum part as a matrix: [`DrumGrid::vel`] is one lanes × steps tensor for the whole\ngrid, whose row for a lane is every step of every bar in order, and 0 means no hit.\n[`DrumGrid::bar_steps`] gives each bar's step count, from bar 1, so bar lines are read\nfrom it.\n\nThe conductor (resolution, tempo, meter, key and their changes) means exactly what\nthe same fields of a [`Part`] mean. Every bar must be a whole number of steps of\n[`DrumGrid::grid`], so each column is one step wide.",
       "properties": {
         "bar_steps": {
           "description": "How many steps each bar holds, from bar 1, with none left out. Bars differ when the\nmeter changes. The sum is the number of columns of [`DrumGrid::vel`].",
@@ -200,7 +200,7 @@
       "type": "object"
     },
     "Position": {
-      "description": "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the song's ticks. bar.beat alone is tick 0.",
+      "description": "A position as bar.beat.tick, such as 3.2.240: bar and beat from 1, the tick an offset into the beat in the part's ticks. bar.beat alone is tick 0.",
       "pattern": "^0*[1-9][0-9]*\\.0*[1-9][0-9]*(\\.[0-9]+)?$",
       "type": "string"
     },

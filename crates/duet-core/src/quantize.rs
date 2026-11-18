@@ -1,14 +1,14 @@
 //! Quantizing: snapping a played take's notes to a grid, the step from a performance to a
 //! score.
 //!
-//! Quantizing is always asked for. [`Song::quantized`] returns a new song and leaves the
+//! Quantizing is always asked for. [`Part::quantized`] returns a new part and leaves the
 //! one it was called on as it was; no read, write or conversion quantizes on its own.
 
 use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{Error, Result};
-use crate::model::Song;
+use crate::model::Part;
 use crate::time::{Position, TimeMap, beats_from_ticks, string_serde, ticks_from_beats};
 
 /// A quantize grid: one step is `1/den` of a whole note, or, for a triplet grid, two
@@ -117,9 +117,9 @@ impl Snapper<'_> {
     }
 }
 
-impl Song {
-    /// A copy of the song with every note's start and end moved to the nearest point of
-    /// `grid`. This song is not changed.
+impl Part {
+    /// A copy of the part with every note's start and end moved to the nearest point of
+    /// `grid`. This part is not changed.
     ///
     /// - Pitch, velocity, track and the order of each track's notes are kept.
     /// - A note that had length but would collapse to zero length is given one step instead,
@@ -128,10 +128,10 @@ impl Song {
     /// - Notes of the same pitch that quantizing puts one inside another are kept as they
     ///   come out; writing them to MIDI refuses them by name, as it does any nested note.
     ///
-    /// Fails, naming the grid, when one step is not a whole number of this song's ticks,
-    /// and, naming the note, when the song names an [end](Song::end) and a note quantizing
+    /// Fails, naming the grid, when one step is not a whole number of this part's ticks,
+    /// and, naming the note, when the part names an [end](Part::end) and a note quantizing
     /// would end past it. The end is never moved and the note is never cut to fit.
-    pub fn quantized(&self, grid: Grid) -> Result<Song> {
+    pub fn quantized(&self, grid: Grid) -> Result<Part> {
         let tpq = self.ticks_per_quarter;
         let map = self.time_map()?;
         let snap = Snapper {

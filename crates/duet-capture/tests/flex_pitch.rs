@@ -11,7 +11,7 @@
 mod support;
 
 use duet_capture::{ANALYSIS_RATE, Event, KeyProfile, ReaderName, estimate_key, estimate_key_with};
-use duet_core::{Key, Song};
+use duet_core::{Key, Part};
 use duet_midi::Midi;
 
 /// How many notes Logic's Flex Pitch exported.
@@ -25,29 +25,29 @@ const NOTES: usize = 52;
 const WITHIN_SECS: f64 = 0.15;
 
 /// The transcription, read through duet-midi.
-fn transcription() -> Song {
+fn transcription() -> Part {
     let path = support::corpus_dir().join("wayfaring-stranger.logic-flex-pitch.mid");
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    Song::from_midi(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    Part::from_midi(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
 /// Each note's start and end in seconds and its MIDI key, in order of start. The export has one
 /// tempo, so a tick is a fixed length of time.
-fn note_secs(song: &Song) -> Vec<(f64, f64, u8)> {
+fn note_secs(part: &Part) -> Vec<(f64, f64, u8)> {
     assert!(
-        song.tempo_changes.is_empty(),
+        part.tempo_changes.is_empty(),
         "the export has one tempo: {:?}",
-        song.tempo_changes
+        part.tempo_changes
     );
-    let map = song.time_map().expect("a time map");
-    let secs_per_quarter = 60.0 / song.tempo_bpm;
-    let mut notes: Vec<(f64, f64, u8)> = song
+    let map = part.time_map().expect("a time map");
+    let secs_per_quarter = 60.0 / part.tempo_bpm;
+    let mut notes: Vec<(f64, f64, u8)> = part
         .tracks
         .iter()
         .flat_map(|track| &track.notes)
         .map(|note| {
-            let tick = map.tick(note.at).expect("a position in the song");
-            let start = tick as f64 / f64::from(song.ticks_per_quarter) * secs_per_quarter;
+            let tick = map.tick(note.at).expect("a position in the part");
+            let start = tick as f64 / f64::from(part.ticks_per_quarter) * secs_per_quarter;
             (
                 start,
                 start + note.beats * secs_per_quarter,
@@ -61,8 +61,8 @@ fn note_secs(song: &Song) -> Vec<(f64, f64, u8)> {
 
 #[test]
 fn the_flex_pitch_transcription_reads_through_duet_midi_and_spans_the_take() {
-    let song = transcription();
-    let notes = note_secs(&song);
+    let part = transcription();
+    let notes = note_secs(&part);
     assert_eq!(notes.len(), NOTES, "the notes Logic exported");
 
     let path = support::corpus_dir().join("wayfaring-stranger.flac");

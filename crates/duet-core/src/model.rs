@@ -1,4 +1,4 @@
-//! The song model. These types serialize to JSON and TOML with serde, and to the
+//! The part model. These types serialize to JSON and TOML with serde, and to the
 //! one-note-per-line text format in [`crate::text`].
 
 use schemars::JsonSchema;
@@ -11,12 +11,12 @@ use crate::time::{
     ticks_from_beats,
 };
 
-/// A whole song: its tempo, meter and key, and its tracks.
+/// A whole part: its tempo, meter and key, and its tracks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct Song {
-    /// The song's name: the MIDI sequence name, from the first track of a format 1 file
+pub struct Part {
+    /// The part's name: the MIDI sequence name, from the first track of a format 1 file
     /// when that track holds no notes, or from the only track of a format 0 file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -38,22 +38,22 @@ pub struct Song {
     pub time_changes: Vec<TimeChange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_changes: Vec<KeyChange>,
-    /// Where the song ends, if it says: a bar.beat.tick position such as `9.1.0` (the bar
-    /// line before bar 9), or one inside a bar, for a song that stops mid-bar. Nothing in
-    /// the song may lie past it: a note may end on it, and no note may end after it.
+    /// Where the part ends, if it says: a bar.beat.tick position such as `9.1.0` (the bar
+    /// line before bar 9), or one inside a bar, for a part that stops mid-bar. Nothing in
+    /// the part may lie past it: a note may end on it, and no note may end after it.
     ///
-    /// `None` means the song names no end, and its [default end](Song::default_end)
+    /// `None` means the part names no end, and its [default end](Part::default_end)
     /// applies: the end of the last bar holding an event. Every writer states the end it
-    /// uses ([`Song::stated_end`]), so a written file always says where it ends, whatever
+    /// uses ([`Part::stated_end`]), so a written file always says where it ends, whatever
     /// default computed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Position>,
     pub tracks: Vec<Track>,
 }
 
-impl Default for Song {
+impl Default for Part {
     fn default() -> Self {
-        Song {
+        Part {
             title: None,
             ticks_per_quarter: 480,
             tempo_bpm: 120.0,
@@ -89,16 +89,16 @@ pub struct KeyChange {
     pub key: Key,
 }
 
-/// How a song that names no end gets one, when a file is written.
+/// How a part that names no end gets one, when a file is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum EndRule {
     /// The bar line after the last bar holding a note or control, and never before a
-    /// tempo, meter or key change: [`Song::default_end`].
+    /// tempo, meter or key change: [`Part::default_end`].
     #[default]
     LastBar,
-    /// That end carried on to the next whole multiple of this many bars, so a song of
-    /// 5 bars rounded up to 4 ends after bar 8. A song already a multiple ends where it
+    /// That end carried on to the next whole multiple of this many bars, so a part of
+    /// 5 bars rounded up to 4 ends after bar 8. A part already a multiple ends where it
     /// does.
     RoundUp(u32),
 }
@@ -195,8 +195,8 @@ impl Control {
     }
 }
 
-impl Song {
-    /// Puts the song in the form reading MIDI would give: lengths rounded to whole
+impl Part {
+    /// Puts the part in the form reading MIDI would give: lengths rounded to whole
     /// ticks and written as their shortest decimal, tempos rounded to what MIDI stores,
     /// and positions written in canonical bar.beat.tick form (so `1.1.960` in 4/4 at 480
     /// ticks per quarter becomes `1.3.0`). The order of notes and controls is kept.
@@ -238,7 +238,7 @@ impl Song {
         self.check_end()
     }
 
-    /// Checks that nothing lies past the song's [end](Song::end), when it names one.
+    /// Checks that nothing lies past the part's [end](Part::end), when it names one.
     ///
     /// A note may end exactly on the end, and a control or a tempo, meter or key change
     /// may sit on it; anything later is refused, naming it and the end. Nothing is ever
@@ -252,7 +252,7 @@ impl Song {
         let end = map.position(end_tick);
         let past = |what: String| {
             Err(Error::invalid(format!(
-                "{what} lies past the song's end at {end}; move the end, or shorten or move \
+                "{what} lies past the part's end at {end}; move the end, or shorten or move \
                  what lies past it"
             )))
         };
@@ -303,7 +303,7 @@ impl Song {
         Ok(())
     }
 
-    /// The end the song names, or else its [default end](Song::default_end): the end
+    /// The end the part names, or else its [default end](Part::default_end): the end
     /// every writer states.
     pub fn stated_end(&self) -> Result<Position> {
         match self.end {
@@ -312,10 +312,10 @@ impl Song {
         }
     }
 
-    /// The end the song has when it names none: the bar line after the last bar that
+    /// The end the part has when it names none: the bar line after the last bar that
     /// holds a note or a control. A note holds every bar it sounds in, so one that ends
     /// exactly on a bar line does not hold the bar after it; a control, or a note of no
-    /// length, holds the bar it sits in. A song with no notes or controls ends at `1.1.0`.
+    /// length, holds the bar it sits in. A part with no notes or controls ends at `1.1.0`.
     ///
     /// Tempo, meter and key changes do not hold a bar, but the default never comes before
     /// one: a change later than the last bar played moves the end to the first bar line
@@ -324,9 +324,9 @@ impl Song {
         self.default_end_by(EndRule::LastBar)
     }
 
-    /// The end a song that names none gets under `rule`. [`EndRule::LastBar`] is
-    /// [`Song::default_end`]; [`EndRule::RoundUp`] carries that on to the next whole
-    /// multiple of its bars. The same song and rule always give the same end.
+    /// The end a part that names none gets under `rule`. [`EndRule::LastBar`] is
+    /// [`Part::default_end`]; [`EndRule::RoundUp`] carries that on to the next whole
+    /// multiple of its bars. The same part and rule always give the same end.
     pub fn default_end_by(&self, rule: EndRule) -> Result<Position> {
         let last = self.last_bar_end()?;
         match rule {
@@ -375,7 +375,7 @@ impl Song {
         Ok(Position::bar(last_bar + 1))
     }
 
-    /// The map from positions to ticks for this song's time signatures.
+    /// The map from positions to ticks for this part's time signatures.
     pub fn time_map(&self) -> Result<TimeMap> {
         let mut map = TimeMap::new(self.ticks_per_quarter, self.time_sig)?;
         for change in &self.time_changes {
@@ -390,15 +390,15 @@ mod tests {
     use super::*;
 
     fn default_end(body: &str) -> String {
-        let song = Song::from_text(&format!("time 4/4\n{body}")).expect("a song");
-        song.default_end().expect("an end").to_string()
+        let part = Part::from_text(&format!("time 4/4\n{body}")).expect("a part");
+        part.default_end().expect("an end").to_string()
     }
 
     #[test]
     fn rounding_up_carries_the_end_to_a_whole_multiple_of_bars() {
-        let song = |body: &str| Song::from_text(&format!("time 3/4\n{body}")).expect("song");
-        let end = |song: &Song, rule| song.default_end_by(rule).expect("end").to_string();
-        let five = song("\n[track \"P\" ch1]\n5.1.0 C4 1 80\n");
+        let part = |body: &str| Part::from_text(&format!("time 3/4\n{body}")).expect("part");
+        let end = |part: &Part, rule| part.default_end_by(rule).expect("end").to_string();
+        let five = part("\n[track \"P\" ch1]\n5.1.0 C4 1 80\n");
         assert_eq!(end(&five, EndRule::LastBar), "6.1.0");
         assert_eq!(end(&five, EndRule::RoundUp(4)), "9.1.0");
         assert_eq!(
@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(end(&five, EndRule::RoundUp(1)), "6.1.0");
         assert_eq!(end(&five, EndRule::RoundUp(2)), "7.1.0");
         assert_eq!(
-            end(&song(""), EndRule::RoundUp(4)),
+            end(&part(""), EndRule::RoundUp(4)),
             "1.1.0",
             "nothing to round"
         );

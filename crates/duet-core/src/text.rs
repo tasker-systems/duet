@@ -26,12 +26,12 @@
 use std::fmt::Write as _;
 
 use crate::error::{Error, Result};
-use crate::model::{Control, KeyChange, Note, Song, TempoChange, TimeChange, Track};
+use crate::model::{Control, KeyChange, Note, Part, TempoChange, TimeChange, Track};
 use crate::pitch::Pitch;
 use crate::time::{Key, Position, TimeSig, parse_beats};
 
 /// The words that start a header line. A header line inside a track is an error rather
-/// than a song-wide change, so where a tempo, meter or key change sits is never in doubt.
+/// than a part-wide change, so where a tempo, meter or key change sits is never in doubt.
 const HEADER_KEYWORDS: [&str; 6] = ["title", "tpq", "tempo", "time", "key", "end"];
 
 const HEADER_COMMENT: &str = "# notefmt v1: positions are bar.beat.tick, lengths are quarter notes";
@@ -56,8 +56,8 @@ enum Line<'a> {
     Control(&'a Control),
 }
 
-impl Song {
-    /// Writes the song in the text format.
+impl Part {
+    /// Writes the part in the text format.
     pub fn to_text(&self) -> String {
         let mut out = String::new();
         // Writing to a String cannot fail.
@@ -65,9 +65,9 @@ impl Song {
         out
     }
 
-    /// The song's header as notefmt header lines: title, tpq, tempo, time and key, then
-    /// their changes, then the end: the one the song names, or its default
-    /// ([`Song::stated_end`]). Other formats that share the notefmt header (the drum grid) write it
+    /// The part's header as notefmt header lines: title, tpq, tempo, time and key, then
+    /// their changes, then the end: the one the part names, or its default
+    /// ([`Part::stated_end`]). Other formats that share the notefmt header (the drum grid) write it
     /// with this, so both agree on what each line means.
     pub fn header_text(&self) -> String {
         let mut out = String::new();
@@ -76,7 +76,7 @@ impl Song {
         out
     }
 
-    /// Applies one notefmt header line, such as `tempo 96 at 9.1.0`, to this song.
+    /// Applies one notefmt header line, such as `tempo 96 at 9.1.0`, to this part.
     ///
     /// Returns `Ok(false)` and changes nothing when the line's first word is not a header
     /// keyword (title, tpq, tempo, time, key or end), so a format that extends the header can
@@ -231,10 +231,10 @@ impl Song {
         Ok(())
     }
 
-    /// Parses the text format, then [normalizes](Song::normalize) the song, so lengths
+    /// Parses the text format, then [normalizes](Part::normalize) the part, so lengths
     /// come back rounded to whole ticks and positions in canonical form.
-    pub fn from_text(text: &str) -> Result<Song> {
-        let mut song = Song::default();
+    pub fn from_text(text: &str) -> Result<Part> {
+        let mut part = Part::default();
         let mut track: Option<Track> = None;
 
         for (index, raw) in text.lines().enumerate() {
@@ -251,7 +251,7 @@ impl Song {
 
             if let Some(inner) = line.strip_prefix('[') {
                 if let Some(done) = track.take() {
-                    song.tracks.push(done);
+                    part.tracks.push(done);
                 }
                 track = Some(parse_track_header(inner).map_err(ctx)?);
                 continue;
@@ -264,7 +264,7 @@ impl Song {
 
             match track.as_mut() {
                 None => {
-                    if !song.apply_header_line(line).map_err(ctx)? {
+                    if !part.apply_header_line(line).map_err(ctx)? {
                         return Err(err(format!(
                             "'{}' is not a header line; expected title, tpq, tempo, time, key, end or a [track]",
                             words[0]
@@ -336,10 +336,10 @@ impl Song {
         }
 
         if let Some(done) = track.take() {
-            song.tracks.push(done);
+            part.tracks.push(done);
         }
-        song.normalize()?;
-        Ok(song)
+        part.normalize()?;
+        Ok(part)
     }
 }
 

@@ -1,4 +1,4 @@
-//! `duet capture melody|rhythm`: a take in, the exact performance (`.duet`, a song document), a
+//! `duet capture melody|rhythm`: a take in, the exact performance (`.duet`, a part document), a
 //! quantized score (`.abc`, or `.grid.duet`, a drum-grid document) and the analysis
 //! (`.capture.duet`) out, with every estimate stated on standard error and in the files, and
 //! every refusal made before anything is written.
@@ -11,7 +11,7 @@ mod audio;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use duet_core::Song;
+use duet_core::Part;
 use duet_drums::DrumGrid;
 use duet_e2e::{duet, duet_with, ok, root, s, scratch};
 use duet_schemas::{AnyDocument, Document};
@@ -111,13 +111,13 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// The song in a song document, as duet-schemas reads it.
-fn song_of(path: &Path) -> Song {
+/// The part in a part document, as duet-schemas reads it.
+fn part_of(path: &Path) -> Part {
     document_of(path).body
 }
 
-/// A song document, as duet-schemas reads it.
-fn document_of(path: &Path) -> Document<Song> {
+/// A part document, as duet-schemas reads it.
+fn document_of(path: &Path) -> Document<Part> {
     Document::read(&read(path)).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
@@ -167,10 +167,10 @@ fn files(dir: &Path) -> Vec<String> {
     names
 }
 
-/// Every note start of a song, in ticks.
-fn ticks(song: &Song) -> Vec<u64> {
-    let map = song.time_map().expect("time map");
-    song.tracks
+/// Every note start of a part, in ticks.
+fn ticks(part: &Part) -> Vec<u64> {
+    let map = part.time_map().expect("time map");
+    part.tracks
         .iter()
         .flat_map(|t| t.notes.iter().map(|n| map.tick(n.at).expect("tick")))
         .collect()
@@ -182,8 +182,8 @@ fn melody_writes_notes_and_abc_beside_the_input() {
     let wav = take(&dir, "tune.wav", &eb_major());
     let out = capture(&dir, &["melody", s(&wav)]);
     ok(&out, "capture melody");
-    let song = song_of(&dir.join("tune.duet"));
-    assert!(song.tracks[0].notes.len() >= 20, "{song:?}");
+    let part = part_of(&dir.join("tune.duet"));
+    assert!(part.tracks[0].notes.len() >= 20, "{part:?}");
     // Onset strengths give velocities off the dynamics' levels, so the ABC snaps them.
     let err = stderr(&out);
     assert!(
@@ -197,27 +197,27 @@ fn melody_writes_notes_and_abc_beside_the_input() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// Capture's song document is a document like any other: `duet song show` reads it by its
+/// Capture's part document is a document like any other: `duet part show` reads it by its
 /// envelope, with no `--from`, and prints the performance capture wrote.
 #[test]
-fn song_show_reads_captures_song_document_directly() {
+fn part_show_reads_captures_part_document_directly() {
     let dir = scratch("capture-show");
     let wav = take(&dir, "tune.wav", &eb_major());
     ok(&capture(&dir, &["melody", s(&wav)]), "capture melody");
     let path = dir.join("tune.duet");
     let doc = document_of(&path);
-    assert_eq!(doc.envelope().kind, "song");
+    assert_eq!(doc.envelope().kind, "part");
     assert_eq!(doc.tool.name, "duet");
-    let out = duet(&dir, &["song", "show", s(&path)]);
-    ok(&out, "song show tune.duet");
-    let shown = Song::from_text(&String::from_utf8_lossy(&out.stdout)).expect("notefmt");
+    let out = duet(&dir, &["part", "show", s(&path)]);
+    ok(&out, "part show tune.duet");
+    let shown = Part::from_text(&String::from_utf8_lossy(&out.stdout)).expect("notefmt");
     assert_eq!(shown, doc.body);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// The keys of a song's notes, in order.
-fn keys(song: &Song) -> Vec<u8> {
-    song.tracks[0]
+/// The keys of a part's notes, in order.
+fn keys(part: &Part) -> Vec<u8> {
+    part.tracks[0]
         .notes
         .iter()
         .map(|n| n.pitch.midi())
@@ -260,7 +260,7 @@ fn a_weak_tuning_suggests_giving_it_and_a_firm_one_does_not() {
 }
 
 /// A take sung 44 cents sharp is read on its own tuning: the same keys as in tune, the
-/// estimate stated on standard error and in the song document, and the reading in the
+/// estimate stated on standard error and in the part document, and the reading in the
 /// analysis.
 #[test]
 fn a_take_sung_sharp_is_read_on_its_own_tuning_and_says_so() {
@@ -271,8 +271,8 @@ fn a_take_sung_sharp_is_read_on_its_own_tuning_and_says_so() {
     let out = capture(&dir, &["melody", s(&sharp)]);
     ok(&out, "capture sharp");
     assert_eq!(
-        keys(&song_of(&dir.join("sharp.duet"))),
-        keys(&song_of(&dir.join("tune.duet")))
+        keys(&part_of(&dir.join("sharp.duet"))),
+        keys(&part_of(&dir.join("tune.duet")))
     );
     let err = stderr(&out);
     let line = err
@@ -298,7 +298,7 @@ fn a_take_sung_sharp_is_read_on_its_own_tuning_and_says_so() {
     let read_notes = reading["notes"].as_array().expect("notes");
     assert_eq!(
         read_notes.len(),
-        keys(&song_of(&dir.join("sharp.duet"))).len()
+        keys(&part_of(&dir.join("sharp.duet"))).len()
     );
     assert!(
         read_notes.iter().all(|n| n["between_keys"] == false),
@@ -421,8 +421,8 @@ fn the_reader_is_chosen_stated_and_written() {
             .any(|l| l == line)
     );
     assert_eq!(
-        keys(&song_of(&dir.join("hmm.duet"))),
-        keys(&song_of(&dir.join("rules.duet")))
+        keys(&part_of(&dir.join("hmm.duet"))),
+        keys(&part_of(&dir.join("rules.duet")))
     );
     for (stem, reader) in [
         (
@@ -500,8 +500,8 @@ fn basic_pitch_reads_a_scale_stated_and_written() {
         "{err}"
     );
     assert_eq!(
-        keys(&song_of(&dir.join("bp.duet"))),
-        keys(&song_of(&dir.join("hmm.duet")))
+        keys(&part_of(&dir.join("bp.duet"))),
+        keys(&part_of(&dir.join("hmm.duet")))
     );
     let reading = &analysis_of(&dir.join("bp.capture.duet"))["reading"];
     assert_eq!(
@@ -715,12 +715,12 @@ fn melody_writes_its_performance_beside_its_other_outputs_and_never_overwrites_i
 }
 
 #[test]
-fn rhythm_writes_a_song_a_grid_and_the_analysis() {
+fn rhythm_writes_a_part_a_grid_and_the_analysis() {
     let dir = scratch("capture-rhythm");
     let wav = take(&dir, "beat.wav", &kick_and_hat());
     let out = capture(&dir, &["rhythm", s(&wav), "-o", s(&dir.join("out"))]);
     ok(&out, "capture rhythm");
-    song_of(&dir.join("out.duet"));
+    part_of(&dir.join("out.duet"));
     grid_of(&dir.join("out.grid.duet"));
     let body = analysis_of(&dir.join("out.capture.duet"));
     // A rhythm take has no reading, and still states its take (1.13).
@@ -751,7 +751,7 @@ fn estimates_are_stated_on_stderr_and_in_both_files() {
         .lines()
         .find(|l| l.starts_with("tempo: estimated "))
         .unwrap_or_else(|| panic!("no tempo statement: {err}"));
-    // In the song document's envelope, and as a comment in the ABC.
+    // In the part document's envelope, and as a comment in the ABC.
     let stated = document_of(&dir.join("tune.duet")).statements;
     let abc = comments(&read(&dir.join("tune.abc")), "%");
     assert!(stated.iter().any(|l| l == line), "{stated:?}");
@@ -1101,7 +1101,7 @@ fn a_fractional_tempo_on_a_rhythm_is_kept() {
     let wav = take(&dir, "beat.wav", &kick_and_hat());
     let out = capture(&dir, &["rhythm", s(&wav), "--tempo", "119.5"]);
     ok(&out, "capture rhythm --tempo 119.5");
-    let notes = song_of(&dir.join("beat.duet"));
+    let notes = part_of(&dir.join("beat.duet"));
     assert_eq!(notes.tempo_bpm, 119.5);
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
@@ -1119,7 +1119,7 @@ fn the_grid_document_keeps_every_velocity_exactly() {
         "every velocity is on a level"
     );
     let mut in_grid: Vec<u8> = grid.vel.data().iter().copied().filter(|v| *v > 0).collect();
-    let mut played: Vec<u8> = song_of(&dir.join("beat.duet")).tracks[0]
+    let mut played: Vec<u8> = part_of(&dir.join("beat.duet")).tracks[0]
         .notes
         .iter()
         .map(|n| n.vel)
@@ -1161,9 +1161,9 @@ fn the_grid_document_renders_and_states_its_estimates() {
         &duet(&dir, &["drums", "render", s(&path), s(&rendered)]),
         "drums render beat.grid.duet",
     );
-    let song = song_of(&rendered);
+    let part = part_of(&rendered);
     let hits = doc.body.vel.data().iter().filter(|v| **v > 0).count();
-    assert_eq!(song.tracks[0].notes.len(), hits, "{song:?}");
+    assert_eq!(part.tracks[0].notes.len(), hits, "{part:?}");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -1208,7 +1208,7 @@ fn the_notes_file_is_not_quantized() {
     );
     let out = capture(&dir, &["rhythm", s(&wav), "--lane", "hh", "--tempo", "120"]);
     ok(&out, "capture rhythm");
-    let notes = song_of(&dir.join("loose.duet"));
+    let notes = part_of(&dir.join("loose.duet"));
     let off = ticks(&notes).into_iter().filter(|t| t % 120 != 0).count();
     assert!(off > 0, "every onset is on the 1/16 grid: {notes:?}");
     std::fs::remove_dir_all(&dir).expect("clean up");
@@ -1234,7 +1234,7 @@ fn an_existing_output_is_refused() {
 #[test]
 fn the_input_is_refused_as_an_output() {
     let dir = scratch("capture-input");
-    // A take whose name is what its song document would be.
+    // A take whose name is what its part document would be.
     let input = take(&dir, "tune.duet", &eb_major());
     let out = capture(&dir, &["melody", s(&input)]);
     assert!(!out.status.success());
@@ -1359,7 +1359,7 @@ fn an_empty_lead_in_is_removed_from_the_score_only() {
     );
 
     let notes_text = read(&dir.join("tune.duet"));
-    let notes = song_of(&dir.join("tune.duet"));
+    let notes = part_of(&dir.join("tune.duet"));
     assert_eq!(notes.time_sig.to_string(), "1/4", "{notes_text}");
     assert_eq!(notes.time_changes.len(), 1, "{notes_text}");
     assert_eq!(ticks(&notes)[0], 479, "{notes_text}");
@@ -1379,7 +1379,7 @@ fn an_empty_lead_in_is_removed_from_the_score_only() {
         ),
         "abc render",
     );
-    let score = song_of(&rendered);
+    let score = part_of(&rendered);
     assert_eq!(score.time_sig.to_string(), "4/4", "{abc}");
     assert!(score.time_changes.is_empty(), "{abc}");
     assert_eq!(ticks(&score)[0], 0, "{abc}");
@@ -1403,7 +1403,7 @@ fn a_given_tempo_and_meter_override_the_estimate() {
     let abc = read(&dir.join("tune.abc"));
     assert!(abc.lines().any(|l| l == "M:3/4"), "{abc}");
     assert!(abc.lines().any(|l| l == "Q:1/4=97"), "{abc}");
-    let notes = song_of(&dir.join("tune.duet"));
+    let notes = part_of(&dir.join("tune.duet"));
     assert_eq!(notes.tempo_bpm, 97.0);
     let meters: Vec<String> = std::iter::once(notes.time_sig)
         .chain(notes.time_changes.iter().map(|c| c.time_sig))
@@ -1499,9 +1499,9 @@ fn snares(secs: f64, times: &[f64]) -> Vec<f32> {
     audio::bursts(secs, &at, 1_000.0, 4_000.0)
 }
 
-/// The pitches of a song's notes, in order.
-fn midis(song: &Song) -> Vec<u8> {
-    song.tracks
+/// The pitches of a part's notes, in order.
+fn midis(part: &Part) -> Vec<u8> {
+    part.tracks
         .iter()
         .flat_map(|t| t.notes.iter().map(|n| n.pitch.midi()))
         .collect()
@@ -1537,7 +1537,7 @@ fn a_quick_run_refines_the_grid_and_writes_everything() {
         comments(&read(&dir.join("run.abc")), "%").contains(&format!("% {line}")),
         "the score does not state its grid"
     );
-    let notes = song_of(&dir.join("run.duet"));
+    let notes = part_of(&dir.join("run.duet"));
     let found: Vec<u8> = analysed(&dir.join("run.capture.duet"), "note")
         .iter()
         .map(|e| e["midi"].as_u64().expect("midi") as u8)
@@ -1601,7 +1601,7 @@ fn a_flam_refines_the_grid_and_writes_everything() {
             .any(|l| l == line),
         "the score does not state its grid"
     );
-    let notes = song_of(&dir.join("flam.duet"));
+    let notes = part_of(&dir.join("flam.duet"));
     assert_eq!(
         analysed(&dir.join("flam.capture.duet"), "hit").len(),
         times.len(),
@@ -1657,7 +1657,7 @@ fn hits_no_grid_parts_are_merged_and_stated() {
     );
     let hits = doc.body.vel.data().iter().filter(|v| **v > 0).count();
     assert_eq!(hits, 2, "{:?}", doc.body);
-    let notes = song_of(&dir.join("flam.duet"));
+    let notes = part_of(&dir.join("flam.duet"));
     assert_eq!(notes.tracks[0].notes.len(), 3, "the .duet lost a hit");
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
@@ -1678,16 +1678,16 @@ fn a_recorded_flac_take_captures_like_the_same_take_as_wav() {
 
     ok(&capture(&dir, &["melody", s(&wav)]), "capture melody wav");
     ok(&capture(&dir, &["melody", s(&flac)]), "capture melody flac");
-    let placed = |song: &Song| -> Vec<_> {
-        song.tracks[0]
+    let placed = |part: &Part| -> Vec<_> {
+        part.tracks[0]
             .notes
             .iter()
             .map(|n| (n.pitch.midi(), n.at))
             .collect()
     };
     let (from_wav, from_flac) = (
-        song_of(&dir.join("wav.duet")),
-        song_of(&dir.join("flac.duet")),
+        part_of(&dir.join("wav.duet")),
+        part_of(&dir.join("flac.duet")),
     );
     assert!(from_wav.tracks[0].notes.len() >= 20, "{from_wav:?}");
     assert_eq!(placed(&from_flac), placed(&from_wav));

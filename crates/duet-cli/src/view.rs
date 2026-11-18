@@ -8,19 +8,19 @@
 //!
 //! | View | Of | Lossless? |
 //! |---|---|---|
-//! | `notes` | a song | yes: every field of song 1.0 |
+//! | `notes` | a part | yes: every field of part 1.0 |
 //! | `grid` | a drum grid | yes, for velocities on its three levels |
-//! | `grid` | one drum track of a song, at a step | no: that track's starts and velocities only |
+//! | `grid` | one drum track of a part, at a step | no: that track's starts and velocities only |
 //!
 //! # What each view drops
 //!
-//! - **`notes` of a song: nothing in the body.** It shows the normalized body, and always states
+//! - **`notes` of a part: nothing in the body.** It shows the normalized body, and always states
 //!   the end.
 //! - **`grid` of a drum grid: nothing in the body**, as long as every velocity is 0 or one of the
 //!   grid's three levels. One that is not is refused, naming its lane, bar and step, unless
 //!   `--snap-levels` shows it snapped; `apply --onto` then keeps the exact velocity of every cell
 //!   whose level the view leaves unchanged.
-//! - **`grid` of a song's drum track: everything but that track's starts and velocities**: every
+//! - **`grid` of a part's drum track: everything but that track's starts and velocities**: every
 //!   other track, the drum track's note lengths, controls and program, and the exact velocity
 //!   behind a level shown snapped. `apply --onto` keeps all of them.
 //! - **Every view drops the envelope's `tool` and `from`,** and shows its `statements` as `# `
@@ -33,9 +33,9 @@
 //! A view's first line names it, so it reads back without a file name:
 //!
 //! ```text
-//! # duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41
+//! # duet notes v1 of part 1.0 from 3f9a1c0d5e2b7a41
 //! # duet grid v1 of drum-grid 1.0 from 9c04e1b2a7d35f60
-//! # duet grid v1 of song 1.0 track "Drums" step 1/16 from 0b7e33c19a5d2f84
+//! # duet grid v1 of part 1.0 track "Drums" step 1/16 from 0b7e33c19a5d2f84
 //! ```
 //!
 //! The view and its syntax version, the kind and schema version it renders, which part of the
@@ -45,7 +45,7 @@
 //! mistakes, not against anyone.
 //!
 //! A view naming a newer view version, or a schema version this duet does not read, is refused
-//! by name. Today's `# notefmt v1` and `# notefmt drums v1` lines read as `notes v1 of song 1.0`
+//! by name. Today's `# notefmt v1` and `# notefmt drums v1` lines read as `notes v1 of part 1.0`
 //! and `grid v1 of drum-grid 1.0`, with no digest, so every file written before documents
 //! applies. A view with no header (written by hand or by an agent) needs `--as notes|grid`, and is
 //! read as leniently as ever.
@@ -56,7 +56,7 @@
 //!
 //! - **A lossless view onto its source** replaces the body with what the view reads, and keeps
 //!   the source's envelope (`from` and `statements`).
-//! - **A grid view onto a song** changes only the drum track it names: an unchanged cell keeps its
+//! - **A grid view onto a part** changes only the drum track it names: an unchanged cell keeps its
 //!   note exactly (length and velocity); a changed level sets that note's velocity; a new hit is
 //!   a note one step long; an emptied cell removes the note. Every other track is untouched.
 //! - **Refused, by name:** a conductor line (tempo, meter, key, end, tpq), the step or the channel
@@ -71,19 +71,19 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Args, ValueEnum};
 use duet_core::time::beats_from_ticks;
-use duet_core::{Grid, Note, Pitch, Position, Song};
+use duet_core::{Grid, Note, Part, Pitch, Position};
 use duet_drums::DrumGrid;
 use duet_schemas::{AnyDocument, Document, Kind, Version};
 use serde::Serialize;
 
 use crate::config::Config;
-use crate::drums::{ReadOptions, grid_of_song, levels_for};
-use crate::io::{Format, read_with_from, same_file, song_format, tool, with_end, write_bytes};
+use crate::drums::{ReadOptions, grid_of_part, levels_for};
+use crate::io::{Format, part_format, read_with_from, same_file, tool, with_end, write_bytes};
 
 /// A view of a document.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum ViewName {
-    /// notefmt text: a song, one note or control per line.
+    /// notefmt text: a part, one note or control per line.
     Notes,
     /// A drum grid's text: one row per lane, one column per step.
     Grid,
@@ -103,24 +103,24 @@ const VIEW_VERSION: u32 = 1;
 
 #[derive(Args)]
 pub struct ViewArgs {
-    /// The document to render: a .duet, or a song in an outside format (.mid, .abc), or - for a
+    /// The document to render: a .duet, or a part in an outside format (.mid, .abc), or - for a
     /// document on standard input.
     input: PathBuf,
-    /// The view: notes for a song, grid for a drum grid (the defaults), or grid of a song's
+    /// The view: notes for a part, grid for a drum grid (the defaults), or grid of a part's
     /// drum track, which takes --grid.
     #[arg(long = "as", value_enum)]
     as_view: Option<ViewName>,
     /// The file to write, instead of standard output.
     #[arg(short, long)]
     output: Option<PathBuf>,
-    /// The grid view of a song: the step, such as 1/16.
+    /// The grid view of a part: the step, such as 1/16.
     #[arg(long)]
     grid: Option<Grid>,
-    /// The grid view of a song: the drum track's name, when it is not the only track on the
+    /// The grid view of a part: the drum track's name, when it is not the only track on the
     /// lane map's channel.
     #[arg(long)]
     track: Option<String>,
-    /// The grid view of a song: how many bars it shows, when not to the song's end.
+    /// The grid view of a part: how many bars it shows, when not to the part's end.
     #[arg(long)]
     bars: Option<u32>,
     /// Show velocities off the text's levels snapped to the nearest. `apply --onto` keeps the
@@ -144,13 +144,13 @@ pub struct ApplyArgs {
     /// The view, for one with no header line.
     #[arg(long = "as", value_enum)]
     as_view: Option<ViewName>,
-    /// A grid view of a song with no header line: its step.
+    /// A grid view of a part with no header line: its step.
     #[arg(long)]
     grid: Option<Grid>,
-    /// A grid view of a song with no header line: its drum track.
+    /// A grid view of a part with no header line: its drum track.
     #[arg(long)]
     track: Option<String>,
-    /// A grid view of a song with no header line: how many bars it shows.
+    /// A grid view of a part with no header line: how many bars it shows.
     #[arg(long)]
     bars: Option<u32>,
     /// Apply over a document that has changed since the view was rendered.
@@ -206,7 +206,7 @@ impl Header {
             return Ok(Some(Header::of("grid", "drum-grid", DrumGrid::VERSION)));
         }
         if line.starts_with("# notefmt v1") {
-            return Ok(Some(Header::of("notes", "song", Song::VERSION)));
+            return Ok(Some(Header::of("notes", "part", Part::VERSION)));
         }
         let Some(rest) = line.strip_prefix("# duet ") else {
             return Ok(None);
@@ -284,7 +284,7 @@ impl Header {
     }
 
     fn partial(&self) -> bool {
-        self.view == ViewName::Grid && self.kind == Song::NAME
+        self.view == ViewName::Grid && self.kind == Part::NAME
     }
 
     /// Refuses a view version or a schema version this duet does not read, by name.
@@ -299,7 +299,7 @@ impl Header {
             );
         }
         let reads = match (self.view, self.kind.as_str()) {
-            (_, k) if k == Song::NAME => Song::VERSION,
+            (_, k) if k == Part::NAME => Part::VERSION,
             (ViewName::Grid, k) if k == DrumGrid::NAME => DrumGrid::VERSION,
             (view, kind) => bail!("{shown}: a {} view is of no kind {kind}", view.name()),
         };
@@ -369,7 +369,7 @@ fn digest<T: Serialize>(body: &T) -> Result<u64> {
 
 /// A document a view is rendered from or applied onto.
 enum Source {
-    Song(Document<Song>),
+    Part(Document<Part>),
     Grid(Document<DrumGrid>),
 }
 
@@ -385,21 +385,21 @@ fn text_of(path: &Path) -> Result<String> {
     }
 }
 
-/// Reads a document by its envelope, or a song from an outside format with its provenance.
+/// Reads a document by its envelope, or a part from an outside format with its provenance.
 /// The body comes back normalized, as every reader gives it.
 fn load(path: &Path, what: &str) -> Result<Source> {
-    let format = song_format(path, None, what)?;
+    let format = part_format(path, None, what)?;
     if format != Format::Duet {
-        let (song, from) = read_with_from(path, format, what)?;
-        let mut doc = Document::new(tool(), song);
+        let (part, from) = read_with_from(path, format, what)?;
+        let mut doc = Document::new(tool(), part);
         doc.from = from;
-        return Ok(Source::Song(doc));
+        return Ok(Source::Part(doc));
     }
     let text = text_of(path)?;
     match AnyDocument::read(&text).with_context(|| path.display().to_string())? {
-        AnyDocument::Song(mut doc) => {
+        AnyDocument::Part(mut doc) => {
             doc.body.normalize()?;
-            Ok(Source::Song(doc))
+            Ok(Source::Part(doc))
         }
         AnyDocument::DrumGrid(mut doc) => {
             doc.body.normalize()?;
@@ -426,10 +426,10 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
     .filter_map(|(set, flag)| set.then_some(flag))
     .collect();
     let text = match (&source, args.as_view) {
-        (Source::Song(doc), None | Some(ViewName::Notes)) => {
+        (Source::Part(doc), None | Some(ViewName::Notes)) => {
             if !grid_flags.is_empty() || args.snap_levels {
                 bail!(
-                    "{} are for the grid view of a song's drum track (--as grid)",
+                    "{} are for the grid view of a part's drum track (--as grid)",
                     if grid_flags.is_empty() {
                         "--snap-levels".to_owned()
                     } else {
@@ -439,7 +439,7 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
             }
             let header = Header {
                 digest: Some(digest(&doc.body)?),
-                ..Header::of("notes", Song::NAME, Song::VERSION)
+                ..Header::of("notes", Part::NAME, Part::VERSION)
             };
             framed(
                 &header,
@@ -451,7 +451,7 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
         (Source::Grid(doc), None | Some(ViewName::Grid)) => {
             if !grid_flags.is_empty() {
                 bail!(
-                    "{} are for the grid view of a song's drum track; a drum grid has its own",
+                    "{} are for the grid view of a part's drum track; a drum grid has its own",
                     grid_flags.join(", ")
                 );
             }
@@ -462,10 +462,10 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
             };
             framed(&header, &doc.statements, &said, &grid.to_text()?)
         }
-        (Source::Song(doc), Some(ViewName::Grid)) => {
+        (Source::Part(doc), Some(ViewName::Grid)) => {
             let Some(step) = args.grid else {
                 bail!(
-                    "the grid view of a song needs --grid, the step, such as --grid 1/16; duet \
+                    "the grid view of a part needs --grid, the step, such as --grid 1/16; duet \
                      never guesses it"
                 );
             };
@@ -476,20 +476,20 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
                 bars: args.bars,
                 snap_levels: false,
             };
-            let exact = grid_of_song(&doc.body, &options, config)?;
+            let exact = grid_of_part(&doc.body, &options, config)?;
             let (grid, said) = shown_levels(&exact, args.snap_levels)?;
             let header = Header {
                 track: Some(track),
                 step: Some(step),
                 bars: args.bars,
                 digest: Some(digest(&doc.body)?),
-                ..Header::of("grid", Song::NAME, Song::VERSION)
+                ..Header::of("grid", Part::NAME, Part::VERSION)
             };
             framed(&header, &doc.statements, &said, &grid.to_text()?)
         }
         (Source::Grid(_), Some(ViewName::Notes)) => bail!(
-            "{} is a drum-grid document, and the notes view is of a song; duet drums render makes \
-             a song of a grid",
+            "{} is a drum-grid document, and the notes view is of a part; duet drums render makes \
+             a part of a grid",
             args.input.display()
         ),
     };
@@ -530,14 +530,14 @@ fn framed(header: &Header, statements: &[String], said: &[String], body: &str) -
     out
 }
 
-/// The drum track a grid view of a song shows: the one named, or the only one on the lane
+/// The drum track a grid view of a part shows: the one named, or the only one on the lane
 /// map's channel.
-fn drum_track_name(song: &Song, named: Option<&str>, config: &Config) -> Result<String> {
+fn drum_track_name(part: &Part, named: Option<&str>, config: &Config) -> Result<String> {
     if let Some(name) = named {
         return Ok(name.to_owned());
     }
     let channel = config.lanes.channel();
-    let on: Vec<&str> = song
+    let on: Vec<&str> = part
         .tracks
         .iter()
         .filter(|t| t.channel == channel)
@@ -546,10 +546,10 @@ fn drum_track_name(song: &Song, named: Option<&str>, config: &Config) -> Result<
     match on.as_slice() {
         [one] => Ok((*one).to_owned()),
         [] => bail!(
-            "the song has no track on channel {channel}, the drum channel; name it with --track"
+            "the part has no track on channel {channel}, the drum channel; name it with --track"
         ),
         several => bail!(
-            "the song has {} tracks on channel {channel} ({}); name the one to show with --track",
+            "the part has {} tracks on channel {channel} ({}); name the one to show with --track",
             several.len(),
             several.join(", ")
         ),
@@ -621,15 +621,15 @@ fn apply_new(
     refuse_named_output(output)?;
     let bytes = match view {
         ViewName::Grid if partial => bail!(
-            "{} is a grid view of one track of a song, which is lossy: it makes no document of \
-             its own; apply it --onto the song it was rendered from",
+            "{} is a grid view of one track of a part, which is lossy: it makes no document of \
+             its own; apply it --onto the part it was rendered from",
             args.view.display()
         ),
         ViewName::Notes => {
-            let mut song = Song::from_text(text)?;
-            song.normalize()?;
-            // Every document duet writes states where its song ends, as `convert` does.
-            Document::new(tool(), with_end(&song, config.end)?).write()?
+            let mut part = Part::from_text(text)?;
+            part.normalize()?;
+            // Every document duet writes states where its part ends, as `convert` does.
+            Document::new(tool(), with_end(&part, config.end)?).write()?
         }
         ViewName::Grid => {
             let grid = read_grid_view(text, config)?;
@@ -641,7 +641,7 @@ fn apply_new(
 
 /// A document is written as a `.duet`, or to standard output.
 fn refuse_named_output(output: &Path) -> Result<()> {
-    if output != Path::new("-") && song_format(output, None, "apply writes")? != Format::Duet {
+    if output != Path::new("-") && part_format(output, None, "apply writes")? != Format::Duet {
         bail!("{}: apply writes a document, a .duet", output.display());
     }
     Ok(())
@@ -664,7 +664,7 @@ fn apply_onto(
     args: &ApplyArgs,
     config: &Config,
 ) -> Result<()> {
-    if song_format(onto, None, "apply --onto changes")? != Format::Duet || onto == Path::new("-") {
+    if part_format(onto, None, "apply --onto changes")? != Format::Duet || onto == Path::new("-") {
         bail!(
             "{}: --onto names the document to change, a .duet",
             onto.display()
@@ -679,7 +679,7 @@ fn apply_onto(
     }
     let source = load(onto, "apply --onto reads")?;
     let now = match &source {
-        Source::Song(doc) => digest(&doc.body)?,
+        Source::Part(doc) => digest(&doc.body)?,
         Source::Grid(doc) => digest(&doc.body)?,
     };
     if let Some(was) = header.and_then(|h| h.digest)
@@ -700,14 +700,14 @@ fn apply_onto(
         );
     }
     let partial = header.map_or(
-        view == ViewName::Grid && matches!(source, Source::Song(_)),
+        view == ViewName::Grid && matches!(source, Source::Part(_)),
         Header::partial,
     );
     let bytes = match (source, view) {
-        (Source::Song(mut doc), ViewName::Notes) => {
-            let mut song = Song::from_text(text)?;
-            song.normalize()?;
-            doc.body = song;
+        (Source::Part(mut doc), ViewName::Notes) => {
+            let mut part = Part::from_text(text)?;
+            part.normalize()?;
+            doc.body = part;
             doc.tool = tool();
             doc.write()?
         }
@@ -718,14 +718,14 @@ fn apply_onto(
             doc.tool = tool();
             doc.write()?
         }
-        (Source::Song(mut doc), ViewName::Grid) => {
+        (Source::Part(mut doc), ViewName::Grid) => {
             let (track, step, bars) = match header {
                 Some(h) => (h.track.clone(), h.step, h.bars),
                 None => (args.track.clone(), args.grid, args.bars),
             };
             let Some(step) = step else {
                 bail!(
-                    "{} has no header line naming its step; a grid view of a song needs --grid to \
+                    "{} has no header line naming its step; a grid view of a part needs --grid to \
                      be placed",
                     args.view.display()
                 );
@@ -738,7 +738,7 @@ fn apply_onto(
         }
         (source, view) => {
             let kind = match source {
-                Source::Song(_) => Song::NAME,
+                Source::Part(_) => Part::NAME,
                 Source::Grid(_) => DrumGrid::NAME,
             };
             bail!(
@@ -773,19 +773,19 @@ fn keep_exact(source: &DrumGrid, mut shown: DrumGrid) -> DrumGrid {
     shown
 }
 
-/// Merges a grid view of `track` onto the song, cell by cell against the grid the song shows
+/// Merges a grid view of `track` onto the part, cell by cell against the grid the part shows
 /// at that step: an unchanged cell keeps its note exactly; a changed level sets its velocity; a
 /// new hit is a note one step long; an emptied cell removes its note.
 fn merge_track(
-    song: &mut Song,
+    part: &mut Part,
     shown: &DrumGrid,
     track: &str,
     step: Grid,
     bars: Option<u32>,
     config: &Config,
 ) -> Result<()> {
-    let source = DrumGrid::from_song(
-        &with_end(song, config.end)?,
+    let source = DrumGrid::from_part(
+        &with_end(part, config.end)?,
         step,
         &config.lanes,
         Some(track),
@@ -793,9 +793,9 @@ fn merge_track(
     )?
     .snapped_to_levels();
     refuse_unplaceable(&source, shown)?;
-    let map = song.time_map()?;
-    let step_ticks = step.step_ticks(song.ticks_per_quarter)?;
-    let beats = beats_from_ticks(step_ticks, song.ticks_per_quarter);
+    let map = part.time_map()?;
+    let step_ticks = step.step_ticks(part.ticks_per_quarter)?;
+    let beats = beats_from_ticks(step_ticks, part.ticks_per_quarter);
     let columns = source.steps();
     // The tick each column starts on.
     let mut ticks = Vec::with_capacity(columns);
@@ -803,8 +803,8 @@ fn merge_track(
         let start = map.tick(Position::bar(i as u32 + 1))?;
         ticks.extend((0..u64::from(*steps)).map(|s| start + s * step_ticks));
     }
-    let Some(drums) = song.tracks.iter_mut().find(|t| t.name == track) else {
-        bail!("the song has no track named \"{track}\"");
+    let Some(drums) = part.tracks.iter_mut().find(|t| t.name == track) else {
+        bail!("the part has no track named \"{track}\"");
     };
     for (lane_index, lane) in source.lanes.iter().enumerate() {
         for (column, tick) in ticks.iter().enumerate() {
@@ -835,7 +835,7 @@ fn merge_track(
             }
         }
     }
-    song.check_end()?;
+    part.check_end()?;
     Ok(())
 }
 
@@ -843,7 +843,7 @@ fn merge_track(
 /// changed, a lane or a bar added or removed.
 fn refuse_unplaceable(source: &DrumGrid, shown: &DrumGrid) -> Result<()> {
     let read_only = "a partial view shows it read-only; change it in the notes view, which shows \
-                     the whole song";
+                     the whole part";
     let (a, b) = (source.conductor(), shown.conductor());
     let fields: [(&str, String, String); 9] = [
         ("title", format!("{:?}", a.title), format!("{:?}", b.title)),
@@ -880,10 +880,10 @@ fn refuse_unplaceable(source: &DrumGrid, shown: &DrumGrid) -> Result<()> {
             shown.stated_end().to_string(),
         ),
     ];
-    for (what, song, view) in fields {
-        if song != view {
+    for (what, part, view) in fields {
+        if part != view {
             bail!(
-                "the view changes the song's {what} (the song's is {song}, the view's {view}); {read_only}"
+                "the view changes the part's {what} (the part's is {part}, the view's {view}); {read_only}"
             );
         }
     }
@@ -941,15 +941,15 @@ mod tests {
             step: Some("1/8t".parse().unwrap()),
             bars: Some(4),
             digest: Some(0x0b7e_33c1_9a5d_2f84),
-            ..Header::of("grid", "song", Version::new(1, 0))
+            ..Header::of("grid", "part", Version::new(1, 0))
         };
         let line = header.render();
         assert_eq!(
             line,
-            "# duet grid v1 of song 1.0 track \"The \\\"Kit\\\"\" step 1/8t bars 4 from 0b7e33c19a5d2f84"
+            "# duet grid v1 of part 1.0 track \"The \\\"Kit\\\"\" step 1/8t bars 4 from 0b7e33c19a5d2f84"
         );
         assert_eq!(Header::parse(&line).unwrap(), Some(header));
-        let notes = Header::parse("# duet notes v1 of song 1.0 from 3f9a1c0d5e2b7a41")
+        let notes = Header::parse("# duet notes v1 of part 1.0 from 3f9a1c0d5e2b7a41")
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -965,7 +965,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             (notes.view, notes.kind.as_str(), notes.digest),
-            (ViewName::Notes, "song", None)
+            (ViewName::Notes, "part", None)
         );
         let grid = Header::parse("# notefmt drums v1: one row per lane")
             .unwrap()
@@ -977,11 +977,11 @@ mod tests {
         assert_eq!(Header::parse("tpq 480").unwrap(), None);
         assert_eq!(Header::parse("# a comment").unwrap(), None);
         for bad in [
-            "# duet tab v1 of song 1.0",
-            "# duet notes 1 of song 1.0",
-            "# duet notes v1 of song",
-            "# duet notes v1 of song 1.0 from xyz",
-            "# duet notes v1 of song 1.0 colour red",
+            "# duet tab v1 of part 1.0",
+            "# duet notes 1 of part 1.0",
+            "# duet notes v1 of part",
+            "# duet notes v1 of part 1.0 from xyz",
+            "# duet notes v1 of part 1.0 colour red",
         ] {
             assert!(Header::parse(bad).is_err(), "{bad}");
         }
@@ -997,20 +997,20 @@ mod tests {
                 .check(path)
                 .map_err(|e| e.to_string())
         };
-        assert!(check("# duet notes v1 of song 1.0").is_ok());
-        let err = check("# duet notes v2 of song 1.0").unwrap_err();
+        assert!(check("# duet notes v1 of part 1.0").is_ok());
+        let err = check("# duet notes v2 of part 1.0").unwrap_err();
         assert!(
             err.contains("notes v2 view; this duet reads notes v1"),
             "{err}"
         );
-        let err = check("# duet notes v1 of song 1.4").unwrap_err();
+        let err = check("# duet notes v1 of part 1.4").unwrap_err();
         assert!(
-            err.contains("view of song 1.4; this duet reads song up to 1.0"),
+            err.contains("view of part 1.4; this duet reads part up to 1.0"),
             "{err}"
         );
-        let err = check("# duet notes v1 of song 2.0").unwrap_err();
+        let err = check("# duet notes v1 of part 2.0").unwrap_err();
         assert!(
-            err.contains("song 1.x") && err.contains("duet convert"),
+            err.contains("part 1.x") && err.contains("duet convert"),
             "{err}"
         );
         let err = check("# duet grid v1 of lute-tab 1.0").unwrap_err();

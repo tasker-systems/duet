@@ -6,7 +6,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use duet_core::{
-    Grid, Key, KeyChange, Position, Song, TempoChange, Tensor, TimeChange, TimeMap, TimeSig,
+    Grid, Key, KeyChange, Part, Position, TempoChange, Tensor, TimeChange, TimeMap, TimeSig,
 };
 
 use crate::error::{Error, Result};
@@ -18,7 +18,7 @@ use crate::lanes::valid_lane_name;
 /// from it.
 ///
 /// The conductor (resolution, tempo, meter, key and their changes) means exactly what
-/// the same fields of a [`Song`] mean. Every bar must be a whole number of steps of
+/// the same fields of a [`Part`] mean. Every bar must be a whole number of steps of
 /// [`DrumGrid::grid`], so each column is one step wide.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -193,17 +193,17 @@ pub(crate) struct BarShape {
 }
 
 impl DrumGrid {
-    /// An empty grid with this song's conductor: no lanes, no bars and no end.
-    pub fn with_conductor(song: &Song, grid: Grid) -> DrumGrid {
+    /// An empty grid with this part's conductor: no lanes, no bars and no end.
+    pub fn with_conductor(part: &Part, grid: Grid) -> DrumGrid {
         DrumGrid {
-            title: song.title.clone(),
-            ticks_per_quarter: song.ticks_per_quarter,
-            tempo_bpm: song.tempo_bpm,
-            time_sig: song.time_sig,
-            key: song.key,
-            tempo_changes: song.tempo_changes.clone(),
-            time_changes: song.time_changes.clone(),
-            key_changes: song.key_changes.clone(),
+            title: part.title.clone(),
+            ticks_per_quarter: part.ticks_per_quarter,
+            tempo_bpm: part.tempo_bpm,
+            time_sig: part.time_sig,
+            key: part.key,
+            tempo_changes: part.tempo_changes.clone(),
+            time_changes: part.time_changes.clone(),
+            key_changes: part.key_changes.clone(),
             end: None,
             grid,
             channel: drum_channel(),
@@ -279,19 +279,19 @@ impl DrumGrid {
         Ok(())
     }
 
-    /// The conductor, and the grid's end, as a song with no tracks.
-    pub fn conductor(&self) -> Song {
-        let mut song = Song::default();
-        song.title = self.title.clone();
-        song.ticks_per_quarter = self.ticks_per_quarter;
-        song.tempo_bpm = self.tempo_bpm;
-        song.time_sig = self.time_sig;
-        song.key = self.key;
-        song.tempo_changes = self.tempo_changes.clone();
-        song.time_changes = self.time_changes.clone();
-        song.key_changes = self.key_changes.clone();
-        song.end = self.end;
-        song
+    /// The conductor, and the grid's end, as a part with no tracks.
+    pub fn conductor(&self) -> Part {
+        let mut part = Part::default();
+        part.title = self.title.clone();
+        part.ticks_per_quarter = self.ticks_per_quarter;
+        part.tempo_bpm = self.tempo_bpm;
+        part.time_sig = self.time_sig;
+        part.key = self.key;
+        part.tempo_changes = self.tempo_changes.clone();
+        part.time_changes = self.time_changes.clone();
+        part.key_changes = self.key_changes.clone();
+        part.end = self.end;
+        part
     }
 
     pub(crate) fn time_map(&self) -> Result<TimeMap> {
@@ -467,7 +467,7 @@ impl DrumGrid {
         Ok(())
     }
 
-    /// Puts the conductor in the form a song's normalizing gives (tempos as MIDI stores
+    /// Puts the conductor in the form a part's normalizing gives (tempos as MIDI stores
     /// them, positions in canonical bar.beat.tick form), then [checks](DrumGrid::check)
     /// the grid. Hits are not touched.
     pub fn normalize(&mut self) -> Result<()> {

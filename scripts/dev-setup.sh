@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sets a developer's machine up beyond what cargo installs: the Brewfile's tools (abcmidi
 # for duet-abc's oracle, FluidSynth for scripts/port-check.sh) and the pinned General MIDI
-# SoundFont that `duet play` sounds songs with. Safe to run again.
+# SoundFont that `duet play` sounds parts with. Safe to run again.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -76,7 +76,7 @@ fn wayfaring_stranger_reads_e_flat_minor_under_every_reader_before_and_after_the
             "{reader:?} after the pass: {}",
             top(after)
         );
-        assert_eq!(captured.song.key, Some(e_flat_minor()), "{reader:?}");
+        assert_eq!(captured.part.key, Some(e_flat_minor()), "{reader:?}");
 
         let before = before_the_pass(&reading);
         if reader != ReaderName::Rules {

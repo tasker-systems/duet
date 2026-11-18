@@ -46,7 +46,7 @@ impl Book {
     /// empty line, or the end of the file. A first block of fields and directives before
     /// any `X:` is the file header: it is read once, here, and every tune starts from it.
     /// Free text between tunes is skipped. A tune's own lines are not read here: a tune that
-    /// is not valid ABC fails when it is read ([`Tune::to_song`]), not when it is found, and
+    /// is not valid ABC fails when it is read ([`Tune::to_part`]), not when it is found, and
     /// so does every tune when the file header is the one at fault.
     pub fn parse(text: &str) -> Result<Book> {
         // §8: Unix, DOS and old Macintosh line ends.

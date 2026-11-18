@@ -7,7 +7,7 @@
 //! confidence. The profile is Aarden–Essen's, fitted to folk melodies, unless another is asked
 //! for. v1 covers major and minor only; the modes come later.
 //!
-//! The key changes a song's spelling and signature, never a note's MIDI number.
+//! The key changes a part's spelling and signature, never a note's MIDI number.
 
 use duet_core::{Key, Mode};
 use schemars::JsonSchema;

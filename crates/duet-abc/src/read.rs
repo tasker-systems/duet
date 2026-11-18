@@ -1,4 +1,4 @@
-//! ABC → `Song`.
+//! ABC → `Part`.
 //!
 //! Written from the ABC 2.1 standard, and from abcMIDI's documentation of how abc2midi
 //! plays what the standard leaves open. The rules are the design's §3:
@@ -20,7 +20,7 @@ use std::fmt;
 
 use duet_core::time::beats_from_ticks;
 use duet_core::{
-    Key, KeyChange, Note, Pitch, Song, TempoChange, TimeChange, TimeMap, TimeSig, Track,
+    Key, KeyChange, Note, Part, Pitch, TempoChange, TimeChange, TimeMap, TimeSig, Track,
 };
 
 use crate::error::{Error, Result};
@@ -38,15 +38,15 @@ pub(crate) const TPQ: u16 = 480;
 #[non_exhaustive]
 pub struct ReadOptions {}
 
-/// A tune read as a song, with every notation-only construct it held.
+/// A tune read as a part, with every notation-only construct it held.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Reading {
-    pub song: Song,
+    pub part: Part,
     pub notices: Vec<Notice>,
 }
 
-/// A construct that was read but not carried into the song, because it is notation only:
+/// A construct that was read but not carried into the part, because it is notation only:
 /// a slur, an annotation, an information field and the like.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -63,7 +63,7 @@ impl fmt::Display for Notice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "line {}, col {}: {} ({}) is notation only, and is not carried into the song",
+            "line {}, col {}: {} ({}) is notation only, and is not carried into the part",
             self.line, self.col, self.found, self.construct
         )
     }
@@ -216,7 +216,7 @@ pub(crate) struct Reader {
     in_body: bool,
     voices: Vec<Voice>,
     current: Option<usize>,
-    /// The first song-wide change written in the body, refused if the tune has several
+    /// The first part-wide change written in the body, refused if the tune has several
     /// voices: (span, construct, text).
     body_change: Option<(Span, &'static str, String)>,
     last_field: Option<char>,
@@ -1276,7 +1276,7 @@ fn pickup_sig(len: u64, meter: TimeSig, span: Span) -> Result<TimeSig> {
 
 /// The meter a pickup `len` long (in whole notes) gets under `meter`: its length over the
 /// meter's denominator, or a finer one when it needs it. The writer uses the pickup form
-/// only when this gives back the song's first bar.
+/// only when this gives back the part's first bar.
 pub(crate) fn pickup_meter(len: Ratio, meter: TimeSig) -> Option<TimeSig> {
     let den = len.den().max(u64::from(meter.den));
     let num = len.num() * den / len.den();
@@ -1292,9 +1292,9 @@ pub(crate) fn pickup_meter(len: Ratio, meter: TimeSig) -> Option<TimeSig> {
 /// `None` when the length is no time signature: a length of zero, one that is not a whole
 /// number of 64ths, or one that would need more than 255 beats.
 ///
-/// This is the rule the writer applies: a song whose first bar has this signature, followed
+/// This is the rule the writer applies: a part whose first bar has this signature, followed
 /// by a change to `meter` at bar 2, is written as a pickup before the first bar line. Anything
-/// that builds a song with a pickup uses it, so the two cannot drift apart.
+/// that builds a part with a pickup uses it, so the two cannot drift apart.
 pub fn pickup_meter_for(len_ticks: u64, ticks_per_quarter: u16, meter: TimeSig) -> Option<TimeSig> {
     pickup_meter(
         Ratio::new(len_ticks, 4 * u64::from(ticks_per_quarter)),
@@ -1333,12 +1333,12 @@ fn without_position(e: Error) -> Error {
 }
 
 impl Tune {
-    /// Reads the tune as a song, with the notation-only constructs it held.
+    /// Reads the tune as a part, with the notation-only constructs it held.
     ///
     /// A construct outside the subset is refused by name ([`Error::Unsupported`]), and a
     /// tune that is not valid ABC, or has a bar of the wrong length, fails with its line
     /// and column ([`Error::Parse`]). Nothing is moved, rounded or dropped to make it fit.
-    pub fn to_song(&self, options: &ReadOptions) -> Result<Reading> {
+    pub fn to_part(&self, options: &ReadOptions) -> Result<Reading> {
         self.read(options, true)
     }
 
@@ -1366,7 +1366,7 @@ impl Tune {
                 "the tune's header never ends: a header ends with a K: field",
             ));
         }
-        r.into_song()
+        r.into_part()
     }
 }
 
@@ -1442,7 +1442,7 @@ impl Reader {
 }
 
 impl Reader {
-    fn into_song(self) -> Result<Reading> {
+    fn into_part(self) -> Result<Reading> {
         let header_meter = self.meter.unwrap_or_default();
         let voices: Vec<&Voice> = self.voices.iter().filter(|v| v.has_music).collect();
         let multi_voice = voices.len() > 1;
@@ -1522,15 +1522,15 @@ impl Reader {
             }
         }
 
-        let mut song = Song::default();
-        song.title = self.title.clone();
-        song.ticks_per_quarter = TPQ;
-        song.tempo_bpm = self.tempo.unwrap_or(120.0);
-        song.time_sig = initial_sig;
-        song.key = self.key;
-        song.time_changes = time_changes.into_iter().map(|(_, c)| c).collect();
+        let mut part = Part::default();
+        part.title = self.title.clone();
+        part.ticks_per_quarter = TPQ;
+        part.tempo_bpm = self.tempo.unwrap_or(120.0);
+        part.time_sig = initial_sig;
+        part.key = self.key;
+        part.time_changes = time_changes.into_iter().map(|(_, c)| c).collect();
         if let Some(first) = laid.first() {
-            song.key_changes = first
+            part.key_changes = first
                 .keys
                 .iter()
                 .map(|&(tick, key)| KeyChange {
@@ -1538,7 +1538,7 @@ impl Reader {
                     key,
                 })
                 .collect();
-            song.tempo_changes = first
+            part.tempo_changes = first
                 .tempos
                 .iter()
                 .map(|&(tick, bpm)| TempoChange {
@@ -1572,13 +1572,13 @@ impl Reader {
                     n.vel,
                 ));
             }
-            song.tracks.push(track);
+            part.tracks.push(track);
         }
         let total = laid.iter().map(|l| l.total).max().unwrap_or(0);
-        song.end = Some(map.position(total));
-        song.normalize()?;
+        part.end = Some(map.position(total));
+        part.normalize()?;
         Ok(Reading {
-            song,
+            part,
             notices: self.notices,
         })
     }
@@ -1614,7 +1614,7 @@ mod tests {
         let in_a_tune = crate::Book::parse("X:1\nM:4/4\nK:none\nC|\n")
             .unwrap()
             .tunes()[0]
-            .to_song(&ReadOptions::default())
+            .to_part(&ReadOptions::default())
             .unwrap_err()
             .to_string();
         let alone = key_from_name("none").unwrap_err().to_string();

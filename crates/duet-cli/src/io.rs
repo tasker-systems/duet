@@ -1,4 +1,4 @@
-//! Reading and writing songs and drum grids. A `.duet` file is read by its envelope, so the kind
+//! Reading and writing parts and drum grids. A `.duet` file is read by its envelope, so the kind
 //! decides what it is, never the name. `.mid` (`.midi`, `.smf`) and `.abc` are the outside
 //! formats, read by their names. notefmt text and a drum grid's text are views: `duet view`
 //! writes them and `duet apply` reads them, and no other command reads or writes them, by any
@@ -19,7 +19,7 @@ use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use clap::builder::{EnumValueParser, PossibleValue, TypedValueParser};
 use clap::error::ErrorKind;
-use duet_core::{EndRule, Song};
+use duet_core::{EndRule, Part};
 use duet_drums::DrumGrid;
 use duet_midi::Midi;
 use duet_schemas::{AnyDocument, Document, From, Tool};
@@ -62,7 +62,7 @@ impl TypedValueParser for FormatParser {
             return Err(clap::Error::raw(
                 ErrorKind::InvalidValue,
                 format!(
-                    "{flag} {given} was removed: a song's or a drum grid's text is a view of a \
+                    "{flag} {given} was removed: a part's or a drum grid's text is a view of a \
                      document. Write one with `duet view <doc.duet> --as notes|grid`, and read \
                      one with `duet apply <view> -o <new.duet>` (or --onto the document it came \
                      from)\n"
@@ -82,9 +82,9 @@ impl TypedValueParser for FormatParser {
     }
 }
 
-/// What a file's name says it is, when it is not a song's format.
+/// What a file's name says it is, when it is not a part's format.
 enum Named {
-    Song(Format),
+    Part(Format),
     /// A `.duet.jsonl` stream.
     Stream,
     /// A name duet no longer reads: `.json`, `.toml`, and the `.drums.json` and `.drums.toml`
@@ -105,9 +105,9 @@ fn named(path: &Path) -> Named {
         return Named::Stream;
     }
     match name.rsplit_once('.').map(|(_, ext)| ext) {
-        Some("duet") => Named::Song(Format::Duet),
-        Some("mid" | "midi" | "smf") => Named::Song(Format::Midi),
-        Some("abc") => Named::Song(Format::Abc),
+        Some("duet") => Named::Part(Format::Duet),
+        Some("mid" | "midi" | "smf") => Named::Part(Format::Midi),
+        Some("abc") => Named::Part(Format::Abc),
         Some("json" | "toml") => Named::Cut,
         Some("notes" | "txt" | "drums") => Named::View,
         _ => Named::Unknown,
@@ -123,11 +123,11 @@ fn to_apply(path: &Path) -> String {
     )
 }
 
-/// Why a name is refused as a song's, and what to do instead.
+/// Why a name is refused as a part's, and what to do instead.
 fn refusal(path: &Path, named: &Named, what: &str) -> String {
     let shown = path.display();
     match named {
-        Named::Stream => format!("{shown} is a stream (.duet.jsonl), and {what} a song"),
+        Named::Stream => format!("{shown} is a stream (.duet.jsonl), and {what} a part"),
         Named::Cut => format!(
             "{shown} is not a duet document: duet's documents are .duet, and .json and .toml \
              are no longer read or written"
@@ -137,7 +137,7 @@ fn refusal(path: &Path, named: &Named, what: &str) -> String {
              .abc by name. {}",
             to_apply(path)
         ),
-        Named::Song(_) | Named::Unknown => format!(
+        Named::Part(_) | Named::Unknown => format!(
             "{shown}: duet reads and writes .duet, .mid (.midi, .smf) and .abc by name; name \
              any other with --from or --to (duet, midi or abc). {}",
             to_apply(path)
@@ -145,11 +145,11 @@ fn refusal(path: &Path, named: &Named, what: &str) -> String {
     }
 }
 
-/// The format of a path a command reads or writes as a song: `given` when the user named one,
+/// The format of a path a command reads or writes as a part: `given` when the user named one,
 /// a document for `-` (standard input is read by what it holds, as [`read`] says), or else the
 /// format the path's name gives. Any other name is refused, so a file is never misread:
 /// `.json` and `.toml` are no longer read, and a view's text is read only by `duet apply`.
-pub fn song_format(path: &Path, given: Option<Format>, what: &str) -> Result<Format> {
+pub fn part_format(path: &Path, given: Option<Format>, what: &str) -> Result<Format> {
     if let Some(format) = given {
         return Ok(format);
     }
@@ -157,13 +157,13 @@ pub fn song_format(path: &Path, given: Option<Format>, what: &str) -> Result<For
         return Ok(Format::Duet);
     }
     match named(path) {
-        Named::Song(format) => Ok(format),
+        Named::Part(format) => Ok(format),
         other => bail!("{}", refusal(path, &other, what)),
     }
 }
 
 /// Checks a path a command reads or writes as a drum grid: a `.duet` drum-grid document, or
-/// `-` for one on standard input or output. Anything else is refused by name: a song's
+/// `-` for one on standard input or output. Anything else is refused by name: a part's
 /// outside format, a stream, a name duet no longer reads, or a grid's text, which is a view.
 pub fn grid_path(path: &Path, what: &str) -> Result<()> {
     if path == Path::new("-") {
@@ -171,9 +171,9 @@ pub fn grid_path(path: &Path, what: &str) -> Result<()> {
     }
     let shown = path.display();
     match named(path) {
-        Named::Song(Format::Duet) => Ok(()),
-        Named::Song(format) => bail!(
-            "{shown} is a song's name ({}), and {what} a drum grid, a drum-grid document \
+        Named::Part(Format::Duet) => Ok(()),
+        Named::Part(format) => bail!(
+            "{shown} is a part's name ({}), and {what} a drum grid, a drum-grid document \
              (.duet)",
             format
                 .to_possible_value()
@@ -185,7 +185,7 @@ pub fn grid_path(path: &Path, what: &str) -> Result<()> {
         ),
         other => bail!(
             "{}",
-            refusal(path, &other, what).replace(" a song", " a drum grid")
+            refusal(path, &other, what).replace(" a part", " a drum grid")
         ),
     }
 }
@@ -213,7 +213,7 @@ pub fn read_grid_document(path: &Path, what: &str) -> Result<DrumGrid> {
     }
 }
 
-/// The refusal of standard input that is not a document, nor MIDI where a song is read.
+/// The refusal of standard input that is not a document, nor MIDI where a part is read.
 fn not_a_document(what: &str) -> String {
     format!(
         "standard input is not a duet document (one starts with {{), and {what} one; if it is \
@@ -245,22 +245,22 @@ fn is_document(bytes: &[u8]) -> bool {
     bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{')
 }
 
-/// What `convert` read: a song with where it came from, or a drum grid from a drum-grid
+/// What `convert` read: a part with where it came from, or a drum grid from a drum-grid
 /// document.
 pub enum Loaded {
-    Song(Song, Option<From>),
+    Part(Part, Option<From>),
     Grid(DrumGrid),
 }
 
-/// Reads a song. `what` says what the command does with it, as in "duet play reads", for a
+/// Reads a part. `what` says what the command does with it, as in "duet play reads", for a
 /// document of another kind. Standard input is read by what it holds: a document when its
 /// first non-blank byte is `{`, ABC when `format` (`--from abc`) says so, MIDI when it starts
 /// with `MThd`, and anything else is refused, pointing at `duet apply` for a view's text.
-pub fn read(path: &Path, format: Format, what: &str) -> Result<Song> {
-    read_with_from(path, format, what).map(|(song, _)| song)
+pub fn read(path: &Path, format: Format, what: &str) -> Result<Part> {
+    read_with_from(path, format, what).map(|(part, _)| part)
 }
 
-/// Reads a song and where it came from, the provenance a `.duet` written from it records:
+/// Reads a part and where it came from, the provenance a `.duet` written from it records:
 ///
 /// - **a `.duet`**: its own `from`, kept as it is, or none;
 /// - **MIDI**: `{"format": "midi"}`, since MIDI drops nothing duet's model holds that a
@@ -269,19 +269,19 @@ pub fn read(path: &Path, format: Format, what: &str) -> Result<Song> {
 ///   the reader read but did not carry, each at its line and column.
 ///
 /// A view's text is not read here: `duet apply` reads it, and a document it writes has no
-/// `from`, since a view is not where a song comes from.
-pub fn read_with_from(path: &Path, format: Format, what: &str) -> Result<(Song, Option<From>)> {
+/// `from`, since a view is not where a part comes from.
+pub fn read_with_from(path: &Path, format: Format, what: &str) -> Result<(Part, Option<From>)> {
     match read_any(path, format, what)? {
-        Loaded::Song(song, from) => Ok((song, from)),
+        Loaded::Part(part, from) => Ok((part, from)),
         Loaded::Grid(_) => bail!(
-            "{} is a drum-grid document, and {what} a song; duet drums render makes a song of \
+            "{} is a drum-grid document, and {what} a part; duet drums render makes a part of \
              one",
             path.display()
         ),
     }
 }
 
-/// Reads a song, or a drum grid when the path holds a drum-grid document.
+/// Reads a part, or a drum grid when the path holds a drum-grid document.
 pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
     let bytes = bytes_of(path)?;
     let format = if path != Path::new("-") {
@@ -298,24 +298,24 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
     let text = || String::from_utf8(bytes.clone()).context("input is not UTF-8 text");
     // MIDI and ABC come back normalized. A hand-edited document may hold lengths or
     // positions in a loose form, so it is normalized here.
-    let (song, from) = match format {
+    let (part, from) = match format {
         Format::Duet => {
             let doc = AnyDocument::read(&text()?).with_context(|| path.display().to_string())?;
             match doc {
-                AnyDocument::Song(doc) => (normalized(doc.body)?, doc.from),
+                AnyDocument::Part(doc) => (normalized(doc.body)?, doc.from),
                 AnyDocument::DrumGrid(doc) => {
                     let mut grid = doc.body;
                     grid.normalize()?;
                     return Ok(Loaded::Grid(grid));
                 }
                 other => bail!(
-                    "{} is a {} document, and {what} a song",
+                    "{} is a {} document, and {what} a part",
                     path.display(),
                     other.kind()
                 ),
             }
         }
-        Format::Midi => (Song::from_midi(&bytes)?, Some(From::new("midi"))),
+        Format::Midi => (Part::from_midi(&bytes)?, Some(From::new("midi"))),
         Format::Abc => {
             let book = duet_abc::Book::parse(&text()?)?;
             if book.tunes().len() > 1 {
@@ -325,25 +325,25 @@ pub fn read_any(path: &Path, format: Format, what: &str) -> Result<Loaded> {
                     book.tunes().len()
                 );
             }
-            let (song, from) = crate::abc::reading(&book.tunes()[0])?;
-            (song, Some(from))
+            let (part, from) = crate::abc::reading(&book.tunes()[0])?;
+            (part, Some(from))
         }
     };
-    Ok(Loaded::Song(song, from))
+    Ok(Loaded::Part(part, from))
 }
 
-fn normalized(mut song: Song) -> duet_core::Result<Song> {
-    song.normalize()?;
-    Ok(song)
+fn normalized(mut part: Part) -> duet_core::Result<Part> {
+    part.normalize()?;
+    Ok(part)
 }
 
-/// The song with its end stated: the one it names, or else the configured default's.
-pub fn with_end(song: &Song, end: EndRule) -> Result<Song> {
-    let mut song = song.clone();
-    if song.end.is_none() {
-        song.end = Some(song.default_end_by(end)?);
+/// The part with its end stated: the one it names, or else the configured default's.
+pub fn with_end(part: &Part, end: EndRule) -> Result<Part> {
+    let mut part = part.clone();
+    if part.end.is_none() {
+        part.end = Some(part.default_end_by(end)?);
     }
-    Ok(song)
+    Ok(part)
 }
 
 /// What every document duet writes names as its tool.
@@ -351,39 +351,39 @@ pub fn tool() -> Tool {
     Tool::new("duet", env!("CARGO_PKG_VERSION"))
 }
 
-/// Writes the song in a format, recording no provenance. See [`write_from`].
-pub fn write(song: &Song, path: &Path, format: Format, end: EndRule) -> Result<()> {
-    write_from(song, path, format, end, None)
+/// Writes the part in a format, recording no provenance. See [`write_from`].
+pub fn write(part: &Part, path: &Path, format: Format, end: EndRule) -> Result<()> {
+    write_from(part, path, format, end, None)
 }
 
-/// Writes the song in a format. Every file written says where the song ends, whatever
+/// Writes the part in a format. Every file written says where the part ends, whatever
 /// default computed it: MIDI states it itself, and a document carries it as its
-/// body's `end`. A document also records `from`, where the song came from
+/// body's `end`. A document also records `from`, where the part came from
 /// ([`read_with_from`]); the other formats have nowhere to keep it.
 ///
-/// **The rule for `from`:** it follows the song. A command that reads a song and writes a
-/// document of it (`convert`, `song quantize`, `song show --to duet`, `abc render`) records
+/// **The rule for `from`:** it follows the part. A command that reads a part and writes a
+/// document of it (`convert`, `part quantize`, `part show --to duet`, `abc render`) records
 /// what it read: a `.duet`'s own `from`, unchanged, or a new one for an import from ABC or
-/// MIDI. Going out to ABC or MIDI and in again replaces it, since that import is the song's new
+/// MIDI. Going out to ABC or MIDI and in again replaces it, since that import is the part's new
 /// provenance. Quantizing keeps it: the notices still name what the import did not carry.
-/// A view carries none, so a song `duet apply` reads from one has none. A drum grid carries
+/// A view carries none, so a part `duet apply` reads from one has none. A drum grid carries
 /// none yet.
 pub fn write_from(
-    song: &Song,
+    part: &Part,
     path: &Path,
     format: Format,
     end: EndRule,
     from: Option<&From>,
 ) -> Result<()> {
-    let song = with_end(song, end)?;
+    let part = with_end(part, end)?;
     let bytes = match format {
         Format::Duet => {
-            let mut doc = Document::new(tool(), song);
+            let mut doc = Document::new(tool(), part);
             doc.from = from.cloned();
             doc.write()?.into_bytes()
         }
-        Format::Midi => song.to_midi()?,
-        Format::Abc => duet_abc::write(&song, &duet_abc::WriteOptions::default())?.into_bytes(),
+        Format::Midi => part.to_midi()?,
+        Format::Abc => duet_abc::write(&part, &duet_abc::WriteOptions::default())?.into_bytes(),
     };
     write_bytes(path, &bytes)
 }
@@ -411,16 +411,16 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
 mod tests {
     use std::path::Path;
 
-    use duet_core::{Note, Position, Song, Track};
+    use duet_core::{Note, Part, Position, Track};
 
-    use super::{Format, grid_path, read, song_format, tool};
+    use super::{Format, grid_path, part_format, read, tool};
     use duet_schemas::Document;
 
     #[test]
-    fn a_song_is_named_by_dot_duet_mid_or_abc_and_nothing_else() {
-        let of = |name: &str| song_format(Path::new(name), None, "reads");
-        assert_eq!(of("song.duet").unwrap(), Format::Duet);
-        assert_eq!(of("Song.DUET").unwrap(), Format::Duet);
+    fn a_part_is_named_by_dot_duet_mid_or_abc_and_nothing_else() {
+        let of = |name: &str| part_format(Path::new(name), None, "reads");
+        assert_eq!(of("part.duet").unwrap(), Format::Duet);
+        assert_eq!(of("Part.DUET").unwrap(), Format::Duet);
         assert_eq!(of("take.mid").unwrap(), Format::Midi);
         assert_eq!(of("take.smf").unwrap(), Format::Midi);
         assert_eq!(of("tune.abc").unwrap(), Format::Abc);
@@ -430,19 +430,19 @@ mod tests {
             "standard streams are documents"
         );
         for (name, says) in [
-            ("song.json", "no longer read"),
-            ("song.toml", "no longer read"),
+            ("part.json", "no longer read"),
+            ("part.toml", "no longer read"),
             ("beat.drums.json", "no longer read"),
             ("take.notes", "`duet apply take.notes -o <new.duet>`"),
             ("take.txt", "`duet apply take.txt -o <new.duet>`"),
             ("beat.drums", "`duet apply beat.drums -o <new.duet>`"),
             ("perf.duet.jsonl", "is a stream"),
-            ("song", "name any other with --from or --to"),
+            ("part", "name any other with --from or --to"),
         ] {
             let err = of(name).expect_err(name).to_string();
             assert!(err.contains(says), "{name}: {err}");
         }
-        let given = song_format(Path::new("x.bin"), Some(Format::Midi), "reads");
+        let given = part_format(Path::new("x.bin"), Some(Format::Midi), "reads");
         assert_eq!(
             given.unwrap(),
             Format::Midi,
@@ -457,7 +457,7 @@ mod tests {
         for (name, says) in [
             ("beat.drums", "`duet apply beat.drums -o <new.duet>`"),
             ("beat", "`duet apply beat -o <new.duet>`"),
-            ("beat.mid", "is a song's name (midi)"),
+            ("beat.mid", "is a part's name (midi)"),
             ("beat.drums.json", "no longer read"),
         ] {
             let err = grid_path(Path::new(name), "reads")
@@ -470,7 +470,7 @@ mod tests {
     #[test]
     fn read_normalizes_a_document() {
         // A loose position and a length that is not whole ticks, as a hand edit might leave.
-        let mut song = Song::default();
+        let mut part = Part::default();
         let mut track = Track::new("P", 1);
         track.notes.push(Note::new(
             Position::new(1, 1, 960),
@@ -478,12 +478,12 @@ mod tests {
             0.3334,
             80,
         ));
-        song.tracks.push(track);
+        part.tracks.push(track);
 
         let dir = std::env::temp_dir().join(format!("duet-read-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let path = dir.join("song.duet");
-        let text = Document::new(tool(), song).write().expect("written");
+        let path = dir.join("part.duet");
+        let text = Document::new(tool(), part).write().expect("written");
         std::fs::write(&path, text).expect("write");
         let read = read(&path, Format::Duet, "reads").expect("read");
         let note = &read.tracks[0].notes[0];

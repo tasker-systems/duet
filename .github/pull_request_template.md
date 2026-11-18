@@ -13,7 +13,7 @@
      would otherwise propose the other.
 
      Then, as short lists:
-     - **Formats:** every document kind or schema version this adds or changes (song,
+     - **Formats:** every document kind or schema version this adds or changes (part,
        drum-grid, capture-analysis, performance, the envelope), each marked additive (a minor)
        or breaking (a major). A change to the envelope's shape is a major of every kind. Write
        `none` when no file format changes.
