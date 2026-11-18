@@ -4,58 +4,76 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context as _, Result, bail};
 use clap::{Subcommand, ValueEnum};
 use duet_abc::{Book, Dynamics, ReadOptions, Tune, WriteOptions};
 use duet_core::Part;
 use duet_schemas::{From, Notice, Source};
 
-use crate::config::Config;
+use crate::Context;
 use crate::io::{Format, FormatParser, Origin, part_format, read, same_file, with_end, write_from};
+use clap::Args;
+use schemars::JsonSchema;
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum AbcCommand {
     /// Read every tune in a file, and list what each holds that is notation only (and
     /// not carried into a part), or the construct it is refused for, with its line.
-    Check {
-        /// The ABC file to read, or - for standard input.
-        input: PathBuf,
-    },
+    Check(CheckInput),
     /// Render one tune as a part: a document (.duet) or MIDI (.mid or .midi) by the output's
     /// name. Standard output is MIDI unless --to says. `duet view` shows a part as text.
-    Render {
-        /// The ABC file to read, or - for standard input.
-        input: PathBuf,
-        /// The file to write, or - for standard output. Must not be the input.
-        output: PathBuf,
-        /// The tune's X: number. Needed only when the file holds more than one tune.
-        #[arg(long)]
-        tune: Option<u32>,
-        #[arg(long, value_parser = FormatParser)]
-        to: Option<Format>,
-    },
+    Render(RenderInput),
     /// Write a part as ABC. Nothing is quantized: a note ABC cannot write where it is
     /// is refused by name.
-    Write {
-        /// The part to read: a .duet document or MIDI by its name, or - for standard input (a
-        /// document if it starts with {, else MIDI).
-        input: PathBuf,
-        /// The ABC file to write, or - for standard output. Must not be the input.
-        output: PathBuf,
-        /// The unit note length (L:), such as 1/4 for a slow vocal line. Without it, the
-        /// standard's default for the meter.
-        #[arg(long)]
-        unit: Option<String>,
-        /// What to do with a velocity that is not a dynamic's level: refuse it (the
-        /// default), or snap it to the nearest, which the ABC then says in a comment.
-        #[arg(long, value_enum, default_value = "refuse")]
-        dynamics: DynamicsArg,
-        #[arg(long, value_parser = FormatParser)]
-        from: Option<Format>,
-    },
+    Write(WriteInput),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+/// Read every tune in a file, and list what each holds that is notation only (and
+/// not carried into a part), or the construct it is refused for, with its line.
+#[derive(Debug, Args, JsonSchema)]
+pub struct CheckInput {
+    /// The ABC file to read, or - for standard input.
+    pub input: PathBuf,
+}
+
+/// Render one tune as a part: a document (.duet) or MIDI (.mid or .midi) by the output's
+/// name. Standard output is MIDI unless --to says. `duet view` shows a part as text.
+#[derive(Debug, Args, JsonSchema)]
+pub struct RenderInput {
+    /// The ABC file to read, or - for standard input.
+    pub input: PathBuf,
+    /// The file to write, or - for standard output. Must not be the input.
+    pub output: PathBuf,
+    /// The tune's X: number. Needed only when the file holds more than one tune.
+    #[arg(long)]
+    pub tune: Option<u32>,
+    #[arg(long, value_parser = FormatParser)]
+    pub to: Option<Format>,
+}
+
+/// Write a part as ABC. Nothing is quantized: a note ABC cannot write where it is
+/// is refused by name.
+#[derive(Debug, Args, JsonSchema)]
+pub struct WriteInput {
+    /// The part to read: a .duet document or MIDI by its name, or - for standard input (a
+    /// document if it starts with {, else MIDI).
+    pub input: PathBuf,
+    /// The ABC file to write, or - for standard output. Must not be the input.
+    pub output: PathBuf,
+    /// The unit note length (L:), such as 1/4 for a slow vocal line. Without it, the
+    /// standard's default for the meter.
+    #[arg(long)]
+    pub unit: Option<String>,
+    /// What to do with a velocity that is not a dynamic's level: refuse it (the
+    /// default), or snap it to the nearest, which the ABC then says in a comment.
+    #[arg(long, value_enum, default_value = "refuse")]
+    pub dynamics: DynamicsArg,
+    #[arg(long, value_parser = FormatParser)]
+    pub from: Option<Format>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub enum DynamicsArg {
     Refuse,
     Nearest,
@@ -111,9 +129,10 @@ fn unit_of(text: &str) -> Result<(u32, u32)> {
     Ok((n, d))
 }
 
-pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
+pub fn run(ctx: &Context, command: AbcCommand) -> Result<()> {
+    let config = ctx.config();
     match command {
-        AbcCommand::Check { input } => {
+        AbcCommand::Check(CheckInput { input }) => {
             let book = Book::parse(&text_of(&input)?)?;
             let mut out = String::new();
             let mut refused = 0;
@@ -140,7 +159,7 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
                     }
                 }
             }
-            crate::stdout(&out)?;
+            crate::io::stdout(&out)?;
             if refused > 0 {
                 bail!(
                     "{refused} of {} tune{} not read",
@@ -150,12 +169,12 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             }
             Ok(())
         }
-        AbcCommand::Render {
+        AbcCommand::Render(RenderInput {
             input,
             output,
             tune,
             to,
-        } => {
+        }) => {
             if input != Path::new("-") && same_file(&input, &output) {
                 bail!(
                     "{} is the input; render writes a new file",
@@ -179,21 +198,21 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             let to = to.or((output == Path::new("-")).then_some(Format::Midi));
             let to = part_format(&output, to, "duet abc render writes")?;
             write_from(
+                ctx,
                 &part,
                 &output,
                 to,
-                config.end,
                 &Origin::imported(from),
                 Source::hand(),
             )
         }
-        AbcCommand::Write {
+        AbcCommand::Write(WriteInput {
             input,
             output,
             unit,
             dynamics,
             from,
-        } => {
+        }) => {
             if input != Path::new("-") && same_file(&input, &output) {
                 bail!("{} is the input; write makes a new file", output.display());
             }
@@ -209,9 +228,9 @@ pub fn run(command: AbcCommand, config: &Config) -> Result<()> {
             }
             let abc = duet_abc::write(&part, &options)?;
             if output == Path::new("-") {
-                crate::stdout(&abc)
+                crate::io::stdout(&abc)
             } else {
-                fs::write(&output, abc).with_context(|| output.display().to_string())
+                ctx.write(&output, abc.as_bytes())
             }
         }
     }

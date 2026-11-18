@@ -78,11 +78,11 @@ pub fn run(command: JournalCommand) -> Result<()> {
                 }
                 out.push('\n');
             }
-            crate::stdout(&out)
+            duet_actions::io::stdout(&out)
         }
         JournalCommand::Check { project } => {
             let report = Report::of(&duet_bus::read(&root_of(&project))?);
-            crate::stdout(&format!("{report}\n"))?;
+            duet_actions::io::stdout(&format!("{report}\n"))?;
             if report.is_wrong() {
                 bail!("{}: the check found something wrong", project.display());
             }

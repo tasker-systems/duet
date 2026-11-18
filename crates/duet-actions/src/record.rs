@@ -3,7 +3,7 @@
 //!
 //! Writing the file is `duet-capture`'s [`TakeWriter`], and tested there. Opening the input
 //! device runs only on a machine with one: no test in CI covers it. What happens to each buffer
-//! after the device hands it over ([`Handoff`], [`Take`]) is tested here, and what is refused
+//! after the device hands it over (`Handoff`, `Take`) is tested here, and what is refused
 //! before a device is opened is tested end to end.
 //!
 //! The device's callback never waits: it hands each buffer to the writing thread through a
@@ -17,17 +17,19 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use crate::Context;
+use anyhow::{Context as _, Result, anyhow, bail};
 use clap::Args;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, SizedSample};
 use duet_capture::{Depth, TakeWriter, Written};
+use schemars::JsonSchema;
 
 /// Buffers waiting for the writer before the device's next one is counted as lost: at a
 /// typical 512 frames a buffer, about seven seconds at 48 kHz.
 const QUEUE: usize = 640;
 
-#[derive(Args)]
+#[derive(Debug, Args, JsonSchema)]
 pub struct RecordArgs {
     /// The FLAC file to write the take to. It must not exist: a take never replaces a file.
     output: PathBuf,
@@ -73,7 +75,7 @@ struct Shared {
     failed: Mutex<Option<String>>,
 }
 
-pub fn run(args: RecordArgs) -> Result<()> {
+pub fn run(ctx: &Context, args: RecordArgs) -> Result<()> {
     refuse_output(&args.output)?;
     let stop = Arc::new(AtomicBool::new(false));
     {
@@ -181,6 +183,9 @@ pub fn run(args: RecordArgs) -> Result<()> {
     );
     take.report_losses(rate, &shared);
     report_level(&written, &take);
+    // A take is no document, so this records nothing; it goes through the context as every
+    // write does.
+    ctx.wrote(&written.path, false)?;
     match ended {
         None => Ok(()),
         Some(why) => bail!("recording stopped: {why}; {}", kept(&written.path)),

@@ -20,6 +20,9 @@
 //! [play]
 //! soundfont = "GeneralUser.sf2"  # for `duet play`; relative to this file's directory
 //!
+//! [journal]
+//! segment-size = "1MiB"       # a project's journal rolls to a new segment past this size
+//!
 //! [lanes.shaker-2]            # a lane of the gm map, added or changed
 //! key = 82
 //! aliases = ["sh2"]
@@ -46,6 +49,7 @@ pub const CONFIG_DIR_VAR: &str = "DUET_CONFIG_DIR";
 const BUILT_IN: &str = "built-in";
 
 /// Where duet looks for its files.
+#[derive(Debug)]
 pub struct Dirs {
     /// The user config directory, and what chose it.
     pub user: Option<(PathBuf, &'static str)>,
@@ -86,7 +90,12 @@ impl Dirs {
     }
 }
 
+/// A journal segment's size, past which the next append rolls to a new one, when no file sets it
+/// (bus design decision 16).
+pub const DEFAULT_SEGMENT_SIZE: u64 = 1 << 20;
+
 /// The merged configuration, and where each value came from.
+#[derive(Debug)]
 pub struct Config {
     /// How a part that names no end gets one when a file is written.
     pub end: EndRule,
@@ -101,6 +110,9 @@ pub struct Config {
     pub text_notices: Vec<String>,
     /// The SoundFont `duet play` sounds a part with, when a file names one, and that file.
     pub soundfont: Option<(PathBuf, String)>,
+    /// The size, in bytes, past which a project's journal rolls to a new segment.
+    pub segment_size: u64,
+    segment_from: String,
     /// Every file's lane patches, in the order they were read.
     patches: Vec<(String, LanePatch)>,
     /// (lane, field, source) for every lane field a file set.
@@ -112,7 +124,48 @@ pub struct Config {
 struct RawFile {
     part: Option<RawPart>,
     play: Option<RawPlay>,
+    journal: Option<RawJournal>,
     lanes: Option<toml::Table>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawJournal {
+    #[serde(rename = "segment-size")]
+    segment_size: Option<toml::Value>,
+}
+
+/// A size: a whole number of bytes, or a string of one with a unit, `B`, `KiB`, `MiB` or `GiB`,
+/// such as `"1MiB"`. It is at least one byte.
+fn size_of(value: &toml::Value) -> Result<u64> {
+    let bad = || {
+        anyhow!(
+            "[journal] segment-size is a size, a whole number of bytes or a string such as \
+             \"1MiB\" (B, KiB, MiB or GiB), at least 1 byte"
+        )
+    };
+    let bytes = match value {
+        toml::Value::Integer(n) => u64::try_from(*n).ok(),
+        toml::Value::String(s) => {
+            let s = s.trim();
+            let split = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+            let (number, unit) = s.split_at(split);
+            let unit = match unit.trim() {
+                "" | "B" => Some(1),
+                "KiB" => Some(1 << 10),
+                "MiB" => Some(1 << 20),
+                "GiB" => Some(1 << 30),
+                _ => None,
+            };
+            number
+                .parse::<u64>()
+                .ok()
+                .zip(unit)
+                .and_then(|(n, unit)| n.checked_mul(unit))
+        }
+        _ => None,
+    };
+    bytes.filter(|n| *n > 0).ok_or_else(bad)
 }
 
 #[derive(Deserialize)]
@@ -155,6 +208,8 @@ impl Config {
             text_lanes: LaneMap::gm(),
             text_notices: Vec::new(),
             soundfont: None,
+            segment_size: DEFAULT_SEGMENT_SIZE,
+            segment_from: BUILT_IN.to_owned(),
             patches: Vec::new(),
             lane_from: Vec::new(),
         }
@@ -191,6 +246,10 @@ impl Config {
             // A relative path is the file's own directory's, not the working directory's.
             let dir = path.parent().unwrap_or(Path::new(""));
             self.soundfont = Some((dir.join(font), from.clone()));
+        }
+        if let Some(size) = raw.journal.and_then(|j| j.segment_size) {
+            self.segment_size = size_of(&size)?;
+            self.segment_from.clone_from(&from);
         }
         let mut patches = Vec::new();
         for (name, value) in raw.lanes.unwrap_or_default() {
@@ -244,6 +303,11 @@ impl Config {
                 "\n[play]\n# soundfont: not set; duet play looks where duet installs one\n",
             ),
         }
+        let _ = writeln!(
+            out,
+            "\n[journal]\nsegment-size = {}  # {}",
+            self.segment_size, self.segment_from
+        );
         for lane in self.lanes.lanes() {
             let src = |field| self.lane_source(&lane.name, field);
             let aliases: Vec<String> = lane.aliases.iter().map(|a| format!("\"{a}\"")).collect();

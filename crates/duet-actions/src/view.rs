@@ -68,7 +68,7 @@ use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context as _, Result, bail};
 use clap::{Args, ValueEnum};
 use duet_core::time::beats_from_ticks;
 use duet_core::{Grid, Note, Part, Pitch, Position};
@@ -76,14 +76,17 @@ use duet_drums::DrumGrid;
 use duet_schemas::{AnyDocument, Document, Kind, PartBody, Version};
 use serde::Serialize;
 
+use crate::Context;
 use crate::config::Config;
 use crate::drums::{ReadOptions, grid_of_part, levels_for};
 use crate::io::{
     Format, fresh_id, part_format, read_with_from, same_file, tool, with_end, write_bytes,
 };
+use schemars::JsonSchema;
 
 /// A view of a document.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub enum ViewName {
     /// notefmt text: a part, one note or control per line.
     Notes,
@@ -103,7 +106,7 @@ impl ViewName {
 /// The one syntax version of each view this duet reads and writes.
 const VIEW_VERSION: u32 = 1;
 
-#[derive(Args)]
+#[derive(Debug, Args, JsonSchema)]
 pub struct ViewArgs {
     /// The document to render: a .duet, or a part in an outside format (.mid, .abc), or - for a
     /// document on standard input.
@@ -131,7 +134,7 @@ pub struct ViewArgs {
     snap_levels: bool,
 }
 
-#[derive(Args)]
+#[derive(Debug, Args, JsonSchema)]
 pub struct ApplyArgs {
     /// The edited view, or - for standard input.
     view: PathBuf,
@@ -418,7 +421,8 @@ fn load(path: &Path, what: &str) -> Result<Source> {
 
 // --- duet view ---
 
-pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
+pub fn run_view(ctx: &Context, args: ViewArgs) -> Result<()> {
+    let config = ctx.config();
     let source = load(&args.input, "duet view reads")?;
     let grid_flags: Vec<&str> = [
         (args.grid.is_some(), "--grid"),
@@ -497,8 +501,8 @@ pub fn run_view(args: ViewArgs, config: &Config) -> Result<()> {
         ),
     };
     match &args.output {
-        Some(path) => write_bytes(path, text.as_bytes()),
-        None => write_bytes(Path::new("-"), text.as_bytes()),
+        Some(path) => write_bytes(ctx, path, text.as_bytes()),
+        None => write_bytes(ctx, Path::new("-"), text.as_bytes()),
     }
 }
 
@@ -561,7 +565,7 @@ fn drum_track_name(part: &Part, named: Option<&str>, config: &Config) -> Result<
 
 // --- duet apply ---
 
-pub fn run_apply(args: ApplyArgs, config: &Config) -> Result<()> {
+pub fn run_apply(ctx: &Context, args: ApplyArgs) -> Result<()> {
     let text = text_of(&args.view)?;
     let shown = args.view.display();
     let header = Header::parse(text.lines().next().unwrap_or(""))?;
@@ -602,23 +606,24 @@ pub fn run_apply(args: ApplyArgs, config: &Config) -> Result<()> {
             "apply needs --onto <document>, the document the view was rendered from, or -o \
              <new.duet> for a new document"
         ),
-        (None, Some(output)) => apply_new(&text, view, header.as_ref(), output, &args, config),
+        (None, Some(output)) => apply_new(ctx, &text, view, header.as_ref(), output, &args),
         (Some(onto), output) => {
             let output = output.clone().unwrap_or_else(|| onto.clone());
-            apply_onto(&text, view, header.as_ref(), onto, &output, &args, config)
+            apply_onto(ctx, &text, view, header.as_ref(), onto, &output, &args)
         }
     }
 }
 
 /// A lossless view into a new document.
 fn apply_new(
+    ctx: &Context,
     text: &str,
     view: ViewName,
     header: Option<&Header>,
     output: &Path,
     args: &ApplyArgs,
-    config: &Config,
 ) -> Result<()> {
+    let config = ctx.config();
     let partial =
         header.is_some_and(Header::partial) || args.grid.is_some() || args.track.is_some();
     refuse_named_output(output)?;
@@ -645,7 +650,7 @@ fn apply_new(
             Document::new(tool(), grid).write()?
         }
     };
-    write_bytes(output, bytes.as_bytes())
+    write_bytes(ctx, output, bytes.as_bytes())
 }
 
 /// A document is written as a `.duet`, or to standard output.
@@ -665,14 +670,15 @@ fn read_grid_view(text: &str, config: &Config) -> Result<DrumGrid> {
 
 /// A view onto the document it was rendered from.
 fn apply_onto(
+    ctx: &Context,
     text: &str,
     view: ViewName,
     header: Option<&Header>,
     onto: &Path,
     output: &Path,
     args: &ApplyArgs,
-    config: &Config,
 ) -> Result<()> {
+    let config = ctx.config();
     if part_format(onto, None, "apply --onto changes")? != Format::Duet || onto == Path::new("-") {
         bail!(
             "{}: --onto names the document to change, a .duet",
@@ -769,7 +775,7 @@ fn apply_onto(
             )
         }
     };
-    write_bytes(output, bytes.as_bytes())
+    write_bytes(ctx, output, bytes.as_bytes())
 }
 
 /// The grid a full view reads, with the source's exact velocity kept in every cell whose level

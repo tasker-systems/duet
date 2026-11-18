@@ -3,13 +3,13 @@
 //! and the analysis (`.capture.duet`, a `capture-analysis` document) out. Every document is
 //! written through duet-schemas.
 //!
-//! Every estimate is stated ([`statement`]) on standard error, in each document's envelope
+//! Every estimate is stated (`statement`) on standard error, in each document's envelope
 //! `statements`, and as a `%` comment in an `.abc`. Every refusal comes before anything is written, and nothing is
 //! overwritten. Once the take is analysed, the performance (`.duet` and `.capture.duet`) is
 //! written whatever becomes of the score, which is written, or reported as failed, after it.
 //!
 //! A melody take also writes its every pitch frame, as a `performance` stream,
-//! `STEM.performance.duet.jsonl`, through duet-schemas ([`PerformanceFile`]). Its file is
+//! `STEM.performance.duet.jsonl`, through duet-schemas (`PerformanceFile`). Its file is
 //! created before the take is read, and its lines written once the take has been read, since
 //! its head states the take's digest ([`Digester`]), which is known only then; until then they
 //! are held, as the frames are for the reading. It is kept once the `.duet` and `.capture.duet`
@@ -23,15 +23,15 @@
 //! and plots and plays its reading against its performance. `duet capture review` ([`review`])
 //! does it for each moment of a moments file, every reading side by side, on one page.
 
-mod compare;
-mod review;
+pub mod compare;
+pub mod review;
 mod statement;
 
 use std::fs;
 use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context as _, Result, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
@@ -45,11 +45,13 @@ use duet_capture::{BasicPitch, Thresholds};
 use duet_core::{Control, Grid, Key, Part, Position, TimeMap, TimeSig};
 use duet_schemas::{Document, Stream};
 
+use crate::Context;
 use crate::config::Config;
 use crate::drums::{ReadOptions, grid_of_part, refuse_overwrite};
 use crate::io::{tool, with_end};
+use schemars::JsonSchema;
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum CaptureCommand {
     /// Capture a sung or played melody: notes, their pitches and the key, written as
     /// STEM.duet (exactly as played) and STEM.abc (quantized to --grid), with every pitch
@@ -77,7 +79,7 @@ pub enum CaptureCommand {
 
 /// What both kinds of take are captured with. Anything about the timing left out is
 /// estimated from the take and stated.
-#[derive(Args)]
+#[derive(Debug, Args, JsonSchema)]
 pub struct TakeArgs {
     /// The recording: WAV, FLAC, MP3, Ogg Vorbis, or AAC in an MP4 (.m4a).
     input: PathBuf,
@@ -136,7 +138,8 @@ pub struct TakeArgs {
 }
 
 /// A melody's reader, as `--reader` names it.
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 enum ReaderArg {
     Rules,
     Hmm,
@@ -151,7 +154,8 @@ enum Take {
     Rhythm,
 }
 
-pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
+pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
+    let config = ctx.config();
     let (take, args) = match command {
         CaptureCommand::Melody(args) => (Take::Melody, args),
         CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
@@ -315,8 +319,10 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     }
     write_all(&[(&outputs.part, &part), (&outputs.analysis, &analysis)])?;
     if let Some(performance) = performance {
-        performance.keep();
+        ctx.wrote(&performance.keep(), false)?;
     }
+    ctx.wrote(&outputs.part, false)?;
+    ctx.wrote(&outputs.analysis, false)?;
 
     let wrote = || {
         format!(
@@ -344,7 +350,8 @@ pub fn run(command: CaptureCommand, config: &Config) -> Result<()> {
     for line in &scored.stated {
         eprintln!("{line}");
     }
-    write_new(&outputs.score, &scored.text).with_context(wrote)
+    write_new(&outputs.score, &scored.text).with_context(wrote)?;
+    ctx.wrote(&outputs.score, false)
 }
 
 /// The grid a score is quantized to when no `--grid` is given.
@@ -567,6 +574,20 @@ impl Outputs {
 #[derive(Debug, Clone, Copy)]
 pub struct TuningArg {
     a4_cents: f64,
+}
+
+/// Given as `--tuning` spells it, so its schema is a string's.
+impl JsonSchema for TuningArg {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("TuningArg")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "description": "A4 in Hz (440, 442) or in cents from 440 Hz (+0c, -12c), at most 100 cents either way.",
+        })
+    }
 }
 
 /// The furthest, in cents, a given tuning may sit from 440 Hz: a key either way. Further is a
@@ -821,9 +842,10 @@ impl PerformanceFile {
             .with_context(|| format!("{} is already closed", self.path.display()))
     }
 
-    /// Keeps the file: the capture has written its performance.
-    fn keep(mut self) {
+    /// Keeps the file, the capture having written its performance, and gives back its path.
+    fn keep(mut self) -> PathBuf {
         self.file = None;
+        std::mem::take(&mut self.path)
     }
 }
 

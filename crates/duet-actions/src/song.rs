@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context as _, Result, bail};
 use clap::Subcommand;
 use duet_core::{Key, TimeSig};
 use duet_schemas::journal::Id;
@@ -20,68 +20,90 @@ use duet_schemas::project::Name;
 use duet_schemas::song::{Composition, Status, distinct_ids, part_names};
 use duet_schemas::{AnyDocument, Document, Project, Song, Source};
 
+use crate::Context;
 use crate::io::{fresh_id, tool};
+use clap::Args;
+use schemars::JsonSchema;
 
 /// A song's document in its folder.
 const SONG_FILE: &str = "song.duet";
 /// The project's document, under its root.
 const PROJECT_FILE: &str = ".duet/project.duet";
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum SongCommand {
     /// Make a song: `songs/<song>/song.duet`, at idea, with a new id, and an empty parts/. Its
     /// composition starts from --tempo, --meter and --key, or else the project's defaults, or
     /// else 120 bpm in 4/4 with no key.
-    New {
-        /// The song's name: lowercase words joined by hyphens, such as wayfaring-stranger.
-        song: Name,
-        /// The song's name for people. Default: its name.
-        #[arg(long)]
-        title: Option<String>,
-        /// What the song is meant to be, in your words. duet never reads it.
-        #[arg(long)]
-        intent: Option<String>,
-        /// The tempo from bar 1, in quarter notes per minute.
-        #[arg(long)]
-        tempo: Option<f64>,
-        /// The meter from bar 1, such as 3/4.
-        #[arg(long)]
-        meter: Option<TimeSig>,
-        /// The key from bar 1, such as "G minor".
-        #[arg(long)]
-        key: Option<Key>,
-        /// The project's root. Default: the working directory.
-        #[arg(long, default_value = ".")]
-        project: PathBuf,
-    },
+    New(NewInput),
     /// Show a song: its id, title, status and the moves it allows, its composition, and each of
     /// its parts with its id, its source and where it is placed. A placement of a part the song
     /// does not have, two parts with one name or one id, and a file in parts/ that is no part,
     /// are refused by name.
-    Show {
-        /// The song's name.
-        song: Name,
-        /// The project's root. Default: the working directory.
-        #[arg(long, default_value = ".")]
-        project: PathBuf,
-    },
+    Show(ShowInput),
     /// Move a song's status: idea → sketch → developing → arranged, and arranged → developing.
     /// Any other move is refused, naming the song's state and the moves it allows, and the song
     /// is left as it was.
-    Status {
-        /// The song's name.
-        song: Name,
-        /// The state to move to: idea, sketch, developing or arranged.
-        state: Status,
-        /// The project's root. Default: the working directory.
-        #[arg(long, default_value = ".")]
-        project: PathBuf,
-    },
+    Status(StatusInput),
 }
 
-pub fn run(command: SongCommand) -> Result<()> {
+/// Make a song: `songs/<song>/song.duet`, at idea, with a new id, and an empty parts/. Its
+/// composition starts from --tempo, --meter and --key, or else the project's defaults, or
+/// else 120 bpm in 4/4 with no key.
+#[derive(Debug, Args, JsonSchema)]
+pub struct NewInput {
+    /// The song's name: lowercase words joined by hyphens, such as wayfaring-stranger.
+    pub song: Name,
+    /// The song's name for people. Default: its name.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// What the song is meant to be, in your words. duet never reads it.
+    #[arg(long)]
+    pub intent: Option<String>,
+    /// The tempo from bar 1, in quarter notes per minute.
+    #[arg(long)]
+    pub tempo: Option<f64>,
+    /// The meter from bar 1, such as 3/4.
+    #[arg(long)]
+    pub meter: Option<TimeSig>,
+    /// The key from bar 1, such as "G minor".
+    #[arg(long)]
+    pub key: Option<Key>,
+    /// The project's root. Default: the working directory.
+    #[arg(long, default_value = ".")]
+    pub project: PathBuf,
+}
+
+/// Show a song: its id, title, status and the moves it allows, its composition, and each of
+/// its parts with its id, its source and where it is placed. A placement of a part the song
+/// does not have, two parts with one name or one id, and a file in parts/ that is no part,
+/// are refused by name.
+#[derive(Debug, Args, JsonSchema)]
+pub struct ShowInput {
+    /// The song's name.
+    pub song: Name,
+    /// The project's root. Default: the working directory.
+    #[arg(long, default_value = ".")]
+    pub project: PathBuf,
+}
+
+/// Move a song's status: idea → sketch → developing → arranged, and arranged → developing.
+/// Any other move is refused, naming the song's state and the moves it allows, and the song
+/// is left as it was.
+#[derive(Debug, Args, JsonSchema)]
+pub struct StatusInput {
+    /// The song's name.
+    pub song: Name,
+    /// The state to move to: idea, sketch, developing or arranged.
+    pub state: Status,
+    /// The project's root. Default: the working directory.
+    #[arg(long, default_value = ".")]
+    pub project: PathBuf,
+}
+
+pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
     match command {
-        SongCommand::New {
+        SongCommand::New(NewInput {
             song,
             title,
             intent,
@@ -89,7 +111,7 @@ pub fn run(command: SongCommand) -> Result<()> {
             meter,
             key,
             project,
-        } => {
+        }) => {
             let dir = folder(&project, &song);
             let path = dir.join(SONG_FILE);
             if path.exists() {
@@ -105,7 +127,7 @@ pub fn run(command: SongCommand) -> Result<()> {
             body.intent = intent;
             body.check().map_err(anyhow::Error::msg)?;
             fs::create_dir_all(dir.join("parts")).with_context(|| dir.display().to_string())?;
-            write_song(&path, &Document::new(tool(), body.clone()))?;
+            write_song(ctx, &path, &Document::new(tool(), body.clone()))?;
             println!(
                 "{}: {} ({}), at {}",
                 path.display(),
@@ -115,7 +137,7 @@ pub fn run(command: SongCommand) -> Result<()> {
             );
             Ok(())
         }
-        SongCommand::Show { song, project } => {
+        SongCommand::Show(ShowInput { song, project }) => {
             let dir = folder(&project, &song);
             let doc = read_song(&dir)?;
             let parts = read_parts(&dir)?;
@@ -131,11 +153,11 @@ pub fn run(command: SongCommand) -> Result<()> {
             print!("{}", shown(&song, &doc.body, &parts));
             Ok(())
         }
-        SongCommand::Status {
+        SongCommand::Status(StatusInput {
             song,
             state,
             project,
-        } => {
+        }) => {
             let dir = folder(&project, &song);
             let path = dir.join(SONG_FILE);
             let mut doc = read_song(&dir)?;
@@ -144,7 +166,7 @@ pub fn run(command: SongCommand) -> Result<()> {
                 .set_status(state)
                 .map_err(|why| anyhow::anyhow!("{}: {why}", path.display()))?;
             doc.tool = tool();
-            write_song(&path, &doc)?;
+            write_song(ctx, &path, &doc)?;
             println!("{}: {was} → {}", path.display(), doc.body.status);
             Ok(())
         }
@@ -183,11 +205,13 @@ fn read_song(dir: &Path) -> Result<Document<Song>> {
 
 /// Writes the song through a file beside it, renamed over it, so a song is never left half
 /// written.
-fn write_song(path: &Path, doc: &Document<Song>) -> Result<()> {
+fn write_song(ctx: &Context, path: &Path, doc: &Document<Song>) -> Result<()> {
     let text = doc.write()?;
+    let replaced = path.exists();
     let next = path.with_extension("duet.next");
     fs::write(&next, text).with_context(|| next.display().to_string())?;
-    fs::rename(&next, path).with_context(|| path.display().to_string())
+    fs::rename(&next, path).with_context(|| path.display().to_string())?;
+    ctx.wrote(path, replaced)
 }
 
 /// One of a song's parts, as `parts/` holds it.

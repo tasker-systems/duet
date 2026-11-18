@@ -118,7 +118,8 @@ fn sine_cents(reading: &Reading, rate: u32, phrases: &[(usize, u64, u64)], at: u
 
 /// What the sine plays inside a note, beyond its key: each a way to hear what the reading holds.
 /// In a gap it bridges, it plays as [`Render::Melody`] does, whichever is chosen.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub enum Render {
     /// The keys only, gliding through each note's slide in: the score the reading makes.
     #[default]

@@ -1,0 +1,43 @@
+[package]
+name = "duet-actions"
+version.workspace = true
+description = "duet's actions: every command's work, each with a typed input, run the same from every face, recording each document it writes."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["midi", "music", "notation", "llm"]
+categories = ["multimedia::audio"]
+
+[lints]
+workspace = true
+
+[dependencies]
+duet-core.workspace = true
+duet-midi.workspace = true
+duet-drums.workspace = true
+duet-abc.workspace = true
+duet-capture.workspace = true
+duet-play.workspace = true
+duet-schemas.workspace = true
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
+toml = "1"
+# An action's input is one type: its clap arguments and its JSON schema both come from it.
+clap = { version = "4", features = ["derive"] }
+schemars = "1.2.3"
+anyhow = "1"
+etcetera = "0.11"
+serde = { version = "1", features = ["derive"] }
+# The 74 random bits of a fresh id's UUIDv7, from the operating system. Already in the tree.
+getrandom = "0.4.3"
+# play: audio out, and MIDI ports. On Linux both need the ALSA headers to build.
+cpal = "0.18.2"
+midir = "0.11.1"
+# play --port: on Ctrl-C, the port is sent note-offs so nothing is left sounding.
+ctrlc = "3.5.2"
+
+[features]
+# `capture melody --reader basic-pitch`: Spotify's Basic Pitch, its model embedded. duet-cli
+# turns it on by default.
+basic-pitch = ["duet-capture/basic-pitch"]

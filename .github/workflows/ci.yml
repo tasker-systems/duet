@@ -186,12 +186,12 @@ jobs:
         run: cargo clippy --locked -p duet-cli --all-targets --no-default-features -- -D warnings
       - name: Tests without the basic-pitch reader
         run: |
-          cargo nextest run --locked --profile ci -p duet-dsp -p duet-capture -p duet-cli --no-default-features
+          cargo nextest run --locked --profile ci -p duet-dsp -p duet-capture -p duet-actions -p duet-cli --no-default-features
           cargo test --locked --doc -p duet-dsp -p duet-capture --no-default-features
 
   # duet reads config from the user's directory and from a .duet above the working directory.
   # The tests must not: a developer's own duet.toml must never change what they check. So run
-  # duet-cli's and duet-e2e's tests again under a hostile config in both places. duet-e2e's
+  # duet-actions', duet-cli's and duet-e2e's tests again under a hostile config in both places. duet-e2e's
   # nextest setup script builds the duet binary once for the run, so its tests run the working
   # tree's binary, never a stale one.
   test-hostile-config:
@@ -213,7 +213,7 @@ jobs:
         run: |
           mkdir .duet
           cp crates/duet-e2e/hostile/duet.toml .duet/
-          cargo nextest run --locked --profile ci -p duet-cli -p duet-e2e
+          cargo nextest run --locked --profile ci -p duet-actions -p duet-cli -p duet-e2e
           cargo test --locked --doc -p duet-e2e
           rm -r .duet
 

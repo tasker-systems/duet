@@ -87,7 +87,28 @@ struct Held {
     _file: File,
 }
 
-fn take_lock(path: &Path) -> Result<Held> {
+/// Refuses `path` when it, or any directory between `root` and it, is a symbolic link, so a
+/// journal file a project holds (or a link committed in its place) never leads a write out of
+/// the project. What does not exist yet is created by the writer, as a file or a directory.
+fn no_link(root: &Path, path: &Path) -> Result<()> {
+    let Ok(rest) = path.strip_prefix(root) else {
+        return Ok(());
+    };
+    let mut here = root.to_path_buf();
+    for part in rest.components() {
+        here.push(part);
+        match std::fs::symlink_metadata(&here) {
+            Ok(meta) if meta.file_type().is_symlink() => return Err(Error::Link { path: here }),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(Error::io(&here)(e)),
+        }
+    }
+    Ok(())
+}
+
+fn take_lock(root: &Path, path: &Path) -> Result<Held> {
+    no_link(root, path)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(Error::io(dir))?;
     }
@@ -111,8 +132,10 @@ fn write_line(file: &mut File, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Opens `path` to append to, and to read.
-fn open_append(path: &Path) -> Result<File> {
+/// Opens `path`, under `root`, to append to and to read. A symbolic link on the way is refused
+/// ([`no_link`]).
+fn open_append(root: &Path, path: &Path) -> Result<File> {
+    no_link(root, path)?;
     OpenOptions::new()
         .read(true)
         .append(true)
@@ -229,13 +252,13 @@ impl Writer {
     pub fn append(&mut self, event: impl Into<Event>, cause: Option<Id>) -> Result<Appended> {
         let event = event.into();
         let root = self.root.clone();
-        let _held = take_lock(&lock_path(&root))?;
+        let _held = take_lock(&root, &lock_path(&root))?;
         let index_path = index_path(&root);
         let io = |e| Error::io(&index_path)(e);
         let mut cuts = Vec::new();
 
         // 2. The index.
-        let mut index = open_append(&index_path)?;
+        let mut index = open_append(&root, &index_path)?;
         cuts.extend(cut_torn_tail(&mut index, crate::INDEX).map_err(io)?);
         let mut started = false;
         if index.metadata().map_err(io)?.len() == 0 {
@@ -278,7 +301,7 @@ impl Writer {
         if !current_path.exists() {
             return Err(Error::MissingSegment { segment: current });
         }
-        let mut segment = open_append(&current_path)?;
+        let mut segment = open_append(&root, &current_path)?;
         cuts.extend(
             cut_torn_tail(&mut segment, &current.file_name())
                 .map_err(|e| Error::io(&current_path)(e))?,
@@ -303,7 +326,7 @@ impl Writer {
         }
         let current = lines.last().map(|l| l.opens.segment).unwrap_or(current);
         let current_path = segment_path(&root, current);
-        let mut segment = open_append(&current_path)?;
+        let mut segment = open_append(&root, &current_path)?;
 
         // 7. Check, append, sync.
         let mut entry = Entry::new(fresh_id()?, now(), self.by.clone(), event);

@@ -18,27 +18,19 @@ name = "duet"
 path = "src/main.rs"
 
 [dependencies]
+duet-actions.workspace = true
 duet-core.workspace = true
-duet-midi.workspace = true
-duet-drums.workspace = true
-duet-abc.workspace = true
-duet-capture.workspace = true
-duet-play.workspace = true
 duet-schemas.workspace = true
 duet-bus.workspace = true
 serde_json = { version = "1", features = ["float_roundtrip"] }
-toml = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
-etcetera = "0.11"
-serde = { version = "1", features = ["derive"] }
-# duet play: audio out, and MIDI ports. On Linux both need the ALSA headers to build.
-cpal = "0.18.2"
-midir = "0.11.1"
-# duet play --port: on Ctrl-C, the port is sent note-offs so nothing is left sounding.
-ctrlc = "3.5.2"
 
 [features]
 # `duet capture melody --reader basic-pitch`: Spotify's Basic Pitch, its model embedded.
 default = ["basic-pitch"]
-basic-pitch = ["duet-capture/basic-pitch"]
+basic-pitch = ["duet-actions/basic-pitch"]
+
+[dev-dependencies]
+# The in-process tests (src/tests.rs) build drum grids to drive the CLI with.
+duet-drums.workspace = true

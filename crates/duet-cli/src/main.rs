@@ -2,35 +2,31 @@
 //!
 //! Commands are grouped by domain (`duet part …`, `duet drums …`), plus `duet convert`, which goes
 //! between any two formats because every format passes through the same `Part`.
+//!
+//! **This crate is a face.** Every command that does work is an action in `duet-actions`: clap
+//! parses the action's own input type, and [`run`] hands it to the action with a
+//! [`Context`]. Inside a project the documents the action wrote are then appended to the
+//! project's journal as `doc.written` events; outside one there is no journal. Only reading the
+//! configuration and the journal stays here.
 
 #![forbid(unsafe_code)]
 
-mod abc;
-mod capture;
-mod config;
-mod drums;
-mod io;
 mod journal;
-mod part;
-mod play;
-mod record;
-mod song;
-mod view;
 
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use duet_core::Grid;
-
-use crate::abc::AbcCommand;
-use crate::capture::CaptureCommand;
-use crate::config::{Config, Dirs};
-use crate::drums::{DrumsCommand, ReadOptions};
-use crate::io::{Format, FormatParser, Loaded, Origin, part_format, read_any, write_from};
-use crate::part::PartCommand;
-use crate::song::SongCommand;
+use duet_actions::abc::AbcCommand;
+use duet_actions::capture::CaptureCommand;
+use duet_actions::config::{self, Config, Dirs};
+use duet_actions::drums::DrumsCommand;
+use duet_actions::io::{stdout, tool};
+use duet_actions::part::PartCommand;
+use duet_actions::song::SongCommand;
+use duet_actions::{Context, Project, abc, actor, capture, convert, drums, fresh_id, part, play};
+use duet_actions::{record, song, view};
+use duet_bus::Writer;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
 #[derive(Parser)]
@@ -50,31 +46,7 @@ enum Command {
     /// drum-grid document, as is one made from a part with --grid. A grid is written from a
     /// part as `duet drums read` writes it, which needs --grid. Grid to grid is a straight
     /// copy, or with --grid goes through a part at that step.
-    Convert {
-        /// The file to read, or - for standard input.
-        input: PathBuf,
-        /// The file to write, or - for standard output.
-        output: PathBuf,
-        #[arg(long, value_parser = FormatParser)]
-        from: Option<Format>,
-        #[arg(long, value_parser = FormatParser)]
-        to: Option<Format>,
-        /// Writing a drum grid: the step, such as 1/16 for sixteenths or 1/8t for triplet
-        /// eighths. Required to write a grid from a part; from a grid, it re-steps the grid
-        /// through a part, which drops unplayed lanes. Refused for any other output.
-        #[arg(long)]
-        grid: Option<Grid>,
-        /// Writing a drum grid: the drum track's name, as for `duet drums read`.
-        #[arg(long)]
-        track: Option<String>,
-        /// Writing a drum grid: how many bars it runs to, as for `duet drums read`.
-        #[arg(long)]
-        bars: Option<u32>,
-        /// Writing a drum grid: snap each velocity to the text levels, as for
-        /// `duet drums read`.
-        #[arg(long)]
-        snap_levels: bool,
-    },
+    Convert(convert::ConvertInput),
     /// Render a document as a text view: notes of a part, a grid of a drum grid, or a grid of
     /// a part's drum track with --as grid. The first line names the view and the document it
     /// was rendered from, so `duet apply` can read it back.
@@ -127,169 +99,72 @@ enum ConfigCommand {
     Show,
 }
 
-/// Runs a command with config read from `dirs`. Tests pass their own, so a developer's
-/// duet.toml never changes what they check.
-fn run(cli: Cli, dirs: &Dirs) -> Result<()> {
-    match cli.command {
-        Command::Convert {
-            input,
-            output,
-            from,
-            to,
-            grid,
-            track,
-            bars,
-            snap_levels,
-        } => convert(
-            &input,
-            &output,
-            from,
-            to,
-            GridFlags {
-                grid,
-                track,
-                bars,
-                snap_levels,
-            },
-            &Config::load(dirs)?,
-        ),
-        Command::Part(command) => part::run(command, &Config::load(dirs)?),
-        Command::Song(command) => song::run(command),
-        Command::Drums(command) => drums::run(command, &Config::load(dirs)?),
-        Command::Abc(command) => abc::run(command, &Config::load(dirs)?),
-        Command::Capture(command) => capture::run(command, &Config::load(dirs)?),
-        Command::Play(args) => play::run(args, &Config::load(dirs)?),
-        Command::Record(args) => record::run(args),
-        Command::View(args) => view::run_view(args, &Config::load(dirs)?),
-        Command::Apply(args) => view::run_apply(args, &Config::load(dirs)?),
+/// Runs a command with config read from `dirs`, in `project` if it is in one. Tests pass their
+/// own, so a developer's duet.toml or project never changes what they check.
+fn run(cli: Cli, dirs: &Dirs, project: Option<Project>) -> Result<()> {
+    // The commands that read no configuration: a broken duet.toml leaves them working, as it
+    // always has.
+    let loads = !matches!(
+        cli.command,
+        Command::Song(_) | Command::Record(_) | Command::Config(_) | Command::Journal(_)
+    );
+    let config = if loads {
+        Config::load(dirs)?
+    } else {
+        Config::built_in()
+    };
+    let ctx = Context::new(project, config);
+    let ran = match cli.command {
+        Command::Convert(input) => convert::run(&ctx, input),
+        Command::Part(command) => part::run(&ctx, command),
+        Command::Song(command) => song::run(&ctx, command),
+        Command::Drums(command) => drums::run(&ctx, command),
+        Command::Abc(command) => abc::run(&ctx, command),
+        Command::Capture(command) => capture::run(&ctx, command),
+        Command::Play(args) => play::run(&ctx, args),
+        Command::Record(args) => record::run(&ctx, args),
+        Command::View(args) => view::run_view(&ctx, args),
+        Command::Apply(args) => view::run_apply(&ctx, args),
         Command::Config(ConfigCommand::Path) => stdout(&config::describe_paths(dirs)),
         Command::Config(ConfigCommand::Show) => stdout(&Config::load(dirs)?.show()),
         Command::Journal(command) => journal::run(command),
-    }
+    };
+    // What the action wrote is journalled even when it failed after writing it, so no write is
+    // left out of the account; the action's own error is the one reported.
+    let journalled = journal_written(&ctx, dirs, loads);
+    ran.and(journalled)
 }
 
-/// `duet convert`'s grid flags, as given.
-struct GridFlags {
-    grid: Option<Grid>,
-    track: Option<String>,
-    bars: Option<u32>,
-    snap_levels: bool,
-}
-
-/// Reads any format and writes any other. A grid is read by the code `duet drums render`
-/// reads with, and written from a part by the code `duet drums read` writes with, so they
-/// never disagree. Writing a grid from a part needs `--grid`. A grid written from a grid
-/// with no `--grid` is copied as it is; with `--grid`, it goes through a part at that step.
-/// A grid flag that would do nothing is refused, so a flag is never silently ignored.
-///
-/// A `.duet` output keeps what was read: a drum-grid document read is written as one, as is a
-/// grid made from a part with `--grid`; a part is written as a part document. `duet drums
-/// render` makes a part of a grid.
-fn convert(
-    input: &Path,
-    output: &Path,
-    from: Option<Format>,
-    to: Option<Format>,
-    flags: GridFlags,
-    config: &Config,
-) -> Result<()> {
-    let GridFlags {
-        grid,
-        track,
-        bars,
-        snap_levels,
-    } = flags;
-    let any_grid_flag = grid.is_some() || track.is_some() || bars.is_some() || snap_levels;
-    let format = part_format(input, from, "convert reads")?;
-    let read = read_any(input, format, "convert reads")?;
-    let to = part_format(output, to, "convert writes")?;
-    // Whether a drum-grid document is written.
-    let to_grid = to == Format::Duet && (matches!(read, Loaded::Grid(..)) || any_grid_flag);
-    // Grid to grid with no step named: a straight copy, read and written as `drums snap`
-    // does, so nothing a part cannot hold (an unplayed lane, the grid's own levels, in a
-    // document any velocity) is lost.
-    if let (Loaded::Grid(source, _), true, None) = (&read, to_grid, grid) {
-        let given: Vec<&str> = [(track.is_some(), "--track"), (bars.is_some(), "--bars")]
-            .into_iter()
-            .filter_map(|(set, flag)| set.then_some(flag))
-            .collect();
-        if !given.is_empty() {
-            bail!(
-                "{} {} for reading a part's drum track, and need --grid; without it, a grid \
-                 is copied as it is",
-                given.join(", "),
-                if given.len() == 1 { "is" } else { "are" },
-            );
-        }
-        let copy = if snap_levels {
-            source.snapped_to_levels()
-        } else {
-            source.clone()
-        };
-        return drums::write_grid(&copy, output, "convert writes");
+/// Appends a `doc.written` for each document the action wrote, inside a project, all caused by
+/// one command id, as `by` decision 8 names. The segment size is the configuration's
+/// `[journal] segment-size`.
+fn journal_written(ctx: &Context, dirs: &Dirs, loaded: bool) -> Result<()> {
+    let (Some(project), written) = (ctx.project(), ctx.written()) else {
+        return Ok(());
+    };
+    if written.is_empty() {
+        return Ok(());
     }
-    // A part read keeps its source; one made of a grid was generated from it.
-    let (part, origin, source) = match read {
-        Loaded::Part(part, origin) => {
-            let source = origin.source();
-            (part, origin, source)
-        }
-        Loaded::Grid(grid, digest) => (
-            grid.to_part()?,
-            Origin::default(),
-            io::generated("convert", [digest]),
-        ),
+    let segment_size = if loaded {
+        ctx.config().segment_size
+    } else {
+        Config::load(dirs)?.segment_size
     };
-    if !to_grid {
-        if any_grid_flag {
-            let given: Vec<&str> = [
-                (grid.is_some(), "--grid"),
-                (track.is_some(), "--track"),
-                (bars.is_some(), "--bars"),
-                (snap_levels, "--snap-levels"),
-            ]
-            .into_iter()
-            .filter_map(|(set, flag)| set.then_some(flag))
-            .collect();
-            bail!(
-                "{} {} for writing a drum grid, and {} is not one; a grid is written as a \
-                 drum-grid document (.duet), and `duet view --as grid` shows a part's drum track \
-                 as a grid's text",
-                given.join(", "),
-                if given.len() == 1 { "is" } else { "are" },
-                output.display()
-            );
-        }
-        return write_from(&part, output, to, config.end, &origin, source);
+    let mut writer =
+        Writer::new(&project.root, tool(), &project.name, actor("cli")).segment_size(segment_size);
+    let cause = fresh_id()?;
+    for doc in written {
+        writer.append(doc, Some(cause.clone()))?;
     }
-    let Some(grid) = grid else {
-        bail!(
-            "writing a drum grid from a part needs --grid, the step, such as --grid 1/16; duet \
-             never guesses it"
-        );
-    };
-    let options = ReadOptions {
-        grid,
-        track,
-        bars,
-        snap_levels,
-    };
-    drums::write_grid(
-        &drums::grid_of_part(&part, &options, config)?,
-        output,
-        "convert writes",
-    )
-}
-
-fn stdout(text: &str) -> Result<()> {
-    use std::io::Write as _;
-    std::io::stdout()
-        .write_all(text.as_bytes())
-        .map_err(|e| anyhow::anyhow!("writing standard output: {e}"))
+    Ok(())
 }
 
 fn main() -> ExitCode {
-    match Dirs::find().and_then(|dirs| run(Cli::parse(), &dirs)) {
+    let found = Dirs::find().and_then(|dirs| {
+        let cwd = std::env::current_dir()?;
+        Ok((dirs, Project::find(&cwd)?))
+    });
+    match found.and_then(|(dirs, project)| run(Cli::parse(), &dirs, project)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // `{:#}` prints the context chain on one line, like "take.mid: No such file".
@@ -300,31 +175,4 @@ fn main() -> ExitCode {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use clap::Parser;
-
-    use crate::config::Dirs;
-    use crate::{Cli, run};
-
-    /// Runs `duet <args>` with no config at all: a fresh, empty user config directory and
-    /// no project `.duet`, passed in rather than set in the process's environment, so a
-    /// developer's own duet.toml, or a `.duet` above the checkout, cannot change a test.
-    pub(crate) fn run_hermetic(args: &[&str]) -> anyhow::Result<()> {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let user = std::env::temp_dir().join(format!(
-            "duet-no-config-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        let dirs = Dirs {
-            user: Some((user, "the test's empty config directory")),
-            project: None,
-        };
-        run(
-            Cli::parse_from(std::iter::once("duet").chain(args.iter().copied())),
-            &dirs,
-        )
-    }
-}
+mod tests;
