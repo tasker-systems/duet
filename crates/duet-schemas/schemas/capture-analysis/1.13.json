@@ -26,7 +26,7 @@
           "description": "The melody's key, given or estimated; absent for a rhythm take."
         },
         "offsets": {
-          "description": "How far quantizing moved each note. Assembly leaves it empty: the grid is chosen\nlater, and [`quantize_offsets`] fills it once the song is quantized.",
+          "description": "How far quantizing moved each note. Assembly leaves it empty: the grid is chosen\nlater, and [`quantize_offsets`] fills it once the part is quantized.",
           "items": {
             "$ref": "#/$defs/QuantizeOffset"
           },

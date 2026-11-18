@@ -1,7 +1,7 @@
-//! A song imported from ABC or MIDI records where it came from in its envelope's `from`, and
-//! the provenance follows the song: kept when a `.duet` is read and written again, kept by
-//! quantizing, replaced when the song goes out to ABC or MIDI and in again, and absent for a
-//! song read from text.
+//! A part imported from ABC or MIDI records where it came from in its envelope's `from`, and
+//! the provenance follows the part: kept when a `.duet` is read and written again, kept by
+//! quantizing, replaced when the part goes out to ABC or MIDI and in again, and absent for a
+//! part read from text.
 
 use std::path::{Path, PathBuf};
 
@@ -21,7 +21,7 @@ fn schema(name: &str) -> Value {
     serde_json::from_slice(&std::fs::read(path).expect("committed")).expect("json")
 }
 
-/// Validates a written document against the committed song schema, with the committed
+/// Validates a written document against the committed part schema, with the committed
 /// envelope schema registered for its `duet`.
 fn assert_valid(doc: &Value) {
     let envelope = schema("envelope");
@@ -30,10 +30,10 @@ fn assert_valid(doc: &Value) {
         .expect("a URI")
         .prepare()
         .expect("a registry");
-    let song = schema("song");
+    let part = schema("part");
     let validator = jsonschema::options()
         .with_registry(&registry)
-        .build(&song)
+        .build(&part)
         .expect("the schema compiles");
     let errors: Vec<String> = validator
         .iter_errors(doc)
@@ -100,7 +100,7 @@ fn out_to_abc_and_in_again_gives_the_same_body_and_a_new_provenance() {
     let again = dir.join("again.duet");
     ok(&duet(&dir, &["convert", s(&out), s(&again)]), "in again");
     let (first, again) = (json_of(&first), json_of(&again));
-    assert_eq!(again["body"], first["body"], "the same song");
+    assert_eq!(again["body"], first["body"], "the same part");
     // The new import is the new provenance: duet's own ABC holds no slur, so it records
     // none, and the first import's notices are gone.
     let from = &again["duet"]["from"];
@@ -138,23 +138,23 @@ fn a_document_read_and_written_again_keeps_its_from() {
     let again = dir.join("b.duet");
     ok(&duet(&dir, &["convert", s(&doc), s(&again)]), "rewritten");
     assert_eq!(std::fs::read(&again).unwrap(), std::fs::read(&doc).unwrap());
-    let shown = duet(&dir, &["song", "show", s(&doc), "--to", "duet"]);
-    ok(&shown, "song show --to duet");
-    assert_eq!(shown.stdout, std::fs::read(&doc).unwrap(), "song show too");
+    let shown = duet(&dir, &["part", "show", s(&doc), "--to", "duet"]);
+    ok(&shown, "part show --to duet");
+    assert_eq!(shown.stdout, std::fs::read(&doc).unwrap(), "part show too");
 
     // Quantizing keeps it: the notices still name what the import did not carry.
     let quantized = dir.join("q.duet");
     ok(
         &duet(
             &dir,
-            &["song", "quantize", s(&doc), s(&quantized), "--grid", "1/16"],
+            &["part", "quantize", s(&doc), s(&quantized), "--grid", "1/16"],
         ),
         "quantize",
     );
     assert_eq!(json_of(&quantized)["duet"]["from"], from);
     assert_valid(&json_of(&quantized));
 
-    // A song read from a view's text has no provenance.
+    // A part read from a view's text has no provenance.
     let notes = root().join("samples/sketch.notes");
     let plain = dir.join("plain.duet");
     ok(

@@ -25,7 +25,7 @@ pub fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// `golden/`: what `duet` wrote from the samples before a song could name an end.
+/// `golden/`: what `duet` wrote from the samples before a part could name an end.
 pub fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("golden")
 }
@@ -158,7 +158,7 @@ pub fn s(path: &Path) -> &str {
     path.to_str().expect("utf-8 path")
 }
 
-/// Writes `text`, a song's notes view, to `dir/name` and reads it into a song document beside
+/// Writes `text`, a part's notes view, to `dir/name` and reads it into a part document beside
 /// it with `duet apply --as notes`, the one way duet reads a view's text: `take.notes` becomes
 /// `take.duet`. Returns the document's path.
 ///

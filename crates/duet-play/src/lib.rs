@@ -1,8 +1,8 @@
-//! Playing a duet [`Song`]: the timed MIDI events it sounds as, a SoundFont synth that
+//! Playing a duet [`Part`]: the timed MIDI events it sounds as, a SoundFont synth that
 //! renders them to audio, and a sender that hands them to a MIDI port at their times.
 //!
-//! The events come from the song's own MIDI file, [`Midi::to_midi`], so what plays is
-//! exactly what `duet convert song.notes song.mid` writes: every note, control, program
+//! The events come from the part's own MIDI file, [`Midi::to_midi`], so what plays is
+//! exactly what `duet convert part.notes part.mid` writes: every note, control, program
 //! and tempo change at the same tick. Ticks become times through the file's tempo map.
 //!
 //! Nothing here opens an audio device or a MIDI port. [`Renderer::fill`] is what an audio
@@ -10,13 +10,13 @@
 //! so both run the same in a test as on a real device.
 //!
 //! ```
-//! use duet_core::Song;
+//! use duet_core::Part;
 //! use duet_play::Schedule;
 //!
-//! let song = Song::from_text(
+//! let part = Part::from_text(
 //!     "tempo 120\ntime 4/4\nend 2.1.0\n\n[track \"Piano\" ch1 prog0]\n1.2.0 C4 1 80\n",
 //! )?;
-//! let schedule = Schedule::from_song(&song)?;
+//! let schedule = Schedule::from_part(&part)?;
 //! // At 120 bpm a beat lasts half a second: the note starts on beat 2 and ends on beat 3.
 //! let times: Vec<f64> = schedule.events().iter().map(|e| e.at.as_secs_f64()).collect();
 //! assert_eq!(times, [0.0, 0.5, 1.0]); // program, note on, note off
@@ -30,20 +30,20 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
-use duet_core::Song;
+use duet_core::Part;
 use duet_midi::Midi;
 use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 
-/// Everything that can go wrong preparing a song to play.
+/// Everything that can go wrong preparing a part to play.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The song cannot be written as MIDI, so it cannot be played either.
+    /// The part cannot be written as MIDI, so it cannot be played either.
     #[error(transparent)]
     Midi(#[from] duet_midi::Error),
-    /// The MIDI the song wrote could not be read back as events. This is a bug in duet.
-    #[error("reading the song's own MIDI: {0}")]
+    /// The MIDI the part wrote could not be read back as events. This is a bug in duet.
+    #[error("reading the part's own MIDI: {0}")]
     Events(String),
     /// The SoundFont could not be read.
     #[error("reading the SoundFont: {0}")]
@@ -111,17 +111,17 @@ const ORDER_ON: u8 = 2;
 /// The note-off of a note of no length, after its own note-on.
 const ORDER_AFTER_ON: u8 = 3;
 
-/// A message and when it sounds, from the start of the song.
+/// A message and when it sounds, from the start of the part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Event {
-    /// The time from the start of the song.
+    /// The time from the start of the part.
     pub at: Duration,
-    /// The tick it falls on, from the start of the song.
+    /// The tick it falls on, from the start of the part.
     pub tick: u64,
     pub message: Message,
 }
 
-/// Every message a song sounds as, in the order it is sent, each with its time.
+/// Every message a part sounds as, in the order it is sent, each with its time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Schedule {
     events: Vec<Event>,
@@ -129,9 +129,9 @@ pub struct Schedule {
 }
 
 impl Schedule {
-    /// The song's events, read from the MIDI file [`Midi::to_midi`] writes for it.
-    pub fn from_song(song: &Song) -> Result<Schedule> {
-        Schedule::from_midi(&song.to_midi()?)
+    /// The part's events, read from the MIDI file [`Midi::to_midi`] writes for it.
+    pub fn from_part(part: &Part) -> Result<Schedule> {
+        Schedule::from_midi(&part.to_midi()?)
     }
 
     /// The events of a Standard MIDI File with metrical timing, merged from every track.
@@ -254,13 +254,13 @@ impl Schedule {
         &self.events
     }
 
-    /// When the song ends: its stated end, which every track of its MIDI ends on.
+    /// When the part ends: its stated end, which every track of its MIDI ends on.
     pub fn end(&self) -> Duration {
         self.end
     }
 }
 
-/// The bytes of a channel message, or `None` for one a song never writes.
+/// The bytes of a channel message, or `None` for one a part never writes.
 fn channel_message(channel: u8, message: MidiMessage) -> Option<Message> {
     let status = |kind: u8| kind | (channel & 0x0F);
     Some(match message {
@@ -325,7 +325,7 @@ impl Clock {
     }
 }
 
-/// How long a renderer keeps sounding after the song's end, so the last notes' release
+/// How long a renderer keeps sounding after the part's end, so the last notes' release
 /// is heard rather than cut off.
 pub const TAIL: Duration = Duration::from_secs(1);
 
@@ -386,7 +386,7 @@ impl Renderer {
         })
     }
 
-    /// How many frames the whole render is: the song to its end, then [`TAIL`].
+    /// How many frames the whole render is: the part to its end, then [`TAIL`].
     pub fn total_frames(&self) -> u64 {
         self.total
     }
@@ -438,7 +438,7 @@ impl Renderer {
     }
 }
 
-/// Renders a whole schedule offline, as (left, right) at a sample rate: the song to its
+/// Renders a whole schedule offline, as (left, right) at a sample rate: the part to its
 /// end, then [`TAIL`].
 pub fn render(
     schedule: &Schedule,
@@ -447,7 +447,7 @@ pub fn render(
 ) -> Result<(Vec<f32>, Vec<f32>)> {
     let mut renderer = Renderer::new(schedule, font, sample_rate)?;
     let frames = usize::try_from(renderer.total_frames())
-        .map_err(|_| Error::Synth("the song is too long to render in memory".into()))?;
+        .map_err(|_| Error::Synth("the part is too long to render in memory".into()))?;
     let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
     renderer.fill(&mut left, &mut right);
     Ok((left, right))
@@ -455,7 +455,7 @@ pub fn render(
 
 /// Sends each event of a schedule at its time: `now` gives the time since the start,
 /// `sleep` waits, and `send` hands a message's bytes to the port. Stops at the first
-/// error `send` returns. After the last event it waits until the song's end, so a port
+/// error `send` returns. After the last event it waits until the part's end, so a port
 /// is not closed early.
 pub fn send_timed<E>(
     schedule: &Schedule,

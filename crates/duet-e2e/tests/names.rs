@@ -33,7 +33,7 @@ fn document(dir: &Path, name: &str, kind: &str, version: &str) -> PathBuf {
     path
 }
 
-/// The sample sketch as a song document in `dir`: its text read with `duet apply`, then
+/// The sample sketch as a part document in `dir`: its text read with `duet apply`, then
 /// written again by `convert`, which states its end.
 fn sketch_doc(dir: &Path) -> PathBuf {
     let (view, doc) = (dir.join("sketch-view.duet"), dir.join("sketch.duet"));
@@ -68,7 +68,7 @@ fn a_name_duet_no_longer_reads_is_refused_saying_so() {
     for name in ["old.json", "old.toml", "old.drums.json", "old.drums.toml"] {
         std::fs::write(p(name), "{}").expect("write");
         let want = ["is not a duet document", "no longer read"];
-        refused(&dir, &["song", "show", s(&p(name))], &p("never"), &want);
+        refused(&dir, &["part", "show", s(&p(name))], &p("never"), &want);
         refused(
             &dir,
             &["convert", s(&take), s(&p(&format!("new-{name}")))],
@@ -127,8 +127,8 @@ fn a_name_duet_no_longer_reads_is_refused_saying_so() {
     // A name with no format at all asks for one.
     refused(
         &dir,
-        &["convert", s(&take), s(&p("song"))],
-        &p("song"),
+        &["convert", s(&take), s(&p("part"))],
+        &p("part"),
         &["name any other with --from or --to"],
     );
     std::fs::remove_dir_all(&dir).expect("clean up");
@@ -138,24 +138,24 @@ fn a_name_duet_no_longer_reads_is_refused_saying_so() {
 fn a_document_is_read_by_its_envelope_and_another_kind_is_refused_by_name() {
     let dir = scratch("names-kind");
     let p = |name: &str| dir.join(name);
-    let song = sketch_doc(&dir);
+    let part = sketch_doc(&dir);
 
-    // A song document reads for every song command, whatever else it is called.
+    // A part document reads for every part command, whatever else it is called.
     let renamed = p("anything.DUET");
-    std::fs::copy(&song, &renamed).expect("copy");
-    let shown = duet(&dir, &["song", "show", s(&renamed)]);
-    ok(&shown, "song show of a .duet");
+    std::fs::copy(&part, &renamed).expect("copy");
+    let shown = duet(&dir, &["part", "show", s(&renamed)]);
+    ok(&shown, "part show of a .duet");
     let notes = std::fs::read_to_string(root().join("samples/sketch.notes")).expect("sample");
     assert_eq!(
         String::from_utf8_lossy(&shown.stdout),
         notes,
-        "the same song"
+        "the same part"
     );
 
     // A kind this duet does not know.
     let doc = document(&dir, "lute-tab.duet", "lute-tab", "1.0");
     let want = [s(&doc), "lute-tab", "this duet knows no kind"];
-    refused(&dir, &["song", "show", s(&doc)], &p("never"), &want);
+    refused(&dir, &["part", "show", s(&doc)], &p("never"), &want);
     refused(
         &dir,
         &["convert", s(&doc), s(&p("out.mid"))],
@@ -169,19 +169,19 @@ fn a_document_is_read_by_its_envelope_and_another_kind_is_refused_by_name() {
         &want,
     );
 
-    // A drum-grid document where a song is read is refused, naming its kind and what makes a
-    // song of it.
+    // A drum-grid document where a part is read is refused, naming its kind and what makes a
+    // part of it.
     let grid = groove_doc(&dir, "beat.duet");
     let want = [
         "beat.duet is a drum-grid document",
-        "song show reads a song",
-        "duet drums render makes a song of one",
+        "part show reads a part",
+        "duet drums render makes a part of one",
     ];
-    refused(&dir, &["song", "show", s(&grid)], &p("never"), &want);
+    refused(&dir, &["part", "show", s(&grid)], &p("never"), &want);
 
-    // A song at another major points at duet convert.
-    let doc = document(&dir, "future.duet", "song", "2.0");
-    let want = ["song 2.0", "this duet reads song 1.x", "duet convert"];
+    // A part at another major points at duet convert.
+    let doc = document(&dir, "future.duet", "part", "2.0");
+    let want = ["part 2.0", "this duet reads part 1.x", "duet convert"];
     refused(
         &dir,
         &["convert", s(&doc), s(&p("out.mid"))],
@@ -189,11 +189,11 @@ fn a_document_is_read_by_its_envelope_and_another_kind_is_refused_by_name() {
         &want,
     );
 
-    // A song document where a grid is read is refused, naming its kind.
-    let want = ["is a song document", "render reads a drum grid"];
+    // A part document where a grid is read is refused, naming its kind.
+    let want = ["is a part document", "render reads a drum grid"];
     refused(
         &dir,
-        &["drums", "render", s(&song), s(&p("out.mid"))],
+        &["drums", "render", s(&part), s(&p("out.mid"))],
         &p("out.mid"),
         &want,
     );
@@ -201,7 +201,7 @@ fn a_document_is_read_by_its_envelope_and_another_kind_is_refused_by_name() {
 }
 
 /// The grid side of a drum command is a drum-grid document, a .duet, and refuses any other
-/// name: a song's, or a grid's text, which points at `duet apply`. The song side is a song's.
+/// name: a part's, or a grid's text, which points at `duet apply`. The part side is a part's.
 #[test]
 fn the_drum_commands_take_grid_documents_on_the_grid_side_and_refuse_other_names() {
     let dir = scratch("names-drums");
@@ -248,7 +248,7 @@ fn the_drum_commands_take_grid_documents_on_the_grid_side_and_refuse_other_names
         &dir,
         &["drums", "render", s(&take), s(&p("r.duet"))],
         &p("r.duet"),
-        &["is a song's name (midi)"],
+        &["is a part's name (midi)"],
     );
     let apply_it = format!("`duet apply {} -o <new.duet>`", s(&beat));
     refused(
@@ -303,16 +303,16 @@ fn standard_input_is_sniffed_for_a_document() {
     let notes = std::fs::read(root().join("samples/sketch.notes")).expect("sample");
     let mid = std::fs::read(golden("sketch.mid")).expect("golden");
 
-    // song show reads MIDI on standard input, and a document all the same.
+    // part show reads MIDI on standard input, and a document all the same.
     let mut padded = b"\n  \t".to_vec();
     padded.extend_from_slice(&doc);
     for input in [&doc, &padded] {
-        let o = duet_with(&dir, &none, &["song", "show", "-"], input);
-        ok(&o, "song show - of a document");
+        let o = duet_with(&dir, &none, &["part", "show", "-"], input);
+        ok(&o, "part show - of a document");
         assert_eq!(o.stdout, notes, "the sample, as text");
     }
-    let o = duet_with(&dir, &none, &["song", "show", "-"], &mid);
-    ok(&o, "song show - of MIDI");
+    let o = duet_with(&dir, &none, &["part", "show", "-"], &mid);
+    ok(&o, "part show - of MIDI");
 
     // Text on standard input is a view: convert refuses it, and duet apply reads it.
     let o = duet_with(&dir, &none, &["convert", "-", "-"], &notes);
@@ -338,15 +338,15 @@ fn standard_input_is_sniffed_for_a_document() {
 
     // A document of another kind on standard input is refused by name.
     let grid = std::fs::read(groove_doc(&dir, "g.duet")).expect("doc");
-    let o = duet_with(&dir, &none, &["song", "show", "-"], &grid);
+    let o = duet_with(&dir, &none, &["part", "show", "-"], &grid);
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("drum-grid"));
-    // The grid side of drums render reads it as a grid, and writes a song document.
+    // The grid side of drums render reads it as a grid, and writes a part document.
     let o = duet_with(&dir, &none, &["drums", "render", "-", "-"], &grid);
     ok(&o, "drums render - - of a drum-grid document");
-    let song = o.stdout;
-    let o = duet_with(&dir, &none, &["song", "show", "-"], &song);
-    ok(&o, "the rendered song document");
+    let part = o.stdout;
+    let o = duet_with(&dir, &none, &["part", "show", "-"], &part);
+    ok(&o, "the rendered part document");
     assert!(String::from_utf8_lossy(&o.stdout).contains("[track \"Drums\" ch10]"));
 
     // A grid's text on standard input is refused on the grid side, and read by duet apply.
@@ -364,7 +364,7 @@ fn standard_input_is_sniffed_for_a_document() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
-/// Text on standard input is refused by every command that reads a song or a grid there,
+/// Text on standard input is refused by every command that reads a part or a grid there,
 /// pointing at `duet apply - -o -`, which reads it.
 #[test]
 fn text_on_standard_input_is_refused_pointing_at_apply() {
@@ -377,8 +377,8 @@ fn text_on_standard_input_is_refused_pointing_at_apply() {
     for (args, input) in [
         (vec!["play", "-"], &notes),
         (vec!["convert", "-", o], &notes),
-        (vec!["song", "show", "-"], &notes),
-        (vec!["song", "quantize", "-", o, "--grid", "1/8"], &notes),
+        (vec!["part", "show", "-"], &notes),
+        (vec!["part", "quantize", "-", o, "--grid", "1/8"], &notes),
         (vec!["abc", "write", "-", "-"], &notes),
         (vec!["drums", "read", "-", o, "--grid", "1/16"], &notes),
         (vec!["drums", "render", "-", "-"], &beat),
@@ -408,13 +408,13 @@ fn the_text_format_flags_are_refused_pointing_at_view_and_apply() {
         vec!["convert", "a.duet", "b.duet", "--to", "text"],
         vec!["convert", "a.duet", "b.duet", "--from", "drums"],
         vec!["convert", "a.duet", "b.duet", "--to", "drums"],
-        vec!["song", "show", "x.duet", "--from", "text"],
-        vec!["song", "show", "x.duet", "--to", "text"],
+        vec!["part", "show", "x.duet", "--from", "text"],
+        vec!["part", "show", "x.duet", "--to", "text"],
         vec![
-            "song", "quantize", "a.duet", "b.duet", "--grid", "1/8", "--from", "text",
+            "part", "quantize", "a.duet", "b.duet", "--grid", "1/8", "--from", "text",
         ],
         vec![
-            "song", "quantize", "a.duet", "b.duet", "--grid", "1/8", "--to", "text",
+            "part", "quantize", "a.duet", "b.duet", "--grid", "1/8", "--to", "text",
         ],
         vec!["abc", "write", "a.duet", "b.abc", "--from", "text"],
         vec!["abc", "render", "a.abc", "b.duet", "--to", "text"],
@@ -444,7 +444,7 @@ fn the_text_format_flags_are_refused_pointing_at_view_and_apply() {
 }
 
 /// `duet convert` goes between `.duet`, `.mid` and `.abc` by their names alone, and back to
-/// the same song.
+/// the same part.
 #[test]
 fn convert_goes_between_documents_midi_and_abc() {
     let dir = scratch("names-convert");
@@ -452,8 +452,8 @@ fn convert_goes_between_documents_midi_and_abc() {
     let doc = sketch_doc(&dir);
     let notes = std::fs::read_to_string(root().join("samples/sketch.notes")).expect("sample");
     let show = |path: &Path| {
-        let o = duet(&dir, &["song", "show", s(path)]);
-        ok(&o, "song show");
+        let o = duet(&dir, &["part", "show", s(path)]);
+        ok(&o, "part show");
         String::from_utf8(o.stdout).expect("utf-8")
     };
 
@@ -469,7 +469,7 @@ fn convert_goes_between_documents_midi_and_abc() {
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
     };
     let (a, b) = (json(&doc), json(&p("b.duet")));
-    assert_eq!(b["body"], a["body"], "MIDI keeps the song");
+    assert_eq!(b["body"], a["body"], "MIDI keeps the part");
     assert_eq!(
         b["duet"]["from"],
         serde_json::json!({ "format": "midi" }),
@@ -497,11 +497,11 @@ fn convert_goes_between_documents_midi_and_abc() {
     assert_eq!(
         show(&p("t2.duet")),
         show(&p("t.duet")),
-        "ABC keeps the song"
+        "ABC keeps the part"
     );
     let written = std::fs::read_to_string(p("t2.duet")).expect("written");
     assert!(
-        written.contains("\"kind\": \"song\"") && written.contains("\"name\": \"duet\""),
+        written.contains("\"kind\": \"part\"") && written.contains("\"name\": \"duet\""),
         "{written}"
     );
     std::fs::remove_dir_all(&dir).expect("clean up");

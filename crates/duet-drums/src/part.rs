@@ -1,7 +1,7 @@
-//! Converting between a drum grid and a [`Song`], the hub every format passes through.
+//! Converting between a drum grid and a [`Part`], the hub every format passes through.
 
 use duet_core::time::beats_from_ticks;
-use duet_core::{Grid, Note, Pitch, Song, Track};
+use duet_core::{Grid, Note, Part, Pitch, Track};
 
 use crate::error::{Error, Result};
 use crate::grid::{DrumGrid, Lane};
@@ -11,12 +11,12 @@ use crate::lanes::LaneMap;
 pub const DRUM_TRACK: &str = "Drums";
 
 impl DrumGrid {
-    /// The grid as a song: its conductor, and one track named `Drums` on the grid's
+    /// The grid as a part: its conductor, and one track named `Drums` on the grid's
     /// channel with no program. Each hit becomes a note on its lane's key, starting on
     /// its step, one step long (drum sounds are one-shots, and General MIDI kits ignore
     /// note-off), with the hit's velocity. Notes are in time order, and top row first
     /// at the same step.
-    pub fn to_song(&self) -> Result<Song> {
+    pub fn to_part(&self) -> Result<Part> {
         self.check()?;
         let map = self.time_map()?;
         let step = self.step_ticks()?;
@@ -38,52 +38,52 @@ impl DrumGrid {
                 }
             }
         }
-        let mut song = self.conductor();
-        song.tracks.push(track);
-        // The song ends where the grid does, and says so.
-        song.end = Some(self.stated_end());
-        song.normalize()?;
-        Ok(song)
+        let mut part = self.conductor();
+        part.tracks.push(track);
+        // The part ends where the grid does, and says so.
+        part.end = Some(self.stated_end());
+        part.normalize()?;
+        Ok(part)
     }
 
-    /// The drum track of a song as a grid of `grid` steps, with lanes from `lanes`.
+    /// The drum track of a part as a grid of `grid` steps, with lanes from `lanes`.
     ///
     /// The drum track is the one named `track`, or else the only track on the map's
-    /// channel. The grid takes the song's conductor and that track's channel. Its lanes
+    /// channel. The grid takes the part's conductor and that track's channel. Its lanes
     /// are the map's lanes the track plays, in the map's row order.
     ///
-    /// It runs to `bars` bars when they are asked for, or else to the song's
-    /// [stated end](Song::stated_end) (the end it names, or its default): through the
+    /// It runs to `bars` bars when they are asked for, or else to the part's
+    /// [stated end](Part::stated_end) (the end it names, or its default): through the
     /// bar before a bar-line end, or through the bar an end inside a bar falls in, which
     /// then becomes the grid's own end and must lie on a step. A bar count asked for
-    /// stands in for the song's end (keeping it when it falls inside the last of those
+    /// stands in for the part's end (keeping it when it falls inside the last of those
     /// bars), and is refused, naming what lies past it, when a hit or a tempo, meter or
     /// key change would fall outside the grid.
     ///
     /// Only note starts and velocities are kept: note lengths, the track's controls and
-    /// the song's other tracks are not part of a drum grid.
+    /// the part's other tracks are not part of a drum grid.
     ///
     /// Nothing is moved or changed to fit. It fails, naming what does not fit, when a
     /// note starts off the grid (quantize first), plays a key no lane maps, lands on the
     /// same lane and step as another, or falls past `bars`, or when a bar is not a
     /// whole number of steps.
-    pub fn from_song(
-        song: &Song,
+    pub fn from_part(
+        part: &Part,
         grid: Grid,
         lanes: &LaneMap,
         track: Option<&str>,
         bars: Option<u32>,
     ) -> Result<DrumGrid> {
-        let drums = drum_track(song, lanes, track)?;
-        song.check_end()?;
-        let mut out = DrumGrid::with_conductor(song, grid);
+        let drums = drum_track(part, lanes, track)?;
+        part.check_end()?;
+        let mut out = DrumGrid::with_conductor(part, grid);
         out.channel = drums.channel;
         let map = out.time_map()?;
         let step = out.step_ticks()?;
 
-        // The grid's length: the bars asked for, or else the bars the song's stated end
+        // The grid's length: the bars asked for, or else the bars the part's stated end
         // reaches, with the grid's own end when that falls inside a bar.
-        let end = song.stated_end()?;
+        let end = part.stated_end()?;
         let end_tick = map.tick(end)?;
         let end = map.position(end_tick);
         let mid_bar = !(end.beat == 1 && end.tick == 0);
@@ -93,7 +93,7 @@ impl DrumGrid {
             let shape = out.bar_shape(&map, step, end.bar)?;
             if !(end_tick - shape.start).is_multiple_of(step) {
                 return Err(Error::invalid(format!(
-                    "the song ends at {end}, which is not on the {grid} grid; a grid ends on a \
+                    "the part ends at {end}, which is not on the {grid} grid; a grid ends on a \
                      bar line or a step"
                 )));
             }
@@ -110,7 +110,7 @@ impl DrumGrid {
             if !offset.is_multiple_of(step) {
                 return Err(Error::invalid(format!(
                     "the note on key {} at {at} is not on the {grid} grid; quantize it first \
-                     (duet song quantize --grid {grid})",
+                     (duet part quantize --grid {grid})",
                     note.pitch.midi()
                 )));
             }
@@ -128,7 +128,7 @@ impl DrumGrid {
         if last > count {
             return Err(Error::invalid(match bars {
                 Some(n) => format!("there is a hit in bar {last}, past the {n} bars asked for"),
-                None => format!("there is a hit in bar {last}, at or past the song's end at {end}"),
+                None => format!("there is a hit in bar {last}, at or past the part's end at {end}"),
             }));
         }
 
@@ -182,16 +182,16 @@ impl DrumGrid {
     }
 }
 
-/// The song's drum track: the one named, or the only one on the map's channel.
-fn drum_track<'a>(song: &'a Song, lanes: &LaneMap, name: Option<&str>) -> Result<&'a Track> {
+/// The part's drum track: the one named, or the only one on the map's channel.
+fn drum_track<'a>(part: &'a Part, lanes: &LaneMap, name: Option<&str>) -> Result<&'a Track> {
     if let Some(name) = name {
-        return song
+        return part
             .tracks
             .iter()
             .find(|t| t.name == name)
-            .ok_or_else(|| Error::invalid(format!("the song has no track named \"{name}\"")));
+            .ok_or_else(|| Error::invalid(format!("the part has no track named \"{name}\"")));
     }
-    let on_channel: Vec<&Track> = song
+    let on_channel: Vec<&Track> = part
         .tracks
         .iter()
         .filter(|t| t.channel == lanes.channel())
@@ -199,11 +199,11 @@ fn drum_track<'a>(song: &'a Song, lanes: &LaneMap, name: Option<&str>) -> Result
     match on_channel.as_slice() {
         [one] => Ok(one),
         [] => Err(Error::invalid(format!(
-            "the song has no track on channel {}, the drum channel; name the drum track",
+            "the part has no track on channel {}, the drum channel; name the drum track",
             lanes.channel()
         ))),
         several => Err(Error::invalid(format!(
-            "the song has {} tracks on channel {} ({}); name the one to read",
+            "the part has {} tracks on channel {} ({}); name the one to read",
             several.len(),
             lanes.channel(),
             several

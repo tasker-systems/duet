@@ -1,7 +1,7 @@
 [package]
 name = "duet-midi"
 version.workspace = true
-description = "Read and write Standard MIDI Files as duet Songs, exactly."
+description = "Read and write Standard MIDI Files as duet Parts, exactly."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

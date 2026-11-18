@@ -38,7 +38,7 @@
 
 use std::fmt::Write as _;
 
-use duet_core::{Grid, Song};
+use duet_core::{Grid, Part};
 
 use crate::error::{Error, Result};
 use crate::grid::{BarShape, DrumGrid, Lane, Levels};
@@ -55,7 +55,7 @@ const BLOCK_STEPS: u32 = 64;
 struct Header<'a> {
     /// The map `map gm` names: the built-in, or the one config gives.
     base: &'a LaneMap,
-    conductor: Song,
+    conductor: Part,
     grid: Option<Grid>,
     map: String,
     lanes: Vec<Lane>,
@@ -354,7 +354,7 @@ impl Frame {
 
 impl DrumGrid {
     /// Parses the text form. The conductor comes back normalized, as
-    /// [`Song::from_text`] gives it; cells come back as the velocities they stand for.
+    /// [`Part::from_text`] gives it; cells come back as the velocities they stand for.
     pub fn from_text(text: &str) -> Result<DrumGrid> {
         DrumGrid::from_text_in(text, &LaneMap::gm())
     }
@@ -367,7 +367,7 @@ impl DrumGrid {
     pub fn from_text_in(text: &str, base: &LaneMap) -> Result<DrumGrid> {
         let mut state = State::Header(Header {
             base,
-            conductor: Song::default(),
+            conductor: Part::default(),
             grid: None,
             map: "gm".to_owned(),
             lanes: Vec::new(),
