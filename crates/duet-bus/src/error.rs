@@ -39,6 +39,15 @@ pub enum Error {
     #[error("refused, {refusal}: {why}")]
     Refused { refusal: Refusal, why: String },
 
+    /// A path the journal writes through is a symbolic link: the journal is written only inside
+    /// its project, so a link that could lead out of it is refused, and nothing is written.
+    #[error(
+        "{} is a symbolic link; the journal is written only to files in the project itself, so \
+         it is refused and nothing was written",
+        path.display()
+    )]
+    Link { path: PathBuf },
+
     /// Randomness for an id could not be had from the operating system.
     #[error("no randomness for an id: {0}")]
     Random(String),

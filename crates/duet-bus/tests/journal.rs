@@ -967,3 +967,68 @@ fn the_index_reads_and_writes_without_the_writer() {
     assert_eq!(index.lines.len(), 2);
     assert_eq!(index.write().unwrap(), example);
 }
+
+/// A symbolic link where the journal writes (the index, the current segment, the lock, or the
+/// `.duet` or `.duet/run` directory above it) could lead a write out of the project: a link
+/// committed in a project's place would truncate or create a file elsewhere. Each is refused by
+/// name, and the file it points at is left exactly as it was.
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_where_the_journal_writes_is_refused_and_its_target_is_untouched() {
+    use std::os::unix::fs::symlink;
+
+    let outside = scratch("link-outside");
+    let victim = outside.join("victim.txt");
+    let before = "keep this\na torn last line";
+    let check = |root: &Path, link: &Path| {
+        fs::write(&victim, before).unwrap();
+        let err = writer(root, "owner", HUGE)
+            .append(AskAsked::new("Which ending?"), None)
+            .unwrap_err();
+        assert!(
+            matches!(&err, Error::Link { path } if path == link),
+            "{}: {err}",
+            link.display()
+        );
+        assert!(err.to_string().contains("symbolic link"), "{err}");
+        assert_eq!(
+            fs::read_to_string(&victim).unwrap(),
+            before,
+            "{}",
+            link.display()
+        );
+    };
+
+    // The index.
+    let root = scratch("link-index");
+    symlink(&victim, duet_bus::index_path(&root)).unwrap();
+    check(&root, &duet_bus::index_path(&root));
+
+    // The lock, and each directory above it.
+    let root = scratch("link-lock");
+    fs::create_dir_all(root.join(".duet/run")).unwrap();
+    symlink(&victim, duet_bus::lock_path(&root)).unwrap();
+    check(&root, &duet_bus::lock_path(&root));
+    let root = scratch("link-run");
+    fs::create_dir_all(root.join(".duet")).unwrap();
+    fs::create_dir_all(outside.join("run")).unwrap();
+    symlink(outside.join("run"), root.join(".duet/run")).unwrap();
+    check(&root, &root.join(".duet/run"));
+    assert!(
+        !outside.join("run/journal.lock").exists(),
+        "no lock made outside"
+    );
+    let root = scratch("link-duet");
+    symlink(&outside, root.join(".duet")).unwrap();
+    check(&root, &root.join(".duet"));
+
+    // The current segment: a journal written once, its segment then replaced by a link.
+    let root = scratch("link-segment");
+    writer(&root, "owner", HUGE)
+        .append(AskAsked::new("Which ending?"), None)
+        .unwrap();
+    let segment = duet_bus::segment_path(&root, current(&root));
+    fs::remove_file(&segment).unwrap();
+    symlink(&victim, &segment).unwrap();
+    check(&root, &segment);
+}

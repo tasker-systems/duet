@@ -345,3 +345,35 @@ fn the_journal_rolls_at_the_configured_segment_size() {
     );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+/// A project whose `journal.duet.jsonl` is a symbolic link out of it, as a clone could hold: the
+/// action's own document is written, but its journal entry is refused by name, and the file the
+/// link points at is left exactly as it was.
+#[cfg(unix)]
+#[test]
+fn a_journal_that_is_a_symbolic_link_out_of_the_project_is_refused_and_its_target_untouched() {
+    let dir = scratch("actions-link");
+    let root = project(&dir, "porch");
+    let outside = dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let victim = outside.join("victim.txt");
+    std::fs::write(&victim, "keep this\na torn last line").unwrap();
+    std::os::unix::fs::symlink(&victim, root.join("journal.duet.jsonl")).unwrap();
+    let out = duet(&root, &["song", "new", "porch"]);
+    assert!(!out.status.success(), "the journal followed the link");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("journal.duet.jsonl is a symbolic link")
+            && said.contains("nothing was written"),
+        "{said}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        "keep this\na torn last line"
+    );
+    assert!(
+        root.join("songs/porch/song.duet").is_file(),
+        "the action ran"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
