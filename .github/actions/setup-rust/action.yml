@@ -1,0 +1,50 @@
+name: Set up Rust
+description: >-
+  The toolchain, the build cache, the ALSA headers duet play builds against, and nextest when a
+  job runs tests. Every job in ci.yml that compiles starts with this, so the pins live once.
+
+inputs:
+  toolchain:
+    description: The Rust toolchain. `stable`, or the declared rust-version for the msrv job.
+    required: false
+    default: stable
+  components:
+    description: Toolchain components, comma-separated (clippy, say). Empty for none.
+    required: false
+    default: ""
+  nextest:
+    description: "`true` installs cargo-nextest, for a job that runs tests."
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+    # The build cache (SC-IN-1: pinned by commit). rust-cache keys each entry on the job, so a
+    # job's cache holds only what that job compiles. Only a push to main saves it, so a pull
+    # request reads main's cache and can never write one that main, or another pull request,
+    # then builds from. A merge-group run reads main's cache too (CI-6).
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    # Tool versions are pinned, and each was at least 7 days old when pinned (SC-IN-1).
+    - if: inputs.nextest == 'true'
+      uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+      with:
+        tool: cargo-nextest@0.9.151
+    # duet play's cpal and midir build against ALSA on Linux, by the owner's decision.
+    # Exact versions from Ubuntu 24.04's archive (SC-IN-1). libasound2-dev is the
+    # noble-updates/-security build of 2026-07-14, and pkg-config noble's release build.
+    # Ubuntu lists only the newest build in noble-updates, so this step fails, loudly, once
+    # a newer one replaces 1.2.11-1ubuntu0.3 there. Then pin the new build, once it is at
+    # least 7 days old: `apt-cache policy libasound2-dev` on the runner names it.
+    - name: ALSA headers for duet play
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1

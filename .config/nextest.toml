@@ -1,5 +1,5 @@
 # cargo-nextest configuration. `cargo nextest run` is how the tests run, locally and in CI
-# (README, .github/workflows/ci.yml#check). nextest does not run doctests, so CI runs them with
+# (README, .github/workflows/ci.yml#test). nextest does not run doctests, so CI runs them with
 # `cargo test --doc` beside each nextest step.
 
 # Setup scripts are still experimental in nextest 0.9.151, the version CI pins.
