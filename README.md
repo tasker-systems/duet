@@ -169,6 +169,7 @@ duet init ~/Music/porch      # makes the directory if it is missing
 duet init --title "Porch"    # the title is the directory's name otherwise
 duet project path            # the project found here, and how it was found
 duet project show            # its document, each take and where it was found, and every song
+duet project adopt ~/scratch # scratch work brought in: a plan, then --apply copies it
 ```
 
 - **`duet init` writes two files and prints each:** `.duet/project.duet`, with no defaults and
@@ -217,6 +218,31 @@ duet record wayfaring                                       # into takes/wayfari
   the take. Outside a project, `duet record` takes a `.flac` path, as below.
 - **The journal** records each write of `.duet/project.duet` as a `doc.written`, and each take
   added as a `take.added`, by its name and digest.
+
+### Adopting scratch work: `duet project adopt`
+
+Work made before projects, a directory of recordings and what duet wrote beside them, is brought
+in with a plan first and an explicit `--apply`. It copies; it never moves.
+
+```sh
+duet project adopt ~/scratch/wayfaring --song wayfaring-stranger          # a plan; writes nothing
+duet project adopt ~/scratch/wayfaring --song wayfaring-stranger --apply   # copies as planned
+```
+
+- **Each file directly in the directory is sorted:** a recording becomes a take, named from its
+  stem (copied, or left where it is with `--named`); a `.duet` or `.duet.jsonl` by its kind, a
+  capture or performance to the take whose digest it states, a part or grid beside a capture of
+  its stem with that capture, any other to the song's `parts/`, and a comp to its `comps/`;
+  `.notes`, `.drums` and `.abc` text as a part of its stem is; a `.moments` file to `review/`;
+  and a `STEM.review/` sheet to `takes/<take>/review/`. Anything else is listed as left behind.
+- **A reading from before the take digest** states none, so it is matched as `capture compare`
+  matches, by its stem, rate and length, and the plan says so. A part from before the `part`
+  rename states no source, and the plan says that too.
+- **Without `--song`,** every part and comp is listed as needing a song. `--song` names the song,
+  made when it does not exist.
+- **`--apply` copies byte for byte,** so every digest a comp or view holds still matches. It
+  refuses every destination that exists before writing anything, and the scratch directory is
+  left as it was. Each take added is a `take.added` in the journal, as `take add` records one.
 
 ### Songs: `duet song`
 

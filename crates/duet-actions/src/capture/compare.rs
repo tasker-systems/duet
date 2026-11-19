@@ -59,7 +59,7 @@ use schemars::JsonSchema;
 
 /// The performance's frames may end up to this long after the take's last sample, in seconds:
 /// a frame sits at the middle of its window, and the last window is padded.
-pub(super) const LENGTH_SLACK_SECS: f64 = 0.1;
+pub(crate) const LENGTH_SLACK_SECS: f64 = 0.1;
 
 /// What `duet capture compare` is given.
 #[derive(Debug, Args, JsonSchema)]

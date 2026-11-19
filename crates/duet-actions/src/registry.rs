@@ -4,7 +4,7 @@
 use schemars::JsonSchema;
 use serde_json::Value;
 
-use crate::{abc, capture, convert, drums, part, play, project, record, song, take, view};
+use crate::{abc, adopt, capture, convert, drums, part, play, project, record, song, take, view};
 
 /// Where an action runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +108,20 @@ pub const ACTIONS: &[Action] = &[
         "project.show",
         &["project", "show"],
         schema::<project::ShowInput>,
+    ),
+    // A plan writes nothing. --apply copies each file new, makes the song --song names when it
+    // is missing, and rewrites the project's document; each take added is a `take.added`.
+    writing(
+        "project.adopt",
+        &["project", "adopt"],
+        TAKE_ADDED,
+        writes(
+            "with --apply: takes/<take>/, songs/<song>/parts/ and comps/, and review/, each file \
+             new; songs/<song>/song.duet when missing; .duet/project.duet, over itself, and with \
+             --named .duet/takes.local.toml",
+            true,
+        ),
+        schema::<adopt::AdoptInput>,
     ),
     writing(
         "take.add",

@@ -426,7 +426,7 @@ pub fn take_of(file: &Path) -> Result<Take> {
 }
 
 /// A take's rate, channels and frames, for people.
-fn format_of(take: &Take) -> String {
+pub(crate) fn format_of(take: &Take) -> String {
     format!(
         "{} Hz, {} channel{}, {} frames",
         take.rate,
@@ -481,7 +481,7 @@ fn refuse_digest_taken(project: &ProjectDoc, take: &Take, file: &Path) -> Result
 
 /// The name a take gets from its file when none is given: its stem, lowercased, every run of
 /// other characters a single hyphen.
-fn name_from(file: &Path) -> Result<Name> {
+pub(crate) fn name_from(file: &Path) -> Result<Name> {
     let stem = file
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -504,7 +504,7 @@ fn name_from(file: &Path) -> Result<Name> {
 }
 
 /// Copies `from` to `to` byte for byte, making `to`'s directory. `to` must not exist.
-fn copy_new(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn copy_new(from: &Path, to: &Path) -> Result<()> {
     if let Some(dir) = to.parent() {
         fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
     }
@@ -577,7 +577,7 @@ fn local_path(local: &toml::Table, name: &Name) -> Option<PathBuf> {
 
 /// Sets `name`'s path in `.duet/takes.local.toml`, or with `None` takes it out, keeping every
 /// other entry as it was. A map left empty is removed.
-fn set_local(root: &Path, name: &Name, at: Option<&Path>) -> Result<()> {
+pub(crate) fn set_local(root: &Path, name: &Name, at: Option<&Path>) -> Result<()> {
     let path = root.join(TAKES_LOCAL_FILE);
     let mut local = read_local(root)?;
     match at {
