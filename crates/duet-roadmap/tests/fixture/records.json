@@ -1,0 +1,947 @@
+{
+  "goals": {
+    "total": 10,
+    "returned": 10,
+    "truncated": false,
+    "limit": null,
+    "offset": 0,
+    "rows": [
+      {
+        "id": "10000000-0000-7000-8000-000000000001",
+        "title": "Songs are written in the journal",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-10T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "active"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "songs-and-comps"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000002",
+        "title": "The bus carries asks between faces",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-11T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "active"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "bus-and-project"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000003",
+        "title": "The workbench | shows the take",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-12T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "paused"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "workbench"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000004",
+        "title": "A capture whose work is all done",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-13T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "active"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "capture-and-readings"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000005",
+        "title": "Models wait for the next release",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-14T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "active"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "models-and-polyphony"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000006",
+        "title": "A goal nobody grouped",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-15T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "active"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000007",
+        "title": "A release goal that was completed",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-16T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "completed"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "ci-and-release"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000008",
+        "title": "A release goal that was cancelled",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-17T09:00:00Z",
+        "managed_meta": {
+          "temper-status": "cancelled"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "ci-and-release"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000009",
+        "title": "A goal outside the vocabulary",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-18T08:00:00Z",
+        "managed_meta": {
+          "temper-status": "active"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "not-a-workstream"
+        }
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000010",
+        "title": "Zither capture is being claimed",
+        "doc_type_name": "goal",
+        "context_ref": "+making-music/duet-dev",
+        "updated": "2026-11-18T09:30:00Z",
+        "managed_meta": {
+          "temper-status": "active"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "workstream": "capture-and-readings"
+        }
+      }
+    ]
+  },
+  "tasks": {
+    "total": 19,
+    "returned": 19,
+    "truncated": false,
+    "limit": null,
+    "offset": 0,
+    "rows": [
+      {
+        "id": "20000000-0000-7000-8000-000000000001",
+        "title": "songs: claimed and in progress",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "in-progress"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "claim_id": "30000000-0000-7000-8000-000000000001",
+          "claimed_at": "2026-11-02T00:00:00Z"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000002",
+        "title": "songs: ready but already claimed",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "in-progress"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "claim_id": "30000000-0000-7000-8000-000000000002",
+          "claimed_at": "2026-11-02T00:00:00Z",
+          "state": "ready"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000003",
+        "title": "songs: claimed and done",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "done"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "claim_id": "30000000-0000-7000-8000-000000000003",
+          "claimed_at": "2026-11-02T00:00:00Z",
+          "state": "ready"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000004",
+        "title": "bus: ready and unclaimed",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "state": "ready"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000005",
+        "title": "bus: filed, not ready",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000006",
+        "title": "workbench: filed, not ready",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000007",
+        "title": "workbench: cancelled",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "cancelled"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "state": "ready"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000008",
+        "title": "capture: done",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "done"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000009",
+        "title": "ungrouped: filed",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000010",
+        "title": "release: open, for a completed goal",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "state": "ready"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000011",
+        "title": "release: done, for a completed goal",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "done"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000012",
+        "title": "no goal: open",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000013",
+        "title": "no goal: done",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-18T10:00:00Z",
+        "managed_meta": {
+          "temper-stage": "done"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000014",
+        "title": "no goal: cancelled",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "cancelled"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000015",
+        "title": "goal outside duet-dev: open",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "in-progress"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "claim_id": "30000000-0000-7000-8000-000000000015",
+          "claimed_at": "2026-11-02T00:00:00Z"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000016",
+        "title": "two goals: open",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "state": "ready"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000017",
+        "title": "zither: claimed",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "in-progress"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "claim_id": "30000000-0000-7000-8000-000000000017",
+          "claimed_at": "2026-11-02T00:00:00Z"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000018",
+        "title": "outside the vocabulary: ready",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ],
+          "state": "ready"
+        }
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000019",
+        "title": "relates only, no advances: open",
+        "doc_type_name": "task",
+        "context_ref": "+making-music/duet-dev-workflows",
+        "updated": "2026-11-01T00:00:00Z",
+        "managed_meta": {
+          "temper-stage": "backlog"
+        },
+        "open_meta": {
+          "tags": [
+            "fixture"
+          ]
+        }
+      }
+    ]
+  },
+  "shows": {
+    "20000000-0000-7000-8000-000000000001": {
+      "id": "20000000-0000-7000-8000-000000000001",
+      "title": "songs: claimed and in progress",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000002": {
+      "id": "20000000-0000-7000-8000-000000000002",
+      "title": "songs: ready but already claimed",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000003": {
+      "id": "20000000-0000-7000-8000-000000000003",
+      "title": "songs: claimed and done",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000004": {
+      "id": "20000000-0000-7000-8000-000000000004",
+      "title": "bus: ready and unclaimed",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000002",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000005": {
+      "id": "20000000-0000-7000-8000-000000000005",
+      "title": "bus: filed, not ready",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000002",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          },
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "peer_title": "peer",
+            "edge_kind": "relates_to",
+            "label": "relates_to",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000006": {
+      "id": "20000000-0000-7000-8000-000000000006",
+      "title": "workbench: filed, not ready",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000003",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000007": {
+      "id": "20000000-0000-7000-8000-000000000007",
+      "title": "workbench: cancelled",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000003",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000008": {
+      "id": "20000000-0000-7000-8000-000000000008",
+      "title": "capture: done",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000004",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000009": {
+      "id": "20000000-0000-7000-8000-000000000009",
+      "title": "ungrouped: filed",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000006",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000010": {
+      "id": "20000000-0000-7000-8000-000000000010",
+      "title": "release: open, for a completed goal",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000007",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000011": {
+      "id": "20000000-0000-7000-8000-000000000011",
+      "title": "release: done, for a completed goal",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000007",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000012": {
+      "id": "20000000-0000-7000-8000-000000000012",
+      "title": "no goal: open",
+      "edges": {
+        "outgoing": [],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000013": {
+      "id": "20000000-0000-7000-8000-000000000013",
+      "title": "no goal: done",
+      "edges": {
+        "outgoing": [],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000014": {
+      "id": "20000000-0000-7000-8000-000000000014",
+      "title": "no goal: cancelled",
+      "edges": {
+        "outgoing": [],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000015": {
+      "id": "20000000-0000-7000-8000-000000000015",
+      "title": "goal outside duet-dev: open",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "40000000-0000-7000-8000-000000000001",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000016": {
+      "id": "20000000-0000-7000-8000-000000000016",
+      "title": "two goals: open",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          },
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000002",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000017": {
+      "id": "20000000-0000-7000-8000-000000000017",
+      "title": "zither: claimed",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000010",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000018": {
+      "id": "20000000-0000-7000-8000-000000000018",
+      "title": "outside the vocabulary: ready",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000009",
+            "peer_title": "peer",
+            "edge_kind": "leads_to",
+            "label": "advances",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    },
+    "20000000-0000-7000-8000-000000000019": {
+      "id": "20000000-0000-7000-8000-000000000019",
+      "title": "relates only, no advances: open",
+      "edges": {
+        "outgoing": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000005",
+            "peer_title": "peer",
+            "edge_kind": "relates_to",
+            "label": "relates_to",
+            "direction": "outgoing"
+          }
+        ],
+        "incoming": [
+          {
+            "peer_table": "kb_resources",
+            "peer_id": "10000000-0000-7000-8000-000000000001",
+            "label": "advances",
+            "direction": "incoming",
+            "edge_kind": "leads_to"
+          }
+        ]
+      }
+    }
+  }
+}
