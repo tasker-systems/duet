@@ -231,9 +231,13 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     }) {
         return Err(anyhow::Error::from(Error::NothingFound { what }).context(named()));
     }
+    // In a project, a capture of one of its takes uses what the owner gave that take, each
+    // stated as given, and remembers what a flag gives it now (decision 6).
+    let remembered = Remembered::of(ctx, take, &args, audio.as_ref())?;
+    let key = key.or(remembered.key);
     let given = Given {
-        tempo_bpm: args.tempo,
-        meter: args.meter,
+        tempo_bpm: args.tempo.or(remembered.tempo_bpm),
+        meter: args.meter.or(remembered.meter),
         downbeat_secs: args.downbeat,
     };
     let timing = estimate(&events, ANALYSIS_RATE, &given).with_context(named)?;
@@ -264,7 +268,8 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     let advice = reading
         .as_ref()
         .and_then(|reading| statement::tuning_advice(&reading.tuning));
-    let mut said = statement::timing(&timing, ANALYSIS_RATE);
+    let mut said = remembered.said.clone();
+    said.extend(statement::timing(&timing, ANALYSIS_RATE));
     if let Some(reading) = &reading {
         said.extend(statement::tuning(&reading.tuning));
         said.extend(statement::reader(reading));
@@ -323,6 +328,7 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     }
     ctx.wrote(&outputs.part, false)?;
     ctx.wrote(&outputs.analysis, false)?;
+    remembered.remember(ctx, &args, key)?;
 
     let wrote = || {
         format!(
@@ -352,6 +358,130 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     }
     write_new(&outputs.score, &scored.text).with_context(wrote)?;
     ctx.wrote(&outputs.score, false)
+}
+
+/// What the project remembers for the take a capture reads, when it reads one of a project's
+/// takes: found by the take's digest, its identity, so a copy in `takes/` and a file named in
+/// `.duet/takes.local.toml` are the same take.
+#[derive(Default)]
+struct Remembered {
+    /// The project's root and the take's name, when the take is a project's.
+    take: Option<(PathBuf, duet_schemas::project::Name)>,
+    tempo_bpm: Option<f64>,
+    meter: Option<TimeSig>,
+    key: Option<Key>,
+    /// Each value used from the take's `given`, stated.
+    said: Vec<String>,
+}
+
+impl Remembered {
+    /// What the take `audio` was given, in the project the capture runs in, for the values no
+    /// flag gives now: a flag wins.
+    fn of(
+        ctx: &Context,
+        kind: Take,
+        args: &TakeArgs,
+        audio: Option<&duet_capture::Take>,
+    ) -> Result<Self> {
+        let (Some(project), Some(audio)) = (ctx.project(), audio) else {
+            return Ok(Self::default());
+        };
+        let doc = crate::take::read_project(&project.root)?;
+        let Some(entry) = doc
+            .body
+            .takes
+            .iter()
+            .find(|t| t.take.digest == audio.digest)
+        else {
+            return Ok(Self::default());
+        };
+        let mut out = Self {
+            take: Some((project.root.clone(), entry.name.clone())),
+            ..Self::default()
+        };
+        let Some(given) = &entry.given else {
+            return Ok(out);
+        };
+        let from = format!(
+            "given for the take {} in {}",
+            entry.name,
+            crate::PROJECT_FILE
+        );
+        if args.tempo.is_none()
+            && let Some(bpm) = given.tempo_bpm
+        {
+            if kind == Take::Melody && bpm.fract() != 0.0 {
+                bail!(
+                    "the take {} was given tempo {bpm} bpm, and a melody's tempo is a whole \
+                     number of bpm (ABC's Q: holds only one); give --tempo {} or {}, which the \
+                     take then remembers",
+                    entry.name,
+                    bpm.floor(),
+                    bpm.ceil()
+                );
+            }
+            out.tempo_bpm = Some(bpm);
+            out.said
+                .push(format!("tempo: {} bpm, {from}", statement::number(bpm)));
+        }
+        if args.meter.is_none()
+            && let Some(meter) = given.meter
+        {
+            out.meter = Some(meter);
+            out.said.push(format!("meter: {meter}, {from}"));
+        }
+        // A rhythm take has no key, so a key given to the take is a melody's alone.
+        if kind == Take::Melody
+            && args.key.is_none()
+            && let Some(key) = given.key
+        {
+            out.key = Some(key);
+            out.said.push(format!("key: {key}, {from}"));
+        }
+        Ok(out)
+    }
+
+    /// Remembers on the take's `given` what a flag gave it now, writing the project's document
+    /// when that changes it, and says so.
+    fn remember(&self, ctx: &Context, args: &TakeArgs, key: Option<Key>) -> Result<()> {
+        let Some((root, name)) = &self.take else {
+            return Ok(());
+        };
+        if args.tempo.is_none() && args.meter.is_none() && args.key.is_none() {
+            return Ok(());
+        }
+        let mut doc = crate::take::read_project(root)?;
+        let Some(entry) = doc.body.takes.iter_mut().find(|t| t.name == *name) else {
+            return Ok(());
+        };
+        let mut given = entry.given.clone().unwrap_or_default();
+        let mut set = Vec::new();
+        if let Some(bpm) = args.tempo {
+            given.tempo_bpm = Some(bpm);
+            set.push(format!("tempo {} bpm", statement::number(bpm)));
+        }
+        if let Some(meter) = args.meter {
+            given.meter = Some(meter);
+            set.push(format!("meter {meter}"));
+        }
+        if args.key.is_some()
+            && let Some(key) = key
+        {
+            given.key = Some(key);
+            set.push(format!("key {key}"));
+        }
+        if entry.given.as_ref() == Some(&given) {
+            return Ok(());
+        }
+        entry.given = Some(given);
+        crate::take::write_project(ctx, root, &mut doc)?;
+        eprintln!(
+            "remembered {} for the take {name}, in {}: later captures of it use them",
+            set.join(", "),
+            crate::PROJECT_FILE
+        );
+        Ok(())
+    }
 }
 
 /// The grid a score is quantized to when no `--grid` is given.

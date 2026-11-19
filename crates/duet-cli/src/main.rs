@@ -25,8 +25,9 @@ use duet_actions::io::{stdout, tool};
 use duet_actions::part::PartCommand;
 use duet_actions::project::{InitInput, ProjectCommand};
 use duet_actions::song::SongCommand;
+use duet_actions::take::TakeCommand;
 use duet_actions::{Context, Project, abc, actor, capture, convert, drums, fresh_id, part, play};
-use duet_actions::{project, record, song, view};
+use duet_actions::{project, record, song, take, view};
 use duet_bus::Writer;
 
 /// Compose with an LLM in text both can read, and convert it to and from MIDI.
@@ -49,6 +50,11 @@ enum Command {
     /// project.duet, or the one DUET_PROJECT names.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Work on a project's takes: add a recording, find one again, list them, or forget one.
+    /// A take is copied into takes/TAKE/, or named where it is in .duet/takes.local.toml,
+    /// and is always checked against its digest.
+    #[command(subcommand)]
+    Take(TakeCommand),
     /// Convert between formats. A .duet is a document, read by its envelope: a part, or a
     /// drum grid. .mid (.midi, .smf) is MIDI and .abc is ABC. No other name means a format:
     /// --from and --to name one, standard input is a document when it starts with {, and
@@ -120,6 +126,7 @@ fn run(cli: Cli, dirs: &Dirs, project: Option<Project>) -> Result<()> {
         Command::Init(_)
             | Command::Project(_)
             | Command::Song(_)
+            | Command::Take(_)
             | Command::Record(_)
             | Command::Config(_)
             | Command::Journal(_)
@@ -139,6 +146,7 @@ fn run(cli: Cli, dirs: &Dirs, project: Option<Project>) -> Result<()> {
     let ran = match cli.command {
         Command::Init(input) => project::init(&ctx, input),
         Command::Project(command) => project::run(&ctx, command),
+        Command::Take(command) => take::run(&ctx, command),
         Command::Convert(input) => convert::run(&ctx, input),
         Command::Part(command) => part::run(&ctx, command),
         Command::Song(command) => song::run(&ctx, command),
@@ -159,15 +167,14 @@ fn run(cli: Cli, dirs: &Dirs, project: Option<Project>) -> Result<()> {
     ran.and(journalled)
 }
 
-/// Appends what the action did, inside a project, in the order it did it: a `doc.written` for
-/// each document it wrote, and each other event it caused (a `song.status-set`), all caused by
-/// one command id, as `by` decision 8 names. The segment size is the configuration's
-/// `[journal] segment-size`.
+/// Appends a `doc.written` for each document the action wrote, inside a project, then each other
+/// event it emitted (a `take.added`, a `song.status-set`), all caused by one command id, as `by`
+/// decision 8 names. The segment size is the configuration's `[journal] segment-size`.
 fn journal_written(ctx: &Context, dirs: &Dirs, loaded: bool) -> Result<()> {
-    let (Some(project), written) = (ctx.project(), ctx.events()) else {
+    let (Some(project), written, emitted) = (ctx.project(), ctx.written(), ctx.emitted()) else {
         return Ok(());
     };
-    if written.is_empty() {
+    if written.is_empty() && emitted.is_empty() {
         return Ok(());
     }
     let segment_size = if loaded {
@@ -180,6 +187,9 @@ fn journal_written(ctx: &Context, dirs: &Dirs, loaded: bool) -> Result<()> {
     let cause = fresh_id()?;
     for doc in written {
         writer.append(doc, Some(cause.clone()))?;
+    }
+    for event in emitted {
+        writer.append(event, Some(cause.clone()))?;
     }
     Ok(())
 }

@@ -125,13 +125,13 @@ pub fn fresh_id() -> Result<Id> {
     Ok(Id::from_parts(ms, random))
 }
 
-/// What an action runs with: the project, the configuration, and every event it has to
-/// journal: each document it has written, and what else it did.
+/// What an action runs with: the project, the configuration, and every document it has written.
 #[derive(Debug)]
 pub struct Context {
     project: Option<Project>,
     config: Config,
-    events: RefCell<Vec<Event>>,
+    written: RefCell<Vec<DocWritten>>,
+    emitted: RefCell<Vec<Event>>,
 }
 
 impl Context {
@@ -141,7 +141,8 @@ impl Context {
         Self {
             project,
             config,
-            events: RefCell::new(Vec::new()),
+            written: RefCell::new(Vec::new()),
+            emitted: RefCell::new(Vec::new()),
         }
     }
 
@@ -158,30 +159,23 @@ impl Context {
     /// Every document written so far, in the order written, as `doc.written` bodies.
     #[must_use]
     pub fn written(&self) -> Vec<DocWritten> {
-        self.events
-            .borrow()
-            .iter()
-            .filter_map(|event| match event {
-                Event::DocWritten(written) => Some(written.clone()),
-                _ => None,
-            })
-            .collect()
+        self.written.borrow().clone()
     }
 
-    /// Every event to journal so far, in the order the action did what each records: each
-    /// `doc.written`, and what [`Self::emit`] was given.
-    #[must_use]
-    pub fn events(&self) -> Vec<Event> {
-        self.events.borrow().clone()
-    }
-
-    /// Records an event the action caused, other than a document written, to be journalled
-    /// after it, in order with what it wrote. Outside a project there is no journal, and it is
-    /// not recorded.
+    /// Records an event the action caused besides its `doc.written`s, such as `take.added` or
+    /// `song.status-set`.
+    /// Inside a project the face appends it to the journal after them; outside one there is no
+    /// journal, and nothing is recorded.
     pub fn emit(&self, event: impl Into<Event>) {
         if self.project.is_some() {
-            self.events.borrow_mut().push(event.into());
+            self.emitted.borrow_mut().push(event.into());
         }
+    }
+
+    /// Every event [`Self::emit`] recorded, in order.
+    #[must_use]
+    pub fn emitted(&self) -> Vec<Event> {
+        self.emitted.borrow().clone()
     }
 
     /// Writes `bytes` to `path`, or to standard output for `-`, and records it
@@ -255,7 +249,7 @@ impl Context {
             DocWritten::new(relative, envelope.kind, envelope.version, digest, replaced);
         written.song = song;
         written.part = part;
-        self.events.borrow_mut().push(written.into());
+        self.written.borrow_mut().push(written);
         Ok(())
     }
 }
