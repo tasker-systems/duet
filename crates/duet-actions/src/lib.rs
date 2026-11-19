@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 pub mod abc;
+pub mod adopt;
 pub mod capture;
 pub mod config;
 mod context;
