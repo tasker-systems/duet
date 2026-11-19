@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, bail};
-use duet_schemas::journal::{By, DocDigest, DocWritten, Id, RelPath};
+use duet_schemas::journal::{By, DocDigest, DocWritten, Event, Id, RelPath};
 use duet_schemas::read_envelope;
 
 use crate::config::Config;
@@ -131,6 +131,7 @@ pub struct Context {
     project: Option<Project>,
     config: Config,
     written: RefCell<Vec<DocWritten>>,
+    emitted: RefCell<Vec<Event>>,
 }
 
 impl Context {
@@ -141,6 +142,7 @@ impl Context {
             project,
             config,
             written: RefCell::new(Vec::new()),
+            emitted: RefCell::new(Vec::new()),
         }
     }
 
@@ -158,6 +160,21 @@ impl Context {
     #[must_use]
     pub fn written(&self) -> Vec<DocWritten> {
         self.written.borrow().clone()
+    }
+
+    /// Records an event the action caused besides its `doc.written`s, such as `take.added`.
+    /// Inside a project the face appends it to the journal after them; outside one there is no
+    /// journal, and nothing is recorded.
+    pub fn emit(&self, event: impl Into<Event>) {
+        if self.project.is_some() {
+            self.emitted.borrow_mut().push(event.into());
+        }
+    }
+
+    /// Every event [`Self::emit`] recorded, in order.
+    #[must_use]
+    pub fn emitted(&self) -> Vec<Event> {
+        self.emitted.borrow().clone()
     }
 
     /// Writes `bytes` to `path`, or to standard output for `-`, and records it
