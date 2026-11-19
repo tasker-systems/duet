@@ -183,6 +183,28 @@ pub const ACTIONS: &[Action] = &[
         schema::<song::StatusInput>,
     ),
     writing(
+        "song.snapshot",
+        &["song", "snapshot"],
+        &["doc.written", "snapshot.taken"],
+        writes(
+            "songs/<song>/snapshots/<date>-<name>/: copies of song.duet and its placed parts, and \
+             snapshot.duet",
+            false,
+        ),
+        schema::<song::SnapshotInput>,
+    ),
+    writing(
+        "song.restore",
+        &["song", "restore"],
+        &["doc.written", "snapshot.taken"],
+        writes(
+            "a snapshot of the working song, then the snapshot's song.duet and parts over the \
+             working ones",
+            true,
+        ),
+        schema::<song::RestoreInput>,
+    ),
+    writing(
         "drums.render",
         &["drums", "render"],
         DOC_WRITTEN,

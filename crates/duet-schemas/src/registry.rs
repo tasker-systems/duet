@@ -9,6 +9,7 @@ use crate::journal::{IndexHead, JournalHead};
 use crate::part::PartBody;
 use crate::project::Project;
 use crate::schema::{document_schema, envelope_schema, stream_schema};
+use crate::snapshot::Snapshot;
 use crate::song::Song;
 use crate::{Document, Error, Kind, Result, StreamKind, Version, read_envelope};
 
@@ -59,6 +60,7 @@ pub const KINDS: &[KindInfo] = &[
     document::<Analysis>(),
     document::<Project>(),
     document::<Song>(),
+    document::<Snapshot>(),
     stream::<PerformanceHead>(),
     stream::<JournalHead>(),
     stream::<IndexHead>(),
@@ -89,6 +91,7 @@ pub enum AnyDocument {
     CaptureAnalysis(Box<Document<Analysis>>),
     Project(Document<Project>),
     Song(Document<Song>),
+    Snapshot(Document<Snapshot>),
 }
 
 impl AnyDocument {
@@ -109,6 +112,7 @@ impl AnyDocument {
             }
             Some(info) if info.name == Project::NAME => Document::read(text).map(Self::Project),
             Some(info) if info.name == Song::NAME => Document::read(text).map(Self::Song),
+            Some(info) if info.name == Snapshot::NAME => Document::read(text).map(Self::Snapshot),
             Some(info) if info.framing == Framing::Stream => Err(Error::Framing {
                 found: "document (.duet, with a `body`)",
                 expected: "stream (.duet.jsonl), as its kind is",
@@ -133,6 +137,7 @@ impl AnyDocument {
             Self::CaptureAnalysis(_) => Analysis::NAME,
             Self::Project(_) => Project::NAME,
             Self::Song(_) => Song::NAME,
+            Self::Snapshot(_) => Snapshot::NAME,
         }
     }
 
@@ -148,6 +153,7 @@ impl AnyDocument {
             Self::CaptureAnalysis(doc) => doc.write(),
             Self::Project(doc) => doc.write(),
             Self::Song(doc) => doc.write(),
+            Self::Snapshot(doc) => doc.write(),
         }
     }
 }
