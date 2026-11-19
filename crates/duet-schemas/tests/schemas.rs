@@ -29,11 +29,12 @@ use duet_schemas::journal::{
 };
 use duet_schemas::part::CompedTake;
 use duet_schemas::project::{Defaults, Given, ProjectTake};
+use duet_schemas::snapshot::{Copied, FileDigest};
 use duet_schemas::song::{Composition, KeyAt, MeterAt, Placement, Section, Status, TempoAt};
 use duet_schemas::{
     AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, EVENTS, Framing, From, IndexHead, Journal,
-    JournalHead, JournalIndex, KINDS, KindInfo, Notice, PartBody, Project, Song, Source, Stream,
-    Tool, Version, read_envelope, schema,
+    JournalHead, JournalIndex, KINDS, KindInfo, Notice, PartBody, Project, Snapshot, Song, Source,
+    Stream, Tool, Version, read_envelope, schema,
 };
 use serde_json::{Value, json};
 
@@ -758,6 +759,12 @@ fn example(name: &str) -> AnyDocument {
     if name == "song" {
         return AnyDocument::Song(Document::new(Tool::new("duet", "0.3.0"), example_song()));
     }
+    if name == "snapshot" {
+        return AnyDocument::Snapshot(Document::new(
+            Tool::new("duet", "0.3.0"),
+            example_snapshot(),
+        ));
+    }
     assert_eq!(name, "part", "no example is defined for {name}");
     let mut doc = Document::new(Tool::new("duet", "0.2.0"), part_body(example_part()));
     let mut from = From::new("abc");
@@ -801,6 +808,29 @@ fn example_song() -> Song {
     song.status = Status::Sketch;
     song.intent = Some("slow and bare; voice first, the bass enters in the second verse".into());
     song
+}
+
+/// A snapshot that uses every field: the owner's words, the song and two placed parts, and a
+/// linked take.
+fn example_snapshot() -> Snapshot {
+    let copied = |path: &str| {
+        Copied::new(
+            path.parse().unwrap(),
+            FileDigest::of(format!("the bytes of {path}").as_bytes()),
+        )
+    };
+    let mut snapshot = Snapshot::new(
+        "first-verse".parse().unwrap(),
+        "2026-11-20".parse().unwrap(),
+        vec![
+            copied("song.duet"),
+            copied("parts/melody.duet"),
+            copied("parts/bass.duet"),
+        ],
+    );
+    snapshot.said = Some("the first verse sits; the bass is right at last".into());
+    snapshot.takes = vec![TakeRef::new("wayfaring", EXAMPLE_DIGEST.parse().unwrap())];
+    snapshot
 }
 
 /// A project that uses every field: every default, a take with something given and one

@@ -77,6 +77,11 @@ pub enum ProjectCommand {
     /// Print the project's document as text, each take with where it was found or that it was
     /// not, and every song in songs/.
     Show(ShowInput),
+    /// Bring scratch work into the project, copied and never moved: recordings become takes,
+    /// captures go to the take whose digest they state, parts and comps to --song's song,
+    /// moments to review/, and anything else is left behind. Without --apply, the plan is
+    /// printed and nothing is written; --apply copies it, refusing every file that exists.
+    Adopt(crate::adopt::AdoptInput),
 }
 
 /// Print the project a command run here works in, and how it was found.
@@ -158,7 +163,7 @@ pub fn init(_ctx: &Context, input: InitInput) -> Result<()> {
     stdout(&said)
 }
 
-/// Runs `duet project path | show`.
+/// Runs `duet project path | show | adopt`.
 ///
 /// # Errors
 ///
@@ -185,6 +190,7 @@ pub fn run(ctx: &Context, command: ProjectCommand) -> Result<()> {
             };
             stdout(&shown(project)?)
         }
+        ProjectCommand::Adopt(input) => crate::adopt::run(ctx, input),
     }
 }
 

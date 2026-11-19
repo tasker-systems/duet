@@ -21,6 +21,8 @@ duet-drums.workspace = true
 duet-dsp.workspace = true
 schemars = "1.2.3"
 serde = { version = "1", features = ["derive"] }
+# A snapshot states the SHA-256 of every file it copied, as a take states its samples'.
+sha2 = "0.10.9"
 # float_roundtrip: every float a document holds reads back to the same bits. raw_value: a
 # journal entry's body is read from its exact text, so an unknown field is refused by name.
 serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
