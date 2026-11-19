@@ -8,8 +8,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, bail};
-use duet_schemas::journal::{By, DocDigest, DocWritten, Id, RelPath};
-use duet_schemas::read_envelope;
+use duet_schemas::journal::{By, DocDigest, DocWritten, Event, Id, RelPath};
+use duet_schemas::{Document, Song, read_envelope};
 
 use crate::config::Config;
 
@@ -125,12 +125,13 @@ pub fn fresh_id() -> Result<Id> {
     Ok(Id::from_parts(ms, random))
 }
 
-/// What an action runs with: the project, the configuration, and every document it has written.
+/// What an action runs with: the project, the configuration, and every event it has to
+/// journal: each document it has written, and what else it did.
 #[derive(Debug)]
 pub struct Context {
     project: Option<Project>,
     config: Config,
-    written: RefCell<Vec<DocWritten>>,
+    events: RefCell<Vec<Event>>,
 }
 
 impl Context {
@@ -140,7 +141,7 @@ impl Context {
         Self {
             project,
             config,
-            written: RefCell::new(Vec::new()),
+            events: RefCell::new(Vec::new()),
         }
     }
 
@@ -157,7 +158,30 @@ impl Context {
     /// Every document written so far, in the order written, as `doc.written` bodies.
     #[must_use]
     pub fn written(&self) -> Vec<DocWritten> {
-        self.written.borrow().clone()
+        self.events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                Event::DocWritten(written) => Some(written.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every event to journal so far, in the order the action did what each records: each
+    /// `doc.written`, and what [`Self::emit`] was given.
+    #[must_use]
+    pub fn events(&self) -> Vec<Event> {
+        self.events.borrow().clone()
+    }
+
+    /// Records an event the action caused, other than a document written, to be journalled
+    /// after it, in order with what it wrote. Outside a project there is no journal, and it is
+    /// not recorded.
+    pub fn emit(&self, event: impl Into<Event>) {
+        if self.project.is_some() {
+            self.events.borrow_mut().push(event.into());
+        }
     }
 
     /// Writes `bytes` to `path`, or to standard output for `-`, and records it
@@ -221,15 +245,50 @@ impl Context {
         } else {
             DocDigest::of(minified(framed.body.map_or("", |b| b.get())).as_bytes())
         };
-        self.written.borrow_mut().push(DocWritten::new(
-            relative,
-            envelope.kind,
-            envelope.version,
-            digest,
-            replaced,
-        ));
+        let (song, part) = ids_of(
+            &project.root,
+            &relative,
+            &envelope.kind,
+            framed.body.map(|b| b.get()),
+        );
+        let mut written =
+            DocWritten::new(relative, envelope.kind, envelope.version, digest, replaced);
+        written.song = song;
+        written.part = part;
+        self.events.borrow_mut().push(written.into());
         Ok(())
     }
+}
+
+/// The ids a `doc.written` of `relative` carries (bus design decision 17): the song's, when the
+/// path is in a song's folder (`songs/<song>/…`) whose `song.duet` reads, and the part's, when
+/// the document is a part in the song's `parts/` and its `body` states one. Whatever does not
+/// read gives no id, and the index names it by its name alone.
+fn ids_of(
+    root: &Path,
+    relative: &RelPath,
+    kind: &str,
+    body: Option<&str>,
+) -> (Option<Id>, Option<Id>) {
+    let parts: Vec<&str> = relative.as_str().split('/').collect();
+    let ["songs", song, rest @ ..] = parts.as_slice() else {
+        return (None, None);
+    };
+    if rest.is_empty() {
+        return (None, None);
+    }
+    let song_file = root.join("songs").join(song).join("song.duet");
+    let song_id = fs::read_to_string(song_file)
+        .ok()
+        .and_then(|text| Document::<Song>::read(&text).ok())
+        .map(|doc| doc.body.id);
+    let part_id = match (rest, kind, body) {
+        (["parts", _], "part", Some(body)) => serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|body| body.get("id")?.as_str()?.parse().ok()),
+        _ => None,
+    };
+    (song_id, part_id)
 }
 
 /// A document's body, or a stream's head, as written.

@@ -337,6 +337,12 @@ impl Writer {
                 why: format!("{} of ask {ask}", entry.event.name()),
             });
         }
+        if let Err((refusal, song)) = self.folded.replay.check_move(&entry.event) {
+            return Err(Error::RefusedMove {
+                refusal,
+                why: format!("{} of song {song}", entry.event.name()),
+            });
+        }
         let line = entry.line().map_err(Error::journal(&current_path))?;
         let seg_io = |e| Error::io(&current_path)(e);
         write_line(&mut segment, line.as_bytes()).map_err(seg_io)?;

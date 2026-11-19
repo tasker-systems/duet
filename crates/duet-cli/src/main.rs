@@ -159,11 +159,12 @@ fn run(cli: Cli, dirs: &Dirs, project: Option<Project>) -> Result<()> {
     ran.and(journalled)
 }
 
-/// Appends a `doc.written` for each document the action wrote, inside a project, all caused by
+/// Appends what the action did, inside a project, in the order it did it: a `doc.written` for
+/// each document it wrote, and each other event it caused (a `song.status-set`), all caused by
 /// one command id, as `by` decision 8 names. The segment size is the configuration's
 /// `[journal] segment-size`.
 fn journal_written(ctx: &Context, dirs: &Dirs, loaded: bool) -> Result<()> {
-    let (Some(project), written) = (ctx.project(), ctx.written()) else {
+    let (Some(project), written) = (ctx.project(), ctx.events()) else {
         return Ok(());
     };
     if written.is_empty() {

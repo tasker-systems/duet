@@ -24,8 +24,8 @@ use duet_core::{
 use duet_dsp::{FrameBlock, PerformanceHead};
 use duet_schemas::journal::{
     AskAnswered, AskAsked, AskWithdrawn, At, Audience, By, Closes, Concerns, DocDigest, DocWritten,
-    Entry, EventInfo, Id, IndexLine, MomentPlayed, Opens, Party, RelPath, SegmentStamp, TakeAdded,
-    TakeRef, VerdictGiven,
+    Entry, EventInfo, Id, IndexLine, Indexed, MomentPlayed, Opens, Party, RelPath, SegmentStamp,
+    SnapshotTaken, SongStatusSet, TakeAdded, TakeRef, VerdictGiven,
 };
 use duet_schemas::part::CompedTake;
 use duet_schemas::project::{Defaults, Given, ProjectTake};
@@ -642,6 +642,16 @@ fn example_journal() -> String {
     let mut verdict = VerdictGiven::new("wayfaring@2.15-3.58", "no audible difference");
     verdict.ask = Some(id(1));
     let digest = EXAMPLE_DIGEST.parse().unwrap();
+    let wayfaring: duet_schemas::project::Name = "wayfaring".parse().unwrap();
+    let mut lead = DocWritten::new(
+        "songs/wayfaring/parts/lead.duet".parse().unwrap(),
+        "part",
+        Version::new(1, 0),
+        DocDigest(0x0f1e_2d3c_4b5a_6978),
+        true,
+    );
+    lead.song = Some(id(30));
+    lead.part = Some(id(31));
     let entries = [
         Entry::new(id(1), at(1), claude.clone(), asked),
         Entry::new(id(2), at(2), owner.clone(), answered),
@@ -654,17 +664,40 @@ fn example_journal() -> String {
             MomentPlayed::new("wayfaring@2.15-3.58", Audience::Owner, "take"),
         ),
         Entry::new(id(6), at(6), owner.clone(), verdict),
-        Entry::new(id(7), at(7), owner, TakeAdded::new("wayfaring", digest)),
+        Entry::new(
+            id(7),
+            at(7),
+            owner.clone(),
+            TakeAdded::new("wayfaring", digest),
+        ),
         Entry::new(
             id(8),
             at(8),
-            claude,
+            claude.clone(),
             DocWritten::new(
                 "takes/wayfaring.capture.duet".parse().unwrap(),
                 "capture-analysis",
                 Version::new(1, 13),
                 DocDigest(0x0123_4567_89ab_cdef),
                 false,
+            ),
+        ),
+        Entry::new(id(9), at(9), claude.clone(), lead),
+        Entry::new(
+            id(10),
+            at(10),
+            owner.clone(),
+            SongStatusSet::new(id(30), wayfaring.clone(), Status::Idea, Status::Sketch),
+        ),
+        Entry::new(
+            id(11),
+            at(11),
+            owner,
+            SnapshotTaken::new(
+                id(30),
+                wayfaring,
+                "2026-11-20-first-verse",
+                DocDigest(0xfedc_ba98_7654_3210),
             ),
         ),
     ];
@@ -690,14 +723,17 @@ fn example_index() -> String {
     let first = Opens::new(example_stamp(1), id(20), example_stamp(1).at());
     text.push_str(&IndexLine::new(first, None).line().unwrap());
     let mut concerns = Concerns::new();
-    concerns.songs = vec!["wayfaring".into()];
-    concerns.parts = vec!["wayfaring/lead".into()];
+    concerns.songs = vec![Indexed::new(Some(id(30)), "wayfaring")];
+    concerns.parts = vec![
+        Indexed::new(None, "wayfaring/kit"),
+        Indexed::new(Some(id(31)), "wayfaring/lead"),
+    ];
     concerns.takes = vec![TakeRef::new("wayfaring", EXAMPLE_DIGEST.parse().unwrap())];
     let closes = Closes::new(
         example_stamp(1),
-        At::from_unix_ms(1_795_446_253_000),
-        8,
-        id(8),
+        At::from_unix_ms(1_795_446_256_000),
+        11,
+        id(11),
         concerns,
     );
     let second = Opens::new(example_stamp(2), id(21), example_stamp(2).at());

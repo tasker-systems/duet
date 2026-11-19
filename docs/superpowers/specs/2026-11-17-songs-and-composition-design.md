@@ -494,10 +494,9 @@ gates nothing (ruling 15, [§7](#7-lifecycles)), and a part's `source` (ruling 1
    name are each refused by name; `duet song status` makes each of the four allowed moves, refuses
    every other by name, and leaves the document unchanged when it refuses; `duet song new` mints an
    id, and renaming the song's folder leaves it unchanged; a part gains its `id`; a status changed
-   by hand in `song.duet` is reported by `duet journal check`. **Built**, except the last
-   witness, which lands with the journal follow-up (temper
-   `01a1ec52-eff4-76bd-8470-33e544e7e2bf`), since no command writes `song.status-set` until it
-   does. A song's `takes` and their `placed` come with task 3, in place under ruling 12.
+   by hand in `song.duet` is reported by `duet journal check`. **Built**; the last witness
+   landed with the journal follow-up (temper `01a1ec52-eff4-76bd-8470-33e544e7e2bf`), which
+   made `duet song status` journal a `song.status-set`. A song's `takes` and their `placed` come with task 3, in place under ruling 12.
 3. **Placing takes:** `placed`, `duet song place`, `duet record --song`, and capture's comparison with
    the composition. **Needs:** 2. **Witnesses:** a take recorded with `--song` has its offset to the
    frame; a take with no click is placed `estimated` with capture's tempo, and `duet song place`

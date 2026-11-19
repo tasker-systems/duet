@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 
-use duet_schemas::journal::{Line, SegmentStamp};
+use duet_schemas::journal::{Closes, Id, Line, SegmentStamp};
 use duet_schemas::{Journal, JournalIndex};
 
 use crate::{Error, Result, index_path, segment_path};
@@ -81,6 +81,53 @@ impl ProjectJournal {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// The segments that may concern the song `id`, in index order: each whose closing summary
+    /// lists the song by that id, under whatever name, and each with no summary to read, which
+    /// is read whole: the current segment, and one a merge left unsummarised (bus design
+    /// decisions 17 and 21). A song renamed since a segment closed is still found in it.
+    #[must_use]
+    pub fn segments_for_song(&self, id: &Id) -> Vec<SegmentStamp> {
+        self.segments_where(|closes| closes.concerns_song(id))
+    }
+
+    /// The segments that may concern the part `id`, as [`Self::segments_for_song`] finds a
+    /// song's.
+    #[must_use]
+    pub fn segments_for_part(&self, id: &Id) -> Vec<SegmentStamp> {
+        self.segments_where(|closes| closes.concerns_part(id))
+    }
+
+    fn segments_where(&self, concerns: impl Fn(&Closes) -> bool) -> Vec<SegmentStamp> {
+        let closes: Vec<&Closes> = self
+            .index
+            .lines
+            .iter()
+            .filter_map(|entry| entry.line.closes.as_ref())
+            .collect();
+        self.segments
+            .iter()
+            .map(|segment| segment.stamp)
+            .filter(|stamp| {
+                let mut summaries = closes.iter().filter(|c| c.segment == *stamp).peekable();
+                summaries.peek().is_none() || summaries.any(|c| concerns(c))
+            })
+            .collect()
+    }
+
+    /// Whether any entry concerns the song `id`, read from the entries themselves.
+    #[must_use]
+    pub fn concerns_song(&self, id: &Id) -> bool {
+        self.entries().any(|(_, line)| {
+            line.read().is_some_and(|event| {
+                event
+                    .concerns()
+                    .songs
+                    .iter()
+                    .any(|s| s.id.as_ref() == Some(id))
+            })
+        })
     }
 }
 

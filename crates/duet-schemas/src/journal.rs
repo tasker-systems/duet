@@ -49,7 +49,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::value::RawValue;
 
+use crate::project::Name;
 use crate::schema::event_schema;
+use crate::song::Status;
 use crate::{Error, From, Kind, Result, Stream, StreamKind, Tool, Version};
 
 // --- The small types every entry uses ---
@@ -609,6 +611,8 @@ pub const EVENTS: &[EventInfo] = &[
     event::<VerdictGiven>(),
     event::<TakeAdded>(),
     event::<DocWritten>(),
+    event::<SongStatusSet>(),
+    event::<SnapshotTaken>(),
 ];
 
 /// The event kind named `name`, if this build knows it.
@@ -991,6 +995,16 @@ pub struct DocWritten {
     pub digest: DocDigest,
     /// Whether it replaced a file that was there.
     pub replaced: bool,
+    /// The id of the song whose folder holds the path (`songs/<song>/…`), as its `song.duet`
+    /// states it when the document was written. Absent outside a song's folder, or when the
+    /// folder holds no song that reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub song: Option<Id>,
+    /// The id of the part the document is (`songs/<song>/parts/<part>…`), as its body states
+    /// it. Absent for anything but a part, and for a part that states none, such as a drum
+    /// grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<Id>,
 }
 
 impl DocWritten {
@@ -1008,12 +1022,86 @@ impl DocWritten {
             version,
             digest,
             replaced,
+            song: None,
+            part: None,
         }
     }
 }
 
 impl EventKind for DocWritten {
     const NAME: &'static str = "doc.written";
+    const VERSION: Version = Version::new(1, 0);
+}
+
+/// `song.status-set` 1.0: a song's status moved, as `duet song status` moves it. A song's
+/// status is a closed state machine (`idea` → `sketch` → `developing` → `arranged`, and
+/// `arranged` → `developing` to reopen), and this is its second lifecycle in the journal beside
+/// the ask's (bus design decision 23). `song.duet` holds the current status, and the journal
+/// each change (the domain model's ruling 14).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct SongStatusSet {
+    /// The song's stable id, as its `song.duet` states it.
+    pub song: Id,
+    /// The song's name, its folder's, when the move was made: for reading, and for the
+    /// index, which lists a song by its id with its name beside it.
+    pub name: Name,
+    /// The status it moved from.
+    pub from: Status,
+    /// The status it moved to.
+    pub to: Status,
+}
+
+impl SongStatusSet {
+    #[must_use]
+    pub const fn new(song: Id, name: Name, from: Status, to: Status) -> Self {
+        Self {
+            song,
+            name,
+            from,
+            to,
+        }
+    }
+}
+
+impl EventKind for SongStatusSet {
+    const NAME: &'static str = "song.status-set";
+    const VERSION: Version = Version::new(1, 0);
+}
+
+/// `snapshot.taken` 1.0: a snapshot of a song was taken. It is an event against the song, not
+/// a status, so it changes no state (the domain model's ruling 9). No command writes it until
+/// the songs spec's build task 4.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct SnapshotTaken {
+    /// The song's stable id, as its `song.duet` states it.
+    pub song: Id,
+    /// The song's name, its folder's, when the snapshot was taken.
+    pub name: Name,
+    /// The snapshot's name, its folder's under the song's `snapshots/`.
+    pub snapshot: String,
+    /// The digest of what it froze: the body of the snapshot's own `snapshot.duet`, which
+    /// states the digest of every file it copied.
+    pub digest: DocDigest,
+}
+
+impl SnapshotTaken {
+    #[must_use]
+    pub fn new(song: Id, name: Name, snapshot: impl Into<String>, digest: DocDigest) -> Self {
+        Self {
+            song,
+            name,
+            snapshot: snapshot.into(),
+            digest,
+        }
+    }
+}
+
+impl EventKind for SnapshotTaken {
+    const NAME: &'static str = "snapshot.taken";
     const VERSION: Version = Version::new(1, 0);
 }
 
@@ -1029,6 +1117,8 @@ pub enum Event {
     VerdictGiven(VerdictGiven),
     TakeAdded(TakeAdded),
     DocWritten(DocWritten),
+    SongStatusSet(SongStatusSet),
+    SnapshotTaken(SnapshotTaken),
 }
 
 impl Event {
@@ -1043,6 +1133,8 @@ impl Event {
             Self::VerdictGiven(_) => VerdictGiven::NAME,
             Self::TakeAdded(_) => TakeAdded::NAME,
             Self::DocWritten(_) => DocWritten::NAME,
+            Self::SongStatusSet(_) => SongStatusSet::NAME,
+            Self::SnapshotTaken(_) => SnapshotTaken::NAME,
         }
     }
 
@@ -1057,6 +1149,8 @@ impl Event {
             Self::VerdictGiven(_) => VerdictGiven::VERSION,
             Self::TakeAdded(_) => TakeAdded::VERSION,
             Self::DocWritten(_) => DocWritten::VERSION,
+            Self::SongStatusSet(_) => SongStatusSet::VERSION,
+            Self::SnapshotTaken(_) => SnapshotTaken::VERSION,
         }
     }
 }
@@ -1078,7 +1172,9 @@ into_event!(
     MomentPlayed,
     VerdictGiven,
     TakeAdded,
-    DocWritten
+    DocWritten,
+    SongStatusSet,
+    SnapshotTaken
 );
 
 // --- Entries, as written and as read ---
@@ -1393,18 +1489,69 @@ impl TakeRef {
     }
 }
 
-/// The project-level elements some events concern (bus design decision 17): songs, parts as
-/// `<song>/<part>`, and takes by name and digest. Songs and parts are named by name until the
-/// songs-and-composition spec gives them a stable id, when the index names them by it, the name
-/// beside it; a rename until then loses per-song lookup of older segments. Never a session, which is no duet entity.
-/// Comps, snapshots and renders are found through their song.
+/// A song or a part as the index names it: its stable id, with its name beside it for reading
+/// (bus design decision 17, the domain model's ruling 13). A part's name is `<song>/<part>`.
+///
+/// The id is absent only when no event named one: a document written in a song's folder that
+/// holds no song that reads, or a part that states no id, such as a drum grid. Such an entry
+/// is found by its name alone.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Indexed {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Id>,
+    pub name: String,
+}
+
+impl Indexed {
+    /// `name`, with its id if one is known.
+    #[must_use]
+    pub fn new(id: Option<Id>, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+        }
+    }
+}
+
+impl PartialOrd for Indexed {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// By name, then by id: a list reads in name order, and one id under two names (a rename in
+/// the segment) lists both.
+impl Ord for Indexed {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (&self.name, &self.id).cmp(&(&other.name, &other.id))
+    }
+}
+
+/// Adds `entry` to the sorted `list`, once. An entry with an id takes the place of one of its
+/// name with none, and an entry with none adds nothing when its name is listed already.
+fn add_indexed(list: &mut Vec<Indexed>, entry: Indexed) {
+    if entry.id.is_some() {
+        list.retain(|e| !(e.id.is_none() && e.name == entry.name));
+    } else if list.iter().any(|e| e.name == entry.name) {
+        return;
+    }
+    if let Err(at) = list.binary_search(&entry) {
+        list.insert(at, entry);
+    }
+}
+
+/// The project-level elements some events concern (bus design decision 17): songs and parts,
+/// each by its id with its name beside it, and takes by name and digest. Never a session,
+/// which is no duet entity. Comps, snapshots and renders are found through their song.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Concerns {
-    /// Sorted, each once.
-    pub songs: Vec<String>,
-    /// `<song>/<part>`, sorted, each once.
-    pub parts: Vec<String>,
+    /// Sorted by name, each once.
+    pub songs: Vec<Indexed>,
+    /// Named `<song>/<part>`, sorted by name, each once.
+    pub parts: Vec<Indexed>,
     /// In the order first concerned, each once.
     pub takes: Vec<TakeRef>,
 }
@@ -1422,25 +1569,23 @@ impl Concerns {
         self.songs.is_empty() && self.parts.is_empty() && self.takes.is_empty()
     }
 
-    fn add_song(&mut self, song: &str) {
-        if let Err(at) = self.songs.binary_search_by(|s| s.as_str().cmp(song)) {
-            self.songs.insert(at, song.to_string());
-        }
+    /// Adds a song, by its id when one is known.
+    pub fn add_song(&mut self, id: Option<Id>, name: impl Into<String>) {
+        add_indexed(&mut self.songs, Indexed::new(id, name));
     }
 
-    fn add_part(&mut self, part: String) {
-        if let Err(at) = self.parts.binary_search(&part) {
-            self.parts.insert(at, part);
-        }
+    /// Adds a part, named `<song>/<part>`, by its id when one is known.
+    pub fn add_part(&mut self, id: Option<Id>, name: impl Into<String>) {
+        add_indexed(&mut self.parts, Indexed::new(id, name));
     }
 
     /// Adds everything `other` concerns.
     pub fn extend(&mut self, other: &Self) {
         for song in &other.songs {
-            self.add_song(song);
+            add_indexed(&mut self.songs, song.clone());
         }
         for part in &other.parts {
-            self.add_part(part.clone());
+            add_indexed(&mut self.parts, part.clone());
         }
         for take in &other.takes {
             if !self.takes.contains(take) {
@@ -1455,7 +1600,9 @@ impl Event {
     /// - `take.added`: its take;
     /// - `doc.written`: the song whose folder holds the path (`songs/<song>/…`), and the part
     ///   when the path is under the song's `parts/` (`songs/<song>/parts/<part>…`, the part
-    ///   named by the file's name up to its first `.`);
+    ///   named by the file's name up to its first `.`), each by the id the event carries, when
+    ///   it carries one;
+    /// - `song.status-set` and `snapshot.taken`: their song, by its id and name;
     /// - every other event: nothing yet. The asks, `moment.played` and `verdict.given` will
     ///   concern what their reference names, once the reference grammar is ruled.
     #[must_use]
@@ -1470,12 +1617,18 @@ impl Event {
                 if let ["songs", song, rest @ ..] = parts.as_slice()
                     && !rest.is_empty()
                 {
-                    concerns.add_song(song);
+                    concerns.add_song(written.song.clone(), *song);
                     if let ["parts", file, ..] = rest {
                         let part = file.split('.').next().unwrap_or(file);
-                        concerns.add_part(format!("{song}/{part}"));
+                        concerns.add_part(written.part.clone(), format!("{song}/{part}"));
                     }
                 }
+            }
+            Self::SongStatusSet(set) => {
+                concerns.add_song(Some(set.song.clone()), set.name.as_str())
+            }
+            Self::SnapshotTaken(taken) => {
+                concerns.add_song(Some(taken.song.clone()), taken.name.as_str());
             }
             _ => {}
         }
@@ -1541,12 +1694,13 @@ pub struct Closes {
     pub entries: u64,
     /// Its last entry's id.
     pub last: Id,
-    /// The songs its events concern, sorted.
+    /// The songs its events concern, each by its id with its name beside it, sorted by name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub songs: Vec<String>,
-    /// The parts its events concern, as `<song>/<part>`, sorted.
+    pub songs: Vec<Indexed>,
+    /// The parts its events concern, each by its id with its name, `<song>/<part>`, beside it,
+    /// sorted by name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parts: Vec<String>,
+    pub parts: Vec<Indexed>,
     /// The takes its events concern, by name and digest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub takes: Vec<TakeRef>,
@@ -1565,6 +1719,20 @@ impl Closes {
             parts: concerns.parts,
             takes: concerns.takes,
         }
+    }
+}
+
+impl Closes {
+    /// Whether its segment concerns the song `id`, under whatever name.
+    #[must_use]
+    pub fn concerns_song(&self, id: &Id) -> bool {
+        self.songs.iter().any(|s| s.id.as_ref() == Some(id))
+    }
+
+    /// Whether its segment concerns the part `id`, under whatever name.
+    #[must_use]
+    pub fn concerns_part(&self, id: &Id) -> bool {
+        self.parts.iter().any(|p| p.id.as_ref() == Some(id))
     }
 }
 
@@ -1787,8 +1955,8 @@ mod tests {
             .concerns()
         };
         let lead = written("songs/wayfaring/parts/lead.duet");
-        assert_eq!(lead.songs, ["wayfaring"]);
-        assert_eq!(lead.parts, ["wayfaring/lead"]);
+        assert_eq!(lead.songs, [Indexed::new(None, "wayfaring")]);
+        assert_eq!(lead.parts, [Indexed::new(None, "wayfaring/lead")]);
         let comp = written("songs/wayfaring/comps/a.duet");
         assert_eq!((comp.songs.len(), comp.parts.len()), (1, 0));
         assert!(written("renders/wayfaring.mid").is_empty());
@@ -1804,6 +1972,57 @@ mod tests {
         all.extend(&take);
         assert_eq!(all.takes.len(), 1);
         assert!(Event::from(AskAsked::new("?")).concerns().is_empty());
+    }
+
+    #[test]
+    fn songs_and_parts_are_concerned_by_the_id_an_event_carries_with_the_name_beside_it() {
+        let (song, part) = (Id::from_parts(1, [1; 10]), Id::from_parts(2, [2; 10]));
+        let mut written = DocWritten::new(
+            "songs/wayfaring/parts/lead.duet".parse().unwrap(),
+            "part",
+            Version::new(1, 0),
+            DocDigest(0),
+            false,
+        );
+        written.song = Some(song.clone());
+        written.part = Some(part.clone());
+        let concerns = Event::from(written).concerns();
+        assert_eq!(
+            concerns.songs,
+            [Indexed::new(Some(song.clone()), "wayfaring")]
+        );
+        assert_eq!(concerns.parts, [Indexed::new(Some(part), "wayfaring/lead")]);
+
+        // A name-only entry gives way to the same name with an id; a rename lists both names
+        // under the one id.
+        let mut all = Concerns::new();
+        all.add_song(None, "wayfaring");
+        all.extend(&concerns);
+        let set = SongStatusSet::new(
+            song.clone(),
+            "wayfaring-stranger".parse().unwrap(),
+            Status::Idea,
+            Status::Sketch,
+        );
+        all.extend(&Event::from(set).concerns());
+        all.add_song(None, "wayfaring");
+        assert_eq!(
+            all.songs,
+            [
+                Indexed::new(Some(song.clone()), "wayfaring"),
+                Indexed::new(Some(song.clone()), "wayfaring-stranger"),
+            ]
+        );
+        let taken = SnapshotTaken::new(
+            song.clone(),
+            "wayfaring".parse().unwrap(),
+            "first",
+            DocDigest(1),
+        );
+        assert_eq!(
+            Event::from(taken).concerns().songs,
+            [Indexed::new(Some(song), "wayfaring")]
+        );
     }
 
     #[test]

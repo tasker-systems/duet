@@ -146,7 +146,7 @@ pub const ACTIONS: &[Action] = &[
     writing(
         "song.status",
         &["song", "status"],
-        DOC_WRITTEN,
+        &["doc.written", "song.status-set"],
         writes("the song's song.duet, over itself", true),
         schema::<song::StatusInput>,
     ),

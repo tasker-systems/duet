@@ -990,6 +990,12 @@ It is an **index**, `journal.duet.jsonl`, over **segments**, `journal.<stamp>.du
 - each index line opens a segment and closes the one before it;
 - a new segment starts when the current one reaches 1 MiB. The size is `[journal] segment-size`
   in `duet.toml`, read once a command writes the journal; nothing writes one yet.
+- a closing line lists the songs and parts its segment concerns, each by its id with its name
+  beside it, so a song renamed since is still found by its id.
+
+A song's status lives in its `song.duet`, and the journal records each change: `duet song status`
+journals a `song.status-set`. Replay folds the moves through the same state machine, leniently:
+after a merge, the first move in order stands and the check lists the other.
 
 Each event kind versions on its own, so an entry this duet does not read, of a newer duet's event,
 is kept as it is and stated, never refused. The design is
@@ -998,7 +1004,9 @@ is kept as it is and stated, never refused. The design is
 
 ```sh
 duet journal show    # every entry: its segment and seq, when, who, the event and its body
-duet journal check   # what this duet keeps unread, what replay skips; exits 1 if anything is wrong
+duet journal check   # what this duet keeps unread, what replay skips, and every song whose
+                     # song.duet disagrees with the journal on its status, naming both and
+                     # changing neither; exits 1 if anything is wrong
 ```
 
 Both read the project in the working directory, or the root or `journal.duet.jsonl` given.

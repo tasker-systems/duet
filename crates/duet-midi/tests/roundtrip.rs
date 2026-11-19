@@ -1892,3 +1892,41 @@ fn a_journal_round_trips_exactly_with_entries_this_duet_does_not_read() {
     let read = duet_schemas::JournalIndex::read(&index).unwrap();
     assert_eq!(read.write().unwrap(), index);
 }
+
+/// The songs build's events round-trip exactly and are read as themselves: a `song.status-set`,
+/// a `snapshot.taken`, and a `doc.written` carrying the ids of its song and part. An index line
+/// whose summary names songs and parts by id, and one by its name alone, round-trips too, and
+/// reads back the ids it names.
+#[test]
+fn the_songs_events_and_an_index_naming_songs_by_id_round_trip_exactly() {
+    use duet_schemas::journal::{Event, IndexLine, read_line};
+    use duet_schemas::song::Status;
+    let lines = [
+        r#"{"id":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f6","at":"2026-11-17T15:04:05.123Z","by":{"who":"owner","face":"cli"},"cause":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f5","event":"song.status-set","v":"1.0","body":{"song":"0196f1a2-7b3c-7000-8000-000000000001","name":"wayfaring","from":"arranged","to":"developing"}}"#,
+        r#"{"id":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f7","at":"2026-11-17T15:04:06.000Z","by":{"who":"claude","face":"cli"},"event":"snapshot.taken","v":"1.0","body":{"song":"0196f1a2-7b3c-7000-8000-000000000001","name":"wayfaring","snapshot":"2026-11-20-first-verse","digest":"00ff00ff00ff00ff"}}"#,
+        r#"{"id":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f8","at":"2026-11-17T15:04:07.000Z","by":{"who":"claude","face":"cli"},"event":"doc.written","v":"1.0","body":{"path":"songs/wayfaring/parts/bass.duet","kind":"part","version":"1.0","digest":"0123456789abcdef","replaced":false,"song":"0196f1a2-7b3c-7000-8000-000000000001","part":"0196f1a2-7b3c-7000-8000-000000000002"}}"#,
+    ];
+    for text in lines {
+        let line = read_line(text).unwrap();
+        let event = line
+            .read()
+            .unwrap_or_else(|| panic!("read as itself: {text}"));
+        assert_eq!(line.write().unwrap(), format!("{text}\n"));
+        let concerns = event.concerns();
+        assert_eq!(
+            concerns.songs[0].id.as_ref().map(Id::as_str),
+            Some("0196f1a2-7b3c-7000-8000-000000000001"),
+            "{text}"
+        );
+        if let Event::SongStatusSet(set) = event {
+            assert_eq!((set.from, set.to), (Status::Arranged, Status::Developing));
+        }
+    }
+
+    let index = r#"{"opens":{"segment":"20261124T150405000Z","id":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f9","from":"2026-11-24T15:04:05.000Z"},"closes":{"segment":"20261123T150405000Z","to":"2026-11-23T15:04:13.000Z","entries":3,"last":"0196f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f8","songs":[{"id":"0196f1a2-7b3c-7000-8000-000000000001","name":"wayfaring"}],"parts":[{"id":"0196f1a2-7b3c-7000-8000-000000000002","name":"wayfaring/bass"},{"name":"wayfaring/kit"}]}}"#;
+    let line: IndexLine = serde_json::from_str(index).unwrap();
+    assert_eq!(line.line().unwrap(), format!("{index}\n"));
+    let closes = line.closes.unwrap();
+    assert!(closes.concerns_song(&"0196f1a2-7b3c-7000-8000-000000000001".parse().unwrap()));
+    assert!(closes.concerns_part(&"0196f1a2-7b3c-7000-8000-000000000002".parse().unwrap()));
+}

@@ -7,6 +7,10 @@
 //!
 //! **The status gates nothing** (decision 01a1ee66): every command works on a song in any state.
 //! Only `duet song status` refuses, and only a move the state machine does not draw.
+//!
+//! **`song.duet` holds the status, and the journal each change** (the domain model's ruling 14):
+//! inside a project, `duet song status` journals a `song.status-set` after the `doc.written` of
+//! the song it rewrote. `duet journal check` reports a song whose document and journal disagree.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -15,7 +19,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use clap::Subcommand;
 use duet_core::{Key, TimeSig};
-use duet_schemas::journal::Id;
+use duet_schemas::journal::{Id, SongStatusSet};
 use duet_schemas::project::Name;
 use duet_schemas::song::{Composition, Status, distinct_ids, part_names};
 use duet_schemas::{AnyDocument, Document, Project, Song, Source};
@@ -167,6 +171,12 @@ pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
                 .map_err(|why| anyhow::anyhow!("{}: {why}", path.display()))?;
             doc.tool = tool();
             write_song(ctx, &path, &doc)?;
+            ctx.emit(SongStatusSet::new(
+                doc.body.id.clone(),
+                song.clone(),
+                was,
+                doc.body.status,
+            ));
             println!("{}: {was} → {}", path.display(), doc.body.status);
             Ok(())
         }
@@ -205,7 +215,8 @@ fn read_song(dir: &Path) -> Result<Document<Song>> {
 
 /// One folder under a project's `songs/`, as `duet project show` lists it: its name, and its song,
 /// or why it holds none.
-pub(crate) struct Listed {
+#[derive(Debug)]
+pub struct Listed {
     pub folder: String,
     pub song: std::result::Result<Song, String>,
 }
@@ -213,7 +224,11 @@ pub(crate) struct Listed {
 /// Every folder under `root`'s `songs/`, sorted by name, each with the song its `song.duet` holds
 /// or why it holds none: no `song.duet`, a name that is no song's name, or a document that does
 /// not read. A file directly in `songs/` is no song, and is left out.
-pub(crate) fn listed(root: &Path) -> Result<Vec<Listed>> {
+///
+/// # Errors
+///
+/// When `songs/` or a folder in it cannot be read.
+pub fn listed(root: &Path) -> Result<Vec<Listed>> {
     let songs = root.join("songs");
     if !songs.is_dir() {
         return Ok(Vec::new());
