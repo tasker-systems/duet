@@ -5,12 +5,15 @@
 #   tools/roadmap/snapshot.sh             # create it as a new research resource
 #
 # Reads every goal in +making-music/duet-dev and every task in +making-music/duet-dev-workflows
-# with `temper resource list --all`, and each task's edges with `temper resource show --with edges`
-# (ROADMAP_JOBS at a time, default 8). roadmap.jq holds the rule; this script only reads and writes.
+# with `temper resource list --all`, then every task's edges in one `temper graph traverse
+# --depth 1`, seeded with every listed task. roadmap.jq holds the rule; this script only reads and
+# writes.
 #
 # The one write is `temper resource create --type research`, tagged roadmap-snapshot: it never
-# updates, moves or deletes anything, so no older snapshot is rewritten. Any failed, unparseable or
-# truncated read stops it with a non-zero exit before that create, naming the read.
+# updates, moves or deletes anything, so no older snapshot is rewritten. Any failed, unparseable,
+# truncated or partial read stops it with a non-zero exit before that create, naming the read. A
+# traverse with no node for a task it was seeded with is partial (roadmap.jq checks it), and there
+# is no fallback to per-task reads.
 #
 # TEMPER names the temper to run (default: temper on PATH). It needs a login that can read both
 # contexts.
@@ -18,7 +21,6 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 temper="${TEMPER:-temper}"
-jobs="${ROADMAP_JOBS:-8}"
 goals_context="+making-music/duet-dev"
 tasks_context="+making-music/duet-dev-workflows"
 
@@ -45,52 +47,44 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/roadmap-snapshot.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 # Run one temper read and keep the first JSON value it prints: temper may print more after it.
+#   read_json <out> <the read, as an error names it> <temper arguments...>
 read_json() {
-    local out="$1"
-    shift
+    local out="$1" what="$2"
+    shift 2
     local cmd=("$temper" "$@" --format json)
     if ! "${cmd[@]}" > "$out.raw" 2> "$out.err"; then
-        fail "could not run \`temper $*\`: $(tr '\n' ' ' < "$out.err")"
+        fail "could not run \`temper $what\`: $(tr '\n' ' ' < "$out.err")"
     fi
     jq -c -n 'input' < "$out.raw" > "$out" 2> /dev/null ||
-        fail "\`temper $*\` answered in a shape this tool does not read: its output is not JSON"
+        fail "\`temper $what\` answered in a shape this tool does not read: its output is not JSON"
+}
+list() {
+    local out="$1"
+    shift
+    read_json "$out" "$*" "$@"
 }
 
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-read_json "$work/goals.json" resource list --type goal --context "$goals_context" --all --with open-meta
-read_json "$work/tasks.json" resource list --type task --context "$tasks_context" --all --with open-meta
+list "$work/goals.json" resource list --type goal --context "$goals_context" --all --with open-meta
+list "$work/tasks.json" resource list --type task --context "$tasks_context" --all --with open-meta
 
-# Each task's edges, read the same way for every task: its goal is the peer of its outgoing
-# `advances` edge, and a task without one is counted, never dropped (the trap in the task's body).
-mkdir "$work/shows"
-jq -r '(.rows // [])[] | .id // empty' "$work/tasks.json" > "$work/ids"
-# shellcheck disable=SC2016 # the single-quoted script is bash's, run by xargs with $0 to $2 set
-if ! xargs -P "$jobs" -I '{}' bash -c '
-    set -euo pipefail
-    if ! "$0" resource show "$1" --without body --without open-meta --with edges --format json \
-        > "$2/$1.raw" 2> "$2/$1.err"; then
-        exit 1
-    fi
-    jq -c -n input < "$2/$1.raw" > "$2/$1.json" 2> /dev/null
-' "$temper" '{}' "$work/shows" < "$work/ids"; then
-    while IFS= read -r id; do
-        if [ ! -s "$work/shows/$id.json" ]; then
-            fail "could not read the edges of task $id (\`temper resource show $id --with edges\`): $(tr '\n' ' ' < "$work/shows/$id.err")"
-        fi
-    done < "$work/ids"
-    fail "an edge read failed"
-fi
-# Keyed by the id each read was asked for, so an answer for another id is caught by roadmap.jq.
-if [ -s "$work/ids" ]; then
-    jq -n 'reduce inputs as $show ({}; . + {(input_filename | split("/") | last | rtrimstr(".json")): $show})' \
-        "$work/shows"/*.json > "$work/shows.json"
+# Every task's edges in one traverse, seeded with every listed task, so each task's goal link is
+# read the same way. roadmap.jq refuses a reply with no node for a seed: a task the traverse left
+# out is a partial read, never a task with no goal. With no task listed there is nothing to seed.
+seeds=()
+while IFS= read -r id; do
+    seeds+=(--from "$id")
+done < <(jq -r '(.rows // [])[] | .id // empty' "$work/tasks.json")
+if [ "${#seeds[@]}" -gt 0 ]; then
+    read_json "$work/traverse.json" "graph traverse --from <each of $((${#seeds[@]} / 2)) tasks> --depth 1" \
+        graph traverse "${seeds[@]}" --depth 1
 else
-    echo '{}' > "$work/shows.json"
+    echo '{"nodes": [], "edges": []}' > "$work/traverse.json"
 fi
 finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 jq -n --slurpfile goals "$work/goals.json" --slurpfile tasks "$work/tasks.json" \
-    --slurpfile shows "$work/shows.json" '{goals: $goals[0], tasks: $tasks[0], shows: $shows[0]}' \
+    --slurpfile traverse "$work/traverse.json" '{goals: $goals[0], tasks: $tasks[0], traverse: $traverse[0]}' \
     > "$work/records.json"
 if ! jq -j -L "$here" --arg started "$started" --arg finished "$finished" \
     --rawfile recipe "$here/recipe.md" -f "$here/snapshot.jq" "$work/records.json" \

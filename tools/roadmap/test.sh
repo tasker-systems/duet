@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# The roadmap snapshot's witnesses (Temper task 01a1f1ac), over fixed records with no network:
-#   1. the fixture draws the expected lanes and counts (fixture/expected.md, checked by hand);
+# The roadmap snapshot's witnesses (Temper tasks 01a1f1ac and 01a1f236), over fixed records with
+# no network:
+#   1. the fixture draws the expected lanes and counts (fixture/expected.md, checked by hand), and
+#      an `advances` edge into a task, from a session or a goal, is no task's goal link;
 #   2. two draws over the same records differ only in the stated date and read times;
-#   3. a failed, unparseable or truncated read exits non-zero and writes nothing;
-#   4. the only write is one create, and a dry run writes nothing;
+#   3. a failed, unparseable, truncated or partial read exits non-zero and writes nothing, and a
+#      traverse with no node for a task it was seeded with is refused, naming the task;
+#   4. the only write is one create, every task's edges come from one `graph traverse` and no
+#      `resource show`, and a dry run writes nothing;
 #   5. the workstreams are CLAUDE.md's vocabulary, in its order.
-# snapshot.sh runs against fixture/temper, a fake that answers from the fixture and logs each call.
+# snapshot.sh runs against fixture/temper, a fake that answers from the fixture, logs each call,
+# and refuses `resource show`.
 # CI runs this in .github/workflows/ci.yml#gate.
 set -euo pipefail
 
@@ -39,10 +44,7 @@ fake() {
     jq "$2" "$records" > "$dir/records.json"
     jq '.goals' "$dir/records.json" > "$dir/goals.json"
     jq '.tasks' "$dir/records.json" > "$dir/tasks.json"
-    jq -r '.shows | to_entries[] | "\(.key)\t\(.value | tojson)"' "$dir/records.json" |
-        while IFS="$(printf '\t')" read -r id show; do
-            printf '%s\n' "$show" > "$dir/show-$id.json"
-        done
+    jq '.traverse' "$dir/records.json" > "$dir/graph.json"
     echo "$dir"
 }
 # Run snapshot.sh against a fake: snapshot <dir> [--dry-run]; stdout, stderr and status land in <dir>.
@@ -62,6 +64,23 @@ creates() {
         echo 0
     fi
 }
+# Why a run's call log is not one depth-1 traverse seeded with every fixture task and no per-task
+# read; empty when it is: traversed_once <dir>
+traversed_once() {
+    local log="$1/calls.log" traverses want got
+    traverses="$(grep -c '^graph traverse ' "$log" || true)"
+    want="$(jq -r '.tasks.rows[].id' "$records" | sort)"
+    got="$(grep '^graph traverse ' "$log" | head -n 1 | grep -o -e '--from [^ ]*' | cut -d ' ' -f 2 | sort)"
+    if grep -q '^resource show ' "$log"; then
+        echo "it made a per-task \`resource show\`: $(grep -c '^resource show ' "$log")"
+    elif [ "$traverses" != 1 ]; then
+        echo "expected one \`graph traverse\`, saw $traverses"
+    elif ! grep -q '^graph traverse .*--depth 1\( \|$\)' "$log"; then
+        echo "the traverse is not at --depth 1: $(grep '^graph traverse ' "$log")"
+    elif [ "$want" != "$got" ]; then
+        echo "the traverse was not seeded with exactly the fixture's $(echo "$want" | wc -l | tr -d ' ') tasks"
+    fi
+}
 
 # 1. The fixture draws the expected lanes and counts.
 if draw 2026-11-19T03:00:00Z 2026-11-19T03:00:01Z "$records" > "$scratch/body.md" &&
@@ -71,8 +90,29 @@ else
     bad "fixed records draw fixture/expected.md"
 fi
 
+# 1b. Only an edge from a task is its goal link. The fixture holds `advances` edges into tasks,
+# from sessions and from a goal; give every task more of each, and the draw does not move.
+into_tasks="$(jq '[.traverse as $g | ($g.nodes | map({(.id): .doc_type}) | add) as $type
+    | $g.edges[] | select(.label == "advances" and $type[.target] == "task" and $type[.source] == "session")] | length' "$records")"
+jq '[.tasks.rows[].id] as $tasks
+    | .traverse.nodes += [{id: "60000000-0000-7000-8000-000000000099", title: "a busy session", doc_type: "session", degree: ($tasks | length)}]
+    | .traverse.edges += [$tasks | to_entries[] | {id: "71000000-0000-7000-8000-\(1000000000000 + .key | tostring | .[1:])",
+        source: "60000000-0000-7000-8000-000000000099", target: .value, edge_kind: "leads_to", polarity: "forward",
+        label: "advances", weight: 1.0}]
+    | .traverse.edges += [$tasks | to_entries[] | {id: "72000000-0000-7000-8000-\(1000000000000 + .key | tostring | .[1:])",
+        source: "10000000-0000-7000-8000-000000000002", target: .value, edge_kind: "leads_to", polarity: "forward",
+        label: "advances", weight: 1.0}]' "$records" > "$scratch/into.json"
+if [ "$into_tasks" -lt 2 ]; then
+    bad "an advances edge into a task is no task's goal link: the fixture holds $into_tasks from a session"
+elif draw 2026-11-19T03:00:00Z 2026-11-19T03:00:01Z "$scratch/into.json" > "$scratch/into.md" &&
+    diff -u "$expected" "$scratch/into.md"; then
+    ok "an advances edge into a task, from a session or a goal, is no task's goal link"
+else
+    bad "an advances edge into a task, from a session or a goal, is no task's goal link"
+fi
+
 # 2. The same records, served in the opposite order and read on another day.
-jq '.goals.rows |= reverse | .tasks.rows |= reverse | .shows |= map_values(.edges.outgoing |= reverse)' \
+jq '.goals.rows |= reverse | .tasks.rows |= reverse | .traverse.nodes |= reverse | .traverse.edges |= reverse' \
     "$records" > "$scratch/reversed.json"
 if draw 2026-12-25T18:30:00Z 2026-12-25T18:32:10Z "$scratch/reversed.json" > "$scratch/other.md" &&
     [ -s "$scratch/body.md" ] && ! cmp -s "$scratch/body.md" "$scratch/other.md" &&
@@ -99,8 +139,11 @@ refuses() {
 refuses "a truncated goal listing" '.goals.truncated = true' "goal listing was truncated"
 refuses "a short task listing" '.tasks.rows |= .[1:] | .tasks.returned = 18' "returned 18 of 19 rows"
 refuses "a task listing whose returned disagrees" '.tasks.returned = 20' "says it returned 20 rows but holds 19"
-refuses "a missing edge read" 'del(.shows["20000000-0000-7000-8000-000000000009"])' "20000000-0000-7000-8000-000000000009"
-refuses "an edge read for another task" '.shows["20000000-0000-7000-8000-000000000009"].id = "x"' "answered for"
+refuses "a traverse with no node for a seeded task" \
+    '.traverse.nodes |= map(select(.id != "20000000-0000-7000-8000-000000000009"))' \
+    "no node for task 20000000-0000-7000-8000-000000000009"
+refuses "a traverse with no edge list" 'del(.traverse.edges)' "lacks a \`nodes\` or \`edges\` list"
+refuses "a traverse edge with no source" '.traverse.edges[0] |= del(.source)' "no string \`source\`"
 refuses "an unknown goal status" '.goals.rows[0].managed_meta["temper-status"] = "dormant"' "none of"
 refuses "an unknown task stage" '.tasks.rows[0].managed_meta["temper-stage"] = "parked"' "none of"
 
@@ -123,10 +166,20 @@ dir="$(fake truncated '.tasks.truncated = true')"
 snapshot "$dir"
 writes_nothing "snapshot.sh, a truncated task listing" "$dir" "task listing was truncated"
 
-dir="$(fake failing-show '.')"
-rm "$dir/show-20000000-0000-7000-8000-000000000007.json"
+dir="$(fake failing-traverse '.')"
+touch "$dir/traverse.fail"
 snapshot "$dir"
-writes_nothing "snapshot.sh, a failing edge read" "$dir" "20000000-0000-7000-8000-000000000007"
+writes_nothing "snapshot.sh, a failing traverse" "$dir" "could not run \`temper graph traverse"
+
+dir="$(fake garbage-traverse '.')"
+touch "$dir/traverse.garbage"
+snapshot "$dir"
+writes_nothing "snapshot.sh, a traverse that is not JSON" "$dir" "graph traverse.*not JSON"
+
+dir="$(fake partial-traverse '.traverse.nodes |= map(select(.id != "20000000-0000-7000-8000-000000000007"))')"
+snapshot "$dir"
+writes_nothing "snapshot.sh, a traverse with no node for a seeded task" "$dir" \
+    "no node for task 20000000-0000-7000-8000-000000000007"
 
 dir="$(fake garbage '.')"
 echo "not json at all" > "$dir/goals.json"
@@ -143,7 +196,7 @@ writes_nothing "snapshot.sh, no temper to run" "$dir" "could not run"
 # 4. The only write is one create; a dry run writes nothing.
 dir="$(fake write '.')"
 snapshot "$dir"
-others="$(grep -v -e '^resource list ' -e '^resource show ' -e '^resource create ' "$dir/calls.log" || true)"
+others="$(grep -v -e '^resource list ' -e '^graph traverse ' -e '^resource create ' "$dir/calls.log" || true)"
 if [ "$(cat "$dir/status")" != 0 ]; then
     bad "a write: exited $(cat "$dir/status"): $(cat "$dir/stderr")"
 elif [ "$(creates "$dir")" != 1 ] || [ -n "$others" ]; then
@@ -152,16 +205,19 @@ elif ! grep -q '^resource create --type research --context +making-music/duet-de
     bad "a write: the create is not a tagged research resource in duet-dev: $(grep '^resource create' "$dir/calls.log")"
 elif ! grep -q '^created 50000000-0000-7000-8000-000000000001: duet roadmap snapshot, ' "$dir/stdout"; then
     bad "a write: stdout does not name the created resource: $(cat "$dir/stdout")"
-elif [ "$(grep -c '^resource show ' "$dir/calls.log")" != 19 ]; then
-    bad "a write: expected one edge read per task"
+elif [ -n "$(traversed_once "$dir")" ]; then
+    bad "a write: $(traversed_once "$dir")"
 else
     ok "a write makes one create, of a tagged research resource, and otherwise only reads"
+    ok "every task's goal link comes from one traverse, and no resource show"
 fi
 
 dry="$(fake dry-run '.')"
 snapshot "$dry" --dry-run
 if [ "$(cat "$dry/status")" != 0 ] || [ "$(creates "$dry")" != 0 ]; then
     bad "a dry run: exited $(cat "$dry/status") with $(creates "$dry") creates"
+elif [ -n "$(traversed_once "$dry")" ]; then
+    bad "a dry run: $(traversed_once "$dry")"
 elif ! diff -u <(without_date "$dry/stdout") <(without_date "$dir/created.md"); then
     bad "a dry run prints what a write creates"
 elif ! diff -u <(without_date "$dry/stdout") <(without_date "$expected"); then
