@@ -67,10 +67,12 @@ const SAME_NOTE_SECS: f64 = 0.03;
 /// What `duet capture review` is given.
 #[derive(Debug, Args, JsonSchema)]
 pub struct ReviewArgs {
-    /// The take's recording, as `duet capture melody` read it: the clips' left channel.
+    /// The take's recording, as `duet capture melody` read it: the clips' left channel. In a
+    /// project, a take's name too.
     input: PathBuf,
     /// The stem the take was captured to (`duet capture melody -o`). Without it, the input's
-    /// name without its extension, beside it.
+    /// name without its extension, beside it; for a project's take, its one reading in
+    /// takes/TAKE/.
     #[arg(short, long, value_name = "STEM")]
     output: Option<PathBuf>,
     /// The moments to review: one per line, FROM TO LABEL, in seconds from the start of the
@@ -82,7 +84,7 @@ pub struct ReviewArgs {
     #[arg(long = "reading", value_name = "NAME=ANALYSIS")]
     readings: Vec<String>,
     /// The directory the sheet is written to, new: index.html and clips/. Without it,
-    /// STEM.review.
+    /// STEM.review; for a project's take with no -o, takes/TAKE/review.
     #[arg(long, value_name = "DIR")]
     dir: Option<PathBuf>,
 }
@@ -103,7 +105,24 @@ struct Column {
     analysis: Analysis,
 }
 
-pub fn run(args: &ReviewArgs) -> Result<()> {
+pub fn run(ctx: &crate::Context, args: ReviewArgs) -> Result<()> {
+    // In a project, the take is given by name or found by its digest, its one reading in
+    // takes/<take>/ is reviewed, and the sheet goes to takes/<take>/review/ (the project
+    // design's §5).
+    let input = crate::take::input(ctx, &args.input, args.output.is_none())?;
+    let (output, dir) = match (&args.output, &input.take) {
+        (None, Some(take)) => (
+            Some(take.reading_stem()?),
+            args.dir.clone().or_else(|| Some(take.dir().join("review"))),
+        ),
+        _ => (args.output.clone(), args.dir.clone()),
+    };
+    let args = &ReviewArgs {
+        input: input.file,
+        output,
+        dir,
+        ..args
+    };
     let stem = args
         .output
         .clone()
