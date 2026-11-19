@@ -20,7 +20,7 @@ use anyhow::{Context as _, Result, bail};
 use clap::Subcommand;
 use duet_core::{Key, TimeSig};
 use duet_schemas::journal::{Id, SongStatusSet};
-use duet_schemas::project::Name;
+use duet_schemas::project::{Defaults, Name};
 use duet_schemas::song::{Composition, Status, distinct_ids, part_names};
 use duet_schemas::{AnyDocument, Document, Project, Song, Source};
 
@@ -121,8 +121,15 @@ pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
             if path.exists() {
                 bail!("{} exists: the song {song} is made already", path.display());
             }
-            let defaults = read_project(&project)?.and_then(|p| p.defaults);
-            let composition = Composition::starting(tempo, meter, key, defaults.as_ref());
+            let in_project = read_project(&project)?;
+            let defaults = in_project.as_ref().and_then(|p| p.defaults.as_ref());
+            let composition = Composition::starting(tempo, meter, key, defaults);
+            // In a project, each value says where it came from (the project design's §5).
+            if in_project.is_some() {
+                for line in starting_from(&composition, tempo, meter, key, defaults) {
+                    eprintln!("{line}");
+                }
+            }
             let mut body = Song::new(
                 fresh_id()?,
                 title.unwrap_or_else(|| song.to_string()),
@@ -186,6 +193,55 @@ pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
 /// `songs/<song>/` under the project's root.
 fn folder(project: &Path, song: &Name) -> PathBuf {
     project.join("songs").join(song.as_str())
+}
+
+/// Where each value a new song's composition starts from came from: its flag, the project's
+/// defaults, or duet's own default. One line for each of tempo, meter and key.
+fn starting_from(
+    composition: &Composition,
+    tempo: Option<f64>,
+    meter: Option<TimeSig>,
+    key: Option<Key>,
+    defaults: Option<&Defaults>,
+) -> Vec<String> {
+    let from = |given: bool, defaulted: bool| {
+        if given {
+            "given".to_owned()
+        } else if defaulted {
+            format!("from the project's defaults in {PROJECT_FILE}")
+        } else {
+            "duet's default".to_owned()
+        }
+    };
+    let bpm = composition.tempo.first().map_or(0.0, |t| t.bpm);
+    let bpm = if (bpm - bpm.round()).abs() < 1e-9 {
+        format!("{bpm:.0}")
+    } else {
+        format!("{bpm}")
+    };
+    let mut out = vec![format!(
+        "tempo: {bpm} bpm, {}",
+        from(
+            tempo.is_some(),
+            defaults.is_some_and(|d| d.tempo_bpm.is_some())
+        )
+    )];
+    if let Some(first) = composition.meter.first() {
+        out.push(format!(
+            "meter: {}, {}",
+            first.sig,
+            from(meter.is_some(), defaults.is_some_and(|d| d.meter.is_some()))
+        ));
+    }
+    out.push(match composition.key.first() {
+        Some(first) => format!(
+            "key: {}, {}",
+            first.key,
+            from(key.is_some(), defaults.is_some_and(|d| d.key.is_some()))
+        ),
+        None => "key: none, given or in the project's defaults".to_owned(),
+    });
+    out
 }
 
 /// The project's document, when the root has one.

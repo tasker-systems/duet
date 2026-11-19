@@ -295,7 +295,7 @@ fn take_forget_leaves_the_files_and_says_which_song_still_links_the_take() {
     );
     ok(&duet(&root, &["song", "new", "groove"]), "song new");
     std::fs::copy(
-        root.join("takes/beat/beat.duet"),
+        root.join("takes/beat/beat.rhythm.duet"),
         root.join("songs/groove/parts/kit.duet"),
     )
     .unwrap();
@@ -308,7 +308,11 @@ fn take_forget_leaves_the_files_and_says_which_song_still_links_the_take() {
         bytes,
         "the take's file is left"
     );
-    for kept in ["beat.duet", "beat.grid.duet", "beat.capture.duet"] {
+    for kept in [
+        "beat.rhythm.duet",
+        "beat.rhythm.grid.duet",
+        "beat.rhythm.capture.duet",
+    ] {
         assert!(
             root.join("takes/beat").join(kept).is_file(),
             "{kept} is left"
