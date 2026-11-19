@@ -1,7 +1,7 @@
 # duet roadmap snapshot, 2026-11-19
 
 - **Date described:** 2026-11-19, in UTC.
-- **Records read:** from 2026-11-19T03:00:00Z to 2026-11-19T03:00:01Z, by `duet-roadmap snapshot`.
+- **Records read:** from 2026-11-19T03:00:00Z to 2026-11-19T03:00:01Z, by `tools/roadmap/snapshot.sh`.
 - **Newest record read:** last changed at 2026-11-18T10:00:00Z.
 - **Sources:** 10 goals in `+making-music/duet-dev`, of every status; 19 tasks in `+making-music/duet-dev-workflows`; and each task's edges. Every listing was read whole.
 - **How each lane was read:** Now, Next and Later were each read from the records, by the recipe at the end. No lane was assigned by hand.

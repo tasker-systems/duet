@@ -1210,20 +1210,21 @@ developer's own config.
 
 ### The roadmap snapshot
 
-`crates/duet-roadmap` draws duet's roadmap from the Temper records. It is a tool for this
-repository's own work, never published, and touches no music code. It reads through the
-`temper` CLI on your `PATH`, so it needs a `temper` login that can read `+making-music/duet-dev`
-and `+making-music/duet-dev-workflows`:
+`tools/roadmap/snapshot.sh` draws duet's roadmap from the Temper records. It is a tool for this
+repository's own work, and touches no music code. It reads through the `temper` CLI on your
+`PATH`, so it needs `jq` and a `temper` login that can read `+making-music/duet-dev` and
+`+making-music/duet-dev-workflows`:
 
 ```bash
-cargo run -p duet-roadmap -- snapshot --dry-run
+tools/roadmap/snapshot.sh --dry-run
 ```
 
-`--dry-run` prints the snapshot. Without it, the tool creates a new `research` resource in
-`+making-music/duet-dev`, tagged `roadmap-snapshot`, and writes nothing else: it never updates
-an older snapshot. Each snapshot places every open goal in Now, Next or Later by its unfinished
+`--dry-run` prints the snapshot. Without it, the script creates a new `research` resource in
+`+making-music/duet-dev`, tagged `roadmap-snapshot`, and writes nothing else: it never updates an
+older snapshot. Each snapshot places every open goal in Now, Next or Later by its unfinished
 work, counts that work, groups goals by workstream, says what it leaves out, and ends with the
-recipe it was drawn by (the baseline's ROAD rules, read through the term mapping in
-`CLAUDE.md`). If any read fails or comes back truncated, it says which, exits non-zero and
-writes nothing. Its tests run against fixed records in `crates/duet-roadmap/tests/fixture`,
-with no network.
+recipe it was drawn by (`tools/roadmap/recipe.md`: the baseline's ROAD rules, read through the
+term mapping in `CLAUDE.md`). The rule itself is a jq filter, `tools/roadmap/roadmap.jq`. If any
+read fails or comes back truncated, the script says which, exits non-zero and writes nothing.
+`tools/roadmap/test.sh` checks it against fixed records in `tools/roadmap/fixture`, with no
+network; CI runs it in the `gate` job.

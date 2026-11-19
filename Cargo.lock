@@ -776,15 +776,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "duet-roadmap"
-version = "0.0.0"
-dependencies = [
- "clap",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "duet-schemas"
 version = "0.3.0"
 dependencies = [
