@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# A fake `temper` for test.sh. It answers from the files in FAKE_TEMPER_DIR (goals.json,
+# tasks.json, show-<id>.json, split from records.json), logs every command it is given to
+# FAKE_TEMPER_DIR/calls.log, and saves what a create pipes it to FAKE_TEMPER_DIR/created.md.
+# A missing file makes the read fail, as an unreachable service would.
+set -euo pipefail
+
+dir="${FAKE_TEMPER_DIR:?FAKE_TEMPER_DIR is not set}"
+printf '%s\n' "$*" >> "$dir/calls.log"
+case "$1 $2" in
+    "resource list")
+        case "$*" in
+            *"--type goal"*) cat "$dir/goals.json" ;;
+            *"--type task"*) cat "$dir/tasks.json" ;;
+            *) echo "fake temper: unexpected listing: $*" >&2; exit 2 ;;
+        esac
+        ;;
+    "resource show") cat "$dir/show-$3.json" ;;
+    "resource create")
+        cat > "$dir/created.md"
+        echo '{"id": "50000000-0000-7000-8000-000000000001"}'
+        ;;
+    *)
+        echo "fake temper: unexpected command: $*" >&2
+        exit 2
+        ;;
+esac
+# temper may print more after its JSON document; the reader must take only the first.
+echo "warning: a newer temper is available"

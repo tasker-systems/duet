@@ -73,6 +73,8 @@ jobs:
         run: python3 -I .conventions/baseline/tools/conventions.py check
       - name: Conventions witness (TW-5)
         run: python3 -I .conventions/baseline/tools/conventions.py witness
+      - name: Roadmap snapshot witnesses (ROAD-1, ROAD-2, ROAD-5)
+        run: bash tools/roadmap/test.sh
       - name: cargo deny (SC-DENY-1..3)
         run: cargo deny --locked check sources licenses bans
       - name: cargo audit (SC-ADV-1)

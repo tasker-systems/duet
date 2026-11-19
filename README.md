@@ -1275,3 +1275,24 @@ samples before a part could name an end, and a test checks that every file writt
 the same music, event for event, and differs only by stating its end. CI runs it again, with
 duet-cli's tests, under the hostile config in `crates/duet-e2e/hostile`, so no test reads a
 developer's own config.
+
+### The roadmap snapshot
+
+`tools/roadmap/snapshot.sh` draws duet's roadmap from the Temper records. It is a tool for this
+repository's own work, and touches no music code. It reads through the `temper` CLI on your
+`PATH`, so it needs `jq` and a `temper` login that can read `+making-music/duet-dev` and
+`+making-music/duet-dev-workflows`:
+
+```bash
+tools/roadmap/snapshot.sh --dry-run
+```
+
+`--dry-run` prints the snapshot. Without it, the script creates a new `research` resource in
+`+making-music/duet-dev`, tagged `roadmap-snapshot`, and writes nothing else: it never updates an
+older snapshot. Each snapshot places every open goal in Now, Next or Later by its unfinished
+work, counts that work, groups goals by workstream, says what it leaves out, and ends with the
+recipe it was drawn by (`tools/roadmap/recipe.md`: the baseline's ROAD rules, read through the
+term mapping in `CLAUDE.md`). The rule itself is a jq filter, `tools/roadmap/roadmap.jq`. If any
+read fails or comes back truncated, the script says which, exits non-zero and writes nothing.
+`tools/roadmap/test.sh` checks it against fixed records in `tools/roadmap/fixture`, with no
+network; CI runs it in the `gate` job.
