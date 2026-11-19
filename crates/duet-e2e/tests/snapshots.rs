@@ -450,3 +450,119 @@ fn a_restore_takes_a_snapshot_of_the_working_song_first_then_copies_the_snapshot
     assert_eq!(snapshots(&root).len(), 3, "{:?}", snapshots(&root));
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+/// A restore never writes through a symbolic link: not one left where it stages a file
+/// (`<file>.duet.next`), and not a song folder or `parts/` that is one. A file outside the
+/// project that a link points at is left as it was.
+#[cfg(unix)]
+#[test]
+fn a_restore_writes_through_no_symbolic_link() {
+    use std::os::unix::fs::symlink;
+    let dir = scratch("snapshot-links-restore");
+    let root = porch(&dir);
+    ok(
+        &duet(&root, &["song", "snapshot", "porch", "first"]),
+        "snapshot",
+    );
+    let folder = snapshot_dir(&root, "first")
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let outside = dir.join("outside.txt");
+    std::fs::write(&outside, b"not the project's").unwrap();
+
+    // A link where the restore stages a part: it is replaced, never written through.
+    symlink(&outside, root.join("songs/porch/parts/bass.duet.next")).unwrap();
+    symlink(&outside, root.join("songs/porch/song.duet.next")).unwrap();
+    ok(
+        &duet(&root, &["song", "restore", "porch", &folder]),
+        "restore beside a staged link",
+    );
+    assert_eq!(std::fs::read(&outside).unwrap(), b"not the project's");
+    assert!(!root.join("songs/porch/parts/bass.duet.next").exists());
+
+    // parts/ that is a link to a folder outside the project: refused, naming it.
+    let elsewhere = dir.join("elsewhere");
+    std::fs::rename(root.join("songs/porch/parts"), &elsewhere).unwrap();
+    symlink(&elsewhere, root.join("songs/porch/parts")).unwrap();
+    let before = tree(&elsewhere);
+    let out = duet(&root, &["song", "restore", "porch", &folder]);
+    assert!(!out.status.success(), "restored through a linked parts/");
+    assert!(
+        stderr(&out).contains("parts is a symbolic link"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(tree(&elsewhere), before, "the linked folder was written");
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A snapshot that holds a symbolic link is not as taken: `duet song show` names the link and
+/// does not follow it, so a link to the folder that holds it ends, and a restore is refused.
+#[cfg(unix)]
+#[test]
+fn a_link_in_a_snapshot_is_reported_and_never_followed() {
+    use std::os::unix::fs::symlink;
+    let dir = scratch("snapshot-links-show");
+    let root = porch(&dir);
+    ok(
+        &duet(&root, &["song", "snapshot", "porch", "first"]),
+        "snapshot",
+    );
+    let snap = snapshot_dir(&root, "first");
+    let folder = snap.file_name().unwrap().to_string_lossy().into_owned();
+
+    // A link back to the snapshot's own folder, and a stated part made a link.
+    symlink(&snap, snap.join("parts/loop")).unwrap();
+    let bass = snap.join("parts/bass.duet");
+    let copy = dir.join("bass-copy.duet");
+    std::fs::rename(&bass, &copy).unwrap();
+    symlink(&copy, &bass).unwrap();
+
+    let out = duet(&root, &["song", "show", "porch"]);
+    ok(&out, "song show of a snapshot holding links");
+    let shown = stdout(&out);
+    assert!(
+        shown.contains(&format!("{folder}: parts/loop is a symbolic link"))
+            && shown.contains(&format!("{folder}: parts/bass.duet is a symbolic link")),
+        "{shown}"
+    );
+    let out = duet(&root, &["song", "restore", "porch", &folder]);
+    assert!(
+        !out.status.success(),
+        "restored from a snapshot holding links"
+    );
+    assert!(
+        stderr(&out).contains("is a symbolic link"),
+        "{}",
+        stderr(&out)
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+/// A song folder that is a symbolic link is refused for a snapshot and a restore alike, naming
+/// it, and the folder it points at is left as it was.
+#[cfg(unix)]
+#[test]
+fn a_linked_song_folder_is_neither_snapshotted_nor_restored_through() {
+    use std::os::unix::fs::symlink;
+    let dir = scratch("snapshot-links-song");
+    let root = porch(&dir);
+    let elsewhere = dir.join("elsewhere");
+    std::fs::rename(root.join("songs/porch"), &elsewhere).unwrap();
+    symlink(&elsewhere, root.join("songs/porch")).unwrap();
+    let before = tree(&elsewhere);
+    let out = duet(&root, &["song", "snapshot", "porch", "first"]);
+    assert!(
+        !out.status.success(),
+        "snapshotted through a linked song folder"
+    );
+    assert!(
+        stderr(&out).contains("songs/porch is a symbolic link"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(tree(&elsewhere), before);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}

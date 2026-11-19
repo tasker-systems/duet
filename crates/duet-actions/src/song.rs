@@ -322,16 +322,17 @@ fn take_snapshot(
     body.said = said;
     body.check().map_err(anyhow::Error::msg)?;
     let snapshots = dir.join("snapshots");
+    no_link(project_of(dir), &snapshots)?;
     let name_of = body.folder();
     let target = snapshots.join(&name_of);
-    if target.exists() {
+    if there(&target) {
         bail!(
             "{} exists: a snapshot is never written again; give this one another name",
             target.display()
         );
     }
     let staging = snapshots.join(format!(".{name_of}.partial"));
-    if staging.exists() {
+    if there(&staging) {
         bail!(
             "{} exists: a snapshot left half written by an earlier run. Nothing reads it; \
              remove it and take the snapshot again",
@@ -384,6 +385,7 @@ fn restore(ctx: &Context, dir: &Path, song: &Name, snapshot: &str) -> Result<()>
             snap_dir.display()
         );
     }
+    no_link(project_of(dir), &snap_dir)?;
     let held = read_snapshot(&snap_dir)?;
     let problems = check_snapshot(&snap_dir, &held)?;
     if !problems.is_empty() {
@@ -400,6 +402,9 @@ fn restore(ctx: &Context, dir: &Path, song: &Name, snapshot: &str) -> Result<()>
         .and_then(|text| Ok(Document::<Song>::read(text)?))
         .with_context(|| snap_song_path.display().to_string())?;
     let working = read_song(dir)?;
+    for file in &held.files {
+        no_link(project_of(dir), &dir.join(file.path.as_str()))?;
+    }
     if snap_song.body.id != working.body.id {
         bail!(
             "{} is the song {}, and the working song is {}: a snapshot restores only the song it \
@@ -467,9 +472,59 @@ fn restore(ctx: &Context, dir: &Path, song: &Name, snapshot: &str) -> Result<()>
 fn replace(ctx: &Context, path: &Path, bytes: &[u8]) -> Result<()> {
     let replaced = path.exists();
     let next = path.with_extension("duet.next");
-    fs::write(&next, bytes).with_context(|| next.display().to_string())?;
+    write_new(&next, bytes)?;
     fs::rename(&next, path).with_context(|| path.display().to_string())?;
     ctx.wrote(path, replaced)
+}
+
+/// Writes `bytes` to a new file at `path`. Whatever is there first, a file left by an earlier
+/// run or a symbolic link, is removed, never written through: the file is created only if
+/// nothing is at `path`, so a link put there between the two is refused, not followed.
+fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+    if there(path) {
+        fs::remove_file(path).with_context(|| path.display().to_string())?;
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(bytes))
+        .with_context(|| path.display().to_string())
+}
+
+/// The project's root, for a song's folder `songs/<song>/` under it.
+fn project_of(dir: &Path) -> &Path {
+    dir.parent().and_then(Path::parent).unwrap_or(dir)
+}
+
+/// Whether anything is at `path`, a symbolic link included, even one that points nowhere.
+fn there(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+/// Refuses `path` when it, or any folder between `dir` and it, is a symbolic link, naming the
+/// link: duet writes and restores no file through one, so a link committed to a project cannot
+/// send a write outside it. `dir` itself and the folders above it are the owner's, and are not
+/// checked; a part of `path` that is not there yet is no link.
+fn no_link(dir: &Path, path: &Path) -> Result<()> {
+    let Ok(rest) = path.strip_prefix(dir) else {
+        bail!("{} is not under {}", path.display(), dir.display());
+    };
+    let mut at = dir.to_path_buf();
+    for part in rest.components() {
+        at.push(part);
+        match fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => bail!(
+                "{} is a symbolic link: duet writes and restores no file through one",
+                at.display()
+            ),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e).with_context(|| at.display().to_string()),
+        }
+    }
+    Ok(())
 }
 
 /// A path in a song's or a snapshot's folder.
@@ -492,12 +547,18 @@ fn read_snapshot(snap_dir: &Path) -> Result<Snapshot> {
 }
 
 /// What differs in a snapshot from what its `snapshot.duet` states, file by file: a file that
-/// differs from its stated digest, one that is missing, and one it holds but does not state.
-/// Empty when the snapshot is as taken.
+/// differs from its stated digest, one that is missing, one it holds but does not state, and a
+/// symbolic link, which a snapshot never holds. Empty when the snapshot is as taken.
+///
+/// No link is followed, so a link to a folder above it cannot make the walk endless.
 fn check_snapshot(snap_dir: &Path, held: &Snapshot) -> Result<Vec<String>> {
     let mut problems = Vec::new();
     for file in &held.files {
         let path = snap_dir.join(file.path.as_str());
+        if no_link(snap_dir, &path).is_err() {
+            problems.push(format!("{} is a symbolic link", file.path));
+            continue;
+        }
         match fs::read(&path) {
             Ok(bytes) if FileDigest::of(&bytes) == file.digest => {}
             Ok(_) => problems.push(format!("{} differs from its stated digest", file.path)),
@@ -511,21 +572,26 @@ fn check_snapshot(snap_dir: &Path, held: &Snapshot) -> Result<Vec<String>> {
     let mut stack = vec![snap_dir.to_path_buf()];
     while let Some(at) = stack.pop() {
         for entry in fs::read_dir(&at).with_context(|| at.display().to_string())? {
-            let path = entry?.path();
-            if path.is_dir() {
+            let entry = entry?;
+            let path = entry.path();
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
                 stack.push(path);
             } else if let Ok(rest) = path.strip_prefix(snap_dir) {
                 let rest: Vec<String> = rest
                     .components()
                     .map(|c| c.as_os_str().to_string_lossy().into_owned())
                     .collect();
-                on_disk.push(rest.join("/"));
+                on_disk.push((rest.join("/"), kind.is_symlink()));
             }
         }
     }
     on_disk.sort();
-    for path in on_disk {
-        if path != SNAPSHOT_FILE && held.files.iter().all(|f| f.path.as_str() != path) {
+    for (path, link) in on_disk {
+        let stated = held.files.iter().any(|f| f.path.as_str() == path);
+        if link && !stated {
+            problems.push(format!("{path} is a symbolic link"));
+        } else if path != SNAPSHOT_FILE && !stated {
             problems.push(format!("{path} is in it, and it does not state it"));
         }
     }
@@ -541,7 +607,8 @@ fn shown_snapshots(dir: &Path) -> Result<String> {
     if snapshots.is_dir() {
         for entry in fs::read_dir(&snapshots).with_context(|| snapshots.display().to_string())? {
             let entry = entry?;
-            if entry.file_type()?.is_dir() {
+            let kind = entry.file_type()?;
+            if kind.is_dir() || kind.is_symlink() {
                 folders.push(entry.file_name().to_string_lossy().into_owned());
             }
         }
@@ -555,6 +622,13 @@ fn shown_snapshots(dir: &Path) -> Result<String> {
     let _ = writeln!(out, "snapshots");
     for folder in folders {
         let snap_dir = snapshots.join(&folder);
+        if fs::symlink_metadata(&snap_dir).is_ok_and(|m| m.file_type().is_symlink()) {
+            let _ = writeln!(
+                out,
+                "  {folder}: is a symbolic link, and a snapshot is a folder of its own"
+            );
+            continue;
+        }
         if folder.starts_with('.') {
             let _ = writeln!(
                 out,
@@ -716,7 +790,7 @@ fn write_song(ctx: &Context, path: &Path, doc: &Document<Song>) -> Result<()> {
     let text = doc.write()?;
     let replaced = path.exists();
     let next = path.with_extension("duet.next");
-    fs::write(&next, text).with_context(|| next.display().to_string())?;
+    write_new(&next, text.as_bytes())?;
     fs::rename(&next, path).with_context(|| path.display().to_string())?;
     ctx.wrote(path, replaced)
 }
