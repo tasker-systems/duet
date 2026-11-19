@@ -215,6 +215,31 @@ duet record wayfaring                                       # into takes/wayfari
   remembered in its place.
 - **`duet record <take>`** in a project records straight into `takes/<take>/<take>.flac` and adds
   the take. Outside a project, `duet record` takes a `.flac` path, as below.
+
+#### Commands that default into a project
+
+```sh
+duet capture melody wayfaring              # takes/wayfaring/wayfaring.hmm.duet, .abc, .capture.duet
+duet capture melody wayfaring --reader rules   # takes/wayfaring/wayfaring.rules.*, beside it
+duet capture compare wayfaring             # its one reading: takes/wayfaring/wayfaring.hmm.compare.*
+duet capture review wayfaring --moments review/wayfaring.moments   # takes/wayfaring/review/
+```
+
+- **A take is given by its name.** `capture`, `compare` and `review` find it as above, checked
+  against its digest, and say where they found it. A path still works: a path whose digest is a
+  project take's is that take.
+- **Readings go to the take's directory.** Without `-o`, a capture writes
+  `takes/<take>/<take>.<reader>.*`: `hmm`, `rules` or `basic-pitch`, or `rhythm` for a rhythm
+  capture. `compare` and `review` read the take's one reading there (with several, `-o` names
+  which), `compare` writes beside it, and `review` writes `takes/<take>/review/`.
+- **A capture of a path that is no take of the project is refused,** with the `duet take add`
+  line to run. `-o` outside `takes/` still captures it there, and duet says it is not in the
+  project.
+- **Defaults are stated.** `duet song new` says where its tempo, meter and key came from: given,
+  the project's `defaults`, or duet's own. `duet drums read` without `--grid` takes the defaults'
+  `grid`, and says so.
+- **Outside a project nothing changes,** nor in a `.duet/` that holds no `project.duet`, and a
+  flag always wins.
 - **The journal** records each write of `.duet/project.duet` as a `doc.written`, and each take
   added as a `take.added`, by its name and digest.
 
