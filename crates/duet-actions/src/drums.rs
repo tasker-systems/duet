@@ -63,9 +63,10 @@ pub struct ReadInput {
     /// The grid to write: a drum-grid document (.duet), which keeps any velocity, or - for
     /// one on standard output. Must not be the input.
     pub output: PathBuf,
-    /// The step, such as 1/16 for sixteenths or 1/8t for triplet eighths.
+    /// The step, such as 1/16 for sixteenths or 1/8t for triplet eighths. In a project, its
+    /// defaults' grid when not given, and said so; outside one, it is needed.
     #[arg(long)]
-    pub grid: Grid,
+    pub grid: Option<Grid>,
     /// The drum track's name. Needed only when the part has no single track on
     /// channel 10.
     #[arg(long)]
@@ -97,6 +98,43 @@ pub struct SnapInput {
 /// key, and its aliases.
 #[derive(Debug, Args, JsonSchema)]
 pub struct LanesInput {}
+
+/// The step a new grid is read on: `--grid`, or else the project's defaults' grid, said so
+/// (the project design's §5). Outside a project, or in one whose defaults name no grid, a step
+/// must be given.
+///
+/// # Errors
+///
+/// When no step is given and the project names none, or its document does not read.
+pub fn grid_of(ctx: &Context, given: Option<Grid>) -> Result<Grid> {
+    if let Some(grid) = given {
+        return Ok(grid);
+    }
+    let defaulted = match ctx.project() {
+        Some(project) => crate::take::read_project(&project.root)?
+            .body
+            .defaults
+            .and_then(|d| d.grid),
+        None => None,
+    };
+    match defaulted {
+        Some(grid) => {
+            eprintln!(
+                "grid: {grid}, from the project's defaults in {}",
+                crate::PROJECT_FILE
+            );
+            Ok(grid)
+        }
+        None => bail!(
+            "--grid is needed: the step a grid is read on, such as 1/16 or 1/8t{}",
+            if ctx.project().is_some() {
+                "; the project's defaults name no grid"
+            } else {
+                ""
+            }
+        ),
+    }
+}
 
 /// Reads a drum-grid document ([`read_grid_document`]). `duet convert` and the `duet drums`
 /// commands all read grids here.
@@ -198,7 +236,7 @@ pub fn run(ctx: &Context, command: DrumsCommand) -> Result<()> {
             let from = part_format(&input, from, "read reads")?;
             grid_path(&output, "read writes")?;
             let options = ReadOptions {
-                grid,
+                grid: grid_of(ctx, grid)?,
                 track,
                 bars,
                 snap_levels,

@@ -90,16 +90,20 @@ fn files(dir: &Path) -> Vec<String> {
 fn capture_melody_in_a_project_appends_exactly_the_doc_written_events_for_its_files() {
     let dir = scratch("actions-capture");
     let root = project(&dir, "wayfaring");
-    std::fs::create_dir_all(root.join("takes")).unwrap();
+    std::fs::create_dir_all(root.join("sketches")).unwrap();
     std::fs::copy(
         root_of_corpus().join("wayfaring-stranger.flac"),
-        root.join("takes/wayfaring.flac"),
+        root.join("sketches/wayfaring.flac"),
     )
     .unwrap();
-    // From a directory under the root: the project is found from the working directory up.
-    let takes = root.join("takes");
+    // From a directory under the root: the project is found from the working directory up. The
+    // recording is no take of the project, so -o, outside takes/, names where its outputs go.
+    let sketches = root.join("sketches");
     ok(
-        &duet(&takes, &["capture", "melody", "wayfaring.flac"]),
+        &duet(
+            &sketches,
+            &["capture", "melody", "wayfaring.flac", "-o", "wayfaring"],
+        ),
         "capture melody in a project",
     );
 
@@ -120,36 +124,36 @@ fn capture_melody_in_a_project_appends_exactly_the_doc_written_events_for_its_fi
         got,
         [
             (
-                "takes/wayfaring.performance.duet.jsonl",
+                "sketches/wayfaring.performance.duet.jsonl",
                 "performance",
                 PerformanceHead::VERSION,
                 false
             ),
-            ("takes/wayfaring.duet", "part", PartBody::VERSION, false),
+            ("sketches/wayfaring.duet", "part", PartBody::VERSION, false),
             (
-                "takes/wayfaring.capture.duet",
+                "sketches/wayfaring.capture.duet",
                 "capture-analysis",
                 Analysis::VERSION,
                 false
             ),
         ],
-        "exactly the documents capture wrote: the score, takes/wayfaring.abc, is no document"
+        "exactly the documents capture wrote: the score, sketches/wayfaring.abc, is no document"
     );
     assert!(
-        takes.join("wayfaring.abc").is_file(),
+        sketches.join("wayfaring.abc").is_file(),
         "the score was written"
     );
     assert_eq!(
         written(&lines[0]).digest,
-        stream_digest(&takes.join("wayfaring.performance.duet.jsonl"))
+        stream_digest(&sketches.join("wayfaring.performance.duet.jsonl"))
     );
     assert_eq!(
         written(&lines[1]).digest,
-        body_digest::<PartBody>(&takes.join("wayfaring.duet"))
+        body_digest::<PartBody>(&sketches.join("wayfaring.duet"))
     );
     assert_eq!(
         written(&lines[2]).digest,
-        body_digest::<Analysis>(&takes.join("wayfaring.capture.duet"))
+        body_digest::<Analysis>(&sketches.join("wayfaring.capture.duet"))
     );
     // One act: every entry is by who ran it, through the CLI, caused by one command id.
     let cause = lines[0].cause.clone().expect("a cause");

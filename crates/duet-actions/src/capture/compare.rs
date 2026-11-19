@@ -65,11 +65,11 @@ pub(crate) const LENGTH_SLACK_SECS: f64 = 0.1;
 #[derive(Debug, Args, JsonSchema)]
 pub struct CompareArgs {
     /// The take's recording, as `duet capture melody` read it: the plot's and the audio's
-    /// timeline, and the audio's left channel.
+    /// timeline, and the audio's left channel. In a project, a take's name too.
     input: PathBuf,
     /// The stem the take was captured to (`duet capture melody -o`): STEM.performance.duet.jsonl
     /// and STEM.capture.duet are read from it. Without it, the input's name without its
-    /// extension, beside it.
+    /// extension, beside it; for a project's take, its one reading in takes/TAKE/.
     #[arg(short, long, value_name = "STEM")]
     output: Option<PathBuf>,
     /// Another analysis of the same take (a .capture.duet) whose reading is compared instead of
@@ -99,7 +99,7 @@ pub struct CompareArgs {
     render: wav::Render,
 }
 
-pub fn run(args: &CompareArgs) -> Result<()> {
+pub fn run(ctx: &crate::Context, args: CompareArgs) -> Result<()> {
     let from_secs = args.from.unwrap_or(0.0);
     if !(from_secs.is_finite() && from_secs >= 0.0) {
         bail!("--from {from_secs}: the window starts at a number of seconds, 0 or more");
@@ -109,6 +109,18 @@ pub fn run(args: &CompareArgs) -> Result<()> {
     {
         bail!("--to {to}: the window ends after it starts, at {from_secs} s");
     }
+    // In a project, the take is given by name or found by its digest, and its one reading in
+    // takes/<take>/ is compared (the project design's §5).
+    let input = crate::take::input(ctx, &args.input, args.output.is_none())?;
+    let output = match (&args.output, &input.take) {
+        (None, Some(take)) => Some(take.reading_stem()?),
+        _ => args.output.clone(),
+    };
+    let args = &CompareArgs {
+        input: input.file,
+        output,
+        ..args
+    };
 
     let stem = args
         .output
