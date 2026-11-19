@@ -4,9 +4,10 @@ use std::collections::HashMap;
 use std::fmt;
 
 use duet_schemas::journal::{Body, Closes, Id, SegmentStamp, Skip};
+use duet_schemas::song::Status;
 use duet_schemas::{IndexHead, Kind, Version};
 
-use crate::{Orphan, Place, ProjectJournal, Refused, Replay};
+use crate::{Orphan, Place, ProjectJournal, Refused, RefusedMove, Replay};
 
 /// An entry kept verbatim and skipped, because this build does not read its event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +50,45 @@ pub struct CloseDiffers {
     pub holds: u64,
 }
 
+/// A song as its document has it: its name (its folder's), its id and its status, as
+/// `songs/<song>/song.duet` states them. What [`Report::with_songs`] compares the journal with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SongOnDisk {
+    pub name: String,
+    pub id: Id,
+    pub status: Status,
+}
+
+impl SongOnDisk {
+    #[must_use]
+    pub fn new(name: impl Into<String>, id: Id, status: Status) -> Self {
+        Self {
+            name: name.into(),
+            id,
+            status,
+        }
+    }
+}
+
+/// A song whose status in its `song.duet` is not where the journal's moves leave it (the
+/// domain model's ruling 14). Both sides are named, and neither is changed: the check reports,
+/// and never repairs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StatusDiffers {
+    pub song: String,
+    pub id: Id,
+    /// What `song.duet` says.
+    pub document: Status,
+    /// Where the journal's moves leave it.
+    pub journal: Status,
+    /// The `song.status-set` that stands, the last that replay folded, or `None` when the
+    /// journal has no move for the song and so leaves it where `duet song new` makes every
+    /// song: at idea.
+    pub set: Option<Place>,
+}
+
 /// A journal checked: what was kept unread, what replay skipped, and what is wrong.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -76,6 +116,11 @@ pub struct Report {
     pub adoptable: Vec<SegmentStamp>,
     /// Transitions replay skipped: wrong, and never fatal.
     pub refused: Vec<Refused>,
+    /// Status moves replay skipped: wrong, and never fatal.
+    pub refused_moves: Vec<RefusedMove>,
+    /// Songs whose `song.duet` disagrees with the journal on their status: wrong, and never
+    /// repaired.
+    pub status_differs: Vec<StatusDiffers>,
     /// Ids that appear twice: wrong.
     pub duplicates: Vec<Duplicate>,
     /// Segments the index names whose file is missing: wrong.
@@ -87,7 +132,34 @@ pub struct Report {
 }
 
 impl Report {
-    /// Checks `journal`.
+    /// Checks `journal`, and compares each song in `songs` with it: a song whose status in its
+    /// document is not where the journal's moves leave it is listed ([`StatusDiffers`]). A song
+    /// the journal concerns nowhere, by its id, is not compared: the journal has nothing to say
+    /// of it. One it concerns with no move stands at idea, where `duet song new` makes it.
+    #[must_use]
+    pub fn with_songs(journal: &ProjectJournal, songs: &[SongOnDisk]) -> Self {
+        let mut report = Self::of(journal);
+        let replay = Replay::of(journal);
+        for song in songs {
+            let (journal_status, set) = match replay.song(&song.id) {
+                Some(record) => (record.status, Some(record.set)),
+                None if journal.concerns_song(&song.id) => (Status::Idea, None),
+                None => continue,
+            };
+            if journal_status != song.status {
+                report.status_differs.push(StatusDiffers {
+                    song: song.name.clone(),
+                    id: song.id.clone(),
+                    document: song.status,
+                    journal: journal_status,
+                    set,
+                });
+            }
+        }
+        report
+    }
+
+    /// Checks `journal`, comparing no song with it.
     #[must_use]
     pub fn of(journal: &ProjectJournal) -> Self {
         let mut unread = Vec::new();
@@ -178,6 +250,8 @@ impl Report {
             unsummarised,
             adoptable: adoptable.into_iter().map(|o| o.stamp).collect(),
             refused: replay.refused.clone(),
+            refused_moves: replay.refused_moves.clone(),
+            status_differs: Vec::new(),
             duplicates,
             missing: journal.missing.clone(),
             unnamed,
@@ -185,15 +259,21 @@ impl Report {
         }
     }
 
-    /// Whether anything is wrong: a transition replay skipped, an id twice, a segment the index
-    /// names that is missing, or entries no index line names. Everything else is stated.
+    /// Whether anything is wrong: a transition or a status move replay skipped, a song whose
+    /// document disagrees with the journal, an id twice, a segment the index names that is
+    /// missing, or entries no index line names. Everything else is stated.
     #[must_use]
     pub const fn is_wrong(&self) -> bool {
         self.wrong() > 0
     }
 
     const fn wrong(&self) -> usize {
-        self.refused.len() + self.duplicates.len() + self.missing.len() + self.unnamed.len()
+        self.refused.len()
+            + self.refused_moves.len()
+            + self.status_differs.len()
+            + self.duplicates.len()
+            + self.missing.len()
+            + self.unnamed.len()
     }
 }
 
@@ -285,6 +365,35 @@ impl fmt::Display for Report {
                     r.place, r.id, r.event, r.ask, r.refusal
                 )?;
             }
+        }
+        if !self.refused_moves.is_empty() {
+            writeln!(
+                f,
+                "{} skipped on replay, the move before standing:",
+                plural(self.refused_moves.len(), "status move", "status moves")
+            )?;
+            for r in &self.refused_moves {
+                let stands = r
+                    .stands
+                    .map(|s| format!("; {s} stands"))
+                    .unwrap_or_default();
+                writeln!(
+                    f,
+                    "  {} ({}): song.status-set of song {} ({}), {} → {}, refused {}{stands}",
+                    r.place, r.id, r.name, r.song, r.from, r.to, r.refusal
+                )?;
+            }
+        }
+        for d in &self.status_differs {
+            let journal = d.set.map_or_else(
+                || "the journal has no move for it, so leaves it at idea".to_owned(),
+                |set| format!("the journal's last move, {set}, leaves it at {}", d.journal),
+            );
+            writeln!(
+                f,
+                "song {} ({}): its song.duet says {}, and {journal}; neither is changed",
+                d.song, d.id, d.document
+            )?;
         }
         if !self.duplicates.is_empty() {
             writeln!(

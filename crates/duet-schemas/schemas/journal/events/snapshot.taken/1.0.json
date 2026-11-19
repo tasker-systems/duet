@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "DocDigest": {
+      "description": "The 64-bit FNV-1a of the document's body as compact JSON, as 16 lowercase hex digits.",
+      "pattern": "^[0-9a-f]{16}$",
+      "type": "string"
+    },
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A name in the project: lowercase letters and digits, words joined by single hyphens, such as wayfaring or blood-sport-v2.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "type": "string"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/snapshot.taken/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is snapshot.taken and whose `v` is 1.0.",
+  "properties": {
+    "digest": {
+      "$ref": "#/$defs/DocDigest",
+      "description": "The digest of what it froze: the body of the snapshot's own `snapshot.duet`, which\nstates the digest of every file it copied."
+    },
+    "name": {
+      "$ref": "#/$defs/Name",
+      "description": "The song's name, its folder's, when the snapshot was taken."
+    },
+    "snapshot": {
+      "description": "The snapshot's name, its folder's under the song's `snapshots/`.",
+      "type": "string"
+    },
+    "song": {
+      "$ref": "#/$defs/Id",
+      "description": "The song's stable id, as its `song.duet` states it."
+    }
+  },
+  "required": [
+    "song",
+    "name",
+    "snapshot",
+    "digest"
+  ],
+  "title": "duet journal event snapshot.taken 1.0",
+  "type": "object"
+}

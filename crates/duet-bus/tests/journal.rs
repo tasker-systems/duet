@@ -28,8 +28,11 @@ use duet_bus::ask::{AskState, Refusal};
 use duet_bus::{Cursor, Error, Place, Polled, ProjectJournal, Replay, Report, Tail, Writer};
 use duet_schemas::journal::{
     AskAnswered, AskAsked, AskWithdrawn, At, Audience, Body, By, DocDigest, DocWritten, Entry,
-    Event, Id, JournalHead, MomentPlayed, SegmentStamp, Skip, TakeAdded, VerdictGiven,
+    Event, Id, Indexed, JournalHead, MomentPlayed, SegmentStamp, Skip, SnapshotTaken,
+    SongStatusSet, TakeAdded, VerdictGiven,
 };
+use duet_schemas::project::Name;
+use duet_schemas::song::Status;
 use duet_schemas::{Journal, JournalIndex, Tool, Version};
 use serde_json::{Value, json};
 
@@ -108,17 +111,47 @@ fn every_event(w: &mut Writer) {
         .parse()
         .unwrap();
     w.append(TakeAdded::new("wayfaring", digest), None).unwrap();
+    let mut lead = DocWritten::new(
+        "songs/wayfaring/parts/lead.duet".parse().unwrap(),
+        "part",
+        Version::new(1, 0),
+        DocDigest::of(b"{}"),
+        true,
+    );
+    lead.song = Some(song_id());
+    lead.part = Some(part_id());
+    w.append(lead, None).unwrap();
+    // A song of its own each time, so each call's move is the song's first.
+    let song = duet_bus::fresh_id().unwrap();
     w.append(
-        DocWritten::new(
-            "songs/wayfaring/parts/lead.duet".parse().unwrap(),
-            "part",
-            Version::new(1, 0),
-            DocDigest::of(b"{}"),
-            true,
+        SongStatusSet::new(
+            song.clone(),
+            name("wayfaring"),
+            Status::Idea,
+            Status::Sketch,
         ),
         None,
     )
     .unwrap();
+    w.append(
+        SnapshotTaken::new(song, name("wayfaring"), "first-verse", DocDigest::of(b"{}")),
+        None,
+    )
+    .unwrap();
+}
+
+/// The song every test's `wayfaring` is, by id.
+fn song_id() -> Id {
+    Id::from_parts(1_795_446_245_000, [1; 10])
+}
+
+/// Its part `lead`, by id.
+fn part_id() -> Id {
+    Id::from_parts(1_795_446_245_001, [2; 10])
+}
+
+fn name(text: &str) -> Name {
+    text.parse().unwrap()
 }
 
 /// An error and every source under it, as `{:#}` prints a chain.
@@ -188,7 +221,7 @@ fn the_index_and_every_segment_round_trip_exactly_and_validate() {
         "it rolled: {}",
         read.segments.len()
     );
-    assert_eq!(read.len(), 16);
+    assert_eq!(read.len(), 20);
     assert!(read.missing.is_empty() && read.orphans.is_empty());
 
     let index = index_text(&root);
@@ -264,9 +297,11 @@ fn the_index_and_every_segment_round_trip_exactly_and_validate() {
         assert_eq!(&c.last, &segment.journal.lines.last().unwrap().id);
     }
     assert!(
-        closes
-            .iter()
-            .any(|c| c.parts == ["wayfaring/lead"] && c.songs == ["wayfaring"])
+        closes.iter().any(
+            |c| c.parts == [Indexed::new(Some(part_id()), "wayfaring/lead")]
+                && c.songs == [Indexed::new(Some(song_id()), "wayfaring")]
+        ),
+        "{closes:?}"
     );
     assert!(
         closes
@@ -400,7 +435,7 @@ fn a_segment_or_the_index_cut_mid_line_is_cut_back_and_nothing_before_it_changes
     .unwrap();
 
     let read = journal(&root);
-    assert_eq!(read.len(), 8, "a reader reads every whole line");
+    assert_eq!(read.len(), 10, "a reader reads every whole line");
     let report = Report::of(&read);
     assert!(!report.is_wrong() && report.torn.len() == 2, "{report}");
 
@@ -420,7 +455,7 @@ fn a_segment_or_the_index_cut_mid_line_is_cut_back_and_nothing_before_it_changes
         "nothing before the segment's cut changes"
     );
     assert_eq!(after.lines().count(), segment_before.lines().count() + 1);
-    assert_eq!(appended.place, Place::new(stamp, 9));
+    assert_eq!(appended.place, Place::new(stamp, 11));
 }
 
 #[test]
@@ -1031,4 +1066,275 @@ fn a_symbolic_link_where_the_journal_writes_is_refused_and_its_target_is_untouch
     fs::remove_file(&segment).unwrap();
     symlink(&victim, &segment).unwrap();
     check(&root, &segment);
+}
+
+// --- A song's status: the second lifecycle (bus design decision 23) ---
+
+fn set(w: &mut Writer, song: &Id, from: Status, to: Status) -> duet_bus::Appended {
+    w.append(
+        SongStatusSet::new(song.clone(), name("wayfaring"), from, to),
+        None,
+    )
+    .unwrap()
+}
+
+#[test]
+fn two_clones_status_moves_merged_replay_the_first_standing_and_check_lists_the_second() {
+    let base = scratch("status-base");
+    let song = song_id();
+    let mut w = writer(&base, "owner", HUGE);
+    set(&mut w, &song, Status::Idea, Status::Sketch);
+    set(&mut w, &song, Status::Sketch, Status::Developing);
+    let (a, b) = (clone(&base, "status-a"), clone(&base, "status-b"));
+    let first = set(
+        &mut writer(&a, "owner", HUGE),
+        &song,
+        Status::Developing,
+        Status::Arranged,
+    );
+    let second = set(
+        &mut writer(&b, "claude", HUGE),
+        &song,
+        Status::Developing,
+        Status::Arranged,
+    );
+    let merged = union(&base, &a, &b);
+
+    let read = journal(&merged);
+    assert_eq!(read.len(), 4);
+    let replay = Replay::of(&read);
+    let record = replay.song(&song).unwrap();
+    assert_eq!((record.status, record.set), (Status::Arranged, first.place));
+    let report = Report::of(&read);
+    assert!(report.is_wrong(), "{report}");
+    assert!(report.refused.is_empty());
+    let refused = &report.refused_moves[..];
+    assert_eq!(refused.len(), 1, "{report}");
+    // Union puts the second clone's line after the first's.
+    let second_place = Place::new(second.place.segment, 4);
+    assert_eq!(
+        (refused[0].place, &refused[0].id, refused[0].stands),
+        (second_place, &second.id, Some(first.place))
+    );
+    assert_eq!(
+        refused[0].refusal,
+        duet_bus::song::Refusal::NotAt {
+            at: Status::Arranged,
+            from: Status::Developing
+        }
+    );
+    let shown = report.to_string();
+    assert!(
+        shown.contains(&format!(
+            "{} ({}): song.status-set of song wayfaring ({song}), developing → arranged, \
+             refused not-at: it moves from developing, and the journal has the song at \
+             arranged; {} stands",
+            second_place, second.id, first.place
+        )),
+        "{shown}"
+    );
+    // A writer appends to the merge: the song is at arranged, and only reopening moves it.
+    let mut after = writer(&merged, "owner", HUGE);
+    assert!(matches!(
+        after.append(
+            SongStatusSet::new(
+                song.clone(),
+                name("wayfaring"),
+                Status::Developing,
+                Status::Arranged
+            ),
+            None
+        ),
+        Err(Error::RefusedMove { .. })
+    ));
+    set(&mut after, &song, Status::Arranged, Status::Developing);
+}
+
+#[test]
+fn a_writer_with_a_stale_view_is_refused_a_status_move_and_appends_nothing() {
+    let root = scratch("status-stale");
+    let song = song_id();
+    set(
+        &mut writer(&root, "owner", HUGE),
+        &song,
+        Status::Idea,
+        Status::Sketch,
+    );
+    let mut first = writer(&root, "owner", HUGE);
+    let mut second = writer(&root, "claude", HUGE);
+    moment(&mut first);
+    moment(&mut second);
+    set(&mut first, &song, Status::Sketch, Status::Developing);
+    let before = segment_text(&root, current(&root));
+    let err = second
+        .append(
+            SongStatusSet::new(
+                song.clone(),
+                name("wayfaring"),
+                Status::Sketch,
+                Status::Developing,
+            ),
+            None,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            Error::RefusedMove {
+                refusal: duet_bus::song::Refusal::NotAt {
+                    at: Status::Developing,
+                    from: Status::Sketch
+                },
+                ..
+            }
+        ),
+        "{err}"
+    );
+    assert!(
+        err.to_string()
+            .contains(&format!("song.status-set of song {song}")),
+        "{err}"
+    );
+    assert_eq!(
+        segment_text(&root, current(&root)),
+        before,
+        "nothing appended"
+    );
+    // A move the machine does not draw is refused even as a song's first.
+    let other = part_id();
+    assert!(matches!(
+        second.append(
+            SongStatusSet::new(other, name("other"), Status::Idea, Status::Developing),
+            None
+        ),
+        Err(Error::RefusedMove {
+            refusal: duet_bus::song::Refusal::NotAMove { .. },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_song_renamed_after_a_segment_closed_is_still_found_in_that_segment_by_id() {
+    let root = scratch("renamed");
+    let song = song_id();
+    let mut w = writer(&root, "owner", TINY);
+    let mut written = DocWritten::new(
+        "songs/wayfaring/song.duet".parse().unwrap(),
+        "song",
+        Version::new(1, 0),
+        DocDigest::of(b"{}"),
+        false,
+    );
+    written.song = Some(song.clone());
+    let made = w.append(written, None).unwrap();
+    moment(&mut w);
+    // The folder is renamed: the song keeps its id, under its new name.
+    let renamed = w
+        .append(
+            SongStatusSet::new(
+                song.clone(),
+                name("wayfaring-stranger"),
+                Status::Idea,
+                Status::Sketch,
+            ),
+            None,
+        )
+        .unwrap();
+    moment(&mut w);
+
+    let read = journal(&root);
+    let closes: Vec<_> = read
+        .index
+        .lines
+        .iter()
+        .filter_map(|l| l.line.closes.as_ref())
+        .collect();
+    let first = closes
+        .iter()
+        .find(|c| c.segment == made.place.segment)
+        .unwrap();
+    assert_eq!(first.songs, [Indexed::new(Some(song.clone()), "wayfaring")]);
+    let found = read.segments_for_song(&song);
+    assert!(found.contains(&made.place.segment), "{found:?}");
+    assert!(found.contains(&renamed.place.segment), "{found:?}");
+    // A segment whose summary names other things is left out; the current one, with no
+    // summary yet, is read whole.
+    let current = read.index.current().unwrap().segment;
+    assert_eq!(found.len(), 3, "{found:?}");
+    assert!(found.contains(&current));
+    assert!(
+        read.segments_for_song(&part_id())
+            .iter()
+            .all(|s| *s == current)
+    );
+}
+
+#[test]
+fn a_song_whose_document_disagrees_with_the_journal_is_reported_naming_both() {
+    use duet_bus::SongOnDisk;
+    let root = scratch("status-differs");
+    let song = song_id();
+    let mut w = writer(&root, "owner", HUGE);
+    let moved = set(&mut w, &song, Status::Idea, Status::Sketch);
+    let read = journal(&root);
+
+    let agrees = Report::with_songs(
+        &read,
+        &[SongOnDisk::new("wayfaring", song.clone(), Status::Sketch)],
+    );
+    assert!(!agrees.is_wrong(), "{agrees}");
+    // A song the journal never concerned is not compared.
+    let unseen = Report::with_songs(
+        &read,
+        &[SongOnDisk::new("other", part_id(), Status::Arranged)],
+    );
+    assert!(!unseen.is_wrong(), "{unseen}");
+
+    let report = Report::with_songs(
+        &read,
+        &[SongOnDisk::new("wayfaring", song.clone(), Status::Arranged)],
+    );
+    assert!(report.is_wrong());
+    assert_eq!(report.status_differs.len(), 1);
+    let d = &report.status_differs[0];
+    assert_eq!(
+        (d.document, d.journal, d.set),
+        (Status::Arranged, Status::Sketch, Some(moved.place))
+    );
+    let shown = report.to_string();
+    assert!(
+        shown.contains(&format!(
+            "song wayfaring ({song}): its song.duet says arranged, and the journal's last move, \
+             {}, leaves it at sketch; neither is changed",
+            moved.place
+        )),
+        "{shown}"
+    );
+    assert!(shown.ends_with("1 thing wrong"), "{shown}");
+
+    // A song the journal concerns with no move stands at idea.
+    let root = scratch("status-differs-no-move");
+    let mut written = DocWritten::new(
+        "songs/wayfaring/song.duet".parse().unwrap(),
+        "song",
+        Version::new(1, 0),
+        DocDigest::of(b"{}"),
+        false,
+    );
+    written.song = Some(song.clone());
+    writer(&root, "owner", HUGE).append(written, None).unwrap();
+    let read = journal(&root);
+    let at_idea = Report::with_songs(
+        &read,
+        &[SongOnDisk::new("wayfaring", song.clone(), Status::Idea)],
+    );
+    assert!(!at_idea.is_wrong(), "{at_idea}");
+    let report = Report::with_songs(&read, &[SongOnDisk::new("wayfaring", song, Status::Sketch)]);
+    assert!(
+        report
+            .to_string()
+            .contains("the journal has no move for it, so leaves it at idea"),
+        "{report}"
+    );
 }

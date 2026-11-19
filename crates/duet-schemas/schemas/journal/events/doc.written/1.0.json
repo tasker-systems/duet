@@ -5,6 +5,11 @@
       "pattern": "^[0-9a-f]{16}$",
       "type": "string"
     },
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
     "RelPath": {
       "description": "A path relative to the project's root, with `/` between its parts and no empty, `.` or `..` part.",
       "pattern": "^([^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)(/([^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+))*$",
@@ -30,6 +35,10 @@
       "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
       "type": "string"
     },
+    "part": {
+      "$ref": "#/$defs/Id",
+      "description": "The id of the part the document is (`songs/<song>/parts/<part>…`), as its body states\nit. Absent for anything but a part, and for a part that states none, such as a drum\ngrid."
+    },
     "path": {
       "$ref": "#/$defs/RelPath",
       "description": "Where, relative to the project's root."
@@ -37,6 +46,10 @@
     "replaced": {
       "description": "Whether it replaced a file that was there.",
       "type": "boolean"
+    },
+    "song": {
+      "$ref": "#/$defs/Id",
+      "description": "The id of the song whose folder holds the path (`songs/<song>/…`), as its `song.duet`\nstates it when the document was written. Absent outside a song's folder, or when the\nfolder holds no song that reads."
     },
     "version": {
       "$ref": "#/$defs/Version",

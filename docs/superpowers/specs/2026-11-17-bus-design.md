@@ -193,7 +193,8 @@ listed refuses, naming why. A terminal state never changes. The lifecycles:
 | the player | `idle` ⇄ `playing` | none |
 | a CLI run in a project | `probing` → `joined` or `standalone` | both, for that run |
 
-Only the ask's lifecycle is in the journal. The others are in-process and transient.
+Only the ask's lifecycle and a song's status are in the journal ([decision 23](#decisions-for-the-owner),
+built with the journal follow-up). The others are in-process and transient.
 
 **The check and the append are one step under the journal lock** ([decision
 13](#decisions-for-the-owner)). This is duet's form of tasker-core's guard and write in one

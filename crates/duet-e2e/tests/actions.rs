@@ -188,7 +188,16 @@ fn an_action_that_writes_over_a_file_records_replaced_true() {
         &duet(&root, &["song", "status", "porch", "sketch"]),
         "song status",
     );
-    let got: Vec<(String, bool)> = entries(&root)
+    // `song status` journals its move after the document it rewrote.
+    let mut lines = entries(&root);
+    assert!(
+        matches!(
+            lines.pop().and_then(|l| l.read().cloned()),
+            Some(Event::SongStatusSet(_))
+        ),
+        "the move, last"
+    );
+    let got: Vec<(String, bool)> = lines
         .iter()
         .map(|line| {
             let doc = written(line);
@@ -205,7 +214,7 @@ fn an_action_that_writes_over_a_file_records_replaced_true() {
         ],
         "a view's text is no document, and is not recorded"
     );
-    let last = entries(&root).pop().unwrap();
+    let last = lines.pop().unwrap();
     assert_eq!(
         written(&last).digest,
         body_digest::<Song>(&root.join("songs/porch/song.duet"))
