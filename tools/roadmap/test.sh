@@ -5,7 +5,8 @@
 #      an `advances` edge into a task, from a session or a goal, is no task's goal link;
 #   2. two draws over the same records differ only in the stated date and read times;
 #   3. a failed, unparseable, truncated or partial read exits non-zero and writes nothing, and a
-#      traverse with no node for a task it was seeded with is refused, naming the task;
+#      traverse with no node for a task it was seeded with, or holding other than its node's
+#      `degree` of edges at it, is refused, naming the task;
 #   4. the only write is one create, every task's edges come from one `graph traverse` and no
 #      `resource show`, and a dry run writes nothing;
 #   5. the workstreams are CLAUDE.md's vocabulary, in its order.
@@ -95,6 +96,7 @@ fi
 into_tasks="$(jq '[.traverse as $g | ($g.nodes | map({(.id): .doc_type}) | add) as $type
     | $g.edges[] | select(.label == "advances" and $type[.target] == "task" and $type[.source] == "session")] | length' "$records")"
 jq '[.tasks.rows[].id] as $tasks
+    | .traverse.nodes |= map(if .doc_type == "task" then .degree += 2 else . end)
     | .traverse.nodes += [{id: "60000000-0000-7000-8000-000000000099", title: "a busy session", doc_type: "session", degree: ($tasks | length)}]
     | .traverse.edges += [$tasks | to_entries[] | {id: "71000000-0000-7000-8000-\(1000000000000 + .key | tostring | .[1:])",
         source: "60000000-0000-7000-8000-000000000099", target: .value, edge_kind: "leads_to", polarity: "forward",
@@ -142,6 +144,15 @@ refuses "a task listing whose returned disagrees" '.tasks.returned = 20' "says i
 refuses "a traverse with no node for a seeded task" \
     '.traverse.nodes |= map(select(.id != "20000000-0000-7000-8000-000000000009"))' \
     "no node for task 20000000-0000-7000-8000-000000000009"
+refuses "a traverse missing one edge at a seeded task" \
+    '(.traverse.edges | map(.target == "20000000-0000-7000-8000-000000000005") | index(true)) as $i | del(.traverse.edges[$i])' \
+    "the traverse holds [0-9]* of the [0-9]* edges its node gives task 20000000-0000-7000-8000-000000000005"
+refuses "a traverse repeating an edge at a seeded task" \
+    '.traverse.edges += [.traverse.edges[] | select(.source == "20000000-0000-7000-8000-000000000003")][:1]' \
+    "edges its node gives task 20000000-0000-7000-8000-000000000003"
+refuses "a traverse with no degree for a seeded task" \
+    '.traverse.nodes |= map(if .id == "20000000-0000-7000-8000-000000000011" then del(.degree) else . end)' \
+    "no numeric \`degree\`"
 refuses "a traverse with no edge list" 'del(.traverse.edges)' "lacks a \`nodes\` or \`edges\` list"
 refuses "a traverse edge with no source" '.traverse.edges[0] |= del(.source)' "no string \`source\`"
 refuses "an unknown goal status" '.goals.rows[0].managed_meta["temper-status"] = "dormant"' "none of"
@@ -180,6 +191,11 @@ dir="$(fake partial-traverse '.traverse.nodes |= map(select(.id != "20000000-000
 snapshot "$dir"
 writes_nothing "snapshot.sh, a traverse with no node for a seeded task" "$dir" \
     "no node for task 20000000-0000-7000-8000-000000000007"
+
+dir="$(fake short-traverse '(.traverse.edges | map(.source == "20000000-0000-7000-8000-000000000012" or .target == "20000000-0000-7000-8000-000000000012") | index(true)) as $i | del(.traverse.edges[$i])')"
+snapshot "$dir"
+writes_nothing "snapshot.sh, a traverse missing one edge at a seeded task" "$dir" \
+    "edges its node gives task 20000000-0000-7000-8000-000000000012"
 
 dir="$(fake garbage '.')"
 echo "not json at all" > "$dir/goals.json"

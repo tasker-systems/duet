@@ -12,8 +12,8 @@
 # The one write is `temper resource create --type research`, tagged roadmap-snapshot: it never
 # updates, moves or deletes anything, so no older snapshot is rewritten. Any failed, unparseable,
 # truncated or partial read stops it with a non-zero exit before that create, naming the read. A
-# traverse with no node for a task it was seeded with is partial (roadmap.jq checks it), and there
-# is no fallback to per-task reads.
+# traverse with no node for a task it was seeded with, or with other than that node's `degree` of
+# edges at it, is partial (roadmap.jq checks both), and there is no fallback to per-task reads.
 #
 # TEMPER names the temper to run (default: temper on PATH). It needs a login that can read both
 # contexts.
@@ -69,8 +69,8 @@ list "$work/goals.json" resource list --type goal --context "$goals_context" --a
 list "$work/tasks.json" resource list --type task --context "$tasks_context" --all --with open-meta
 
 # Every task's edges in one traverse, seeded with every listed task, so each task's goal link is
-# read the same way. roadmap.jq refuses a reply with no node for a seed: a task the traverse left
-# out is a partial read, never a task with no goal. With no task listed there is nothing to seed.
+# read the same way. roadmap.jq refuses a reply with no node for a seed, or short of a seed's
+# degree: a task the traverse left out is a partial read, never a task with no goal. With no task listed there is nothing to seed.
 seeds=()
 while IFS= read -r id; do
     seeds+=(--from "$id")

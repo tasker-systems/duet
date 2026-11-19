@@ -46,7 +46,8 @@ def goal:
        open: ($status == "active" or $status == "paused")}
     end;
 
-# The traverse, checked before it is trusted: {nodes: {<id>: true}, links: {<task id>: [<target id>]}}.
+# The traverse, checked before it is trusted:
+#   {nodes: {<id>: <its degree>}, edges: {<id>: <edges the reply holds at it>}, links: {<task id>: [<target id>]}}.
 # A task's goal links are the targets of the `advances` edges whose source is that task; an edge
 # into a task, from a session or anything else, is no task's link.
 def traversed:
@@ -57,13 +58,16 @@ def traversed:
   elif any(.edges[]; (.source | type) != "string" or (.target | type) != "string") then
     error("the traverse answered in a shape this tool does not read: an edge has no string `source` or `target`")
   else
-    {nodes: (.nodes | map({(.id): true}) | add // {}),
+    {nodes: (.nodes | map({(.id): .degree}) | add // {}),
+     edges: ([.edges[] | if .source == .target then .source else .source, .target end]
+             | group_by(.) | map({(.[0]): length}) | add // {}),
      links: (.edges | map(select(.label == "advances")) | group_by(.source)
              | map({(.[0].source): map(.target)}) | add // {})}
   end;
 
-# A task, with its goal links. It must have a node in the traverse it was seeded into: a task the
-# traverse left out is a partial read, never a task with no goal.
+# A task, with its goal links. It must have a node in the traverse it was seeded into, and the reply
+# must hold exactly as many edges at it as that node's `degree` says it has: a task the traverse
+# left out, or whose edges it did not all return, is a partial read, never a task with no goal.
 def task($graph):
   . as $r
   | need($r; "id"; "task") as $id | need($r; "title"; "task") as $title
@@ -72,8 +76,12 @@ def task($graph):
       error("task \($id) (\($title)) has stage \($stage | tojson), which is none of \(task_stages | tojson); the counts cannot tell whether it is finished")
     elif ($r.open_meta | type) != "object" then
       error("task \($id) has no `open_meta`, so its claim and ready markers cannot be read")
-    elif ($graph.nodes[$id] | not) then
+    elif ($graph.nodes | has($id) | not) then
       error("the traverse has no node for task \($id) (\($title)), which it was seeded with: its edges were not read, so it cannot be counted as having no goal")
+    elif ($graph.nodes[$id] | type) != "number" then
+      error("the traverse gives task \($id) (\($title)) no numeric `degree`, so it cannot show that every one of its edges was read")
+    elif $graph.nodes[$id] != ($graph.edges[$id] // 0) then
+      error("the traverse holds \($graph.edges[$id] // 0) of the \($graph.nodes[$id]) edges its node gives task \($id) (\($title)), which it was seeded with: a partial read, so its goal links cannot be trusted")
     else
       {id: $id, title: $title, stage: $stage, updated: need($r; "updated"; "task"),
        unfinished: ($stage != "done" and $stage != "cancelled"),
