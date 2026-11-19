@@ -3,7 +3,8 @@
 # test.sh calls the parts.
 #
 # `snapshot($started; $finished; $recipe)` takes one object, as snapshot.sh assembles it from `temper` (and as fixture/records.json holds):
-#   {"goals": <resource list page>, "tasks": <resource list page>, "shows": {<task id>: <resource show --with edges>}}
+#   {"goals": <resource list page>, "tasks": <resource list page>,
+#    "traverse": <graph traverse --depth 1, seeded with every listed task>}
 # $started and $finished are YYYY-MM-DDTHH:MM:SSZ, when the reads began and ended; $recipe is recipe.md.
 # It answers the snapshot's markdown body. Nothing in it depends on the order of the input
 # rows, and only the stated date and read times depend on the arguments.
@@ -45,8 +46,29 @@ def goal:
        open: ($status == "active" or $status == "paused")}
     end;
 
-# A task, with its goal links: the peers of its outgoing `advances` edges, read from its own show.
-def task($shows):
+# The traverse, checked before it is trusted:
+#   {nodes: {<id>: <its degree>}, edges: {<id>: <edges the reply holds at it>}, links: {<task id>: [<target id>]}}.
+# A task's goal links are the targets of the `advances` edges whose source is that task; an edge
+# into a task, from a session or anything else, is no task's link.
+def traversed:
+  if (.nodes | type) != "array" or (.edges | type) != "array" then
+    error("the traverse answered in a shape this tool does not read: it lacks a `nodes` or `edges` list")
+  elif any(.nodes[]; (.id | type) != "string") then
+    error("the traverse answered in a shape this tool does not read: a node has no string `id`")
+  elif any(.edges[]; (.source | type) != "string" or (.target | type) != "string") then
+    error("the traverse answered in a shape this tool does not read: an edge has no string `source` or `target`")
+  else
+    {nodes: (.nodes | map({(.id): .degree}) | add // {}),
+     edges: ([.edges[] | if .source == .target then .source else .source, .target end]
+             | group_by(.) | map({(.[0]): length}) | add // {}),
+     links: (.edges | map(select(.label == "advances")) | group_by(.source)
+             | map({(.[0].source): map(.target)}) | add // {})}
+  end;
+
+# A task, with its goal links. It must have a node in the traverse it was seeded into, and the reply
+# must hold exactly as many edges at it as that node's `degree` says it has: a task the traverse
+# left out, or whose edges it did not all return, is a partial read, never a task with no goal.
+def task($graph):
   . as $r
   | need($r; "id"; "task") as $id | need($r; "title"; "task") as $title
   | ($r.managed_meta["temper-stage"] // "") as $stage
@@ -54,22 +76,18 @@ def task($shows):
       error("task \($id) (\($title)) has stage \($stage | tojson), which is none of \(task_stages | tojson); the counts cannot tell whether it is finished")
     elif ($r.open_meta | type) != "object" then
       error("task \($id) has no `open_meta`, so its claim and ready markers cannot be read")
-    elif ($shows[$id] | type) != "object" then
-      error("the edges of task \($id) were not read")
-    elif $shows[$id].id != $id then
-      error("the edge read for task \($id) answered for \($shows[$id].id | tojson)")
-    elif ($shows[$id].edges.outgoing | type) != "array" then
-      error("the edge read for task \($id) has no `edges.outgoing` list")
+    elif ($graph.nodes | has($id) | not) then
+      error("the traverse has no node for task \($id) (\($title)), which it was seeded with: its edges were not read, so it cannot be counted as having no goal")
+    elif ($graph.nodes[$id] | type) != "number" then
+      error("the traverse gives task \($id) (\($title)) no numeric `degree`, so it cannot show that every one of its edges was read")
+    elif $graph.nodes[$id] != ($graph.edges[$id] // 0) then
+      error("the traverse holds \($graph.edges[$id] // 0) of the \($graph.nodes[$id]) edges its node gives task \($id) (\($title)), which it was seeded with: a partial read, so its goal links cannot be trusted")
     else
       {id: $id, title: $title, stage: $stage, updated: need($r; "updated"; "task"),
        unfinished: ($stage != "done" and $stage != "cancelled"),
        claimed: ($r.open_meta | has("claim_id") and .claim_id != null),
        ready: ($r.open_meta.state == "ready"),
-       links: ([$shows[$id].edges.outgoing[]
-                | select(.label == "advances" and .direction == "outgoing")
-                | if (.peer_id | type) == "string" then .peer_id
-                  else error("an edge of task \($id) has no `peer_id`") end]
-               | unique)}
+       links: ($graph.links[$id] // [] | unique)}
     end;
 
 def lane_of: if .claimed + .ready_unclaimed > 0 then "Now" elif .open > 0 then "Next" else "Later" end;
@@ -97,7 +115,8 @@ def order: sort_by([(.lane | lane_rank), .title, .id]);
 def snapshot($started; $finished; $recipe):
   . as $in
   | ($in.goals | whole("goal") | map(goal) | sort_by(.id)) as $goals
-  | ($in.tasks | whole("task") | map(task($in.shows // {})) | sort_by(.id)) as $tasks
+  | ($in.traverse | traversed) as $graph
+  | ($in.tasks | whole("task") | map(task($graph)) | sort_by(.id)) as $tasks
   | ($goals | map(select(.open)) | map({key: .id, value: .}) | from_entries) as $open
   # Each task counts toward the one open goal it links to, or toward nothing.
   | ($tasks | map(. + {goal: (if (.links | length) == 1 and $open[.links[0]] then .links[0] else null end)})) as $placed

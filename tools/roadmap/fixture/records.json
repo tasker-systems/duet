@@ -478,470 +478,562 @@
       }
     ]
   },
-  "shows": {
-    "20000000-0000-7000-8000-000000000001": {
-      "id": "20000000-0000-7000-8000-000000000001",
-      "title": "songs: claimed and in progress",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
+  "traverse": {
+    "nodes": [
+      {
+        "id": "10000000-0000-7000-8000-000000000001",
+        "title": "Songs are written in the journal",
+        "doc_type": "goal",
+        "degree": 24
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000002",
+        "title": "The bus carries asks between faces",
+        "doc_type": "goal",
+        "degree": 3
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000003",
+        "title": "The workbench | shows the take",
+        "doc_type": "goal",
+        "degree": 2
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000004",
+        "title": "A capture whose work is all done",
+        "doc_type": "goal",
+        "degree": 1
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000005",
+        "title": "Models wait for the next release",
+        "doc_type": "goal",
+        "degree": 1
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000006",
+        "title": "A goal nobody grouped",
+        "doc_type": "goal",
+        "degree": 1
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000007",
+        "title": "A release goal that was completed",
+        "doc_type": "goal",
+        "degree": 2
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000008",
+        "title": "A release goal that was cancelled",
+        "doc_type": "goal",
+        "degree": 0
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000009",
+        "title": "A goal outside the vocabulary",
+        "doc_type": "goal",
+        "degree": 1
+      },
+      {
+        "id": "10000000-0000-7000-8000-000000000010",
+        "title": "Zither capture is being claimed",
+        "doc_type": "goal",
+        "degree": 1
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000001",
+        "title": "songs: claimed and in progress",
+        "doc_type": "task",
+        "degree": 3
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000002",
+        "title": "songs: ready but already claimed",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000003",
+        "title": "songs: claimed and done",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000004",
+        "title": "bus: ready and unclaimed",
+        "doc_type": "task",
+        "degree": 3
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000005",
+        "title": "bus: filed, not ready",
+        "doc_type": "task",
+        "degree": 3
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000006",
+        "title": "workbench: filed, not ready",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000007",
+        "title": "workbench: cancelled",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000008",
+        "title": "capture: done",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000009",
+        "title": "ungrouped: filed",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000010",
+        "title": "release: open, for a completed goal",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000011",
+        "title": "release: done, for a completed goal",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000012",
+        "title": "no goal: open",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000013",
+        "title": "no goal: done",
+        "doc_type": "task",
+        "degree": 1
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000014",
+        "title": "no goal: cancelled",
+        "doc_type": "task",
+        "degree": 1
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000015",
+        "title": "goal outside duet-dev: open",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000016",
+        "title": "two goals: open",
+        "doc_type": "task",
+        "degree": 3
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000017",
+        "title": "zither: claimed",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000018",
+        "title": "outside the vocabulary: ready",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "20000000-0000-7000-8000-000000000019",
+        "title": "relates only, no advances: open",
+        "doc_type": "task",
+        "degree": 2
+      },
+      {
+        "id": "40000000-0000-7000-8000-000000000001",
+        "title": "a goal outside duet-dev",
+        "doc_type": "goal",
+        "degree": 1
+      },
+      {
+        "id": "60000000-0000-7000-8000-000000000001",
+        "title": "a session that worked on two tasks",
+        "doc_type": "session",
+        "degree": 2
+      },
+      {
+        "id": "60000000-0000-7000-8000-000000000002",
+        "title": "a session that worked on a task with no goal",
+        "doc_type": "session",
+        "degree": 1
       }
-    },
-    "20000000-0000-7000-8000-000000000002": {
-      "id": "20000000-0000-7000-8000-000000000002",
-      "title": "songs: ready but already claimed",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
+    ],
+    "edges": [
+      {
+        "id": "70000000-0000-7000-8000-000000000001",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000001",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000002",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000002",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000003",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000003",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000004",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000004",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000005",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000005",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000006",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000006",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000007",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000007",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000008",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000008",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000009",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000009",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000010",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000010",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000011",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000011",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000012",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000012",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000013",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000013",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000014",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000014",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000015",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000015",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000016",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000016",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000017",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000017",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000018",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000018",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000019",
+        "source": "10000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000019",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000020",
+        "source": "20000000-0000-7000-8000-000000000001",
+        "target": "10000000-0000-7000-8000-000000000001",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000021",
+        "source": "20000000-0000-7000-8000-000000000002",
+        "target": "10000000-0000-7000-8000-000000000001",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000022",
+        "source": "20000000-0000-7000-8000-000000000003",
+        "target": "10000000-0000-7000-8000-000000000001",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000023",
+        "source": "20000000-0000-7000-8000-000000000004",
+        "target": "10000000-0000-7000-8000-000000000002",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000024",
+        "source": "20000000-0000-7000-8000-000000000005",
+        "target": "10000000-0000-7000-8000-000000000001",
+        "edge_kind": "relates_to",
+        "polarity": "forward",
+        "label": "relates_to",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000025",
+        "source": "20000000-0000-7000-8000-000000000005",
+        "target": "10000000-0000-7000-8000-000000000002",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000026",
+        "source": "20000000-0000-7000-8000-000000000006",
+        "target": "10000000-0000-7000-8000-000000000003",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000027",
+        "source": "20000000-0000-7000-8000-000000000007",
+        "target": "10000000-0000-7000-8000-000000000003",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000028",
+        "source": "20000000-0000-7000-8000-000000000008",
+        "target": "10000000-0000-7000-8000-000000000004",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000029",
+        "source": "20000000-0000-7000-8000-000000000009",
+        "target": "10000000-0000-7000-8000-000000000006",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000030",
+        "source": "20000000-0000-7000-8000-000000000010",
+        "target": "10000000-0000-7000-8000-000000000007",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000031",
+        "source": "20000000-0000-7000-8000-000000000011",
+        "target": "10000000-0000-7000-8000-000000000007",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000032",
+        "source": "20000000-0000-7000-8000-000000000015",
+        "target": "40000000-0000-7000-8000-000000000001",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000033",
+        "source": "20000000-0000-7000-8000-000000000016",
+        "target": "10000000-0000-7000-8000-000000000001",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000034",
+        "source": "20000000-0000-7000-8000-000000000016",
+        "target": "10000000-0000-7000-8000-000000000002",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000035",
+        "source": "20000000-0000-7000-8000-000000000017",
+        "target": "10000000-0000-7000-8000-000000000010",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000036",
+        "source": "20000000-0000-7000-8000-000000000018",
+        "target": "10000000-0000-7000-8000-000000000009",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000037",
+        "source": "20000000-0000-7000-8000-000000000019",
+        "target": "10000000-0000-7000-8000-000000000005",
+        "edge_kind": "relates_to",
+        "polarity": "forward",
+        "label": "relates_to",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000038",
+        "source": "60000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000001",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000039",
+        "source": "60000000-0000-7000-8000-000000000001",
+        "target": "20000000-0000-7000-8000-000000000004",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
+      },
+      {
+        "id": "70000000-0000-7000-8000-000000000040",
+        "source": "60000000-0000-7000-8000-000000000002",
+        "target": "20000000-0000-7000-8000-000000000012",
+        "edge_kind": "leads_to",
+        "polarity": "forward",
+        "label": "advances",
+        "weight": 1.0
       }
-    },
-    "20000000-0000-7000-8000-000000000003": {
-      "id": "20000000-0000-7000-8000-000000000003",
-      "title": "songs: claimed and done",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000004": {
-      "id": "20000000-0000-7000-8000-000000000004",
-      "title": "bus: ready and unclaimed",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000002",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000005": {
-      "id": "20000000-0000-7000-8000-000000000005",
-      "title": "bus: filed, not ready",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000002",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          },
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "peer_title": "peer",
-            "edge_kind": "relates_to",
-            "label": "relates_to",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000006": {
-      "id": "20000000-0000-7000-8000-000000000006",
-      "title": "workbench: filed, not ready",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000003",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000007": {
-      "id": "20000000-0000-7000-8000-000000000007",
-      "title": "workbench: cancelled",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000003",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000008": {
-      "id": "20000000-0000-7000-8000-000000000008",
-      "title": "capture: done",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000004",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000009": {
-      "id": "20000000-0000-7000-8000-000000000009",
-      "title": "ungrouped: filed",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000006",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000010": {
-      "id": "20000000-0000-7000-8000-000000000010",
-      "title": "release: open, for a completed goal",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000007",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000011": {
-      "id": "20000000-0000-7000-8000-000000000011",
-      "title": "release: done, for a completed goal",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000007",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000012": {
-      "id": "20000000-0000-7000-8000-000000000012",
-      "title": "no goal: open",
-      "edges": {
-        "outgoing": [],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000013": {
-      "id": "20000000-0000-7000-8000-000000000013",
-      "title": "no goal: done",
-      "edges": {
-        "outgoing": [],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000014": {
-      "id": "20000000-0000-7000-8000-000000000014",
-      "title": "no goal: cancelled",
-      "edges": {
-        "outgoing": [],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000015": {
-      "id": "20000000-0000-7000-8000-000000000015",
-      "title": "goal outside duet-dev: open",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "40000000-0000-7000-8000-000000000001",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000016": {
-      "id": "20000000-0000-7000-8000-000000000016",
-      "title": "two goals: open",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          },
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000002",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000017": {
-      "id": "20000000-0000-7000-8000-000000000017",
-      "title": "zither: claimed",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000010",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000018": {
-      "id": "20000000-0000-7000-8000-000000000018",
-      "title": "outside the vocabulary: ready",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000009",
-            "peer_title": "peer",
-            "edge_kind": "leads_to",
-            "label": "advances",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    },
-    "20000000-0000-7000-8000-000000000019": {
-      "id": "20000000-0000-7000-8000-000000000019",
-      "title": "relates only, no advances: open",
-      "edges": {
-        "outgoing": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000005",
-            "peer_title": "peer",
-            "edge_kind": "relates_to",
-            "label": "relates_to",
-            "direction": "outgoing"
-          }
-        ],
-        "incoming": [
-          {
-            "peer_table": "kb_resources",
-            "peer_id": "10000000-0000-7000-8000-000000000001",
-            "label": "advances",
-            "direction": "incoming",
-            "edge_kind": "leads_to"
-          }
-        ]
-      }
-    }
+    ]
   }
 }
