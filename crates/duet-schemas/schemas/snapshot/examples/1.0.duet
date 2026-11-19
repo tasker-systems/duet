@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/snapshot/1.0.json",
+  "duet": {
+    "kind": "snapshot",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.3.0"
+    }
+  },
+  "body": {
+    "name": "first-verse",
+    "date": "2026-11-20",
+    "said": "the first verse sits; the bass is right at last",
+    "files": [
+      {
+        "path": "song.duet",
+        "digest": "sha256:892bd9cd865e944c6583035ba3ef5258b8e2f6cac627e8fff56ff3370db2fdd6"
+      },
+      {
+        "path": "parts/melody.duet",
+        "digest": "sha256:06778e6b0d1e57fd1d53a43fadb3de9964b48d04f32caf8d45fde93720aaca8f"
+      },
+      {
+        "path": "parts/bass.duet",
+        "digest": "sha256:fd567aeae63b3c83997e341c28230d22a126d2795c3da09e65631229d0303aad"
+      }
+    ],
+    "takes": [
+      {
+        "take": "wayfaring",
+        "digest": "sha256:9f2c41d07b3e8a65c1f0d92e4b7a3c58e06d1f9a2b4c7e8d3f5a6b0c9d1e2f34"
+      }
+    ]
+  }
+}

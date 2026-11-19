@@ -1071,8 +1071,9 @@ impl EventKind for SongStatusSet {
 }
 
 /// `snapshot.taken` 1.0: a snapshot of a song was taken. It is an event against the song, not
-/// a status, so it changes no state (the domain model's ruling 9). No command writes it until
-/// the songs spec's build task 4.
+/// a status, so it changes no state (the domain model's ruling 9). `duet song snapshot` writes
+/// it, after a `doc.written` for each file the snapshot holds, and so does `duet song restore`
+/// for the snapshot it takes of the working song first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]

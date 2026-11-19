@@ -4,8 +4,8 @@
 folded into the domain model by the owner's ruling on the project design (temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, decision 10).
 
-**Status: Proposed; songs task 2 is built** (`song` 1.0, its composition, `duet song new | show |
-status`, and a part's `id` and `source`). The domain model under it is **Ruled** (owner,
+**Status: Proposed; songs tasks 2 and 4 are built** (`song` 1.0, its composition, `duet song new |
+show | status`, and a part's `id` and `source`; `snapshot` 1.0 and `duet song snapshot | restore`). The domain model under it is **Ruled** (owner,
 2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 14, and 2026-11-18, temper
 `01a1ee66-f71b-763c-8117-5198cf45aa14`, rulings 15 and 16), and each point taken from it is marked
 so. Everything else is **Proposed**. What the owner has not ruled is listed in
@@ -504,7 +504,11 @@ gates nothing (ruling 15, [§7](#7-lifecycles)), and a part's `source` (ruling 1
    song, and changes neither.
 4. **Snapshots:** `duet song snapshot` and restore. **Needs:** 2. **Witnesses:** every copied file is
    byte for byte its source; restore takes a snapshot first; a changed file in a snapshot is reported;
-   taking a snapshot leaves the song's status unchanged.
+   taking a snapshot leaves the song's status unchanged. **Built** (temper
+   `01a1f16d-c35d-751e-b1db-78e91037af6e`): `duet song restore <song> <snapshot>`, and the
+   snapshot taken first is `before-restoring-<snapshot>`. A restore keeps the working song's status,
+   so the journal and `song.duet` still agree. A copied file's digest is the SHA-256 of its bytes.
+   The snapshot's `takes` stays empty until task 3 gives the song its links.
 5. **Playing a song:** `duet play` of a song, the parts at their placements on the composition's
    clock, with disagreements stated. **Needs:** 2. **Witness:** a part placed at bar 9 with
    `repeat: 2` renders its notes at bars 9 and following, at the composition's tempo.

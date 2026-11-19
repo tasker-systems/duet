@@ -21,7 +21,7 @@ The workspace is split by domain:
 | `duet-play` | a `Part` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Part` and score |
-| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, the project document, and the song and its composition |
+| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, the project document, the song and its composition, and a song's snapshots |
 | `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
 | `duet-actions` | every command's work, as registered actions with typed inputs, each recording the documents it writes |
 | `duet-cli` | the `duet` binary: clap over the actions, and inside a project their `doc.written` events appended to the journal |
@@ -272,13 +272,16 @@ duet project adopt ~/scratch/wayfaring --song wayfaring-stranger --apply   # cop
 ### Songs: `duet song`
 
 A song is a folder in a project, `songs/<song>/`, named as a take is (lowercase words joined by
-hyphens). It holds `song.duet`, a `song` 1.0 document of the song and its composition, and
-`parts/`, the song's parts, each a part or drum-grid document named by its stem.
+hyphens). It holds `song.duet`, a `song` 1.0 document of the song and its composition,
+`parts/`, the song's parts, each a part or drum-grid document named by its stem, and
+`snapshots/`, the checkpoints the owner chose to keep.
 
 ```sh
 duet song new wayfaring-stranger --title "Wayfaring Stranger" --meter 3/4 --key "G minor"
 duet song show wayfaring-stranger                 # its id, status, composition and parts
 duet song status wayfaring-stranger sketch        # idea → sketch
+duet song snapshot wayfaring-stranger first-verse --said "the verse sits"
+duet song restore wayfaring-stranger 2026-11-20-first-verse
 ```
 
 - **`song.duet` holds the song**: its `id` (minted by `duet song new`; renaming the folder or
@@ -294,6 +297,20 @@ duet song status wayfaring-stranger sketch        # idea → sketch
 - **`duet song show`** refuses a placement of a part the song does not have, two parts with one
   name (`bass.duet` and `bass.DUET`), and two parts with one id (a file copied by hand), each by
   name.
+- **A snapshot is a folder of copies, made once and never written again**:
+  `duet song snapshot` writes `snapshots/<date>-<name>/` with a byte-for-byte copy of
+  `song.duet`, a copy of every part the composition places (a part placed nowhere is not
+  copied), and `snapshot.duet`, a `snapshot` 1.0 document stating the name, the date, the
+  owner's words, the SHA-256 of every file copied, and the takes the song links, by name and
+  digest. It journals a `doc.written` for each file and a `snapshot.taken`, and leaves the
+  song's status as it was. One of the same name the same day is refused.
+- **`duet song show` lists the snapshots**, and reports each file in one that differs from its
+  stated digest, is missing, or is not stated, naming it.
+- **`duet song restore`** first takes a snapshot of the working song
+  (`before-restoring-<snapshot>`), then copies the snapshot's `song.duet` and parts back over the
+  working ones, each journalled as a `doc.written` that replaced a file. The song keeps its
+  working status: only `duet song status` moves it. A snapshot whose files differ from their
+  digests is refused, naming them.
 - **A new song's composition** starts from `--tempo`, `--meter` and `--key`, or else the
   project's defaults in `.duet/project.duet`, or else 120 bpm in 4/4 with no key. `--project`
   names the project's root; it is the working directory by default.
@@ -1080,7 +1097,7 @@ It is an **index**, `journal.duet.jsonl`, over **segments**, `journal.<stamp>.du
   beside it, so a song renamed since is still found by its id.
 
 A song's status lives in its `song.duet`, and the journal records each change: `duet song status`
-journals a `song.status-set`. Replay folds the moves through the same state machine, leniently:
+journals a `song.status-set`, and `duet song snapshot` a `snapshot.taken`. Replay folds the moves through the same state machine, leniently:
 after a merge, the first move in order stands and the check lists the other.
 
 Each event kind versions on its own, so an entry this duet does not read, of a newer duet's event,

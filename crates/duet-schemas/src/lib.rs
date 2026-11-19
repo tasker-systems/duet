@@ -50,7 +50,9 @@
 //! [`FrameBlock`](duet_dsp::FrameBlock)s, and a project's journal ([`journal`]): `journal-index`
 //! 1.0, the index over its segments, and `journal` 1.0, one segment, a stream of entries, each
 //! one event; `project` 1.0 ([`Project`]), a project's document, `.duet/project.duet`; and
-//! `song` 1.0 ([`Song`]), a song and its composition, `songs/<song>/song.duet`.
+//! `song` 1.0 ([`Song`]), a song and its composition, `songs/<song>/song.duet`; and `snapshot`
+//! 1.0 ([`Snapshot`]), what one of a song's snapshots holds,
+//! `songs/<song>/snapshots/<snapshot>/snapshot.duet`.
 //! [`AnyDocument`] reads a `.duet` of any document kind by its envelope.
 //!
 //! **The journal's events version on their own** ([`EVENTS`]), each schema committed under
@@ -85,6 +87,7 @@ mod performance;
 pub mod project;
 mod registry;
 pub mod schema;
+pub mod snapshot;
 pub mod song;
 mod version;
 
@@ -99,6 +102,7 @@ pub use part::{PartBody, Source};
 pub use project::Project;
 pub use registry::{AnyDocument, ENVELOPE_INFO, Framing, KINDS, KindInfo, kind};
 pub use schema::{ENVELOPE, ENVELOPE_VERSION};
+pub use snapshot::Snapshot;
 pub use song::Song;
 pub use version::Version;
 

@@ -1,4 +1,5 @@
-//! `duet song new | show | status`: a song's folder, `songs/<song>/`, under a project's root.
+//! `duet song new | show | status | snapshot | restore`: a song's folder, `songs/<song>/`, under a
+//! project's root.
 //!
 //! What a song is, and what it refuses, is duet-schemas' (`duet_schemas::song`): this reads the
 //! folder, hands what it holds to it, and writes what comes back. A song is named by its folder
@@ -11,6 +12,12 @@
 //! **`song.duet` holds the status, and the journal each change** (the domain model's ruling 14):
 //! inside a project, `duet song status` journals a `song.status-set` after the `doc.written` of
 //! the song it rewrote. `duet journal check` reports a song whose document and journal disagree.
+//!
+//! **A snapshot is a folder of copies, made once and never written again** (the songs spec's
+//! §3): `snapshots/<date>-<name>/` holds `song.duet` and every part the composition places, each
+//! byte for byte, and `snapshot.duet`, which states each copy's digest. Taking one changes no
+//! status (ruling 9): it journals a `doc.written` for each file and a `snapshot.taken`. A restore
+//! takes a snapshot of the working song first, so nothing is lost by restoring.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -19,10 +26,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use clap::Subcommand;
 use duet_core::{Key, TimeSig};
-use duet_schemas::journal::{Id, SongStatusSet};
+use duet_schemas::journal::{DocDigest, Id, RelPath, SnapshotTaken, SongStatusSet};
 use duet_schemas::project::{Defaults, Name};
+use duet_schemas::snapshot::{Copied, FileDigest, SNAPSHOT_FILE};
 use duet_schemas::song::{Composition, Status, distinct_ids, part_names};
-use duet_schemas::{AnyDocument, Document, Project, Song, Source};
+use duet_schemas::{AnyDocument, Document, Project, Snapshot, Song, Source};
 
 use crate::Context;
 use crate::io::{fresh_id, tool};
@@ -49,6 +57,15 @@ pub enum SongCommand {
     /// Any other move is refused, naming the song's state and the moves it allows, and the song
     /// is left as it was.
     Status(StatusInput),
+    /// Take a snapshot: copy song.duet and every part the composition places, byte for byte,
+    /// into `snapshots/<date>-<name>/`, beside a snapshot.duet stating each copy's digest. A part
+    /// placed nowhere is not copied. The song's status is left as it is, and a snapshot is never
+    /// written again: one of the same name the same day is refused.
+    Snapshot(SnapshotInput),
+    /// Restore a snapshot: first take a snapshot of the working song, then copy the snapshot's
+    /// song.duet and parts back over the working ones. The song keeps its status. A snapshot
+    /// whose files differ from their stated digests is refused, naming them.
+    Restore(RestoreInput),
 }
 
 /// Make a song: `songs/<song>/song.duet`, at idea, with a new id, and an empty parts/. Its
@@ -100,6 +117,39 @@ pub struct StatusInput {
     pub song: Name,
     /// The state to move to: idea, sketch, developing or arranged.
     pub state: Status,
+    /// The project's root. Default: the working directory.
+    #[arg(long, default_value = ".")]
+    pub project: PathBuf,
+}
+
+/// Take a snapshot: copy song.duet and every part the composition places, byte for byte,
+/// into `snapshots/<date>-<name>/`, beside a snapshot.duet stating each copy's digest. A part
+/// placed nowhere is not copied. The song's status is left as it is, and a snapshot is never
+/// written again: one of the same name the same day is refused.
+#[derive(Debug, Args, JsonSchema)]
+pub struct SnapshotInput {
+    /// The song's name.
+    pub song: Name,
+    /// The snapshot's name: lowercase words joined by hyphens, such as first-verse. Its
+    /// folder is `<date>-<name>`.
+    pub name: Name,
+    /// What you say of it, in your words. duet never reads it.
+    #[arg(long)]
+    pub said: Option<String>,
+    /// The project's root. Default: the working directory.
+    #[arg(long, default_value = ".")]
+    pub project: PathBuf,
+}
+
+/// Restore a snapshot: first take a snapshot of the working song, then copy the snapshot's
+/// song.duet and parts back over the working ones. The song keeps its status. A snapshot
+/// whose files differ from their stated digests is refused, naming them.
+#[derive(Debug, Args, JsonSchema)]
+pub struct RestoreInput {
+    /// The song's name.
+    pub song: Name,
+    /// The snapshot, by its folder under the song's snapshots/, such as 2026-11-20-first-verse.
+    pub snapshot: String,
     /// The project's root. Default: the working directory.
     #[arg(long, default_value = ".")]
     pub project: PathBuf,
@@ -162,6 +212,7 @@ pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
             )
             .map_err(|why| anyhow::anyhow!("{}: {why}", dir.join("parts").display()))?;
             print!("{}", shown(&song, &doc.body, &parts));
+            print!("{}", shown_snapshots(&dir)?);
             Ok(())
         }
         SongCommand::Status(StatusInput {
@@ -187,7 +238,429 @@ pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
             println!("{}: {was} → {}", path.display(), doc.body.status);
             Ok(())
         }
+        SongCommand::Snapshot(SnapshotInput {
+            song,
+            name,
+            said,
+            project,
+        }) => {
+            let taken = take_snapshot(ctx, &folder(&project, &song), &song, name, said)?;
+            println!(
+                "{}: {} files, {}",
+                taken.dir.display(),
+                taken.files,
+                taken.status
+            );
+            Ok(())
+        }
+        SongCommand::Restore(RestoreInput {
+            song,
+            snapshot,
+            project,
+        }) => restore(ctx, &folder(&project, &song), &song, &snapshot),
     }
+}
+
+/// A snapshot just taken: its folder, how many files it copied, and the song's status, which
+/// it left as it was.
+struct Taken {
+    dir: PathBuf,
+    folder: String,
+    files: usize,
+    status: duet_schemas::song::Status,
+}
+
+/// Takes a snapshot of the song in `dir`, named `name`: copies `song.duet` and every part its
+/// composition places into `snapshots/<date>-<name>/`, writes `snapshot.duet` beside them, and
+/// journals a `doc.written` for each and a `snapshot.taken`. Each file is read once, and the
+/// bytes read are the bytes checked, digested and copied.
+///
+/// The copies are written into a folder beside the snapshot's and renamed into place, so a
+/// snapshot is there whole or not at all.
+fn take_snapshot(
+    ctx: &Context,
+    dir: &Path,
+    song: &Name,
+    name: Name,
+    said: Option<String>,
+) -> Result<Taken> {
+    let song_path = dir.join(SONG_FILE);
+    let song_bytes = read_bytes(&song_path)?;
+    let doc = std::str::from_utf8(&song_bytes)
+        .map_err(anyhow::Error::from)
+        .and_then(|text| Ok(Document::<Song>::read(text)?))
+        .with_context(|| song_path.display().to_string())?;
+    let parts = read_parts(dir)?;
+    doc.body
+        .check_parts(parts.iter().map(|p| &p.name))
+        .map_err(|why| anyhow::anyhow!("{}: {why}", song_path.display()))?;
+
+    // Every part the composition places, once each, in the order first placed.
+    let mut placed: Vec<&SongPart> = Vec::new();
+    for placement in &doc.body.composition.placements {
+        if placed.iter().all(|p| p.name != placement.part)
+            && let Some(part) = parts.iter().find(|p| p.name == placement.part)
+        {
+            placed.push(part);
+        }
+    }
+    let mut copies: Vec<(RelPath, Vec<u8>)> = vec![(rel(SONG_FILE)?, song_bytes)];
+    for part in placed {
+        let path = format!("parts/{}", part.file);
+        let bytes = read_bytes(&dir.join(&path))?;
+        copies.push((rel(&path)?, bytes));
+    }
+
+    let mut body = Snapshot::new(
+        name,
+        crate::project::today()?,
+        copies
+            .iter()
+            .map(|(path, bytes)| Copied::new(path.clone(), FileDigest::of(bytes)))
+            .collect(),
+    );
+    body.said = said;
+    body.check().map_err(anyhow::Error::msg)?;
+    let snapshots = dir.join("snapshots");
+    no_link(project_of(dir), &snapshots)?;
+    let name_of = body.folder();
+    let target = snapshots.join(&name_of);
+    if there(&target) {
+        bail!(
+            "{} exists: a snapshot is never written again; give this one another name",
+            target.display()
+        );
+    }
+    let staging = snapshots.join(format!(".{name_of}.partial"));
+    if there(&staging) {
+        bail!(
+            "{} exists: a snapshot left half written by an earlier run. Nothing reads it; \
+             remove it and take the snapshot again",
+            staging.display()
+        );
+    }
+    let text = Document::new(tool(), body.clone()).write()?;
+    let staged = (|| -> Result<()> {
+        fs::create_dir_all(staging.join("parts")).with_context(|| staging.display().to_string())?;
+        for (path, bytes) in &copies {
+            let to = staging.join(path.as_str());
+            fs::write(&to, bytes).with_context(|| to.display().to_string())?;
+        }
+        let to = staging.join(SNAPSHOT_FILE);
+        fs::write(&to, &text).with_context(|| to.display().to_string())?;
+        fs::rename(&staging, &target).with_context(|| target.display().to_string())
+    })();
+    if let Err(e) = staged {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+    for (path, _) in &copies {
+        ctx.wrote(&target.join(path.as_str()), false)?;
+    }
+    ctx.wrote(&target.join(SNAPSHOT_FILE), false)?;
+    let digest = DocDigest::of(serde_json::to_string(&body)?.as_bytes());
+    ctx.emit(SnapshotTaken::new(
+        doc.body.id.clone(),
+        song.clone(),
+        name_of.clone(),
+        digest,
+    ));
+    Ok(Taken {
+        dir: target,
+        folder: name_of,
+        files: copies.len(),
+        status: doc.body.status,
+    })
+}
+
+/// Restores the snapshot `snapshot` of the song in `dir`: checks every file it holds against
+/// its stated digest, takes a snapshot of the working song, then copies the snapshot's parts and
+/// `song.duet` back over the working ones. The song keeps its working status: a restore moves
+/// no status, which only `duet song status` does.
+fn restore(ctx: &Context, dir: &Path, song: &Name, snapshot: &str) -> Result<()> {
+    let snap_dir = dir.join("snapshots").join(snapshot);
+    if snapshot.starts_with('.') || snapshot.contains(['/', '\\']) || !snap_dir.is_dir() {
+        bail!(
+            "{} is no snapshot of {song}: `duet song show {song}` lists its snapshots",
+            snap_dir.display()
+        );
+    }
+    no_link(project_of(dir), &snap_dir)?;
+    let held = read_snapshot(&snap_dir)?;
+    let problems = check_snapshot(&snap_dir, &held)?;
+    if !problems.is_empty() {
+        bail!(
+            "{}: {}; a snapshot is never changed, so this one is not restored",
+            snap_dir.display(),
+            problems.join("; ")
+        );
+    }
+    let snap_song_path = snap_dir.join(SONG_FILE);
+    let snap_song_bytes = read_bytes(&snap_song_path)?;
+    let mut snap_song = std::str::from_utf8(&snap_song_bytes)
+        .map_err(anyhow::Error::from)
+        .and_then(|text| Ok(Document::<Song>::read(text)?))
+        .with_context(|| snap_song_path.display().to_string())?;
+    let working = read_song(dir)?;
+    for file in &held.files {
+        no_link(project_of(dir), &dir.join(file.path.as_str()))?;
+    }
+    if snap_song.body.id != working.body.id {
+        bail!(
+            "{} is the song {}, and the working song is {}: a snapshot restores only the song it \
+             was taken of",
+            snap_song_path.display(),
+            snap_song.body.id,
+            working.body.id
+        );
+    }
+
+    // The working song, kept first, under a name that is free.
+    let base = format!("before-restoring-{snapshot}");
+    let mut kept_name: Name = base
+        .parse()
+        .map_err(|e| anyhow::anyhow!("{snapshot} is not named as a snapshot is: {e}"))?;
+    let today = crate::project::today()?;
+    for n in 2.. {
+        if !dir
+            .join("snapshots")
+            .join(duet_schemas::snapshot::folder(today, &kept_name))
+            .exists()
+        {
+            break;
+        }
+        kept_name = format!("{base}-{n}").parse().map_err(anyhow::Error::msg)?;
+    }
+    let kept = take_snapshot(
+        ctx,
+        dir,
+        song,
+        kept_name,
+        Some(format!(
+            "the working song, kept before restoring {snapshot}"
+        )),
+    )?;
+
+    // The snapshot's song, with the working status, then its parts.
+    let status = working.body.status;
+    let song_path = dir.join(SONG_FILE);
+    if snap_song.body.status == status {
+        replace(ctx, &song_path, &snap_song_bytes)?;
+    } else {
+        snap_song.body.status = status;
+        snap_song.tool = tool();
+        write_song(ctx, &song_path, &snap_song)?;
+    }
+    let mut restored = vec![SONG_FILE.to_owned()];
+    for file in held.files.iter().skip(1) {
+        let bytes = read_bytes(&snap_dir.join(file.path.as_str()))?;
+        replace(ctx, &dir.join(file.path.as_str()), &bytes)?;
+        restored.push(file.path.to_string());
+    }
+    println!(
+        "{}: restored {} over the working song ({}); the song kept its status, {status}. The \
+         working song is kept as the snapshot {}",
+        dir.display(),
+        snapshot,
+        restored.join(", "),
+        kept.folder
+    );
+    Ok(())
+}
+
+/// Writes `bytes` over `path` through a file beside it, renamed over it, and records it.
+fn replace(ctx: &Context, path: &Path, bytes: &[u8]) -> Result<()> {
+    let replaced = path.exists();
+    let next = path.with_extension("duet.next");
+    write_new(&next, bytes)?;
+    fs::rename(&next, path).with_context(|| path.display().to_string())?;
+    ctx.wrote(path, replaced)
+}
+
+/// Writes `bytes` to a new file at `path`. Whatever is there first, a file left by an earlier
+/// run or a symbolic link, is removed, never written through: the file is created only if
+/// nothing is at `path`, so a link put there between the two is refused, not followed.
+fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+    if there(path) {
+        fs::remove_file(path).with_context(|| path.display().to_string())?;
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(bytes))
+        .with_context(|| path.display().to_string())
+}
+
+/// The project's root, for a song's folder `songs/<song>/` under it.
+fn project_of(dir: &Path) -> &Path {
+    dir.parent().and_then(Path::parent).unwrap_or(dir)
+}
+
+/// Whether anything is at `path`, a symbolic link included, even one that points nowhere.
+fn there(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+/// Refuses `path` when it, or any folder between `dir` and it, is a symbolic link, naming the
+/// link: duet writes and restores no file through one, so a link committed to a project cannot
+/// send a write outside it. `dir` itself and the folders above it are the owner's, and are not
+/// checked; a part of `path` that is not there yet is no link.
+fn no_link(dir: &Path, path: &Path) -> Result<()> {
+    let Ok(rest) = path.strip_prefix(dir) else {
+        bail!("{} is not under {}", path.display(), dir.display());
+    };
+    let mut at = dir.to_path_buf();
+    for part in rest.components() {
+        at.push(part);
+        match fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => bail!(
+                "{} is a symbolic link: duet writes and restores no file through one",
+                at.display()
+            ),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e).with_context(|| at.display().to_string()),
+        }
+    }
+    Ok(())
+}
+
+/// A path in a song's or a snapshot's folder.
+fn rel(path: &str) -> Result<RelPath> {
+    path.parse().map_err(anyhow::Error::msg)
+}
+
+/// A file's bytes, naming it by its path when it cannot be read.
+fn read_bytes(path: &Path) -> Result<Vec<u8>> {
+    fs::read(path).with_context(|| path.display().to_string())
+}
+
+/// A snapshot's `snapshot.duet`.
+fn read_snapshot(snap_dir: &Path) -> Result<Snapshot> {
+    let path = snap_dir.join(SNAPSHOT_FILE);
+    let text = fs::read_to_string(&path).with_context(|| path.display().to_string())?;
+    Ok(Document::<Snapshot>::read(&text)
+        .with_context(|| path.display().to_string())?
+        .body)
+}
+
+/// What differs in a snapshot from what its `snapshot.duet` states, file by file: a file that
+/// differs from its stated digest, one that is missing, one it holds but does not state, and a
+/// symbolic link, which a snapshot never holds. Empty when the snapshot is as taken.
+///
+/// No link is followed, so a link to a folder above it cannot make the walk endless.
+fn check_snapshot(snap_dir: &Path, held: &Snapshot) -> Result<Vec<String>> {
+    let mut problems = Vec::new();
+    for file in &held.files {
+        let path = snap_dir.join(file.path.as_str());
+        if no_link(snap_dir, &path).is_err() {
+            problems.push(format!("{} is a symbolic link", file.path));
+            continue;
+        }
+        match fs::read(&path) {
+            Ok(bytes) if FileDigest::of(&bytes) == file.digest => {}
+            Ok(_) => problems.push(format!("{} differs from its stated digest", file.path)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                problems.push(format!("{} is missing", file.path));
+            }
+            Err(e) => return Err(e).with_context(|| path.display().to_string()),
+        }
+    }
+    let mut on_disk = Vec::new();
+    let mut stack = vec![snap_dir.to_path_buf()];
+    while let Some(at) = stack.pop() {
+        for entry in fs::read_dir(&at).with_context(|| at.display().to_string())? {
+            let entry = entry?;
+            let path = entry.path();
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                stack.push(path);
+            } else if let Ok(rest) = path.strip_prefix(snap_dir) {
+                let rest: Vec<String> = rest
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                on_disk.push((rest.join("/"), kind.is_symlink()));
+            }
+        }
+    }
+    on_disk.sort();
+    for (path, link) in on_disk {
+        let stated = held.files.iter().any(|f| f.path.as_str() == path);
+        if link && !stated {
+            problems.push(format!("{path} is a symbolic link"));
+        } else if path != SNAPSHOT_FILE && !stated {
+            problems.push(format!("{path} is in it, and it does not state it"));
+        }
+    }
+    Ok(problems)
+}
+
+/// What `duet song show` prints of the song's snapshots: each by its folder, with its name and
+/// how many files it holds when it is as taken, or else everything in it that differs from
+/// what its `snapshot.duet` states, naming each file.
+fn shown_snapshots(dir: &Path) -> Result<String> {
+    let snapshots = dir.join("snapshots");
+    let mut folders = Vec::new();
+    if snapshots.is_dir() {
+        for entry in fs::read_dir(&snapshots).with_context(|| snapshots.display().to_string())? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_dir() || kind.is_symlink() {
+                folders.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    folders.sort();
+    let mut out = String::new();
+    if folders.is_empty() {
+        let _ = writeln!(out, "snapshots none");
+        return Ok(out);
+    }
+    let _ = writeln!(out, "snapshots");
+    for folder in folders {
+        let snap_dir = snapshots.join(&folder);
+        if fs::symlink_metadata(&snap_dir).is_ok_and(|m| m.file_type().is_symlink()) {
+            let _ = writeln!(
+                out,
+                "  {folder}: is a symbolic link, and a snapshot is a folder of its own"
+            );
+            continue;
+        }
+        if folder.starts_with('.') {
+            let _ = writeln!(
+                out,
+                "  {folder}: a snapshot left half written; nothing reads it, and it can be removed"
+            );
+            continue;
+        }
+        let held = match read_snapshot(&snap_dir) {
+            Ok(held) => held,
+            Err(e) => {
+                let _ = writeln!(out, "  {folder}: {SNAPSHOT_FILE} does not read: {e:#}");
+                continue;
+            }
+        };
+        let problems = check_snapshot(&snap_dir, &held)?;
+        if problems.is_empty() {
+            let _ = writeln!(
+                out,
+                "  {folder}: {}, {} files, as taken{}",
+                held.name,
+                held.files.len(),
+                held.said
+                    .as_ref()
+                    .map_or_else(String::new, |said| format!(", said {said:?}"))
+            );
+        } else {
+            for problem in problems {
+                let _ = writeln!(out, "  {folder}: {problem}");
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// `songs/<song>/` under the project's root.
@@ -317,7 +790,7 @@ fn write_song(ctx: &Context, path: &Path, doc: &Document<Song>) -> Result<()> {
     let text = doc.write()?;
     let replaced = path.exists();
     let next = path.with_extension("duet.next");
-    fs::write(&next, text).with_context(|| next.display().to_string())?;
+    write_new(&next, text.as_bytes())?;
     fs::rename(&next, path).with_context(|| path.display().to_string())?;
     ctx.wrote(path, replaced)
 }
@@ -325,6 +798,8 @@ fn write_song(ctx: &Context, path: &Path, doc: &Document<Song>) -> Result<()> {
 /// One of a song's parts, as `parts/` holds it.
 struct SongPart {
     name: Name,
+    /// Its file in `parts/`.
+    file: String,
     kind: &'static str,
     /// A part's id; a drum grid states none yet.
     id: Option<Id>,
@@ -355,12 +830,14 @@ fn read_parts(dir: &Path) -> Result<Vec<SongPart>> {
         let part = match doc {
             AnyDocument::Part(doc) => SongPart {
                 name,
+                file: file.to_owned(),
                 kind: "part",
                 id: Some(doc.body.id),
                 source: Some(doc.body.source),
             },
             AnyDocument::DrumGrid(_) => SongPart {
                 name,
+                file: file.to_owned(),
                 kind: "drum-grid",
                 id: None,
                 source: None,
