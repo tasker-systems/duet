@@ -30,4 +30,21 @@ Guidance for agents working in this repository. It is a router: each topic lives
   binary in a separate checkout with its own `CARGO_TARGET_DIR` and set `DUET_E2E_BIN` to it.
   *Why:* a test run against an old binary passes or fails for code that is not in the tree.
 
+- **The roadmap is read from Temper records, in the terms of the baseline's ROAD rules.** Goals are
+  `goal` resources in `+making-music/duet-dev`. Work items are `task`s in
+  `+making-music/duet-dev-workflows`, each advancing at most one goal through its `goal` link.
+  - **Filed:** the task exists.
+  - **Claimed:** it carries `open_meta.claim_id`, and its `temper-stage` is not `done` or
+    `cancelled`.
+  - **Ready:** it carries `open_meta.state = "ready"`.
+  - **Open:** a goal whose `temper-status` is `active` or `paused`. The goal statuses are `active`,
+    `paused`, `completed` and `cancelled`.
+  - **The grouping key (ROAD-3):** `open_meta.workstream`, one value per open goal, from
+    `songs-and-comps`, `bus-and-project`, `capture-and-readings`, `models-and-polyphony` and
+    `ci-and-release`.
+
+  The rulings are Temper decisions `01a1ec84-4f93-73b8-bcbd-fa9f97233bfa` and
+  `01a1f0eb-01d7-7468-9d02-7b75020799fa`. *Why:* a roadmap a reader takes on trust has to be
+  answerable to the records, so the field behind each term is written down (`doctrine/roadmap.md`).
+
 Commits are conventional (`feat:`, `fix:`, `docs:`, `chore:`).

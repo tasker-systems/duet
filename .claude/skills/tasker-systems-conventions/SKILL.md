@@ -106,7 +106,7 @@ Statuses for **duet**:
 | PY-VER-1 | n/a: no Python of this repository's own (scripts/listen was retired with duet-listen.sh, for duet capture review; .conventions/baseline/tools is the baseline's) |
 | ROAD-1 | uncovered: duet's one roadmap is a hand-drawn page (a claude.ai artifact), dated 2026-11-18 but redrawn in place, and it does not say which lanes were read from the records; Temper goal 01a1ec7a-83cd-7538-b71c-3fbe93f5be82 plans to read it from the records, in a child not yet authored |
 | ROAD-2 | uncovered: the page's lanes are drawn by hand and hold work items, not goals, with no per-goal counts of claimed, ready and filed items; the ready and claimed markers exist (Temper decision 01a1ec84-4f93-73b8-bcbd-fa9f97233bfa: open_meta.state ready, a guarded claim_id), but nothing computes lanes from them |
-| ROAD-3 | uncovered: no grouping key or vocabulary is written in the repository; the page filters work items by five workstreams, and one item can carry two |
+| ROAD-3 | practiced: the key is open_meta.workstream, its five values are written in CLAUDE.md (Temper decision 01a1f0eb-01d7-7468-9d02-7b75020799fa), and each of the five open goals in +making-music/duet-dev carries one; nothing checks that a new goal does |
 | ROAD-4 | practiced: the page orders goals by lane and items by build order, and reads no per-item score; Temper tasks carry temper-effort, which it does not read; nothing checks |
 | ROAD-5 | uncovered: the page does not count filed work that advances no open goal, name the goal statuses it omits, or list goals with no group value |
 | ROAD-6 | n/a: the one roadmap is a private page whose reader, the owner, also reads the goal records; no roadmap has a wider audience |
