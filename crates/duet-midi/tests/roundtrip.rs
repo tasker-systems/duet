@@ -1930,3 +1930,48 @@ fn the_songs_events_and_an_index_naming_songs_by_id_round_trip_exactly() {
     assert!(closes.concerns_song(&"0196f1a2-7b3c-7000-8000-000000000001".parse().unwrap()));
     assert!(closes.concerns_part(&"0196f1a2-7b3c-7000-8000-000000000002".parse().unwrap()));
 }
+
+/// A snapshot's document round-trips exactly: read, then written, it is byte-identical, and it
+/// reads back by its envelope as itself. Its digests are of bytes no text could hold, the
+/// owner's words need escaping, and a part's file keeps its case.
+#[test]
+fn a_snapshot_round_trips_exactly() {
+    use duet_schemas::Snapshot;
+    use duet_schemas::journal::TakeRef;
+    use duet_schemas::snapshot::{Copied, FileDigest};
+    let copied =
+        |path: &str, bytes: &[u8]| Copied::new(path.parse().unwrap(), FileDigest::of(bytes));
+    let mut body = Snapshot::new(
+        "take-2".parse().unwrap(),
+        "2028-02-29".parse().unwrap(),
+        vec![
+            copied("song.duet", &[0xff, 0xfe, 0x00]),
+            copied("parts/Kit.DUET", b""),
+        ],
+    );
+    body.said = Some("tab\there, \"quoted\", and é".into());
+    body.takes = vec![TakeRef::new(
+        "porch-2",
+        "sha256:00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff"
+            .parse()
+            .unwrap(),
+    )];
+    let doc = Document::new(Tool::new("duet", "0.3.0"), body);
+    let text = doc.write().unwrap();
+    let back = Document::<Snapshot>::read(&text).unwrap();
+    assert_eq!(back, doc);
+    assert_eq!(back.write().unwrap(), text, "it writes back identical");
+    let AnyDocument::Snapshot(any) = AnyDocument::read(&text).unwrap() else {
+        panic!("not read as a snapshot");
+    };
+    assert_eq!(any, doc, "read by its envelope");
+
+    // The committed example round-trips too.
+    let example = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../duet-schemas/schemas/snapshot/examples/1.0.duet"
+    ))
+    .unwrap();
+    let read = Document::<Snapshot>::read(&example).unwrap();
+    assert_eq!(format!("{}\n", read.write().unwrap().trim_end()), example);
+}

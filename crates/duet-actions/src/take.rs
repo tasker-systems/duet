@@ -367,6 +367,153 @@ pub fn find(root: &Path, take: &ProjectTake) -> Result<Located> {
     }
 }
 
+/// The take a command was given (the project design's §5): the file to read, and the project's
+/// take it is, when it is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Input {
+    /// The file to read: the path given, or where [`find`] found the take named.
+    pub file: PathBuf,
+    /// The project's take the file is, when the command runs in a project and it is one.
+    pub take: Option<InProject>,
+}
+
+/// One of the project's takes, as a command given it knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InProject {
+    /// The project's root.
+    pub root: PathBuf,
+    /// The take's name.
+    pub name: Name,
+}
+
+impl InProject {
+    /// The take's directory, `takes/<take>/`, under the root.
+    #[must_use]
+    pub fn dir(&self) -> PathBuf {
+        self.root.join(TAKES_DIR).join(self.name.as_str())
+    }
+
+    /// A reading's default stem: `takes/<take>/<take>.<label>`, where the label is its reader.
+    #[must_use]
+    pub fn stem(&self, label: &str) -> PathBuf {
+        self.dir().join(format!("{}.{label}", self.name))
+    }
+
+    /// The labels of the take's readings: each `takes/<take>/<take>.<label>.capture.duet`,
+    /// sorted.
+    #[must_use]
+    pub fn readings(&self) -> Vec<String> {
+        let prefix = format!("{}.", self.name);
+        let mut out: Vec<String> = fs::read_dir(self.dir())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let label = name.strip_prefix(&prefix)?.strip_suffix(".capture.duet")?;
+                (!label.is_empty() && !label.contains('.')).then(|| label.to_owned())
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The stem of the take's one reading, for `compare` and `review` without `-o`.
+    ///
+    /// # Errors
+    ///
+    /// When the take has no reading in its directory, or more than one, naming each.
+    pub fn reading_stem(&self) -> Result<PathBuf> {
+        let readings = self.readings();
+        let dir = Path::new(TAKES_DIR).join(self.name.as_str());
+        match readings.as_slice() {
+            [one] => Ok(self.stem(one)),
+            [] => bail!(
+                "the take {} has no reading in {}/: `duet capture melody {}` makes one",
+                self.name,
+                dir.display(),
+                self.name
+            ),
+            many => bail!(
+                "the take {} has {} readings in {}/, {}: -o names which, such as -o {}",
+                self.name,
+                many.len(),
+                dir.display(),
+                many.join(", "),
+                self.stem(&many[0]).display()
+            ),
+        }
+    }
+}
+
+/// What a command was given as a take, read in the project it runs in, if any. Outside a
+/// project it is the path given, as always.
+///
+/// Inside one:
+/// - **A take's name** (`duet capture melody wayfaring`) is found by [`find`], checked against
+///   its digest, and where it was found is said on standard error. A name the project has no
+///   take of, and no file has, is refused naming the takes it has.
+/// - **A path** is read as given. With `digest`, its decode is digested, once, and the project's
+///   take with that digest is the take it is, wherever the file lies.
+///
+/// # Errors
+///
+/// When the project's document does not read, the take named is not found, or the file given
+/// does not decode.
+pub fn input(ctx: &Context, given: &Path, digest: bool) -> Result<Input> {
+    let outside = || Input {
+        file: given.to_path_buf(),
+        take: None,
+    };
+    let Some(project) = ctx.project() else {
+        return Ok(outside());
+    };
+    let doc = read_project(&project.root)?;
+    let in_project = |entry: &ProjectTake| InProject {
+        root: project.root.clone(),
+        name: entry.name.clone(),
+    };
+    if let Some(name) = given.to_str().and_then(|s| s.parse::<Name>().ok()) {
+        if let Some(entry) = doc.body.take(&name) {
+            let found = find(&project.root, entry)?;
+            eprintln!("take {name}: {}", Looked::Found(found.clone()).describe());
+            return Ok(Input {
+                file: project.root.join(&found.path),
+                take: Some(in_project(entry)),
+            });
+        }
+        if !given.exists() {
+            taken(&doc.body, &name)?;
+        }
+    }
+    if !digest {
+        return Ok(outside());
+    }
+    if !given.is_file() {
+        bail!("{}: no such file", given.display());
+    }
+    let take = take_of(given)?;
+    Ok(Input {
+        file: given.to_path_buf(),
+        take: doc
+            .body
+            .takes
+            .iter()
+            .find(|t| t.take.digest == take.digest)
+            .map(in_project),
+    })
+}
+
+/// The `duet take add` line for a file that is no take of the project, and the take's name it
+/// would be given.
+#[must_use]
+pub fn add_line(file: &Path) -> (String, Option<Name>) {
+    (
+        format!("duet take add {}", file.display()),
+        name_from(file).ok(),
+    )
+}
+
 /// Looks for `take` as [`find`] does, saying what it found rather than refusing.
 pub(crate) fn look(root: &Path, take: &ProjectTake, local: &toml::Table) -> Looked {
     let copied = copied_path(take);
@@ -426,7 +573,7 @@ pub fn take_of(file: &Path) -> Result<Take> {
 }
 
 /// A take's rate, channels and frames, for people.
-fn format_of(take: &Take) -> String {
+pub(crate) fn format_of(take: &Take) -> String {
     format!(
         "{} Hz, {} channel{}, {} frames",
         take.rate,
@@ -481,7 +628,7 @@ fn refuse_digest_taken(project: &ProjectDoc, take: &Take, file: &Path) -> Result
 
 /// The name a take gets from its file when none is given: its stem, lowercased, every run of
 /// other characters a single hyphen.
-fn name_from(file: &Path) -> Result<Name> {
+pub(crate) fn name_from(file: &Path) -> Result<Name> {
     let stem = file
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -504,7 +651,7 @@ fn name_from(file: &Path) -> Result<Name> {
 }
 
 /// Copies `from` to `to` byte for byte, making `to`'s directory. `to` must not exist.
-fn copy_new(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn copy_new(from: &Path, to: &Path) -> Result<()> {
     if let Some(dir) = to.parent() {
         fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
     }
@@ -577,7 +724,7 @@ fn local_path(local: &toml::Table, name: &Name) -> Option<PathBuf> {
 
 /// Sets `name`'s path in `.duet/takes.local.toml`, or with `None` takes it out, keeping every
 /// other entry as it was. A map left empty is removed.
-fn set_local(root: &Path, name: &Name, at: Option<&Path>) -> Result<()> {
+pub(crate) fn set_local(root: &Path, name: &Name, at: Option<&Path>) -> Result<()> {
     let path = root.join(TAKES_LOCAL_FILE);
     let mut local = read_local(root)?;
     match at {

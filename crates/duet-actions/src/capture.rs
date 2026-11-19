@@ -81,7 +81,9 @@ pub enum CaptureCommand {
 /// estimated from the take and stated.
 #[derive(Debug, Args, JsonSchema)]
 pub struct TakeArgs {
-    /// The recording: WAV, FLAC, MP3, Ogg Vorbis, or AAC in an MP4 (.m4a).
+    /// The recording: WAV, FLAC, MP3, Ogg Vorbis, or AAC in an MP4 (.m4a). In a project, a
+    /// take's name, or the path of one of its takes; any other path is refused, with the
+    /// `duet take add` line to run, unless -o names a stem outside takes/.
     input: PathBuf,
     /// The tempo, in quarter notes per minute, used exactly. A melody's must be a whole
     /// number: its ABC states the tempo in Q:, which holds only a whole number.
@@ -132,7 +134,8 @@ pub struct TakeArgs {
     #[arg(long)]
     lane: Option<String>,
     /// The output files' stem: STEM.duet, STEM.abc or STEM.grid.duet, and STEM.capture.duet.
-    /// Without it, the input's name without its extension, beside it.
+    /// Without it, the input's name without its extension, beside it; in a project,
+    /// takes/TAKE/TAKE.READER, READER being hmm, rules or basic-pitch, or rhythm for a rhythm.
     #[arg(short, long, value_name = "STEM")]
     output: Option<PathBuf>,
 }
@@ -159,8 +162,8 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     let (take, args) = match command {
         CaptureCommand::Melody(args) => (Take::Melody, args),
         CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
-        CaptureCommand::Compare(args) => return compare::run(&args),
-        CaptureCommand::Review(args) => return review::run(&args),
+        CaptureCommand::Compare(args) => return compare::run(ctx, args),
+        CaptureCommand::Review(args) => return review::run(ctx, args),
     };
     let key = flags(take, &args)?;
     let grid = match args.grid {
@@ -171,10 +174,24 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     // quantized at all.
     grid.step_ticks(Part::default().ticks_per_quarter)
         .with_context(|| format!("--grid {grid}"))?;
-    let outputs = Outputs::new(&args.input, args.output.as_deref(), take)?;
+    // In a project, the take is given by name or found by its digest, and its readings go to
+    // its directory (the project design's §5).
+    let input = crate::take::input(ctx, &args.input, true)?;
+    let stem = in_project(ctx, take, &args, &input)?;
+    let outputs = Outputs::new(&input.file, stem.as_deref(), take)?;
+    let args = TakeArgs {
+        input: input.file,
+        ..args
+    };
     // Basic Pitch is loaded, and its thresholds checked, before anything is read.
     #[cfg(feature = "basic-pitch")]
     let basic_pitch = basic_pitch_of(&args)?;
+    // A named take's directory is made when its first reading is written into it.
+    if args.output.is_none()
+        && let Some(dir) = stem.as_deref().and_then(Path::parent)
+    {
+        fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
+    }
 
     // Every failure from here on is the take's, so it names the take. FileSource's own errors
     // name it already.
@@ -358,6 +375,85 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     }
     write_new(&outputs.score, &scored.text).with_context(wrote)?;
     ctx.wrote(&outputs.score, false)
+}
+
+/// Where a capture's outputs go in a project, as their stem: `-o`'s, or else
+/// `takes/<take>/<take>.<label>` for one of the project's takes, the label its reader (`hmm`,
+/// `rules`, `basic-pitch`) or, for a rhythm, `rhythm`. Outside a project, `-o`'s or none.
+///
+/// A path that is no take of the project is refused, with the `duet take add` line to run
+/// (decision 5), unless `-o` names a stem outside `takes/`: then the outputs go there, and duet
+/// says the take is not in the project.
+fn in_project(
+    ctx: &Context,
+    take: Take,
+    args: &TakeArgs,
+    input: &crate::take::Input,
+) -> Result<Option<PathBuf>> {
+    let Some(project) = ctx.project() else {
+        return Ok(args.output.clone());
+    };
+    if let Some(found) = &input.take {
+        return Ok(Some(match &args.output {
+            Some(stem) => stem.clone(),
+            None => found.stem(label(take, args)),
+        }));
+    }
+    let (add, name) = crate::take::add_line(&input.file);
+    let command = match take {
+        Take::Melody => "melody",
+        Take::Rhythm => "rhythm",
+    };
+    let then = name.map_or_else(String::new, |name| {
+        format!(", and `duet capture {command} {name}` then captures it into takes/{name}/")
+    });
+    match &args.output {
+        Some(stem) if !under(&project.root.join(crate::take::TAKES_DIR), stem) => {
+            eprintln!(
+                "{} is not a take in this project: its outputs go to {}, as -o says; `{add}` \
+                 adds it",
+                input.file.display(),
+                stem.display()
+            );
+            Ok(Some(stem.clone()))
+        }
+        Some(stem) => bail!(
+            "{} is not a take in this project, and -o {} is under takes/, which holds the \
+             project's takes: `{add}` adds it{then}",
+            input.file.display(),
+            stem.display()
+        ),
+        None => bail!(
+            "{} is not a take in this project ({}): `{add}` adds it{then}; or -o names a stem \
+             outside takes/ to capture it as it is",
+            input.file.display(),
+            project.root.display()
+        ),
+    }
+}
+
+/// A reading's label in its default stem: the melody's reader, or `rhythm`.
+fn label(take: Take, args: &TakeArgs) -> &'static str {
+    match take {
+        Take::Rhythm => "rhythm",
+        Take::Melody => match args.reader.unwrap_or(ReaderArg::Hmm) {
+            ReaderArg::Hmm => "hmm",
+            ReaderArg::Rules => "rules",
+            #[cfg(feature = "basic-pitch")]
+            ReaderArg::BasicPitch => "basic-pitch",
+        },
+    }
+}
+
+/// Whether the stem `stem` lies under `dir`: its directory, made absolute, is `dir` or below it.
+fn under(dir: &Path, stem: &Path) -> bool {
+    let parent = stem
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::canonicalize(parent)
+        .or_else(|_| std::env::current_dir().map(|cwd| cwd.join(parent)))
+        .is_ok_and(|full| full.starts_with(dir))
 }
 
 /// What the project remembers for the take a capture reads, when it reads one of a project's

@@ -21,7 +21,7 @@ The workspace is split by domain:
 | `duet-play` | a `Part` as timed MIDI events, and a SoundFont synth that renders them |
 | `duet-dsp` | audio analysis, samples to events: notes, hits, tempo, meter, key; no I/O |
 | `duet-capture` | decoding a take, writing one as FLAC, and assembling `duet-dsp`'s events into a `Part` and score |
-| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, the project document, and the song and its composition |
+| `duet-schemas` | documents: the envelope, versioned kinds, `.duet` and `.duet.jsonl`, the version policy, the journal's kinds and events, the project document, the song and its composition, and a song's snapshots |
 | `duet-bus` | the project's journal, an index over segments: appended under one lock, read from a cursor, replayed and checked |
 | `duet-actions` | every command's work, as registered actions with typed inputs, each recording the documents it writes |
 | `duet-cli` | the `duet` binary: clap over the actions, and inside a project their `doc.written` events appended to the journal |
@@ -169,6 +169,7 @@ duet init ~/Music/porch      # makes the directory if it is missing
 duet init --title "Porch"    # the title is the directory's name otherwise
 duet project path            # the project found here, and how it was found
 duet project show            # its document, each take and where it was found, and every song
+duet project adopt ~/scratch # scratch work brought in: a plan, then --apply copies it
 ```
 
 - **`duet init` writes two files and prints each:** `.duet/project.duet`, with no defaults and
@@ -215,19 +216,72 @@ duet record wayfaring                                       # into takes/wayfari
   remembered in its place.
 - **`duet record <take>`** in a project records straight into `takes/<take>/<take>.flac` and adds
   the take. Outside a project, `duet record` takes a `.flac` path, as below.
+
+#### Commands that default into a project
+
+```sh
+duet capture melody wayfaring              # takes/wayfaring/wayfaring.hmm.duet, .abc, .capture.duet
+duet capture melody wayfaring --reader rules   # takes/wayfaring/wayfaring.rules.*, beside it
+duet capture compare wayfaring             # its one reading: takes/wayfaring/wayfaring.hmm.compare.*
+duet capture review wayfaring --moments review/wayfaring.moments   # takes/wayfaring/review/
+```
+
+- **A take is given by its name.** `capture`, `compare` and `review` find it as above, checked
+  against its digest, and say where they found it. A path still works: a path whose digest is a
+  project take's is that take.
+- **Readings go to the take's directory.** Without `-o`, a capture writes
+  `takes/<take>/<take>.<reader>.*`: `hmm`, `rules` or `basic-pitch`, or `rhythm` for a rhythm
+  capture. `compare` and `review` read the take's one reading there (with several, `-o` names
+  which), `compare` writes beside it, and `review` writes `takes/<take>/review/`.
+- **A capture of a path that is no take of the project is refused,** with the `duet take add`
+  line to run. `-o` outside `takes/` still captures it there, and duet says it is not in the
+  project.
+- **Defaults are stated.** `duet song new` says where its tempo, meter and key came from: given,
+  the project's `defaults`, or duet's own. `duet drums read` without `--grid` takes the defaults'
+  `grid`, and says so.
+- **Outside a project nothing changes,** nor in a `.duet/` that holds no `project.duet`, and a
+  flag always wins.
 - **The journal** records each write of `.duet/project.duet` as a `doc.written`, and each take
   added as a `take.added`, by its name and digest.
+
+### Adopting scratch work: `duet project adopt`
+
+Work made before projects, a directory of recordings and what duet wrote beside them, is brought
+in with a plan first and an explicit `--apply`. It copies; it never moves.
+
+```sh
+duet project adopt ~/scratch/wayfaring --song wayfaring-stranger          # a plan; writes nothing
+duet project adopt ~/scratch/wayfaring --song wayfaring-stranger --apply   # copies as planned
+```
+
+- **Each file directly in the directory is sorted:** a recording becomes a take, named from its
+  stem (copied, or left where it is with `--named`); a `.duet` or `.duet.jsonl` by its kind, a
+  capture or performance to the take whose digest it states, a part or grid beside a capture of
+  its stem with that capture, any other to the song's `parts/`, and a comp to its `comps/`;
+  `.notes`, `.drums` and `.abc` text as a part of its stem is; a `.moments` file to `review/`;
+  and a `STEM.review/` sheet to `takes/<take>/review/`. Anything else is listed as left behind.
+- **A reading from before the take digest** states none, so it is matched as `capture compare`
+  matches, by its stem, rate and length, and the plan says so. A part from before the `part`
+  rename states no source, and the plan says that too.
+- **Without `--song`,** every part and comp is listed as needing a song. `--song` names the song,
+  made when it does not exist.
+- **`--apply` copies byte for byte,** so every digest a comp or view holds still matches. It
+  refuses every destination that exists before writing anything, and the scratch directory is
+  left as it was. Each take added is a `take.added` in the journal, as `take add` records one.
 
 ### Songs: `duet song`
 
 A song is a folder in a project, `songs/<song>/`, named as a take is (lowercase words joined by
-hyphens). It holds `song.duet`, a `song` 1.0 document of the song and its composition, and
-`parts/`, the song's parts, each a part or drum-grid document named by its stem.
+hyphens). It holds `song.duet`, a `song` 1.0 document of the song and its composition,
+`parts/`, the song's parts, each a part or drum-grid document named by its stem, and
+`snapshots/`, the checkpoints the owner chose to keep.
 
 ```sh
 duet song new wayfaring-stranger --title "Wayfaring Stranger" --meter 3/4 --key "G minor"
 duet song show wayfaring-stranger                 # its id, status, composition and parts
 duet song status wayfaring-stranger sketch        # idea → sketch
+duet song snapshot wayfaring-stranger first-verse --said "the verse sits"
+duet song restore wayfaring-stranger 2026-11-20-first-verse
 ```
 
 - **`song.duet` holds the song**: its `id` (minted by `duet song new`; renaming the folder or
@@ -243,6 +297,20 @@ duet song status wayfaring-stranger sketch        # idea → sketch
 - **`duet song show`** refuses a placement of a part the song does not have, two parts with one
   name (`bass.duet` and `bass.DUET`), and two parts with one id (a file copied by hand), each by
   name.
+- **A snapshot is a folder of copies, made once and never written again**:
+  `duet song snapshot` writes `snapshots/<date>-<name>/` with a byte-for-byte copy of
+  `song.duet`, a copy of every part the composition places (a part placed nowhere is not
+  copied), and `snapshot.duet`, a `snapshot` 1.0 document stating the name, the date, the
+  owner's words, the SHA-256 of every file copied, and the takes the song links, by name and
+  digest. It journals a `doc.written` for each file and a `snapshot.taken`, and leaves the
+  song's status as it was. One of the same name the same day is refused.
+- **`duet song show` lists the snapshots**, and reports each file in one that differs from its
+  stated digest, is missing, or is not stated, naming it.
+- **`duet song restore`** first takes a snapshot of the working song
+  (`before-restoring-<snapshot>`), then copies the snapshot's `song.duet` and parts back over the
+  working ones, each journalled as a `doc.written` that replaced a file. The song keeps its
+  working status: only `duet song status` moves it. A snapshot whose files differ from their
+  digests is refused, naming them.
 - **A new song's composition** starts from `--tempo`, `--meter` and `--key`, or else the
   project's defaults in `.duet/project.duet`, or else 120 bpm in 4/4 with no key. `--project`
   names the project's root; it is the working directory by default.
@@ -1029,7 +1097,7 @@ It is an **index**, `journal.duet.jsonl`, over **segments**, `journal.<stamp>.du
   beside it, so a song renamed since is still found by its id.
 
 A song's status lives in its `song.duet`, and the journal records each change: `duet song status`
-journals a `song.status-set`. Replay folds the moves through the same state machine, leniently:
+journals a `song.status-set`, and `duet song snapshot` a `snapshot.taken`. Replay folds the moves through the same state machine, leniently:
 after a merge, the first move in order stands and the check lists the other.
 
 Each event kind versions on its own, so an entry this duet does not read, of a newer duet's event,
