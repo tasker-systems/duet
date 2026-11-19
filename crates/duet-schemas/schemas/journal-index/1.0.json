@@ -20,9 +20,9 @@
           "description": "Its last entry's id."
         },
         "parts": {
-          "description": "The parts its events concern, as `<song>/<part>`, sorted.",
+          "description": "The parts its events concern, each by its id with its name, `<song>/<part>`, beside it,\nsorted by name.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Indexed"
           },
           "type": "array"
         },
@@ -31,9 +31,9 @@
           "description": "Its stamp."
         },
         "songs": {
-          "description": "The songs its events concern, sorted.",
+          "description": "The songs its events concern, each by its id with its name beside it, sorted by name.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Indexed"
           },
           "type": "array"
         },
@@ -95,6 +95,22 @@
       },
       "required": [
         "opens"
+      ],
+      "type": "object"
+    },
+    "Indexed": {
+      "additionalProperties": false,
+      "description": "A song or a part as the index names it: its stable id, with its name beside it for reading\n(bus design decision 17, the domain model's ruling 13). A part's name is `<song>/<part>`.\n\nThe id is absent only when no event named one: a document written in a song's folder that\nholds no song that reads, or a part that states no id, such as a drum grid. Such an entry\nis found by its name alone.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },

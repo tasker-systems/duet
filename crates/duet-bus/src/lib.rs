@@ -18,13 +18,15 @@
 //!      line;
 //!   5. checks the entry's transition, writes it with one write, and calls `fdatasync`.
 //!
-//!   The check and the append are one step, so two processes cannot both answer one ask.
+//!   The check and the append are one step, so two processes cannot both answer one ask, or
+//!   both move one song from one status.
 //! - **[`read`]** reads the whole journal as a [`ProjectJournal`]: the index, every segment it
 //!   names, and what is missing or not named.
 //! - **[`Tail`]** follows it from a [`Cursor`] `(segment, seq, id)`, and says [`Polled::Resync`]
 //!   when the line at the cursor is no longer the one it named.
-//! - **[`Replay`]** folds the segments in index order through each lifecycle's `transition`,
-//!   leniently: a transition that fails is skipped, the first in order stands, and it is listed.
+//! - **[`Replay`]** folds the segments in index order through each lifecycle's `transition`, the
+//!   ask's ([`ask`]) and a song's status ([`song`]), leniently: a transition that fails is
+//!   skipped, the first in order stands, and it is listed.
 //! - **[`Report`]** is what `duet journal check` prints.
 //!
 //! `seq` is an entry's position within its segment, never stored: a segment's line 2 is `seq` 1.
@@ -37,14 +39,15 @@ mod error;
 mod id;
 mod project;
 mod replay;
+pub mod song;
 mod tail;
 mod writer;
 
-pub use check::{CloseDiffers, Duplicate, Report, Torn, Unread};
+pub use check::{CloseDiffers, Duplicate, Report, SongOnDisk, StatusDiffers, Torn, Unread};
 pub use error::{Error, Result};
 pub use id::{fresh_id, now};
 pub use project::{Orphan, Place, ProjectJournal, Segment, read};
-pub use replay::{AskRecord, Refused, Replay};
+pub use replay::{AskRecord, Refused, RefusedMove, Replay, SongRecord};
 pub use tail::{Cursor, Polled, Tail, after};
 pub use writer::{Appended, Cut, DEFAULT_SEGMENT_SIZE, Writer};
 

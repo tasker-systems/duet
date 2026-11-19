@@ -1,0 +1,62 @@
+{
+  "$defs": {
+    "Id": {
+      "description": "A UUIDv7, lowercase and hyphenated.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A name in the project: lowercase letters and digits, words joined by single hyphens, such as wayfaring or blood-sport-v2.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "type": "string"
+    },
+    "Status": {
+      "description": "Where a song stands: a closed state machine, set by the owner or by an agent with the\nowner, never inferred (ruling 9).\n\n```text\nidea ──▶ sketch ──▶ developing ──▶ arranged\n                        ▲              │\n                        └── reopen ────┘\n```",
+      "oneOf": [
+        {
+          "enum": [
+            "sketch",
+            "developing",
+            "arranged"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "idea",
+          "description": "Where every song starts.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal/events/song.status-set/1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The body of a journal entry whose `event` is song.status-set and whose `v` is 1.0.",
+  "properties": {
+    "from": {
+      "$ref": "#/$defs/Status",
+      "description": "The status it moved from."
+    },
+    "name": {
+      "$ref": "#/$defs/Name",
+      "description": "The song's name, its folder's, when the move was made: for reading, and for the\nindex, which lists a song by its id with its name beside it."
+    },
+    "song": {
+      "$ref": "#/$defs/Id",
+      "description": "The song's stable id, as its `song.duet` states it."
+    },
+    "to": {
+      "$ref": "#/$defs/Status",
+      "description": "The status it moved to."
+    }
+  },
+  "required": [
+    "song",
+    "name",
+    "from",
+    "to"
+  ],
+  "title": "duet journal event song.status-set 1.0",
+  "type": "object"
+}

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
-use duet_bus::{INDEX, Replay, Report};
+use duet_bus::{INDEX, Replay, Report, SongOnDisk};
 use duet_schemas::journal::Body;
 
 #[derive(Subcommand)]
@@ -25,15 +25,30 @@ pub enum JournalCommand {
     },
     /// Check the journal: list every entry of an event this duet does not read, which is kept
     /// as it is; every transition replay skips, such as a second answer to one ask, the first
-    /// in order standing; every id that appears twice; and every segment the index names that is
-    /// missing, or that holds entries and is not named. Exits 1 when anything is wrong. A torn
-    /// last line, a merge's traces in the index, and a segment a crashed roll left are stated,
-    /// not wrong.
+    /// in order standing; every song status move replay skips, such as two clones' moves of one
+    /// song, merged; every song whose status in its song.duet is not where the journal's moves
+    /// leave it, naming both, and changing neither; every id that appears twice; and every
+    /// segment the index names that is missing, or that holds entries and is not named. Exits 1
+    /// when anything is wrong. A torn last line, a merge's traces in the index, and a segment a
+    /// crashed roll left are stated, not wrong.
     Check {
         /// The project's root, or its journal.duet.jsonl. Default: the working directory.
         #[arg(default_value = ".")]
         project: PathBuf,
     },
+}
+
+/// Every song under the project's `songs/` whose `song.duet` reads, with its id and status, for
+/// the check to compare with the journal. One that does not read is left to `duet song show`,
+/// which names why.
+fn songs(root: &Path) -> Result<Vec<SongOnDisk>> {
+    Ok(duet_actions::song::listed(root)?
+        .into_iter()
+        .filter_map(|listed| {
+            let song = listed.song.ok()?;
+            Some(SongOnDisk::new(listed.folder, song.id, song.status))
+        })
+        .collect())
 }
 
 /// The project's root: `path`, or the directory holding it when it names the index.
@@ -52,7 +67,17 @@ pub fn run(command: JournalCommand) -> Result<()> {
         JournalCommand::Show { project } => {
             let read = duet_bus::read(&root_of(&project))?;
             let replay = Replay::of(&read);
-            let refused: HashMap<_, _> = replay.refused.iter().map(|r| (r.place, r)).collect();
+            let mut refused: HashMap<_, _> = replay
+                .refused
+                .iter()
+                .map(|r| (r.place, r.refusal.to_string()))
+                .collect();
+            refused.extend(
+                replay
+                    .refused_moves
+                    .iter()
+                    .map(|r| (r.place, r.refusal.to_string())),
+            );
             let mut out = String::new();
             for (place, line) in read.entries() {
                 let body = match &line.body {
@@ -74,14 +99,15 @@ pub fn run(command: JournalCommand) -> Result<()> {
                     write!(out, "  (kept, not read: {why})")?;
                 }
                 if let Some(r) = refused.get(&place) {
-                    write!(out, "  (skipped on replay: {})", r.refusal)?;
+                    write!(out, "  (skipped on replay: {r})")?;
                 }
                 out.push('\n');
             }
             duet_actions::io::stdout(&out)
         }
         JournalCommand::Check { project } => {
-            let report = Report::of(&duet_bus::read(&root_of(&project))?);
+            let root = root_of(&project);
+            let report = Report::with_songs(&duet_bus::read(&root)?, &songs(&root)?);
             duet_actions::io::stdout(&format!("{report}\n"))?;
             if report.is_wrong() {
                 bail!("{}: the check found something wrong", project.display());

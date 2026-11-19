@@ -39,6 +39,14 @@ pub enum Error {
     #[error("refused, {refusal}: {why}")]
     Refused { refusal: Refusal, why: String },
 
+    /// A song's status move is refused by the song's lifecycle, as the journal has the song, so
+    /// it was not appended.
+    #[error("refused, {refusal}: {why}")]
+    RefusedMove {
+        refusal: crate::song::Refusal,
+        why: String,
+    },
+
     /// A path the journal writes through is a symbolic link: the journal is written only inside
     /// its project, so a link that could lead out of it is refused, and nothing is written.
     #[error(
