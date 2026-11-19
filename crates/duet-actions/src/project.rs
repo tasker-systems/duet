@@ -23,12 +23,10 @@ use duet_schemas::{Document, Project as ProjectDoc, Version};
 use schemars::JsonSchema;
 
 use crate::io::{stdout, tool};
-use crate::{Context, PROJECT_FILE, PROJECT_VAR, Project, song};
+use crate::{Context, PROJECT_FILE, PROJECT_VAR, Project, song, take};
 
 /// A project's config, under its root.
 const CONFIG_FILE: &str = ".duet/duet.toml";
-/// Where a named take lives on this machine, under a project's root.
-const TAKES_LOCAL_FILE: &str = ".duet/takes.local.toml";
 
 /// What `init` writes as `.duet/duet.toml` when there is none: every line a comment, so it changes
 /// nothing until edited.
@@ -196,7 +194,7 @@ fn shown(project: &Project) -> Result<String> {
     let text = fs::read_to_string(&path).with_context(|| path.display().to_string())?;
     let doc = Document::<ProjectDoc>::read(&text).with_context(|| path.display().to_string())?;
     let body = &doc.body;
-    let local = takes_local(&project.root)?;
+    let local = take::read_local(&project.root)?;
     let mut out = String::new();
     let _ = writeln!(out, "project {}: {}", project.root.display(), body.title);
     let _ = writeln!(out, "created {}, by duet {}", body.created, body.duet);
@@ -232,26 +230,8 @@ fn shown(project: &Project) -> Result<String> {
         out.push_str("takes\n");
     }
     for take in &body.takes {
-        let copied = Path::new("takes")
-            .join(take.name.as_str())
-            .join(take.file.as_str());
-        let named = local
-            .as_ref()
-            .and_then(|t| t.get(take.name.as_str()))
-            .and_then(|entry| entry.get("path"))
-            .and_then(toml::Value::as_str)
-            .map(PathBuf::from);
-        let found = if project.root.join(&copied).is_file() {
-            format!("found at {}", copied.display())
-        } else if let Some(at) = named.as_ref().filter(|p| p.is_file()) {
-            format!("found at {}, named in {TAKES_LOCAL_FILE}", at.display())
-        } else {
-            let mut looked = vec![copied.display().to_string()];
-            if let Some(at) = &named {
-                looked.push(format!("{}, named in {TAKES_LOCAL_FILE}", at.display()));
-            }
-            format!("not found: looked at {}", looked.join(" and "))
-        };
+        // Each take's file is found and checked against its digest, as any command finds it.
+        let found = take::look(&project.root, take, &local).describe();
         let t = &take.take;
         let _ = write!(
             out,
@@ -305,17 +285,6 @@ fn shown(project: &Project) -> Result<String> {
     Ok(out)
 }
 
-/// `.duet/takes.local.toml`, when the project has one.
-fn takes_local(root: &Path) -> Result<Option<toml::Table>> {
-    let path = root.join(TAKES_LOCAL_FILE);
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let text = fs::read_to_string(&path).with_context(|| path.display().to_string())?;
-    let table = toml::from_str(&text).with_context(|| path.display().to_string())?;
-    Ok(Some(table))
-}
-
 /// `path` made absolute, with symbolic links resolved as far as it exists: the part that exists
 /// is resolved and the rest, not yet made, is laid on it.
 fn absolute(path: &Path) -> Result<PathBuf> {
@@ -347,7 +316,7 @@ fn home() -> Option<PathBuf> {
 }
 
 /// Today's date, in UTC.
-fn today() -> Result<Date> {
+pub(crate) fn today() -> Result<Date> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));

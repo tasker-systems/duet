@@ -31,7 +31,9 @@ const QUEUE: usize = 640;
 
 #[derive(Debug, Args, JsonSchema)]
 pub struct RecordArgs {
-    /// The FLAC file to write the take to. It must not exist: a take never replaces a file.
+    /// The FLAC file to write the take to. It must not exist: a take never replaces a file. In
+    /// a project, a take's name instead (lowercase words joined by hyphens, no .flac): the take
+    /// is recorded into takes/TAKE/TAKE.flac and added to the project.
     output: PathBuf,
     /// The input device to record from: its name, or a part of it only one input's name
     /// holds. Without it, the system's default input.
@@ -75,8 +77,14 @@ struct Shared {
     failed: Mutex<Option<String>>,
 }
 
-pub fn run(ctx: &Context, args: RecordArgs) -> Result<()> {
-    refuse_output(&args.output)?;
+pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
+    let into = into_project(ctx, &args.output)?;
+    if let Some((_, _, path)) = &into {
+        args.output.clone_from(path);
+    }
+    if into.is_none() {
+        refuse_output(&args.output)?;
+    }
     let stop = Arc::new(AtomicBool::new(false));
     {
         let stop = Arc::clone(&stop);
@@ -123,6 +131,11 @@ pub fn run(ctx: &Context, args: RecordArgs) -> Result<()> {
         other => bail!("{name}'s sample format, {other}, is not one duet records"),
     }
     .with_context(|| format!("opening {name} for input"))?;
+    if let Some((_, _, path)) = &into
+        && let Some(dir) = path.parent()
+    {
+        std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
+    }
     let mut writer = TakeWriter::create(&args.output, rate, channels, depth)?;
     if let Err(e) = stream.play() {
         // Nothing was recorded: the empty file is not a take.
@@ -186,6 +199,16 @@ pub fn run(ctx: &Context, args: RecordArgs) -> Result<()> {
     // A take is no document, so this records nothing; it goes through the context as every
     // write does.
     ctx.wrote(&written.path, false)?;
+    // In a project the take is added, whether the recording ran to its end or stopped: what
+    // was written is kept either way.
+    if let Some((project, name, _)) = &into {
+        let take = crate::take::add_recorded(ctx, project, name, &written.path)?;
+        eprintln!(
+            "added take {name}: {}, in {}",
+            take.digest,
+            crate::PROJECT_FILE
+        );
+    }
     match ended {
         None => Ok(()),
         Some(why) => bail!("recording stopped: {why}; {}", kept(&written.path)),
@@ -463,6 +486,50 @@ where
 
 /// Refuses an output that exists, is not named `.flac`, or is in a directory that does not
 /// exist, before any device is opened.
+/// Where `duet record <take>` records in a project: the project, the take's name, and
+/// `takes/<take>/<take>.flac` under its root. `None` when the output is a file's path, as it
+/// is outside a project. A name the project has a take by already is refused, as is a file
+/// there already, before any device is opened.
+fn into_project(
+    ctx: &Context,
+    output: &Path,
+) -> Result<Option<(crate::Project, duet_schemas::project::Name, PathBuf)>> {
+    let named = output.extension().is_none()
+        && output.components().count() == 1
+        && output
+            .to_str()
+            .is_some_and(|s| s.parse::<duet_schemas::project::Name>().is_ok());
+    if !named {
+        return Ok(None);
+    }
+    let name: duet_schemas::project::Name = output
+        .to_str()
+        .unwrap_or_default()
+        .parse()
+        .map_err(anyhow::Error::msg)?;
+    let Some(project) = ctx.project() else {
+        bail!(
+            "duet record {name} records the take {name} into a project, and there is none \
+             here (`duet init` makes one); outside a project, name a FLAC file, such as \
+             {name}.flac"
+        );
+    };
+    let doc = crate::take::read_project(&project.root)?;
+    crate::take::refuse_name_taken(&doc.body, &name)?;
+    let path = project
+        .root
+        .join(crate::take::TAKES_DIR)
+        .join(name.as_str())
+        .join(format!("{name}.flac"));
+    if path.symlink_metadata().is_ok() {
+        bail!(
+            "{} exists; a take never replaces a file, so move it or name another take",
+            path.display()
+        );
+    }
+    Ok(Some((project.clone(), name, path)))
+}
+
 fn refuse_output(output: &Path) -> Result<()> {
     let flac = output
         .extension()

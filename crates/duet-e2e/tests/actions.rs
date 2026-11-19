@@ -268,6 +268,7 @@ fn readers_write_nothing_in_a_project() {
         vec!["config", "path"],
         vec!["project", "path"],
         vec!["project", "show"],
+        vec!["take", "list"],
         vec!["journal", "show"],
         vec!["journal", "check"],
     ] {

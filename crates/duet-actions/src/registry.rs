@@ -4,7 +4,7 @@
 use schemars::JsonSchema;
 use serde_json::Value;
 
-use crate::{abc, capture, convert, drums, part, play, project, record, song, view};
+use crate::{abc, capture, convert, drums, part, play, project, record, song, take, view};
 
 /// Where an action runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +49,9 @@ fn schema<T: JsonSchema>() -> Value {
 }
 
 const DOC_WRITTEN: &[&str] = &["doc.written"];
+
+/// A take added to the project: its document's `doc.written`, and a `take.added` naming it.
+const TAKE_ADDED: &[&str] = &["doc.written", "take.added"];
 
 const fn writes(what: &'static str, replaces: bool) -> Option<Writes> {
     Some(Writes { what, replaces })
@@ -105,6 +108,35 @@ pub const ACTIONS: &[Action] = &[
         "project.show",
         &["project", "show"],
         schema::<project::ShowInput>,
+    ),
+    writing(
+        "take.add",
+        &["take", "add"],
+        TAKE_ADDED,
+        writes(
+            "takes/<take>/<file>, new, or with --named .duet/takes.local.toml; and \
+             .duet/project.duet, over itself",
+            true,
+        ),
+        schema::<take::AddInput>,
+    ),
+    writing(
+        "take.locate",
+        &["take", "locate"],
+        &[],
+        writes(".duet/takes.local.toml", true),
+        schema::<take::LocateInput>,
+    ),
+    reads("take.list", &["take", "list"], schema::<take::ListInput>),
+    writing(
+        "take.forget",
+        &["take", "forget"],
+        DOC_WRITTEN,
+        writes(
+            ".duet/project.duet, over itself, and .duet/takes.local.toml; never a take's files",
+            true,
+        ),
+        schema::<take::ForgetInput>,
     ),
     writing(
         "convert",
@@ -229,11 +261,17 @@ pub const ACTIONS: &[Action] = &[
         schema::<capture::review::ReviewArgs>,
     ),
     reads("play", &["play"], schema::<play::PlayArgs>),
+    // In a project, `duet record <take>` records into takes/<take>/<take>.flac and adds the
+    // take, which rewrites the project's document.
     writing(
         "record",
         &["record"],
-        &[],
-        writes("a new FLAC take", false),
+        TAKE_ADDED,
+        writes(
+            "a new FLAC take; in a project, under takes/<take>/, and .duet/project.duet over \
+             itself",
+            true,
+        ),
         schema::<record::RecordArgs>,
     ),
 ];

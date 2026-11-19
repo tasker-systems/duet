@@ -30,6 +30,7 @@ pub mod project;
 pub mod record;
 mod registry;
 pub mod song;
+pub mod take;
 pub mod view;
 
 pub use context::{Context, Found, PROJECT_FILE, PROJECT_VAR, Project, actor, fresh_id};

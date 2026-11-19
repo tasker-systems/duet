@@ -216,7 +216,8 @@ fn project_show_prints_the_document_each_take_and_where_it_was_found_and_every_s
     std::fs::create_dir_all(dir.join(".duet")).unwrap();
     let example = duet_e2e::root().join("crates/duet-schemas/schemas/project/examples/1.0.duet");
     std::fs::copy(example, dir.join(".duet/project.duet")).unwrap();
-    // wayfaring is copied in; blood-sport is named where it is, and that file is gone.
+    // wayfaring is copied in, but its file is no audio, so it is checked and does not read;
+    // blood-sport is named where it is, and that file is gone.
     std::fs::create_dir_all(dir.join("takes/wayfaring")).unwrap();
     std::fs::write(dir.join("takes/wayfaring/wayfaring-stranger.flac"), b"fLaC").unwrap();
     let gone = dir.join("phone/Blood Sport 3.m4a");
@@ -241,7 +242,7 @@ fn project_show_prints_the_document_each_take_and_where_it_was_found_and_every_s
         format!("project {}: Porch\n", dir.display()),
         "created 2026-11-17, by duet 0.3\n".to_owned(),
         "defaults tempo 92 bpm, meter 3/4, key Ab major, tuning +0c, grid 1/16\n".to_owned(),
-        "  wayfaring (wayfaring-stranger.flac), sha256:9f2c41d07b3e8a65c1f0d92e4b7a3c58e06d1f9a2b4c7e8d3f5a6b0c9d1e2f34, 44100 Hz, 1 channel, 976080 frames, added 2026-11-17, given tempo 92 bpm; found at takes/wayfaring/wayfaring-stranger.flac\n".to_owned(),
+        "  wayfaring (wayfaring-stranger.flac), sha256:9f2c41d07b3e8a65c1f0d92e4b7a3c58e06d1f9a2b4c7e8d3f5a6b0c9d1e2f34, 44100 Hz, 1 channel, 976080 frames, added 2026-11-17, given tempo 92 bpm; does not read: takes/wayfaring/wayfaring-stranger.flac: ".to_owned(),
         format!(
             "  blood-sport (Blood Sport 3.m4a), sha256:41ab07e3c9d25f18b6a4e0c7d3f92b5a8e1c6d4f7a0b3e9c2d5f8a1b4c7e0d36, 48000 Hz, 1 channel, 1203200 frames, added 2026-11-18; not found: looked at takes/blood-sport/Blood Sport 3.m4a and {}, named in .duet/takes.local.toml\n",
             gone.display()

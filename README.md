@@ -183,6 +183,41 @@ duet project show            # its document, each take and where it was found, a
   whose `.duet/` holds `project.duet`, or the one `DUET_PROJECT=<dir>` names, for scripts and
   tests. A `.duet/` without a `project.duet` is config only, as it has always been.
 
+### Takes: `duet take`
+
+A take is a recording in a project, named by the owner and identified by its digest: the SHA-256
+of its decoded samples. Its entry in `.duet/project.duet` holds the digest, rate, channels and
+frames, the file's own name, the date it was added, and what the owner gave it.
+
+```sh
+duet take add ~/Downloads/idea.m4a --name idea              # copied into takes/idea/
+duet take add "/Volumes/Phone/Blood Sport 3.m4a" --named    # left where it is
+duet take locate blood-sport "/Volumes/Archive/Blood Sport 3.m4a"   # found again elsewhere
+duet take list                                              # every take, and where it is found
+duet take forget idea                                       # its entry goes; its files stay
+duet record wayfaring                                       # into takes/wayfaring/wayfaring.flac
+```
+
+- **`take add` decodes the file once** for its digest. By default it copies the file byte for
+  byte to `takes/<take>/<file>`, never transcoding it. With `--named` it copies nothing and
+  keeps the file's absolute path in `.duet/takes.local.toml`, which is this machine's. Without
+  `--name`, the take is named from the file (`Blood Sport 3.m4a` is `blood-sport-3`). A name the
+  project has, or a recording it has under any name, is refused.
+- **Finding a take:** `takes/<take>/<file>` first, then the path `takes.local.toml` names, checked
+  against the digest. `take list` and `project show` say where each take was found, or that it
+  is missing, changed or unreadable, and `take locate` refuses a file that is not the take,
+  naming both digests. Nothing is ever a symlink.
+- **`take forget`** drops the entry and its local path, and leaves every file in `takes/<take>/`
+  for you to delete. A song part still comped from the take is named.
+- **What you give a take is remembered.** A capture of a project's take (`duet capture rhythm
+  takes/beat/beat.wav --tempo 92`) stores the tempo, meter or key it was given on the take's
+  `given`, and every later capture of it uses them, stated as given. A flag still wins, and is
+  remembered in its place.
+- **`duet record <take>`** in a project records straight into `takes/<take>/<take>.flac` and adds
+  the take. Outside a project, `duet record` takes a `.flac` path, as below.
+- **The journal** records each write of `.duet/project.duet` as a `doc.written`, and each take
+  added as a `take.added`, by its name and digest.
+
 ### Songs: `duet song`
 
 A song is a folder in a project, `songs/<song>/`, named as a take is (lowercase words joined by

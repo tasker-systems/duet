@@ -283,7 +283,7 @@ fn felt_beat(meter: TimeSig, quarter_bpm: f64) -> Option<String> {
 }
 
 /// A tempo as a whole number when it is one, and otherwise to one decimal: 46, 46.5.
-fn number(bpm: f64) -> String {
+pub(crate) fn number(bpm: f64) -> String {
     if (bpm - bpm.round()).abs() < 1e-9 {
         format!("{bpm:.0}")
     } else {
