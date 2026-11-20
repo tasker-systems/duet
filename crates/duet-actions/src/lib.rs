@@ -19,6 +19,7 @@
 
 pub mod abc;
 pub mod adopt;
+pub mod arrange;
 pub mod capture;
 pub mod config;
 mod context;

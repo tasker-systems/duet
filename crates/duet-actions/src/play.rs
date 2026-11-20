@@ -34,7 +34,8 @@ pub const SOUNDFONT_NAME: &str = "default.sf2";
 pub struct PlayArgs {
     /// The part to play: a .duet document, MIDI or ABC by its name, or - for standard input
     /// (a document if it starts with {, MIDI, or ABC with --from abc). A view's text plays
-    /// through `duet apply`: `duet apply take.notes -o - | duet play -`.
+    /// through `duet apply`: `duet apply take.notes -o - | duet play -`. Or a song: its folder,
+    /// its song.duet, or in a project its name, played as its composition places its parts.
     input: PathBuf,
     #[arg(long, value_parser = FormatParser)]
     from: Option<Format>,
@@ -50,8 +51,22 @@ pub struct PlayArgs {
 
 pub fn run(ctx: &Context, args: PlayArgs) -> Result<()> {
     let config = ctx.config();
-    let format = part_format(&args.input, args.from, "duet play reads")?;
-    let part = read(&args.input, format, "duet play reads")?;
+    let root = ctx.project().map(|p| p.root.as_path());
+    let part = match crate::song::folder_for_play(root, &args.input)? {
+        Some(dir) => {
+            if args.from.is_some() {
+                bail!(
+                    "--from names a part's format, and {} is a song, read from its folder",
+                    args.input.display()
+                );
+            }
+            song_part(&dir)?
+        }
+        None => {
+            let format = part_format(&args.input, args.from, "duet play reads")?;
+            read(&args.input, format, "duet play reads")?
+        }
+    };
     let schedule = Schedule::from_part(&part)?;
     match args.port {
         Some(port) => to_port(&schedule, &port, &args.input),
@@ -60,6 +75,18 @@ pub fn run(ctx: &Context, args: PlayArgs) -> Result<()> {
             through_synth(&schedule, &font, &args.input)
         }
     }
+}
+
+/// The song in `dir` as one part on its composition's clock ([`crate::arrange`]), with each
+/// disagreement said on standard error before it plays: stated, never fixed.
+fn song_part(dir: &Path) -> Result<duet_core::Part> {
+    let (song, parts) = crate::song::read_placed(dir)?;
+    let arranged = crate::arrange::arrange(&song, &parts)
+        .map_err(|why| anyhow!("{}: {why}", dir.join("song.duet").display()))?;
+    for line in &arranged.stated {
+        eprintln!("{line}");
+    }
+    Ok(arranged.part)
 }
 
 /// Where the installed SoundFont is looked for: the data directory (`DUET_DATA_DIR`, or
