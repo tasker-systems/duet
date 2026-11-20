@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# A fake cargo for test-api-check.sh. It logs every call to $FAKE_CRATES_DIR/cargo.log and
+# answers only what the release scripts ask of it:
+#   cargo semver-checks --version
+#   cargo semver-checks check-release -p CRATE --baseline-version V --release-type T
+#     fails when $FAKE_BREAKS names CRATE (space-separated) and T is not `major`: a break that
+#     only a breaking bump admits.
+#   cargo package ...   succeeds.
+set -euo pipefail
+
+echo "$*" >> "${FAKE_CRATES_DIR}/cargo.log"
+case "${1:-} ${2:-}" in
+    "semver-checks --version") echo "cargo-semver-checks 0.0.0-fake"; exit 0 ;;
+    "semver-checks check-release")
+        shift 2
+        crate="" type=""
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                -p) crate="$2"; shift 2 ;;
+                --release-type) type="$2"; shift 2 ;;
+                --baseline-version) shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        for broken in ${FAKE_BREAKS:-}; do
+            if [[ "$broken" == "$crate" && "$type" != "major" ]]; then
+                echo "--- failure function_missing: pub fn removed (fake) in ${crate} ---"
+                exit 1
+            fi
+        done
+        exit 0 ;;
+esac
+[[ "${1:-}" == "package" ]] && exit 0
+echo "fake cargo: unexpected call: $*" >&2
+exit 2

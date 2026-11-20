@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# A fake curl for test-api-check.sh: answers crates.io's versions API from $FAKE_CRATES_DIR, and
+# nothing else. One file per crate, named for it, holds its answer:
+#   versions: 0.2.0 0.3.0   HTTP 200 with that versions list
+#   status: 503             that HTTP status, with an error body
+#   net                     no answer at all (curl exit 7, http_code 000)
+#   body: <text>            HTTP 200 with that body as it is
+# No file means 404. It honours -o, -w '%{http_code}' and -f, as the release scripts use them.
+set -euo pipefail
+
+out="" fmt="" fail=false url=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        -w) fmt="$2"; shift 2 ;;
+        -A | --retry | --retry-delay) shift 2 ;;
+        -sf | -fs) fail=true; shift ;;
+        -f) fail=true; shift ;;
+        -s) shift ;;
+        https://*) url="$1"; shift ;;
+        *) echo "fake curl: unexpected argument $1" >&2; exit 2 ;;
+    esac
+done
+echo "$url" >> "${FAKE_CRATES_DIR}/curl.log"
+crate="${url#https://crates.io/api/v1/crates/}"
+crate="${crate%/versions}"
+answer_file="${FAKE_CRATES_DIR}/${crate}"
+
+code=404
+body='{"errors":[{"detail":"Not Found"}]}'
+if [[ -f "$answer_file" ]]; then
+    answer="$(cat "$answer_file")"
+    case "$answer" in
+        net)
+            [[ -z "$fmt" ]] || printf '000'
+            exit 7 ;;
+        status:*)
+            code="${answer#status: }"
+            body='{"errors":[{"detail":"unavailable"}]}' ;;
+        body:*)
+            code=200
+            body="${answer#body: }" ;;
+        versions:*)
+            code=200
+            body="$(printf '%s\n' ${answer#versions: } | jq -R . | jq -sc '{versions: map({num: .})}')" ;;
+    esac
+fi
+if [[ "$fail" == "true" && "$code" -ge 400 ]]; then
+    exit 22
+fi
+if [[ -n "$out" ]]; then printf '%s' "$body" > "$out"; else printf '%s' "$body"; fi
+[[ -z "$fmt" ]] || printf '%s' "${fmt//%\{http_code\}/$code}"

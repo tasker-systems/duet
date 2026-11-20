@@ -19,19 +19,23 @@ only add to it.
 ## Cutting a release
 
 1. **Check.** On an up-to-date `main`, `cargo make release-check` (a patch) or
-   `cargo make release-check-minor` reports the next version, checks each library crate's API
-   against its latest version on crates.io with cargo-semver-checks, and packages every crate. It
-   changes nothing. A crate whose API changed more than the bump allows is named; use the next
-   level up. duet-cli is the application, so its contract is the command line (`crates/duet-e2e`),
-   and it is not API-checked.
+   `cargo make release-check-minor` reports the next version, runs the API check, and packages
+   every crate. It changes nothing. The API check (`tools/scripts/release/api-check.sh`) runs
+   cargo-semver-checks on each library crate against the last release on crates.io, at the bump
+   requested. A crate whose API changed more than the bump allows is named; use the next level up.
+   duet-cli is the application, so its contract is the command line (`crates/duet-e2e`), and it
+   is not API-checked.
 2. **Prepare.** `cargo make release-prepare`, `release-prepare-minor` or `release-prepare-major`
    runs the same checks, then cuts `release/v<NEXT>`, writes every version site, commits,
    verify-packages every crate from the commit, pushes, and opens the release PR.
 3. **Merge.** Merging the release PR changes `VERSION` on `main`.
    [`release-tag.yml`](.github/workflows/release-tag.yml) pushes the `v<VERSION>` tag and calls
    [`release.yml`](.github/workflows/release.yml):
-   - **build-crates** verify-packages every crate crates.io does not yet have at the version, and
-     records each package's SHA-256 as a job output. It holds no credential.
+   - **build-crates** runs the API check again, on the tagged candidate, so what is published is
+     what was judged: a `VERSION` change `release-prepare` did not make, or a merge to `main`
+     after the check, is judged too. Then it verify-packages every crate crates.io does not yet
+     have at the version, and records each package's SHA-256 as a job output. It holds no
+     credential.
    - **publish-crates** downloads those packages, checks them against the hashes, exchanges its
      OIDC token for a short-lived crates.io token (trusted publishing), and publishes them in
      dependency order, compiling nothing. It does not run when there is nothing to publish.
@@ -41,6 +45,26 @@ only add to it.
 
 A run that fails partway is re-run from the Actions tab with `workflow_dispatch` and the tag:
 every version crates.io already lists is skipped, so it continues where it stopped.
+
+## The API check
+
+`tools/scripts/release/api-check.sh CANDIDATE` judges the tree at `HEAD` as `CANDIDATE`.
+
+- **The last release** is origin's newest `v<semver>` tag in `HEAD`'s history (`last_release` in
+  `tools/scripts/release/lib/common.sh`). `release-prepare` opens the window from it, and requires
+  `VERSION` to name it. The check passes it to cargo-semver-checks as `--baseline-version`, so
+  the baseline is the copy crates.io published, and there is one derivation of it. A shallow
+  clone, a remote whose tags cannot be listed, a tag whose commit is not in the clone, or no one
+  newest tag refuses.
+- **The bump** from the last release to `CANDIDATE` is the class the check admits. Below 1.0, a
+  minor may break and a patch may only add. duet declares only the class, so the check cannot tell
+  one break from another.
+- **A new crate** is one crates.io answers 404 for, or lists at `CANDIDATE` alone (the bootstrap
+  below). Any other failed lookup refuses: it is never read as "not published".
+
+Its bite test, `tools/scripts/release/test-api-check.sh`, runs in CI with fakes for crates.io
+and cargo-semver-checks. Only a real release run shows the check against the real registry and
+comparator.
 
 ## Authentication
 
