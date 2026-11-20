@@ -296,6 +296,13 @@ pub const ACTIONS: &[Action] = &[
         ),
         schema::<capture::review::ReviewArgs>,
     ),
+    writing(
+        "capture.disagree",
+        &["capture", "disagree"],
+        &[],
+        writes("STEM.disagree.moments, new, when a place is found", false),
+        schema::<capture::disagree::DisagreeArgs>,
+    ),
     reads("play", &["play"], schema::<play::PlayArgs>),
     // In a project, `duet record <take>` records into takes/<take>/<take>.flac and adds the
     // take, which rewrites the project's document.
