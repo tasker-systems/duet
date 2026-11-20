@@ -165,6 +165,10 @@ fn every_output_holds_the_same_music_and_states_its_end() {
     let mut compared = 0;
     for entry in std::fs::read_dir(&golden).expect("golden files") {
         let path = entry.expect("entry").path();
+        // golden/capture/ holds the default capture's goldens (tests/capture_default.rs).
+        if path.is_dir() {
+            continue;
+        }
         let name = path
             .file_name()
             .expect("a name")
