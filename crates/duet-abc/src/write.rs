@@ -12,7 +12,10 @@ use duet_core::{Key, Mode, Part, Position, TimeSig, Track};
 
 use crate::error::{Error, Result};
 use crate::ratio::Ratio;
-use crate::read::{DEFAULT_VELOCITY, DYNAMICS, default_channel, key_alterations, pickup_meter};
+use crate::read::{
+    DEFAULT_VELOCITY, DYNAMICS, beats_per_beam_group, default_channel, key_alterations,
+    pickup_meter,
+};
 
 /// What to do with a velocity that is not one of the dynamics' levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -258,9 +261,8 @@ impl TrackWriter<'_> {
     /// Writes one bar's pieces. `changes` are the inline fields due at ticks in the bar.
     fn bar(&mut self, bar: &BarSpan, pieces: &mut [Piece], changes: &[Change]) -> Result<String> {
         self.bar_acc = [None; 7];
-        let compound = bar.sig.num.is_multiple_of(3) && bar.sig.num >= 6;
         let beat = self.whole_ticks / u64::from(bar.sig.den);
-        let group_beat = if compound { 3 * beat } else { beat };
+        let group_beat = beats_per_beam_group(bar.sig) * beat;
         let bar_end = bar.start + bar.len;
         let mut out = String::new();
         let mut i = 0;
