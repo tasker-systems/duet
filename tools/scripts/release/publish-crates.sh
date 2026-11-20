@@ -25,7 +25,10 @@
 #
 # Re-runs are idempotent: a version crates.io already lists is a loud skip, so a release that
 # failed at crate 5 of 9 continues from crate 5, and a release whose crates were all published
-# beforehand (the first release's local bootstrap, RELEASING.md) publishes nothing.
+# beforehand publishes nothing.
+#
+# Held crates: a crate in HELD (lib/common.sh) is neither packaged nor published, though its
+# version moves with the rest. held_check refuses a run that would publish a crate depending on one.
 #
 # Version agreement: VERSION must equal [workspace.package].version and every duet-* version in
 # [workspace.dependencies]; update-versions.sh writes them together.
@@ -56,6 +59,7 @@ fi
 [[ -z "$OUT_DIR" || "$DRY_RUN" == "false" ]] || die "--dry-run belongs to the publish stage (--from)"
 
 cd "$REPO_ROOT"
+held_check
 TARGET_DIR="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
 
 [[ "$(workspace_version)" == "$VERSION" ]] ||
@@ -70,18 +74,19 @@ if [[ -n "$OUT_DIR" ]]; then
     log_header "verify-package duet ${VERSION} into ${OUT_DIR}"
     mkdir -p "$OUT_DIR"
     MISSING=0
-    for crate in "${CRATES[@]}"; do crate_published "$crate" "$VERSION" || MISSING=$((MISSING + 1)); done
+    for crate in ${HELD[@]+"${HELD[@]}"}; do log_info "${crate} is held back from this release (HELD); not packaged"; done
+    for crate in "${PUBLISHED[@]}"; do crate_published "$crate" "$VERSION" || MISSING=$((MISSING + 1)); done
     if [[ "$MISSING" -eq 0 ]]; then
         # Nothing to publish, so nothing is compiled: the release's publish job will not run.
-        log_info "every duet crate is on crates.io at ${VERSION}; nothing to package"
+        log_info "every duet crate this release publishes is on crates.io at ${VERSION}; nothing to package"
         exit 0
     fi
     PKG_ARGS=()
-    for crate in "${CRATES[@]}"; do PKG_ARGS+=(-p "$crate"); done
+    for crate in "${PUBLISHED[@]}"; do PKG_ARGS+=(-p "$crate"); done
     # All at once, so the unpublished crates resolve each other from cargo's local overlay and the
     # whole set is verified before anything is published.
     cargo package "${PKG_ARGS[@]}"
-    for crate in "${CRATES[@]}"; do
+    for crate in "${PUBLISHED[@]}"; do
         if crate_published "$crate" "$VERSION"; then
             log_info "${crate} ${VERSION} is already on crates.io; left out"
         else
@@ -92,8 +97,9 @@ if [[ -n "$OUT_DIR" ]]; then
 fi
 
 log_header "publish duet ${VERSION} from ${FROM_DIR} (dry run: ${DRY_RUN})"
+for crate in ${HELD[@]+"${HELD[@]}"}; do log_info "${crate} is held back from this release (HELD); not published"; done
 PRESENT=0
-for crate in "${CRATES[@]}"; do
+for crate in "${PUBLISHED[@]}"; do
     if crate_published "$crate" "$VERSION"; then
         log_info "${crate} ${VERSION} is already on crates.io; skipped"
         PRESENT=$((PRESENT + 1))
@@ -115,4 +121,4 @@ for crate in "${CRATES[@]}"; do
     cargo publish --no-verify -p "$crate"
     PRESENT=$((PRESENT + 1))
 done
-[[ "$PRESENT" -eq "${#CRATES[@]}" ]] && log_info "all ${#CRATES[@]} duet crates ${VERSION} are on crates.io"
+[[ "$PRESENT" -eq "${#PUBLISHED[@]}" ]] && log_info "all ${#PUBLISHED[@]} duet crates this release publishes are on crates.io at ${VERSION}"

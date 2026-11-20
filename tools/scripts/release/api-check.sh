@@ -16,6 +16,8 @@
 # - The bump is the version class duet declares: release_type (lib/common.sh) turns the last
 #   release and CANDIDATE into cargo-semver-checks' --release-type. duet declares only a class,
 #   so the check cannot tell one break from another.
+# - A crate in HELD (lib/common.sh) is not published by this release, so it is not judged; the
+#   check names each one. held_check refuses a release that publishes a crate depending on one.
 # - Each library crate is judged; duet-cli is the application, whose contract is the command line
 #   (duet-e2e tests it), so it is not.
 # - A crate is new, and has nothing to be judged against, only on a definite answer: crates.io
@@ -37,6 +39,7 @@ cd "$REPO_ROOT"
 cargo semver-checks --version >/dev/null 2>&1 ||
     die "cargo-semver-checks is not installed (cargo install cargo-semver-checks --locked)"
 
+held_check
 LAST="$(last_release "$CANDIDATE")" || exit 1
 if [[ "$LAST" == "none" ]]; then
     log_header "API check for ${CANDIDATE}: origin has no release tag in HEAD's history"
@@ -49,7 +52,8 @@ NEW=()
 FAILED=()
 OUT="$(mktemp)"
 trap 'rm -f "$OUT"' EXIT
-for crate in "${CRATES[@]}"; do
+for crate in ${HELD[@]+"${HELD[@]}"}; do log_info "${crate}: held back from this release (HELD); not judged"; done
+for crate in "${PUBLISHED[@]}"; do
     [[ "$crate" == "duet-cli" ]] && continue
     if ! crate_lookup "$crate"; then
         log_info "${crate}: not on crates.io (404); new, first published at ${CANDIDATE}"

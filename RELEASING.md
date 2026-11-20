@@ -59,8 +59,9 @@ every version crates.io already lists is skipped, so it continues where it stopp
 - **The bump** from the last release to `CANDIDATE` is the class the check admits. Below 1.0, a
   minor may break and a patch may only add. duet declares only the class, so the check cannot tell
   one break from another.
-- **A new crate** is one crates.io answers 404 for, or lists at `CANDIDATE` alone (the bootstrap
-  below). Any other failed lookup refuses: it is never read as "not published".
+- **A new crate** is one crates.io answers 404 for, or lists at `CANDIDATE` alone (published by
+  token ahead of this run, "A crate's first version" below). Any other failed lookup refuses: it
+  is never read as "not published". A crate in `HELD` is not judged at all.
 
 Its bite test, `tools/scripts/release/test-api-check.sh`, runs in CI with fakes for crates.io
 and cargo-semver-checks. Only a real release run shows the check against the real registry and
@@ -73,19 +74,34 @@ crates.io names this repository and **two** workflow files: `release-tag.yml`, b
 release-tag.yml → release.yml chain crates.io matches the calling workflow, and `release.yml`,
 for the `workflow_dispatch` re-run. A new crate needs both entries.
 
-crates.io attaches a trusted publisher only to a crate that already exists, so a crate's first
-version is published once with an API token, from a maintainer's machine:
+Every crate already on crates.io is set to **trusted-publishing-only**, so no API token can
+publish it: only a run of the release workflows can.
 
-1. Cut the release PR as above, and check out its branch.
-2. `cargo login`, with a token scoped to publishing.
-3. `cargo make release-publish` verify-packages every crate, checks the first crate crates.io
-   lacks against its verified package, asks, and publishes what crates.io lacks, in order.
-4. Add the trusted publishers for every crate on crates.io, and revoke the token.
-5. Merge the release PR, with nothing merged to `main` before it: the published packages are its
-   branch's, and the tag should name the same sources. Its run finds every crate on crates.io
-   already, publishes nothing, mints no credential, and tags the release and creates the Release.
+### A crate's first version
 
-`cargo make release-publish` is also a recovery door for a release CI cannot finish.
+crates.io attaches a trusted publisher only to a crate that already exists, so a new crate's first
+version is published once with an API token. A token cannot publish the crates it depends on, and
+CI cannot publish the new crate, so the two go out in separate steps:
+
+1. **Hold it.** Name the new crate in `HELD` (`tools/scripts/release/lib/common.sh`), with every
+   crate that depends on it (duet-cli, usually). A held crate's version still moves with the rest,
+   but the API check, the packaging and the publish leave it out, and the release PR names it.
+   `held_check` refuses a release that would publish a crate depending on a held one.
+2. **Release the rest** as above. CI publishes every crate but the held ones, and tags the release.
+3. **Claim it.** From `main` after the tag, cut a branch that empties `HELD`. On it, with a token
+   scoped to publishing new crates (`cargo login`), publish each new crate by hand, in the order of
+   `CRATES`: `cargo publish -p <crate>`. Its dependencies are on crates.io at the shared version by
+   now. A held crate that already exists on crates.io (duet-cli) is not published here: the token
+   cannot, and it goes out with the next release.
+4. Add each new crate's trusted publishers (both workflow files, above), set it to
+   trusted-publishing-only, and revoke the token. Merge the branch.
+
+The next release publishes every crate through CI.
+
+**A release CI cannot finish** is re-run with `release.yml`'s `workflow_dispatch` on its tag:
+`publish-crates.sh` skips every version crates.io already lists, so it continues where it stopped.
+`cargo make release-publish` publishes with cargo's stored token, so it can publish only a crate
+that is not yet trusted-publishing-only.
 
 ## Pinned triggers
 
