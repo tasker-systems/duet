@@ -176,6 +176,8 @@ struct Voice {
     /// The tied notes of the last event, waiting for the notes they tie to.
     tied: Vec<EvNote>,
     chord: Option<OpenChord>,
+    /// Each space between notes: how many items came before it, and where it is.
+    spaces: Vec<(usize, Span)>,
 }
 
 impl Voice {
@@ -199,6 +201,7 @@ impl Voice {
             tuplet: None,
             tied: Vec::new(),
             chord: None,
+            spaces: Vec::new(),
         }
     }
 }
@@ -220,7 +223,6 @@ pub(crate) struct Reader {
     /// voices: (span, construct, text).
     body_change: Option<(Span, &'static str, String)>,
     last_field: Option<char>,
-    beaming_noted: bool,
     header_program: Option<u8>,
     header_channel: Option<u8>,
     x_line: usize,
@@ -954,9 +956,10 @@ impl Reader {
                 Tok::Overlay => return Err(refuse(span, subset::OVERLAY, "&")),
                 Tok::OldChord(text) => return Err(refuse(span, subset::OLD_CHORD, text.clone())),
                 Tok::Space => {
-                    if !self.beaming_noted {
-                        self.beaming_noted = true;
-                        self.notice(span, subset::BEAMING, "a space");
+                    // Judged once the voice is laid out: see `beam_break`.
+                    let voice = &mut self.voices[v];
+                    if voice.chord.is_none() {
+                        voice.spaces.push((voice.items.len(), span));
                     }
                 }
                 Tok::Continuation => {}
@@ -1008,6 +1011,77 @@ fn whole(ticks: u64) -> Ratio {
 
 fn bar_ticks(sig: TimeSig) -> u64 {
     TICKS_PER_WHOLE * u64::from(sig.num) / u64::from(sig.den)
+}
+
+/// How many beats make one beam group in a bar of `sig`: three in a compound meter (6/8,
+/// 9/8, 12/8), one otherwise. The writer puts a space where a group ends, and nowhere
+/// else; the reader notices a space only where it breaks a beam elsewhere.
+pub(crate) fn beats_per_beam_group(sig: TimeSig) -> u64 {
+    if sig.num.is_multiple_of(3) && sig.num >= 6 {
+        3
+    } else {
+        1
+    }
+}
+
+/// The first space in a voice that breaks a beam the writer would not break: one between
+/// two notes or rests of the same line and bar, each shorter than a quarter (the only
+/// lengths that beam), that is not where a beam group ends. Such a space is beaming the
+/// part does not carry; any other space is restored when the part is written. `first` is
+/// the first bar's meter (a pickup's own), `meter` the tune's.
+fn beam_break(voice: &Voice, first: TimeSig, meter: TimeSig) -> Option<Span> {
+    const QUARTER: u64 = TICKS_PER_WHOLE / 4;
+    let mut spaces = voice.spaces.iter().peekable();
+    let (mut sig, mut meter) = (first, meter);
+    let mut into = 0u64;
+    // The last event in this bar, while nothing but transparent items follow it: its
+    // length and line.
+    let mut prev: Option<(u64, usize)> = None;
+    // A space since `prev`, waiting for the event after it.
+    let mut space: Option<Span> = None;
+    for (i, item) in voice.items.iter().enumerate() {
+        while let Some(&&(at, span)) = spaces.peek()
+            && at <= i
+        {
+            space = space.or(Some(span));
+            spaces.next();
+        }
+        match item {
+            Item::Event(e) => {
+                let len = e.len.ticks(TICKS_PER_WHOLE).unwrap_or(0);
+                if let (Some(span), Some((prev_len, prev_line))) = (space.take(), prev) {
+                    let group = beats_per_beam_group(sig) * TICKS_PER_WHOLE / u64::from(sig.den);
+                    let breaks = prev_len < QUARTER
+                        && len < QUARTER
+                        && prev_line == span.line
+                        && e.span.line == span.line
+                        && group != 0
+                        && !into.is_multiple_of(group);
+                    if breaks {
+                        return Some(span);
+                    }
+                }
+                prev = Some((len, e.span.line));
+                into += len;
+            }
+            Item::Bar(_) | Item::BarRest(..) => {
+                into = 0;
+                sig = meter;
+                prev = None;
+                space = None;
+            }
+            Item::Ending(..) => {
+                prev = None;
+                space = None;
+            }
+            Item::Meter(s, _) => {
+                meter = *s;
+                sig = *s;
+            }
+            Item::Key(_) | Item::Tempo(_) | Item::Dynamic(_) => {}
+        }
+    }
+    None
 }
 
 /// The order a voice's items play in, with repeats unfolded and endings played on their
@@ -1418,7 +1492,6 @@ impl Reader {
             current: None,
             body_change: None,
             last_field: None,
-            beaming_noted: false,
             header_program: None,
             header_channel: None,
             x_line: 0,
@@ -1503,6 +1576,27 @@ impl Reader {
             Some((len, span)) => pickup_sig(len, header_meter, span)?,
             None => header_meter,
         };
+        let mut notices = self.notices;
+        let beaming = voices
+            .iter()
+            .filter_map(|v| beam_break(v, initial_sig, header_meter))
+            .min_by_key(|s| (s.line, s.col));
+        if let Some(span) = beaming {
+            let at = notices
+                .iter()
+                .position(|n| (n.line, n.col) > (span.line, span.col))
+                .unwrap_or(notices.len());
+            notices.insert(
+                at,
+                Notice {
+                    line: span.line,
+                    col: span.col,
+                    construct: subset::BEAMING,
+                    found: "a space".to_owned(),
+                },
+            );
+        }
+
         let mut map = TimeMap::new(TPQ, initial_sig)?;
         let mut time_changes: Vec<(u64, TimeChange)> = Vec::new();
         let mut add_meter = |map: &mut TimeMap, tick: u64, sig: TimeSig| -> Result<()> {
@@ -1577,10 +1671,7 @@ impl Reader {
         let total = laid.iter().map(|l| l.total).max().unwrap_or(0);
         part.end = Some(map.position(total));
         part.normalize()?;
-        Ok(Reading {
-            part,
-            notices: self.notices,
-        })
+        Ok(Reading { part, notices })
     }
 }
 
