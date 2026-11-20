@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use duet_capture::{
-    ANALYSIS_RATE, Analysis, Chunk, Digester, Event, Given, Kind, Layer1, Mono, NoteModel,
+    ANALYSIS_RATE, Analysis, Chunk, Digester, Event, Gap, Given, Kind, Layer1, Mono, NoteModel,
     Performance, PerformanceFrames, Reader as ReadingReader, Stage, Thresholds, assemble, estimate,
     quantize_apart, quantize_offsets, read,
 };
@@ -19,7 +19,7 @@ fn read_json(relative: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// A validator for the committed capture-analysis 1.13 schema, with the envelope registered.
+/// A validator for the committed capture-analysis 1.14 schema, with the envelope registered.
 fn validator() -> jsonschema::Validator {
     let envelope = read_json("schemas/envelope/1.0.json");
     let registry = jsonschema::Registry::new()
@@ -29,7 +29,7 @@ fn validator() -> jsonschema::Validator {
         .unwrap();
     jsonschema::options()
         .with_registry(&registry)
-        .build(&read_json("schemas/capture-analysis/1.13.json"))
+        .build(&read_json("schemas/capture-analysis/1.14.json"))
         .unwrap()
 }
 
@@ -50,12 +50,17 @@ fn validator_at(version: &str) -> jsonschema::Validator {
 }
 
 /// `document`, restamped as a capture-analysis document at `version`. Before 1.12 the key states
-/// no profile, and before 1.13 the analysis states no take and the reading no passes, so those
-/// are left out, as every analysis now has them; any other field newer than `version` is the
-/// caller's to remove.
+/// no profile, before 1.13 the analysis states no take and the reading no passes, and before
+/// 1.14 it states no gaps, so those are left out, as every analysis now has them; any other
+/// field newer than `version` is the caller's to remove.
 fn as_version(document: &Value, version: &str) -> Value {
     let mut older = document.clone();
     let minor: u32 = version.strip_prefix("1.").unwrap().parse().unwrap();
+    if minor < 14
+        && let Some(body) = older["body"].as_object_mut()
+    {
+        body.remove("gaps");
+    }
     if minor < 13 {
         if let Some(body) = older["body"].as_object_mut() {
             body.remove("take");
@@ -673,8 +678,34 @@ fn the_variant_annotation_round_trips_exactly_and_validates_only_from_1_13() {
 }
 
 #[test]
-fn every_older_example_reads_as_stating_no_take_and_no_passes() {
-    for minor in 0..13 {
+fn the_gaps_round_trip_exactly_and_validate_only_from_1_14() {
+    let mut analysis = analysis(&Given::default());
+    analysis.gaps = vec![Gap::new(88_200, 22_050), Gap::new(132_300, 44_100)];
+    let (_, value) = round_trip(analysis.clone());
+    assert_eq!(
+        value["body"]["gaps"],
+        json!([{ "start": 88_200, "frames": 22_050 }, { "start": 132_300, "frames": 44_100 }]),
+        "{value}"
+    );
+    // A whole decode states none, and writes none.
+    analysis.gaps = Vec::new();
+    let (_, whole) = round_trip(analysis);
+    assert!(whole["body"].get("gaps").is_none(), "{whole}");
+    // capture-analysis 1.13 has no `gaps`: a 1.13 reader refuses it, and takes the same
+    // document without it.
+    let older = validator_at("1.13");
+    let mut refused = as_version(&value, "1.13");
+    refused["body"]["gaps"] = value["body"]["gaps"].clone();
+    assert!(!older.is_valid(&refused), "1.13 accepts gaps");
+    assert!(
+        older.is_valid(&as_version(&value, "1.13")),
+        "the 1.13 control is not valid"
+    );
+}
+
+#[test]
+fn every_older_example_reads_as_stating_no_take_no_passes_and_no_gaps() {
+    for minor in 0..14 {
         let text = std::fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(format!("schemas/capture-analysis/examples/1.{minor}.duet")),
@@ -683,18 +714,24 @@ fn every_older_example_reads_as_stating_no_take_and_no_passes() {
         let AnyDocument::CaptureAnalysis(doc) = AnyDocument::read(&text).unwrap() else {
             panic!("1.{minor} read as another kind");
         };
-        assert_eq!(doc.body.take, None, "1.{minor}");
-        assert_eq!(
-            doc.body.reading.as_ref().and_then(|r| r.passes.as_ref()),
-            None,
-            "1.{minor}"
-        );
+        if minor < 13 {
+            assert_eq!(doc.body.take, None, "1.{minor}");
+            assert_eq!(
+                doc.body.reading.as_ref().and_then(|r| r.passes.as_ref()),
+                None,
+                "1.{minor}"
+            );
+        }
+        assert!(doc.body.gaps.is_empty(), "1.{minor}");
         // Written today, it states neither, rather than a default.
         let written: Value = serde_json::from_str(&doc.write().unwrap()).unwrap();
-        assert!(written["body"].get("take").is_none(), "1.{minor}");
-        assert!(
-            written["body"]["reading"].get("passes").is_none(),
-            "1.{minor}"
-        );
+        if minor < 13 {
+            assert!(written["body"].get("take").is_none(), "1.{minor}");
+            assert!(
+                written["body"]["reading"].get("passes").is_none(),
+                "1.{minor}"
+            );
+        }
+        assert!(written["body"].get("gaps").is_none(), "1.{minor}");
     }
 }

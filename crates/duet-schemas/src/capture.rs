@@ -84,7 +84,13 @@ use crate::{Kind, Version};
 /// a pass that changed nothing included. Two readings with one `take` are variants of one take;
 /// they are the same variant when their `reader` and `passes` are equal too. Both are omitted
 /// when not stated, so a 1.12 document reads as one stating no take and no passes.
+///
+/// **1.14** adds the analysis's optional `gaps`, also additive: each span of the take the
+/// decoder left out (a frame Symphonia's FLAC reader skipped, or a packet it refused), its
+/// `start` and its length in `frames`, counted at the take's own rate. The frames are hashed
+/// and analysed as silence, so the digest and the events keep the take's true time. Omitted
+/// when the take decoded whole, so a 1.13 document reads as one stating no gaps.
 impl Kind for Analysis {
     const NAME: &'static str = "capture-analysis";
-    const VERSION: Version = Version::new(1, 13);
+    const VERSION: Version = Version::new(1, 14);
 }

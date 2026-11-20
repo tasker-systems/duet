@@ -96,6 +96,12 @@ pub struct Analysis {
     /// meaning not stated. Assembly leaves it absent: the capture command fills it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take: Option<Take>,
+    /// Spans of the take the decoder left out, each its start and length in frames at the
+    /// take's own rate, hashed and analysed as silence ([`Gap`](crate::Gap)). Added in
+    /// `capture-analysis` 1.14; absent before, and when the take decoded whole. Assembly
+    /// leaves it empty: the capture command fills it from the source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gaps: Vec<crate::Gap>,
     pub events: Vec<Event>,
     pub timing: Timing,
     /// The melody's key, given or estimated; absent for a rhythm take.
@@ -239,6 +245,7 @@ pub fn assemble(
     let analysis = Analysis {
         rate,
         take: None,
+        gaps: Vec::new(),
         events: events.to_vec(),
         timing: timing.clone(),
         key: estimate,

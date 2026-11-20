@@ -452,10 +452,15 @@ pub(super) fn take(path: &Path, rate: u32) -> Result<Vec<f32>> {
     let mut source = FileSource::open(path)?;
     let mut prepare = Prepare::new(rate);
     let mut mono = Vec::new();
+    let mut source_rate = 1;
     while let Some(chunk) = source.next_chunk().with_context(named)? {
+        source_rate = chunk.rate;
         prepare.push(chunk, &mut mono).with_context(named)?;
     }
     prepare.finish(&mut mono).with_context(named)?;
+    for said in crate::take::gaps_said(path, source_rate, source.gaps()) {
+        eprintln!("{said}");
+    }
     let mut samples = Vec::new();
     for m in mono {
         let at = usize::try_from(m.start_frame).context("a frame past the address space")?;

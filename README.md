@@ -188,7 +188,10 @@ duet project adopt ~/scratch # scratch work brought in: a plan, then --apply cop
 
 A take is a recording in a project, named by the owner and identified by its digest: the SHA-256
 of its decoded samples. Its entry in `.duet/project.duet` holds the digest, rate, channels and
-frames, the file's own name, the date it was added, and what the owner gave it.
+frames, the file's own name, the date it was added, and what the owner gave it. A frame of a
+file that the decoder refuses or its reader skips is read as silence, so what follows keeps its
+time, and said on standard error at every read — the digest is then of the silence-filled
+audio, and never silently of it.
 
 ```sh
 duet take add ~/Downloads/idea.m4a --name idea              # copied into takes/idea/
@@ -870,6 +873,12 @@ cannot be, that is reported after them, and they stay:
   once one sample moves. So two readings of one take are known to be of it by their `take`,
   never by their names. `passes` lists `breathy`, `rejoin` and `held-pitch` in the order they
   ran, each one listed even when it changed no note. A document without them states neither.
+  Since 1.14 the analysis states the decoder's `gaps`: each span of the take its reader left
+  out (a frame Symphonia's FLAC reader skipped, or a packet it refused), its `start` and its
+  length in `frames` at the take's own rate. Such a span is read as silence, so the take's
+  digest is over the silence-filled audio and every frame after it keeps its time; the same is
+  said on standard error when the take is read. A document without `gaps` states the take
+  decoded whole.
 - `STEM.performance.duet.jsonl`, for a melody: every pitch frame, before any note is read from
   it, as a `performance` stream. The first line is the envelope with its head (the rate, the hop,
   the first frame, the unit, and since `performance` 1.1 the `take`, as the analysis states it);

@@ -749,6 +749,55 @@ fn rhythm_writes_a_part_a_grid_and_the_analysis() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
+/// A take a frame of which the decoder refuses: the gap is said on standard error and stated
+/// in the analysis, as frames at the take's own rate, and the hits after it keep their time.
+/// The file is made here: 16 blocks of the clicks take, its fourth block a reserved subframe
+/// under a right CRC16 (`capture/audio.rs`).
+#[test]
+fn a_frame_the_decoder_refuses_is_said_written_as_silence_and_never_moves_what_follows() {
+    let dir = scratch("capture-gapped");
+    let flac = dir.join("tapped.flac");
+    audio::write_flac_block_refused(&flac, 16, 3);
+    let out = capture(
+        &dir,
+        &["rhythm", s(&flac), "--lane", "hh", "--tempo", "120"],
+    );
+    ok(&out, "capture rhythm");
+    let err = stderr(&out);
+    // Said once, with where and how long at the file's own rate (22 050 Hz): block 3 runs
+    // 12 288 frames from 0.557 s, 4096 frames long.
+    assert!(
+        err.contains("186 ms of audio at 0:00.6 could not be decoded and is read as silence"),
+        "{err}"
+    );
+    let body = analysis_of(&dir.join("tapped.capture.duet"));
+    assert_eq!(
+        body["gaps"],
+        serde_json::json!([{ "start": 12_288, "frames": 4096 }]),
+        "{body}"
+    );
+    // The clicks keep their true time either side of the gap: detector jitter either way, and
+    // never the gap's 4 096 frames.
+    let hits: Vec<u64> = body["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"] == "hit")
+        .map(|e| e["frame"].as_u64().unwrap())
+        .collect();
+    for at in [5_513, 16_538, 38_588] {
+        assert!(
+            hits.iter().any(|&f| f.abs_diff(at) < 200),
+            "no hit near frame {at}: {hits:?}"
+        );
+    }
+    assert!(
+        !hits.iter().any(|&f| f.abs_diff(22_850) < 200),
+        "a hit landed inside the gap: {hits:?}"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
 #[test]
 fn estimates_are_stated_on_stderr_and_in_both_files() {
     let dir = scratch("capture-stated");
