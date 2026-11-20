@@ -4,7 +4,9 @@
 //! capture disagree` existed (temper `01a1f6e0-d939-76d8-af14-0a932a1f5819`). This test holds that
 //! a capture run without asking for a disagreement behaves exactly as it did then: every file
 //! written, standard output and standard error, and the set of files, so no `.disagree.moments`
-//! appears unasked. The one field masked is the part's `body.id`, which is minted fresh each run.
+//! appears unasked. Two fields are masked: the part's `body.id`, which is minted fresh each run,
+//! and the version in each file's `tool`, which every release moves (`without_tool_version`), on
+//! both sides, so the goldens stay as `main` wrote them.
 //!
 //! The takes are the corpus's synthetic ones, both MIT: `synthetic-disagree.flac`, the witness
 //! take of `duet capture disagree`, and `synthetic-melody.flac`. "Wayfaring Stranger" is left to
@@ -23,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use duet_e2e::{duet, golden_dir, ok, root, scratch, without_id};
+use duet_e2e::{duet, golden_dir, ok, root, scratch, without_id, without_tool_version};
 
 /// The takes, in the corpus, captured with nothing asked.
 const TAKES: [&str; 2] = ["synthetic-disagree", "synthetic-melody"];
@@ -72,6 +74,7 @@ fn capture(take: &str) -> Vec<(String, Vec<u8>)> {
             } else {
                 bytes
             };
+            let bytes = without_tool_version(&bytes);
             ((*suffix).to_owned(), bytes)
         })
         .collect();
@@ -104,13 +107,15 @@ fn bless(take: &str, files: &[(String, Vec<u8>)]) {
 fn compare(take: &str, files: &[(String, Vec<u8>)]) {
     for (suffix, got) in files {
         let path = golden_path(take, suffix);
-        let want = std::fs::read(&path).unwrap_or_else(|e| {
-            panic!(
-                "{}: {e}; this platform has no goldens, so write them from main's binary \
+        let want = std::fs::read(&path)
+            .map(|w| without_tool_version(&w))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{}: {e}; this platform has no goldens, so write them from main's binary \
                  (DUET_E2E_BLESS, above)",
-                path.display()
-            )
-        });
+                    path.display()
+                )
+            });
         assert!(
             *got == want,
             "{take}{suffix} differs from {}: {}",
