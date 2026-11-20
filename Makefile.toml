@@ -30,14 +30,14 @@ echo "  cargo make release-publish"
 '''
 
 [tasks.release-check]
-description = "Dry run of a patch release: the next version, the API check against crates.io, and packaging. Changes nothing."
+description = "Dry run of a patch release: the fresh-verify-dir bite test (real cargo), then the next version, the API check against crates.io, and packaging. Changes nothing."
 category = "Release"
-script = ["./tools/scripts/release/release-prepare.sh --dry-run"]
+script = ["bash ./tools/scripts/release/test-fresh-package.sh", "./tools/scripts/release/release-prepare.sh --dry-run"]
 
 [tasks.release-check-minor]
 description = "Dry run of a minor release (below 1.0, the breaking bump). Changes nothing."
 category = "Release"
-script = ["./tools/scripts/release/release-prepare.sh --dry-run --minor"]
+script = ["bash ./tools/scripts/release/test-fresh-package.sh", "./tools/scripts/release/release-prepare.sh --dry-run --minor"]
 
 [tasks.release-prepare]
 description = "Cut release/v<NEXT> at a patch, write every version site, verify-package every crate, and open the release PR."

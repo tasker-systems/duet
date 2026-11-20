@@ -67,6 +67,22 @@ held_check() {
     done
 }
 
+# A fresh target directory for one verifying `cargo package`, made under target dir $1, printed.
+# The caller removes it when the run ends (a trap on EXIT).
+#
+# Why fresh: cargo treats a registry crate as immutable, so it fingerprints each crate it verifies
+# from its local packaging registry (`<target>/package/tmp-registry`) by name, version and source
+# alone, never by its contents. A second packaging run at the same version, in a target dir an
+# earlier run filled, reuses that run's build of a crate whose source has since changed, and
+# verifies against the stale build: cutting v0.4.0, a re-run after main moved failed to verify
+# duet-capture against the new duet-dsp. Deleting `<target>/package` or cargo's unpacked registry
+# source does not clear it; only a target dir no earlier run at that version can have filled does.
+# Release CI never hit it, as each run builds in a fresh checkout.
+fresh_verify_dir() {
+    mkdir -p "$1"
+    mktemp -d "$1/release-verify.XXXXXX"
+}
+
 SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 
 # crates.io asks automated clients to identify themselves; no personal detail goes in it.

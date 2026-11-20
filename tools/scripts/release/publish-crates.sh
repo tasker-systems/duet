@@ -10,7 +10,8 @@
 #   ./tools/scripts/release/publish-crates.sh VERSION --from DIR [--dry-run]
 #
 #   --out DIR   the BUILD stage: `cargo package` every crate, which verify-compiles each against the
-#               others' packaged versions, and copy the `.crate` files into DIR. A crate already on
+#               others' packaged versions, in a fresh target dir removed after (fresh_verify_dir),
+#               and copy the `.crate` files into DIR. A crate already on
 #               crates.io at VERSION is left out, and when every crate is, nothing is compiled and
 #               DIR is left empty. Holds no registry credential.
 #   --from DIR  the PUBLISH stage: for each crate, in order, skip it if crates.io has it at
@@ -84,13 +85,19 @@ if [[ -n "$OUT_DIR" ]]; then
     PKG_ARGS=()
     for crate in "${PUBLISHED[@]}"; do PKG_ARGS+=(-p "$crate"); done
     # All at once, so the unpublished crates resolve each other from cargo's local overlay and the
-    # whole set is verified before anything is published.
-    cargo package "${PKG_ARGS[@]}"
+    # whole set is verified before anything is published. In a fresh target dir, so a re-run at
+    # this version verifies the sources it packages, never an earlier run's build of them
+    # (fresh_verify_dir in lib/common.sh says why). The --from stage re-packages without
+    # compiling, so it builds nothing that could be stale, and the bytes it compares do not depend
+    # on the target dir.
+    VERIFY_DIR="$(fresh_verify_dir "$TARGET_DIR")"
+    trap 'rm -rf "$VERIFY_DIR"' EXIT
+    cargo package --target-dir "$VERIFY_DIR" "${PKG_ARGS[@]}"
     for crate in "${PUBLISHED[@]}"; do
         if crate_published "$crate" "$VERSION"; then
             log_info "${crate} ${VERSION} is already on crates.io; left out"
         else
-            cp "${TARGET_DIR}/package/${crate}-${VERSION}.crate" "$OUT_DIR/"
+            cp "${VERIFY_DIR}/package/${crate}-${VERSION}.crate" "$OUT_DIR/"
         fi
     done
     exit 0

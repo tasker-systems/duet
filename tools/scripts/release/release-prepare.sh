@@ -77,7 +77,12 @@ if [[ "$DRY_RUN" == "true" ]]; then
     PKG_ARGS=()
     for crate in "${PUBLISHED[@]}"; do PKG_ARGS+=(-p "$crate"); done
     # --allow-dirty: a dry run may be run on an unfinished tree; a real run refuses one above.
-    cargo package --quiet --allow-dirty "${PKG_ARGS[@]}"
+    # A fresh target dir, so a second check at this version verifies today's sources, not the
+    # first check's build of them (fresh_verify_dir in lib/common.sh says why); the real run gets
+    # the same from publish-crates.sh --out.
+    VERIFY_DIR="$(fresh_verify_dir "${CARGO_TARGET_DIR:-${REPO_ROOT}/target}")"
+    trap 'rm -rf "$VERIFY_DIR"' EXIT
+    cargo package --quiet --allow-dirty --target-dir "$VERIFY_DIR" "${PKG_ARGS[@]}"
     log_info "all ${#PUBLISHED[@]} crates this release publishes package and verify"
     log_header "dry run: nothing changed. A real run cuts release/v${NEXT} and opens its PR."
     exit 0
