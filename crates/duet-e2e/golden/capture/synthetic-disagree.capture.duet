@@ -1,8 +1,8 @@
 {
-  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.13.json",
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.14.json",
   "duet": {
     "kind": "capture-analysis",
-    "version": "1.13",
+    "version": "1.14",
     "tool": {
       "name": "duet",
       "version": "0.3.0"

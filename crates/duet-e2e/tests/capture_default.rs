@@ -1,6 +1,6 @@
 //! `duet capture melody` with nothing asked: what it writes, byte for byte.
 //!
-//! The goldens in `golden/capture/` were written by `main`'s binary at `ce02481`, before `duet
+//! The goldens in `golden/capture/` were written by `main`'s binary at `de2e831`, before `duet
 //! capture disagree` existed (temper `01a1f6e0-d939-76d8-af14-0a932a1f5819`). This test holds that
 //! a capture run without asking for a disagreement behaves exactly as it did then: every file
 //! written, standard output and standard error, and the set of files, so no `.disagree.moments`
