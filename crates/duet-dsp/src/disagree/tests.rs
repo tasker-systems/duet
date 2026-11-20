@@ -24,8 +24,11 @@ fn n(key: u8, start: u64, end: u64) -> ReadNote {
     }
 }
 
-/// The places' kinds, sides and notes, without the stretches.
-fn stated(d: &Disagreements) -> Vec<Vec<(Kind, Side, usize, Vec<usize>)>> {
+/// A stated note: its kind, side, index and the other reading's notes it sounds with.
+type Stated = (Kind, Side, usize, Vec<usize>);
+
+/// The places' stated notes, without the stretches.
+fn stated(d: &Disagreements) -> Vec<Vec<Stated>> {
     d.places
         .iter()
         .map(|p| {
@@ -177,12 +180,12 @@ fn swapping_the_readings_swaps_the_names_and_changes_nothing_else() {
             (y.stretch.start, y.stretch.end)
         );
         assert_eq!((&x.stretch.a, &x.stretch.b), (&y.stretch.b, &y.stretch.a));
-        let swapped: Vec<(Kind, Side, usize, Vec<usize>)> = y
+        let swapped: Vec<Stated> = y
             .found
             .iter()
             .map(|f| (f.kind, f.side.other(), f.note, f.with.clone()))
             .collect();
-        let own: Vec<(Kind, Side, usize, Vec<usize>)> = x
+        let own: Vec<Stated> = x
             .found
             .iter()
             .map(|f| (f.kind, f.side, f.note, f.with.clone()))
