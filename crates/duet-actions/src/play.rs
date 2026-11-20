@@ -1,5 +1,6 @@
 //! `duet play`: sound a part through the built-in SoundFont synth, or send it to a MIDI
-//! port.
+//! port. A song is played as one part on its composition's clock ([`crate::arrange`]), with
+//! each disagreement said on standard error first.
 //!
 //! The events, their times and the synth's rendering are `duet-play`'s, and tested there.
 //! What this module adds, opening the audio device and the port and keeping time against
