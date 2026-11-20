@@ -1,0 +1,600 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.14.json",
+  "duet": {
+    "kind": "capture-analysis",
+    "version": "1.14",
+    "tool": {
+      "name": "duet",
+      "version": "0.3.0"
+    }
+  },
+  "body": {
+    "rate": 22050,
+    "take": {
+      "digest": "sha256:72a422582e9e6c2f26d0512a15228a279b8490c4ba09cde7bded5ab385a8249d",
+      "rate": 16000,
+      "channels": 1,
+      "frames": 72000
+    },
+    "events": [
+      {
+        "type": "onset",
+        "frame": 5632,
+        "strength": 0.012297525
+      },
+      {
+        "type": "note",
+        "start": 5632,
+        "end": 15232,
+        "midi": 60,
+        "confidence": 0.9853321,
+        "strength": 0.012297525
+      },
+      {
+        "type": "onset",
+        "frame": 15360,
+        "strength": 0.010167061
+      },
+      {
+        "type": "onset",
+        "frame": 16640,
+        "strength": 0.013600725
+      },
+      {
+        "type": "note",
+        "start": 16640,
+        "end": 26240,
+        "midi": 64,
+        "confidence": 0.99321157,
+        "strength": 0.013600725
+      },
+      {
+        "type": "onset",
+        "frame": 26368,
+        "strength": 0.0068537877
+      },
+      {
+        "type": "onset",
+        "frame": 27648,
+        "strength": 0.015433267
+      },
+      {
+        "type": "note",
+        "start": 27648,
+        "end": 37248,
+        "midi": 67,
+        "confidence": 0.99543864,
+        "strength": 0.015433267
+      },
+      {
+        "type": "onset",
+        "frame": 37376,
+        "strength": 0.007751418
+      },
+      {
+        "type": "onset",
+        "frame": 38656,
+        "strength": 0.017905705
+      },
+      {
+        "type": "note",
+        "start": 38656,
+        "end": 48512,
+        "midi": 72,
+        "confidence": 0.99722713,
+        "strength": 0.017905705
+      },
+      {
+        "type": "onset",
+        "frame": 48512,
+        "strength": 0.009007422
+      },
+      {
+        "type": "onset",
+        "frame": 49664,
+        "strength": 0.017837085
+      },
+      {
+        "type": "note",
+        "start": 49664,
+        "end": 59520,
+        "midi": 67,
+        "confidence": 0.9927644,
+        "strength": 0.017837085
+      },
+      {
+        "type": "onset",
+        "frame": 59520,
+        "strength": 0.009060785
+      },
+      {
+        "type": "onset",
+        "frame": 60672,
+        "strength": 0.017078845
+      },
+      {
+        "type": "note",
+        "start": 60672,
+        "end": 70528,
+        "midi": 64,
+        "confidence": 0.9853365,
+        "strength": 0.017078845
+      },
+      {
+        "type": "onset",
+        "frame": 70528,
+        "strength": 0.008943222
+      },
+      {
+        "type": "onset",
+        "frame": 71680,
+        "strength": 0.015253022
+      },
+      {
+        "type": "note",
+        "start": 71680,
+        "end": 81536,
+        "midi": 60,
+        "confidence": 0.98847055,
+        "strength": 0.015253022
+      },
+      {
+        "type": "onset",
+        "frame": 81536,
+        "strength": 0.010578386
+      },
+      {
+        "type": "onset",
+        "frame": 82688,
+        "strength": 0.013151251
+      },
+      {
+        "type": "note",
+        "start": 82688,
+        "end": 92544,
+        "midi": 60,
+        "confidence": 0.98887444,
+        "strength": 0.013151251
+      },
+      {
+        "type": "onset",
+        "frame": 92544,
+        "strength": 0.010498449
+      }
+    ],
+    "timing": {
+      "tempo_bpm": {
+        "estimated": {
+          "value": 121.0,
+          "confidence": 0.52876586
+        }
+      },
+      "tempo_alternatives": {
+        "half": 60.5,
+        "double": 242.0
+      },
+      "beat_period_frames": 10964.363636363636,
+      "meter": {
+        "estimated": {
+          "value": "4/4",
+          "confidence": 0.14463414
+        }
+      },
+      "downbeat_frame": {
+        "estimated": {
+          "value": 5632,
+          "confidence": 0.14463414
+        }
+      }
+    },
+    "key": {
+      "key": {
+        "estimated": {
+          "value": "C major",
+          "confidence": 0.7179076
+        }
+      },
+      "alternative": "A minor",
+      "histogram": [
+        0.5016393442622951,
+        0.0,
+        0.0,
+        0.0,
+        0.24918032786885247,
+        0.0,
+        0.0,
+        0.24918032786885247,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scores": [
+        [
+          "C major",
+          0.7179075808116353
+        ],
+        [
+          "C minor",
+          0.418862651085822
+        ],
+        [
+          "Db major",
+          -0.37404695077002054
+        ],
+        [
+          "C# minor",
+          -0.22833934249805046
+        ],
+        [
+          "D major",
+          -0.10866501853837338
+        ],
+        [
+          "D minor",
+          0.1829773751448343
+        ],
+        [
+          "Eb major",
+          0.04751477095489191
+        ],
+        [
+          "Eb minor",
+          -0.5200048995796331
+        ],
+        [
+          "E major",
+          -0.2473213707414041
+        ],
+        [
+          "E minor",
+          0.2011347468121159
+        ],
+        [
+          "F major",
+          0.501172359963675
+        ],
+        [
+          "F minor",
+          0.3669755684312122
+        ],
+        [
+          "F# major",
+          -0.5276375757602654
+        ],
+        [
+          "F# minor",
+          -0.4423421184559244
+        ],
+        [
+          "G major",
+          0.2492929015412199
+        ],
+        [
+          "G minor",
+          0.29254078196169125
+        ],
+        [
+          "Ab major",
+          0.1872225187413961
+        ],
+        [
+          "G# minor",
+          -0.4754761309850301
+        ],
+        [
+          "A major",
+          -0.175871116292035
+        ],
+        [
+          "A minor",
+          0.48998919107540917
+        ],
+        [
+          "Bb major",
+          0.08208431650558354
+        ],
+        [
+          "Bb minor",
+          -0.04668437032232759
+        ],
+        [
+          "B major",
+          -0.3516524164163035
+        ],
+        [
+          "B minor",
+          -0.23963345267011962
+        ]
+      ],
+      "profile": "aarden-essen"
+    },
+    "beats": [
+      {
+        "beat": 0,
+        "secs": 0.25541950113378686,
+        "bpm": 120.18531976744185
+      },
+      {
+        "beat": 1,
+        "secs": 0.7546485260770975,
+        "bpm": 120.18531976744185
+      },
+      {
+        "beat": 2,
+        "secs": 1.253877551020408,
+        "bpm": 120.18531976744185
+      },
+      {
+        "beat": 3,
+        "secs": 1.7531065759637188,
+        "bpm": 120.18531976744185
+      },
+      {
+        "beat": 4,
+        "secs": 2.2523356009070294,
+        "bpm": 121.24266862170089
+      },
+      {
+        "beat": 5,
+        "secs": 2.75156462585034,
+        "bpm": 122.31878698224853
+      },
+      {
+        "beat": 6,
+        "secs": 3.250793650793651,
+        "bpm": 123.41417910447761
+      },
+      {
+        "beat": 7,
+        "secs": 3.7500226757369615,
+        "bpm": 124.52936746987952
+      }
+    ],
+    "grid": "1/16",
+    "offsets": [
+      {
+        "note": 0,
+        "moved_ms": 0.0,
+        "moved_steps": 0.0
+      },
+      {
+        "note": 1,
+        "moved_ms": -2.0718752147323576,
+        "moved_steps": -0.016666666666666666
+      },
+      {
+        "note": 2,
+        "moved_ms": -4.143750429464715,
+        "moved_steps": -0.03333333333333333
+      },
+      {
+        "note": 3,
+        "moved_ms": -6.215625644197073,
+        "moved_steps": -0.05
+      },
+      {
+        "note": 4,
+        "moved_ms": -8.28750085892943,
+        "moved_steps": -0.06666666666666667
+      },
+      {
+        "note": 5,
+        "moved_ms": -10.359376073661789,
+        "moved_steps": -0.08333333333333333
+      },
+      {
+        "note": 6,
+        "moved_ms": -11.395313681027966,
+        "moved_steps": -0.09166666666666666
+      },
+      {
+        "note": 7,
+        "moved_ms": -13.467188895760325,
+        "moved_steps": -0.10833333333333334
+      }
+    ],
+    "reading": {
+      "tuning": {
+        "a4": {
+          "estimated": {
+            "value": 6900.908001835329,
+            "confidence": 1.0
+          }
+        },
+        "spread_cents": 1.642079085494778
+      },
+      "reader": {
+        "name": "hmm",
+        "note_cost": 4.0
+      },
+      "notes": [
+        {
+          "start": 5632,
+          "end": 15232,
+          "held_from": 5632,
+          "key": 60,
+          "centre": -0.8079529,
+          "between_keys": false,
+          "confidence": 0.9853321,
+          "strength": 0.012297525,
+          "residual": {
+            "centre": -0.43159354,
+            "drift": {
+              "cents_per_sec": -1.1506941,
+              "range_cents": 0.49430272
+            },
+            "rest_cents": 1.6342537,
+            "frames": 38
+          }
+        },
+        {
+          "start": 16640,
+          "end": 26240,
+          "held_from": 16640,
+          "key": 64,
+          "centre": -0.70762634,
+          "between_keys": false,
+          "confidence": 0.99321157,
+          "strength": 0.013600725,
+          "residual": {
+            "centre": -0.46572182,
+            "drift": {
+              "cents_per_sec": -1.1835519,
+              "range_cents": 0.5084174
+            },
+            "rest_cents": 1.0731893,
+            "frames": 38
+          }
+        },
+        {
+          "start": 27648,
+          "end": 37248,
+          "held_from": 27648,
+          "key": 67,
+          "centre": -0.7080078,
+          "between_keys": false,
+          "confidence": 0.99543864,
+          "strength": 0.015433267,
+          "residual": {
+            "centre": -0.5183534,
+            "drift": {
+              "cents_per_sec": -1.5209563,
+              "range_cents": 0.6533559
+            },
+            "rest_cents": 0.82184935,
+            "frames": 38
+          }
+        },
+        {
+          "start": 38656,
+          "end": 48512,
+          "held_from": 38656,
+          "key": 72,
+          "centre": -0.4081726,
+          "between_keys": false,
+          "confidence": 0.99722713,
+          "strength": 0.017905705,
+          "residual": {
+            "centre": -0.25161412,
+            "drift": {
+              "cents_per_sec": -0.064575434,
+              "range_cents": 0.028489333
+            },
+            "rest_cents": 0.6908673,
+            "frames": 39
+          }
+        },
+        {
+          "start": 49664,
+          "end": 59520,
+          "held_from": 49664,
+          "key": 67,
+          "centre": -0.7080078,
+          "between_keys": false,
+          "confidence": 0.9927644,
+          "strength": 0.017837085,
+          "residual": {
+            "centre": -0.40782654,
+            "drift": {
+              "cents_per_sec": -0.4864654,
+              "range_cents": 0.21461838
+            },
+            "rest_cents": 1.2268203,
+            "frames": 39
+          }
+        },
+        {
+          "start": 60672,
+          "end": 70528,
+          "held_from": 60672,
+          "key": 64,
+          "centre": -0.70762634,
+          "between_keys": false,
+          "confidence": 0.9853365,
+          "strength": 0.017078845,
+          "residual": {
+            "centre": -0.25396788,
+            "drift": {
+              "cents_per_sec": -0.9938742,
+              "range_cents": 0.43847656
+            },
+            "rest_cents": 1.660679,
+            "frames": 39
+          }
+        },
+        {
+          "start": 71680,
+          "end": 81536,
+          "held_from": 71808,
+          "key": 60,
+          "centre": -0.8079529,
+          "between_keys": false,
+          "confidence": 0.98847055,
+          "strength": 0.015253022,
+          "residual": {
+            "centre": -0.26945516,
+            "drift": {
+              "cents_per_sec": -1.1263198,
+              "range_cents": 0.4969088
+            },
+            "rest_cents": 2.4130535,
+            "frames": 39
+          }
+        },
+        {
+          "start": 82688,
+          "end": 92544,
+          "held_from": 82816,
+          "key": 60,
+          "centre": -0.8079529,
+          "between_keys": false,
+          "confidence": 0.98887444,
+          "strength": 0.013151251,
+          "residual": {
+            "centre": -0.11047579,
+            "drift": {
+              "cents_per_sec": -3.4174492,
+              "range_cents": 1.5077074
+            },
+            "rest_cents": 2.549757,
+            "frames": 39
+          }
+        }
+      ],
+      "residual": {
+        "centres": {
+          "from_cents": -50.0,
+          "bin_cents": 10.0,
+          "counts": [
+            0,
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "centre_cents_per_sec": 0.0919608,
+        "between_keys": 0,
+        "read_frames": 309,
+        "unread_frames": 16,
+        "loss": {
+          "pitch": 1.1182977752712346,
+          "voicing": 1.272582271378048,
+          "unread": 1.8924875607494918,
+          "notes": 32.0
+        }
+      },
+      "passes": [
+        "breathy",
+        "rejoin",
+        "held-pitch"
+      ]
+    }
+  }
+}

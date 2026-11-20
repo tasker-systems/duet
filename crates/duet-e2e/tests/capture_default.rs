@@ -1,6 +1,6 @@
 //! `duet capture melody` with nothing asked: what it writes, byte for byte.
 //!
-//! The goldens in `golden/capture/` were written by `main`'s binary at `de2e831`, before `duet
+//! The goldens in `golden/capture/PLATFORM/` were written by `main`'s binary at `de2e831`, before `duet
 //! capture disagree` existed (temper `01a1f6e0-d939-76d8-af14-0a932a1f5819`). This test holds that
 //! a capture run without asking for a disagreement behaves exactly as it did then: every file
 //! written, standard output and standard error, and the set of files, so no `.disagree.moments`
@@ -9,6 +9,12 @@
 //! The takes are the corpus's synthetic ones, both MIT: `synthetic-disagree.flac`, the witness
 //! take of `duet capture disagree`, and `synthetic-melody.flac`. "Wayfaring Stranger" is left to
 //! its listened corpus test: a golden of its readings would commit data derived from a CC BY take.
+//!
+//! **One set per platform** (`macos-aarch64`, `linux-x86_64`): the pitch track's last f32 digits
+//! differ between macOS's and glibc's maths, so one platform's bytes are not another's. Each set
+//! is exact on its own platform. A platform with no set fails, naming how to write one.
+//! `macos-aarch64` was written on the owner's machine, `linux-x86_64` in a `linux/amd64` container
+//! (`rust:1`, Rust 1.100.0), each from `main` at `de2e831`.
 //!
 //! **Rewriting the goldens** is for a change that means to change the default capture, never to
 //! make this pass. Build the binary to bless (for this test's own goldens, `main`'s, in a separate
@@ -25,8 +31,13 @@ const TAKES: [&str; 2] = ["synthetic-disagree", "synthetic-melody"];
 /// What `duet capture melody TAKE.flac` writes beside the take.
 const WRITTEN: [&str; 4] = [".duet", ".abc", ".capture.duet", ".performance.duet.jsonl"];
 
+/// This platform's goldens.
 fn goldens() -> PathBuf {
-    golden_dir().join("capture")
+    golden_dir().join("capture").join(format!(
+        "{}-{}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ))
 }
 
 /// `take` captured with nothing asked, in a scratch directory of its own: the files written,
@@ -93,7 +104,13 @@ fn bless(take: &str, files: &[(String, Vec<u8>)]) {
 fn compare(take: &str, files: &[(String, Vec<u8>)]) {
     for (suffix, got) in files {
         let path = golden_path(take, suffix);
-        let want = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let want = std::fs::read(&path).unwrap_or_else(|e| {
+            panic!(
+                "{}: {e}; this platform has no goldens, so write them from main's binary \
+                 (DUET_E2E_BLESS, above)",
+                path.display()
+            )
+        });
         assert!(
             *got == want,
             "{take}{suffix} differs from {}: {}",
@@ -140,5 +157,36 @@ fn every_golden_is_of_a_take_and_a_file_the_capture_writes() {
         })
         .collect();
     want.sort();
-    assert_eq!(names, want, "{}", Path::new("golden/capture").display());
+    assert_eq!(names, want, "{}", goldens().display());
+}
+
+#[test]
+fn every_platforms_goldens_hold_the_same_files() {
+    let platforms: Vec<PathBuf> = std::fs::read_dir(golden_dir().join("capture"))
+        .expect("golden/capture")
+        .map(|e| e.expect("entry").path())
+        .collect();
+    assert!(platforms.len() >= 2, "{platforms:?}");
+    let names = |dir: &Path| {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .expect("a platform's goldens")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    for dir in &platforms {
+        assert_eq!(names(dir), names(&platforms[0]), "{}", dir.display());
+        // Only the numbers may differ: the text that is not a number is the same.
+        for name in names(dir) {
+            let strip = |p: &Path| -> String {
+                std::fs::read_to_string(p.join(&name))
+                    .expect("a golden")
+                    .chars()
+                    .filter(|c| !c.is_ascii_digit())
+                    .collect()
+            };
+            assert_eq!(strip(dir), strip(&platforms[0]), "{} {name}", dir.display());
+        }
+    }
 }

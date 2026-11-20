@@ -1,0 +1,15 @@
+X:1
+% tempo: estimated 121 bpm (half 60.5, double 242), confidence 0.53
+% meter: estimated 4/4, confidence 0.14, weak
+% downbeat: estimated at 0.255 s, confidence 0.14, weak
+% tuning: estimated A4 = 440.2 Hz (+1 cent), spread 2 cents, confidence 1.00
+% notes: 8 read, 0 between keys
+% key: estimated C major (relative A minor), confidence 0.72
+% lead-in: none
+M:4/4
+L:1/8
+Q:1/4=121
+K:C
+% duet: velocities were snapped to the nearest dynamic's level
+V:1 name="melody"
+C2 E2 !ff!G2 !fff!c2 | G2 E2 !ff!C2 !f!C2 |]
