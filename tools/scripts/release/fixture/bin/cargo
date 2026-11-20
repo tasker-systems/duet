@@ -5,7 +5,10 @@
 #   cargo semver-checks check-release -p CRATE --baseline-version V --release-type T
 #     fails when $FAKE_BREAKS names CRATE (space-separated) and T is not `major`: a break that
 #     only a breaking bump admits.
-#   cargo package ...   succeeds.
+#   cargo package ...   succeeds. With --target-dir DIR, it logs `target-dir DIR fresh` when DIR is
+#     an existing empty directory (else `target-dir DIR used`), and writes a stand-in
+#     DIR/package/CRATE-VERSION.crate for each -p CRATE, at [workspace.package]'s version in
+#     ./Cargo.toml. Without one, it writes nothing.
 set -euo pipefail
 
 echo "$*" >> "${FAKE_CRATES_DIR}/cargo.log"
@@ -30,6 +33,26 @@ case "${1:-} ${2:-}" in
         done
         exit 0 ;;
 esac
-[[ "${1:-}" == "package" ]] && exit 0
+if [[ "${1:-}" == "package" ]]; then
+    shift
+    dir="" crates=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --target-dir) dir="$2"; shift 2 ;;
+            -p) crates+=("$2"); shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [[ -n "$dir" ]] || exit 0
+    if [[ -d "$dir" && -z "$(ls -A "$dir")" ]]; then
+        echo "target-dir $dir fresh" >> "${FAKE_CRATES_DIR}/cargo.log"
+    else
+        echo "target-dir $dir used" >> "${FAKE_CRATES_DIR}/cargo.log"
+    fi
+    version="$(awk -F'"' '/^\[workspace\.package\]/{p=1; next} /^\[/{p=0} p && /^version = /{print $2; exit}' Cargo.toml)"
+    mkdir -p "$dir/package"
+    for crate in ${crates[@]+"${crates[@]}"}; do echo "$crate" > "$dir/package/$crate-$version.crate"; done
+    exit 0
+fi
 echo "fake cargo: unexpected call: $*" >&2
 exit 2

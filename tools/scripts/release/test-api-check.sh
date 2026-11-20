@@ -15,6 +15,8 @@
 #      that is not the last release, and passes cargo-semver-checks the derived baseline;
 #   7. release.yml's build-crates runs api-check.sh on the tagged candidate, from a full clone,
 #      before it packages anything;
+#   6b. release-prepare.sh --dry-run and publish-crates.sh --out verify-package in a fresh target
+#      dir under the target dir, removed after (the bite with real cargo is test-fresh-package.sh);
 #   8. a crate in HELD is not judged, packaged or published, and is named; a release that would
 #      publish a crate depending on a held one, through a dependency that carries a version, is
 #      refused, as is a HELD naming no crate.
@@ -258,7 +260,7 @@ expect_pass "$d" "with no release tag, every crate a definite 404 passes as new"
 
 # 6. release-prepare.sh --dry-run: the same check, through the same derivation.
 d="$(fixture prepare-clean)"
-run "$d" release-prepare.sh --dry-run
+CARGO_TARGET_DIR="$d/target" run "$d" release-prepare.sh --dry-run
 if [[ "$(status "$d")" == 0 ]] && ! said "$d" "(a real run refuses here)"; then
     ok "release-prepare --dry-run passes a clean patch"
 else
@@ -269,6 +271,20 @@ if [[ "$(grep -c -- '--baseline-version 0.3.0 --release-type minor$' "$d/crates/
 else
     bad "release-prepare's check-release calls carry no derived baseline: $(grep check-release "$d/crates/cargo.log" | head -n 1)"
 fi
+# fresh_verify <dir> <label>: the run's one package call verified in a fresh dir under <dir>/target,
+# which is gone now.
+fresh_verify() {
+    local line dir
+    line="$(grep '^target-dir ' "$1/crates/cargo.log" 2> /dev/null || true)"
+    dir="$(awk '{print $2}' <<< "$line")"
+    if [[ "$(wc -l <<< "$line" | tr -d ' ')" == 1 && "$line" == *" fresh" &&
+        "$(dirname "$dir")" == "$1/target" && "$(basename "$dir")" == release-verify.* && ! -e "$dir" ]]; then
+        ok "$2 verify-packages in a fresh dir under the target dir, and removes it"
+    else
+        bad "$2 did not verify-package in a fresh dir under the target dir, removed after: ${line:-no --target-dir}$([[ -n "$dir" && -e "$dir" ]] && echo ', left behind')"
+    fi
+}
+fresh_verify "$d" "release-prepare --dry-run"
 
 d="$(fixture prepare-503)"
 echo "status: 503" > "$d/crates/duet-dsp"
@@ -373,6 +389,7 @@ if [[ "$(status "$d")" == 0 ]] && [[ -n "$line" ]] && ! grep -qE -- '-p duet-(bu
 else
     bad "the build stage packaged a held crate, or not the rest: exit $(status "$d"), $line, dist: $(find "$d/dist" -name '*.crate' -exec basename {} \; 2> /dev/null | tr '\n' ' ')"
 fi
+fresh_verify "$d" "the build stage (publish-crates --out)"
 
 d="$(publish_fixture held-publish)"
 set_held "$d" duet-bus duet-actions duet-cli

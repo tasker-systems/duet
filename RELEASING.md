@@ -67,6 +67,20 @@ Its bite test, `tools/scripts/release/test-api-check.sh`, runs in CI with fakes 
 and cargo-semver-checks. Only a real release run shows the check against the real registry and
 comparator.
 
+## Packaging is verified in a fresh target directory
+
+`release-prepare` (and its `--dry-run`, `release-check`) and `publish-crates.sh --out` verify-package
+in a fresh directory under the target dir, removed when the run ends. Cargo fingerprints a crate in
+its local packaging registry by name, version and source, not by its contents, so a second
+packaging run at one version, in a target dir the first filled, verified against the first run's
+build: cutting v0.4.0, a re-run after `main` moved failed to verify duet-capture against the new
+duet-dsp. Each packaging run therefore compiles every dependency again. Release CI was never
+affected, as each run builds in a fresh checkout.
+
+Its bite test, `tools/scripts/release/test-fresh-package.sh`, packages a fixture workspace twice at
+one version with real cargo, and `cargo make release-check` runs it first. It is not in CI: it
+compiles, and the gate job where `test-api-check.sh` runs compiles nothing.
+
 ## Authentication
 
 **crates.io trusted publishing**, with no registry secret. Each crate's trusted publisher on
