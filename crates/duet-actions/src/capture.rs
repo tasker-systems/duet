@@ -24,6 +24,7 @@
 //! does it for each moment of a moments file, every reading side by side, on one page.
 
 pub mod compare;
+pub mod disagree;
 pub mod review;
 mod statement;
 
@@ -75,6 +76,13 @@ pub enum CaptureCommand {
     /// a button that copies every verdict. The clips are in STEM.review/clips. Reads what `duet
     /// capture melody` wrote at STEM and each --reading; a directory that exists is refused.
     Review(review::ReviewArgs),
+    /// Find where two readings of one melody take disagree, by kind: each stretch between their
+    /// seams whose keys differ, its notes stated as split, key, only or other. Writes
+    /// STEM.disagree.moments, which `duet capture review --moments` reads, and lists each place
+    /// on standard output. Reads what `duet capture melody` wrote at STEM and --reading, the
+    /// other reading (such as one made with --reader rules); in a project, the take's two
+    /// readings. Nothing is overwritten.
+    Disagree(disagree::DisagreeArgs),
 }
 
 /// What both kinds of take are captured with. Anything about the timing left out is
@@ -164,6 +172,7 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
         CaptureCommand::Rhythm(args) => (Take::Rhythm, args),
         CaptureCommand::Compare(args) => return compare::run(ctx, args),
         CaptureCommand::Review(args) => return review::run(ctx, args),
+        CaptureCommand::Disagree(args) => return disagree::run(ctx, args),
     };
     let key = flags(take, &args)?;
     let grid = match args.grid {

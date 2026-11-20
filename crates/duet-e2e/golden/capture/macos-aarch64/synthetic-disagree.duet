@@ -1,0 +1,83 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/part/1.0.json",
+  "duet": {
+    "kind": "part",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.3.0"
+    },
+    "statements": [
+      "tempo: estimated 72 bpm (half 36, double 144), confidence 0.58",
+      "meter: estimated 4/4, confidence 0.54",
+      "downbeat: estimated at 2.397 s, confidence 0.54",
+      "tuning: estimated A4 = 440.1 Hz (+0 cents), spread 23 cents, confidence 0.70",
+      "notes: 5 read, 1 between keys",
+      "breathy: 3 notes carried on over 46 ms of weakly voiced frames whose pitch goes on, the loss +9.6 nats",
+      "rejoined: 1 same-key split around a dip within a whole tone, the loss +48.5 nats",
+      "key: estimated C major (relative A minor), confidence 0.79",
+      "lead-in: a pickup of 3/4 before the downbeat"
+    ]
+  },
+  "body": {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "source": {
+      "by": "comped",
+      "takes": [
+        {
+          "digest": "sha256:ffb01ec069e5ef7911c975aeecbca3e28c56db498be36f9b6e3fefffd7c0e72c",
+          "reading": "hmm"
+        }
+      ]
+    },
+    "ticks_per_quarter": 480,
+    "tempo_bpm": 72.0,
+    "time_sig": "3/4",
+    "key": "C major",
+    "time_changes": [
+      {
+        "at": "2.1.0",
+        "time_sig": "4/4"
+      }
+    ],
+    "end": "3.1.0",
+    "tracks": [
+      {
+        "name": "melody",
+        "channel": 1,
+        "notes": [
+          {
+            "at": "1.1.205",
+            "pitch": "C4",
+            "beats": 0.58,
+            "vel": 127
+          },
+          {
+            "at": "1.2.187",
+            "pitch": "G3",
+            "beats": 1.248,
+            "vel": 120
+          },
+          {
+            "at": "2.1.0",
+            "pitch": "E3",
+            "beats": 0.6,
+            "vel": 111
+          },
+          {
+            "at": "2.1.458",
+            "pitch": "G3",
+            "beats": 0.719,
+            "vel": 94
+          },
+          {
+            "at": "2.3.17",
+            "pitch": "D4",
+            "beats": 0.6,
+            "vel": 111
+          }
+        ]
+      }
+    ]
+  }
+}

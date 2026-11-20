@@ -7,6 +7,11 @@ takes witness the three capture goal clauses, and only takes recorded by a perso
 `synthetic` takes (made by `scripts/capture-fixtures.sh`) prove the harness bites and count
 for nothing else.
 
+
+`synthetic-disagree.flac` (MIT, also made by `scripts/capture-fixtures.sh`) is no manifest take:
+it is the witness take of `duet capture disagree`, read by `crates/duet-e2e/tests/disagree.rs` and
+`capture_default.rs`. It holds a held G3 with a turn to A3 and a G3 sung on the G3/G#3 midpoint,
+where the HMM and the rules read differently.
 ## Adding a take
 
 1. Put the recording beside `manifest.toml`.

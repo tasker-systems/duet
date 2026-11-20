@@ -1,8 +1,9 @@
 # `duet capture disagree`: the places two readings of a take disagree, found by kind, without listening through
 
-**Date:** 2026-11-20. **Status: Proposed.** Nothing here is ruled or built. Each of the task's open
-questions is answered below with a proposal and its reasons. What needs the owner's ruling is listed
-apart, in [For the owner](#for-the-owner).
+**Date:** 2026-11-20. **Status: Ruled** (owner, 2026-11-20): questions A to D as recommended, A (a),
+B (a), C (a) and D `duet capture disagree` ([Rulings](#rulings)). Each of the task's open questions
+is answered below with its reasons. Question E is the owner's ear, after the build. The build task
+is temper `01a1f6e0-d939-76d8-af14-0a932a1f5819`.
 
 **Task:** temper `01a1e156-0e70-77b5-9d45-879d660205e8`. It comes from the Blood Sport listening
 (temper `01a1e077-f1cc-7252-87f9-2601aacf5356`), and its places are raw material for
@@ -314,9 +315,20 @@ of two moments with both readings, and each moment's label starts with its kind.
 
 **W7. The default capture is unchanged:** the golden test above.
 
+## Rulings
+
+Ruled by the owner, 2026-11-20, as recommended below. Do not re-open them.
+
+- **A (a).** The second reading is a second `duet capture melody --reader rules` run, kept as its
+  own variant.
+- **B (a).** Boundary-only stretches are no place; only their count and largest boundary
+  difference are stated.
+- **C (a).** A place's kind is the label's first word; the moments format does not change.
+- **D.** The command is `duet capture disagree`.
+
 ## For the owner
 
-Each question changes what gets built.
+Each question changes what gets built. A to D are ruled ([Rulings](#rulings)); E is open.
 
 **A. Where the second reading comes from.**
 - **(a)** a second `duet capture melody --reader rules` run, kept as its own variant. The pitch
@@ -360,7 +372,7 @@ hears the reading go wrong is the owner's to judge, through `review`. Nothing he
 ## Build task
 
 **One task, medium: `duet capture disagree`.**
-- **Needs:** nothing. **Gate:** questions A to D ruled.
+- **Needs:** nothing. **Gate:** questions A to D ruled (met, 2026-11-20).
 - **What:**
   - `seams` and `disagreements` in `crates/duet-dsp/src/disagree.rs`;
   - the command in `crates/duet-actions/src/capture/disagree.rs`;

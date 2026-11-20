@@ -1,0 +1,533 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.14.json",
+  "duet": {
+    "kind": "capture-analysis",
+    "version": "1.14",
+    "tool": {
+      "name": "duet",
+      "version": "0.3.0"
+    }
+  },
+  "body": {
+    "rate": 22050,
+    "take": {
+      "digest": "sha256:ffb01ec069e5ef7911c975aeecbca3e28c56db498be36f9b6e3fefffd7c0e72c",
+      "rate": 16000,
+      "channels": 1,
+      "frames": 78240
+    },
+    "events": [
+      {
+        "type": "onset",
+        "frame": 5632,
+        "strength": 0.030318435
+      },
+      {
+        "type": "note",
+        "start": 5632,
+        "end": 16256,
+        "midi": 60,
+        "confidence": 0.99385804,
+        "strength": 0.030318435
+      },
+      {
+        "type": "onset",
+        "frame": 16384,
+        "strength": 0.007984335
+      },
+      {
+        "type": "onset",
+        "frame": 23296,
+        "strength": 0.028235577
+      },
+      {
+        "type": "note",
+        "start": 23296,
+        "end": 46208,
+        "midi": 55,
+        "confidence": 0.9920125,
+        "strength": 0.028235577
+      },
+      {
+        "type": "onset",
+        "frame": 52864,
+        "strength": 0.0256828
+      },
+      {
+        "type": "note",
+        "start": 52864,
+        "end": 63872,
+        "midi": 52,
+        "confidence": 0.99868125,
+        "strength": 0.0256828
+      },
+      {
+        "type": "onset",
+        "frame": 70400,
+        "strength": 0.020892303
+      },
+      {
+        "type": "note",
+        "start": 70400,
+        "end": 83584,
+        "midi": 55,
+        "confidence": 0.995452,
+        "strength": 0.020892303
+      },
+      {
+        "type": "onset",
+        "frame": 90240,
+        "strength": 0.025783703
+      },
+      {
+        "type": "note",
+        "start": 90240,
+        "end": 101248,
+        "midi": 62,
+        "confidence": 0.98981637,
+        "strength": 0.025783703
+      }
+    ],
+    "timing": {
+      "tempo_bpm": {
+        "estimated": {
+          "value": 72.0,
+          "confidence": 0.5784362
+        }
+      },
+      "tempo_alternatives": {
+        "half": 36.0,
+        "double": 144.0
+      },
+      "beat_period_frames": 18358.85714285714,
+      "meter": {
+        "estimated": {
+          "value": "4/4",
+          "confidence": 0.53854233
+        }
+      },
+      "downbeat_frame": {
+        "estimated": {
+          "value": 52864,
+          "confidence": 0.53854233
+        }
+      }
+    },
+    "key": {
+      "key": {
+        "estimated": {
+          "value": "C major",
+          "confidence": 0.78795457
+        }
+      },
+      "alternative": "A minor",
+      "histogram": [
+        0.15456238361266295,
+        0.0,
+        0.1601489757914339,
+        0.0,
+        0.1601489757914339,
+        0.0,
+        0.0,
+        0.5251396648044693,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scores": [
+        [
+          "C major",
+          0.7879545836486652
+        ],
+        [
+          "C minor",
+          0.5143687810595489
+        ],
+        [
+          "Db major",
+          -0.5020721133432265
+        ],
+        [
+          "C# minor",
+          -0.37828731745563976
+        ],
+        [
+          "D major",
+          0.19788497621934575
+        ],
+        [
+          "D minor",
+          0.4316911372911679
+        ],
+        [
+          "Eb major",
+          0.28243244033779275
+        ],
+        [
+          "Eb minor",
+          -0.5638857250979832
+        ],
+        [
+          "E major",
+          -0.3642556766968818
+        ],
+        [
+          "E minor",
+          0.41381768999567564
+        ],
+        [
+          "F major",
+          0.34175505023604014
+        ],
+        [
+          "F minor",
+          0.19499808661701865
+        ],
+        [
+          "F# major",
+          -0.5555819369206632
+        ],
+        [
+          "F# minor",
+          -0.45977521281461775
+        ],
+        [
+          "G major",
+          0.5174109568030406
+        ],
+        [
+          "G minor",
+          0.5261575735997572
+        ],
+        [
+          "Ab major",
+          -0.1773642938234911
+        ],
+        [
+          "G# minor",
+          -0.5012044246252577
+        ],
+        [
+          "A major",
+          -0.19315908730343392
+        ],
+        [
+          "A minor",
+          0.2669015934076525
+        ],
+        [
+          "Bb major",
+          0.10050780631469407
+        ],
+        [
+          "Bb minor",
+          -0.38197256263425516
+        ],
+        [
+          "B major",
+          -0.43551270547188203
+        ],
+        [
+          "B minor",
+          -0.06280961934306747
+        ]
+      ],
+      "profile": "aarden-essen"
+    },
+    "beats": [
+      {
+        "beat": 0,
+        "secs": 2.3974603174603173,
+        "bpm": 75.44479927007299
+      },
+      {
+        "beat": 1,
+        "secs": 3.1927437641723357,
+        "bpm": 66.68346774193549
+      }
+    ],
+    "grid": "1/16",
+    "offsets": [
+      {
+        "note": 0,
+        "moved_ms": 60.710506424792136,
+        "moved_steps": 0.2916666666666667
+      },
+      {
+        "note": 1,
+        "moved_ms": 91.9330525861138,
+        "moved_steps": 0.44166666666666665
+      },
+      {
+        "note": 2,
+        "moved_ms": 0.0,
+        "moved_steps": 0.0
+      },
+      {
+        "note": 3,
+        "moved_ms": 38.16088975272648,
+        "moved_steps": 0.18333333333333332
+      },
+      {
+        "note": 4,
+        "moved_ms": -29.487960263470466,
+        "moved_steps": -0.14166666666666666
+      }
+    ],
+    "reading": {
+      "tuning": {
+        "a4": {
+          "estimated": {
+            "value": 6900.352237764532,
+            "confidence": 0.69546264
+          }
+        },
+        "spread_cents": 22.64317596346165
+      },
+      "reader": {
+        "name": "hmm",
+        "note_cost": 4.0
+      },
+      "notes": [
+        {
+          "start": 5632,
+          "end": 16256,
+          "held_from": 5632,
+          "key": 60,
+          "centre": -0.2521515,
+          "between_keys": false,
+          "confidence": 0.99385804,
+          "strength": 0.030318435,
+          "residual": {
+            "centre": -0.18072316,
+            "drift": {
+              "cents_per_sec": -0.41177455,
+              "range_cents": 0.19600843
+            },
+            "rest_cents": 0.27616903,
+            "frames": 42
+          }
+        },
+        {
+          "start": 23296,
+          "end": 46208,
+          "held_from": 23424,
+          "key": 55,
+          "centre": -0.35209656,
+          "between_keys": false,
+          "confidence": 0.9920125,
+          "strength": 0.028235577,
+          "residual": {
+            "centre": 19.003323,
+            "drift": {
+              "cents_per_sec": -0.4666834,
+              "range_cents": 0.48221833
+            },
+            "rest_cents": 53.562183,
+            "frames": 90,
+            "excursions": [
+              {
+                "start": 34048,
+                "end": 35584,
+                "cents": 197.94781
+              }
+            ]
+          }
+        },
+        {
+          "start": 52864,
+          "end": 63872,
+          "held_from": 52864,
+          "key": 52,
+          "centre": -0.35209656,
+          "between_keys": false,
+          "confidence": 0.99868125,
+          "strength": 0.0256828,
+          "residual": {
+            "centre": 0.23148544,
+            "drift": {
+              "cents_per_sec": 6.2278013,
+              "range_cents": 3.0367944
+            },
+            "rest_cents": 2.820589,
+            "frames": 43
+          }
+        },
+        {
+          "start": 70400,
+          "end": 83584,
+          "held_from": 81280,
+          "key": 55,
+          "centre": 43.798065,
+          "between_keys": true,
+          "confidence": 0.995452,
+          "strength": 0.020892303,
+          "residual": {
+            "centre": 49.72773,
+            "drift": {
+              "cents_per_sec": -0.45763528,
+              "range_cents": 0.2709699
+            },
+            "modulation": {
+              "rate_hz": 4.9247994,
+              "depth_cents": 7.7928457
+            },
+            "rest_cents": 0.82930875,
+            "frames": 52,
+            "excursions": [
+              {
+                "start": 70400,
+                "end": 72704,
+                "cents": 55.647762
+              },
+              {
+                "start": 74752,
+                "end": 77056,
+                "cents": 55.347958
+              },
+              {
+                "start": 79360,
+                "end": 81280,
+                "cents": 55.597713
+              }
+            ]
+          }
+        },
+        {
+          "start": 90240,
+          "end": 101248,
+          "held_from": 90240,
+          "key": 62,
+          "centre": -0.15220642,
+          "between_keys": false,
+          "confidence": 0.98981637,
+          "strength": 0.025783703,
+          "residual": {
+            "centre": -0.056759477,
+            "drift": {
+              "cents_per_sec": 0.5084824,
+              "range_cents": 0.24794571
+            },
+            "rest_cents": 0.43684024,
+            "frames": 43
+          }
+        }
+      ],
+      "residual": {
+        "centres": {
+          "from_cents": -50.0,
+          "bin_cents": 10.0,
+          "counts": [
+            0,
+            0,
+            0,
+            0,
+            2,
+            1,
+            1,
+            0,
+            0,
+            1
+          ]
+        },
+        "centre_cents_per_sec": 4.1056914,
+        "between_keys": 1,
+        "read_frames": 270,
+        "unread_frames": 7,
+        "loss": {
+          "pitch": 83.92615099026291,
+          "voicing": 10.221615719836162,
+          "unread": 0.9113808162578269,
+          "notes": 20.0
+        }
+      },
+      "rejoins": [
+        {
+          "decoded": [
+            {
+              "start": 23296,
+              "end": 33152,
+              "held_from": 23424,
+              "key": 55,
+              "centre": -0.35209656,
+              "between_keys": false,
+              "confidence": 0.9996021,
+              "strength": 0.028235577
+            },
+            {
+              "start": 33152,
+              "end": 46208,
+              "held_from": 35968,
+              "key": 55,
+              "centre": -0.35209656,
+              "between_keys": false,
+              "confidence": 0.98628306,
+              "strength": 0.028235577
+            }
+          ],
+          "dips": [
+            {
+              "start": 33152,
+              "end": 35968,
+              "cents": 199.74786
+            }
+          ],
+          "loss_change": 48.50064794870593
+        }
+      ],
+      "breathy": [
+        {
+          "decoded": {
+            "start": 33152,
+            "end": 45952,
+            "held_from": 35968,
+            "key": 55,
+            "centre": -0.35209656,
+            "between_keys": false,
+            "confidence": 0.98628306,
+            "strength": 0.028235577
+          },
+          "end": 46208,
+          "lowest_db": -6.074325,
+          "loss_change": 3.252528171729182
+        },
+        {
+          "decoded": {
+            "start": 52864,
+            "end": 63360,
+            "held_from": 52864,
+            "key": 52,
+            "centre": -0.35209656,
+            "between_keys": false,
+            "confidence": 0.99868125,
+            "strength": 0.0256828
+          },
+          "end": 63872,
+          "lowest_db": -6.868155,
+          "loss_change": 5.077401356196333
+        },
+        {
+          "decoded": {
+            "start": 70400,
+            "end": 83328,
+            "held_from": 81280,
+            "key": 55,
+            "centre": 43.798065,
+            "between_keys": true,
+            "confidence": 0.995452,
+            "strength": 0.020892303
+          },
+          "end": 83584,
+          "lowest_db": -3.132983,
+          "loss_change": 1.274124708807335
+        }
+      ],
+      "passes": [
+        "breathy",
+        "rejoin",
+        "held-pitch"
+      ]
+    }
+  }
+}

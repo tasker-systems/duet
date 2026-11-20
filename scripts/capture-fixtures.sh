@@ -12,7 +12,8 @@
 #   Needs lame, flac, oggenc and macOS's afconvert (-d aac for AAC-LC, -d aach for HE-AAC).
 # corpus: the reference corpus's synthetic takes in crates/duet-capture/corpus:
 #   synthetic-melody.flac (eight quarter-note sine tones at 120 bpm) and
-#   synthetic-beatbox.flac (kick, snare and hat noise bursts, two bars at 120 bpm). Both are
+#   synthetic-beatbox.flac (kick, snare and hat noise bursts, two bars at 120 bpm), and
+#   synthetic-disagree.flac (the witness take of `duet capture disagree`, not a manifest take). All are
 #   made by arithmetic and a seeded generator, then encoded losslessly by flac, so they are
 #   byte-stable for a given flac version, and were byte-identical across two runs here. Needs flac and python3.
 #
@@ -169,10 +170,59 @@ PY
   flac --silent --force -o "$corpus/synthetic-beatbox.flac" "$work/synthetic-beatbox.wav"
 }
 
+# The witness take for `duet capture disagree`: a sung-like tone (six harmonics, phase continuous
+# within a note, a 10 ms fade at each end) on A440, 16 kHz mono 16-bit, from 0.25 s in with 0.3 s
+# of silence after each note: a plain C4; a G3 held 1.04 s with a turn in its middle (up to A3 over
+# 0.04 s, held 0.06 s, back over 0.04 s, with no onset); a plain E3; a G3 held 0.6 s at +50 cents
+# with vibrato of 8 cents at 5 Hz; a plain D4. Read with --tuning 440, the rules split the turn
+# and the HMM does not, and the two readers' medians fall either side of the G3/G#3 midpoint.
+make_synthetic_disagree() {
+  python3 -I - "$work/synthetic-disagree.wav" <<'PY'
+import math, struct, sys, wave
+rate = 16000
+G3 = 55
+# Each note is a list of (seconds, cents at its start, cents at its end), in absolute cents.
+def held(midi, secs):
+    return [(secs, midi * 100.0, midi * 100.0)]
+turn = [(0.45, 5500, 5500), (0.04, 5500, 5700), (0.06, 5700, 5700), (0.04, 5700, 5500), (0.45, 5500, 5500)]
+notes = [held(60, 0.5), turn, held(52, 0.5), "vibrato", held(62, 0.5)]
+lead, gap, fade = 0.25, 0.3, 0.01
+amps = [1.0, 0.5, 0.33, 0.25, 0.2, 0.16]
+samples = [0.0] * round(lead * rate)
+for note in notes:
+    curve = []
+    if note == "vibrato":
+        for i in range(round(0.6 * rate)):
+            curve.append(G3 * 100 + 50.0 + 8 * math.sin(2 * math.pi * 5 * i / rate))
+    else:
+        for secs, a, b in note:
+            n = round(secs * rate)
+            curve.extend(a + (b - a) * i / n for i in range(n))
+    ramp = round(fade * rate)
+    phase = [0.0] * len(amps)
+    for i, cents in enumerate(curve):
+        hz = 440 * 2 ** ((cents / 100 - 69) / 12)
+        env = min(1.0, i / ramp, (len(curve) - 1 - i) / ramp)
+        x = 0.0
+        for k, amp in enumerate(amps):
+            phase[k] += 2 * math.pi * hz * (k + 1) / rate
+            x += amp * math.sin(phase[k])
+        samples.append(0.25 * env * x)
+    samples += [0.0] * round(gap * rate)
+with wave.open(sys.argv[1], "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(rate)
+    w.writeframes(b"".join(struct.pack("<h", round(32767 * x)) for x in samples))
+PY
+  flac --silent --force -o "$corpus/synthetic-disagree.flac" "$work/synthetic-disagree.wav"
+}
+
 make_corpus() {
   mkdir -p "$corpus"
   make_synthetic_melody
   make_synthetic_beatbox
+  make_synthetic_disagree
   ls -l "$corpus"
 }
 

@@ -88,6 +88,10 @@ pub use duet_dsp::{
     Held, NEXT_NOTE_GAP_SECS, REJOIN_CENTS, Rejoin, Suggestion, SuggestionRule, Suggests, breathe,
     hold_apart, interpret, read_as_decoded, rejoin,
 };
+pub use duet_dsp::{
+    Agreed, Disagreements, Found, Place, PlaceKind, Side, Stretch, disagreements, in_order, seams,
+    sound_together,
+};
 #[cfg(feature = "basic-pitch")]
 pub use duet_dsp::{BasicPitch, BasicPitchRead, MODEL_SHA256};
 pub use error::{Error, Result};

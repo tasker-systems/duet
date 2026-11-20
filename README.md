@@ -1086,6 +1086,36 @@ duet capture review idea.m4a --moments idea.moments -o scratch/idea --dir scratc
   licence-restricted take's sheet out of git.
 - **Nothing is overwritten:** a directory that exists is refused.
 
+**Finding where two readings disagree.** `duet capture disagree` lists the places two readings
+of one take read different notes, so they can be listened to without listening through. It reads
+two readings that exist; it makes none, so a capture run without it is unchanged:
+
+```sh
+duet capture melody idea.m4a --reader rules -o idea-rules      # the second reading, when asked
+duet capture disagree idea.m4a --reading rules=idea-rules.capture.duet   # idea.disagree.moments
+duet capture review idea.m4a --moments idea.disagree.moments --reading rules=idea-rules.capture.duet
+```
+
+In a project, `duet capture melody TAKE --reader rules` makes the second reading beside the
+first in `takes/TAKE/`, and `duet capture disagree TAKE` compares the take's two readings, writing
+`takes/TAKE/TAKE.disagree.moments`.
+
+- **A place** is a stretch between the readings' seams (frames where no note of either is
+  sounding across) whose keys differ. Two notes sound together when at least half of the shorter
+  overlaps the longer. Each note of a place is one kind, the first word of its label:
+  - `split`: the other reader read it as several notes, a candidate ornament or a slide read as
+    notes. The label says whether the note's own key is among its pieces;
+  - `key`: one note against one, on another key;
+  - `only`: one reader reads a note where the other reads none;
+  - `other`: anything else, listed so nothing is dropped.
+- **Stretches of the same keys are no place,** whatever their boundaries; standard output counts
+  those whose boundaries differ by more than 30 ms, and by how much at most.
+- **The moments file** is `review`'s: each place's stretch with 0.15 s either side, under a
+  comment holding both readings' notes there. When nothing is found, nothing is written.
+- **Refused before anything is written:** readings of different takes (by `take.digest`), a
+  reading that states no take, readings on different tunings, a name given twice, and a moments
+  file that exists.
+
 **Correcting a capture.** Edit the ABC text, which is what it is for, or a rhythm's grid with
 the `duet drums` commands, which read the `.grid.duet` by its envelope. To fix an
 estimate, run again with `--tempo`, `--meter`, `--downbeat` or `--key` (add `-o` to keep the

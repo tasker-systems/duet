@@ -1,0 +1,17 @@
+X:1
+% tempo: estimated 72 bpm (half 36, double 144), confidence 0.58
+% meter: estimated 4/4, confidence 0.54
+% downbeat: estimated at 2.397 s, confidence 0.54
+% tuning: estimated A4 = 440.1 Hz (+0 cents), spread 23 cents, confidence 0.70
+% notes: 5 read, 1 between keys
+% breathy: 3 notes carried on over 46 ms of weakly voiced frames whose pitch goes on, the loss +9.6 nats
+% rejoined: 1 same-key split around a dip within a whole tone, the loss +48.5 nats
+% key: estimated C major (relative A minor), confidence 0.79
+% lead-in: a pickup of 3/4 before the downbeat
+M:4/4
+L:1/8
+Q:1/4=72
+K:C
+% duet: velocities were snapped to the nearest dynamic's level
+V:1 name="melody"
+z!fff!C zG,5/2z/ | !ff!E,z !f!G,3/2z/ !ff!D3/2z5/2 |]
