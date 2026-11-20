@@ -72,10 +72,10 @@ comparator.
 ## Authentication
 
 **crates.io trusted publishing**, with no registry secret. Each crate's trusted publisher on
-crates.io names this repository, the **`release` environment**, and **two** workflow files:
+crates.io names this repository and **two** workflow files:
 `release-tag.yml`, because inside the release-tag.yml → release.yml chain crates.io matches the
 calling workflow, and `release.yml`, for the `workflow_dispatch` re-run. A new crate needs both
-entries, each with the environment.
+entries.
 
 Every crate already on crates.io is set to **trusted-publishing-only**, so no API token can
 publish it: only a run of the release workflows can.
@@ -88,7 +88,7 @@ A release reaches `publish-crates`, the one job that can mint a crates.io creden
 |---|---|---|
 | `release-tag.yml` on a push to `main` that changes `VERSION` | Ruleset 27260518 on `main`: a PR and a strict `CI Success`, with no bypass. So the commit it tags passed CI before it landed | No: a GitHub setting |
 | `release.yml` by `workflow_dispatch`, a tag given by hand | `release-commit-check.sh` in `determine-version`: the tag's commit must be on `main` and have a successful `ci.yml` run on a push to `main`. Every later job needs `determine-version`, so a refusal builds nothing and mints no credential | Yes: its bite test, `tools/scripts/release/test-release-commit.sh`, runs in CI with a fake `gh` |
-| Either, from a branch's own copy of the workflow | A branch can edit the check away, so `publish-crates` runs in the **`release` environment**, which only `main` may deploy from, and every crate's trusted publishers name that environment. A run from any other ref gets no deployment, so its OIDC token mints nothing | No: the environment, its deployment rule and the publishers are GitHub and crates.io settings |
+| Either, from a branch's own copy of the workflow | **Nothing: an accepted gap.** crates.io's trusted publisher matches the repository and the workflow file's name, not the ref, so a branch that edits the check out of its own `release.yml` and is dispatched could mint a credential. Only someone with write access can push that branch, and that is the maintainer alone (and agents working with the maintainer's credentials). Closing it would mean a main-only GitHub environment named on every crate's trusted publishers; the owner chose not to, 2026-11-20 | — |
 
 - **The tag must be on `main` on both doors.** On the release-tag.yml door it always is, so the
   check costs nothing there.
@@ -96,15 +96,6 @@ A release reaches `publish-crates`, the one job that can mint a crates.io creden
   running when `release-tag.yml` calls `release.yml`, and the ruleset already required CI on the
   PR. In a called workflow `github.event_name` is the caller's (`push`), and every other event is
   asked.
-- **Both trusted publishers name the environment, not just `release.yml`'s.** The environment is
-  declared on the `publish-crates` job, and the OIDC token's `environment` claim is that job's, on
-  either door. crates.io compares it with the publisher's environment. A `release-tag.yml`
-  publisher without it would accept a token from a branch that gives its own `release-tag.yml` a
-  new trigger and drops the `environment:` line.
-- **The settings, for the record.** The `release` environment's deployment branches are
-  "Selected branches and tags", with the one rule `main` (branch). It has no secrets and no
-  reviewers. Nothing in the repo reads any of this: check it in the repository's Settings →
-  Environments, and in each crate's Settings → Trusted Publishing on crates.io.
 
 ### A crate's first version
 
@@ -122,8 +113,8 @@ CI cannot publish the new crate, so the two go out in separate steps:
    `CRATES`: `cargo publish -p <crate>`. Its dependencies are on crates.io at the shared version by
    now. A held crate that already exists on crates.io (duet-cli) is not published here: the token
    cannot, and it goes out with the next release.
-4. Add each new crate's trusted publishers (both workflow files, each with the `release`
-   environment, above), set it to trusted-publishing-only, and revoke the token. Merge the branch.
+4. Add each new crate's trusted publishers (both workflow files, above), set it to
+   trusted-publishing-only, and revoke the token. Merge the branch.
 
 The next release publishes every crate through CI.
 

@@ -13,12 +13,11 @@
 #   6. what it cannot decide refuses: a shallow clone, no origin/main, no such tag, a tag that is
 #      not v<semver>, no event;
 #   7. release.yml runs it in determine-version, from a full clone, with the run's event and an
-#      Actions-reading token, before build-crates and publish-crates, and publish-crates runs in
-#      the `release` environment; release-tag.yml#release grants the actions: read it needs.
+#      Actions-reading token, before build-crates and publish-crates; release-tag.yml#release
+#      grants the actions: read it needs.
 #
-# NOT CHECKED: GitHub's real API, the `release` environment's deployment rule, and crates.io's
-# trusted publishers naming it. Those are settings, and nothing in the repo reads them
-# (RELEASING.md, "Authentication").
+# NOT CHECKED: GitHub's real API. A branch's own copy of release.yml is not guarded at all (an
+# accepted gap, RELEASING.md "Authentication").
 #
 # RELEASE_SCRIPTS=<dir> runs the cases against another copy of tools/scripts/release, such as
 # main's, to show they fail without this change; RELEASE_WORKFLOW=<file> and
@@ -199,11 +198,6 @@ if grep -qE '^    needs: (determine-version|\[determine-version.*\])$' <<< "$bui
     ok "build-crates and publish-crates need determine-version, so a refusal builds and publishes nothing"
 else
     bad "build-crates or publish-crates does not need determine-version"
-fi
-if grep -qE '^    environment: release$' <<< "$publish" && grep -qE '^      id-token: write$' <<< "$publish"; then
-    ok "release.yml#publish-crates, the job holding id-token: write, runs in the release environment"
-else
-    bad "release.yml#publish-crates does not run in the release environment"
 fi
 caller="$(job "$release_tag_yml" release)"
 if grep -qE '^      actions: read$' <<< "$caller"; then
