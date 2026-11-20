@@ -621,7 +621,7 @@ checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
 
 [[package]]
 name = "duet-abc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "duet-core",
  "duet-midi",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "duet-actions"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "duet-bus"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "duet-schemas",
  "getrandom 0.4.3",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "duet-capture"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "duet-abc",
  "duet-core",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "duet-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "duet-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "schemars",
  "serde",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "duet-drums"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "duet-core",
  "duet-midi",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "duet-dsp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "audioadapter-buffers",
  "basic-pitch-rs",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "duet-midi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "duet-core",
  "duet-dsp",
@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "duet-play"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "duet-core",
  "duet-midi",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "duet-schemas"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "duet-capture",
  "duet-core",
