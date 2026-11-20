@@ -17,7 +17,8 @@
 #   made by arithmetic and a seeded generator, then encoded losslessly by flac, so they are
 #   byte-stable for a given flac version, and were byte-identical across two runs here. Needs flac and python3.
 #
-# The tests use the committed files; run this only to change them. macOS only.
+# The tests use the committed files; run this only to change them. It deletes only the files it
+# generates (generated_fixtures), never another committed file. macOS only.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -91,9 +92,18 @@ with wave.open(path, "wb") as w:
 PY
 }
 
+# The files the fixtures target generates, and the only ones it deletes before regenerating (some
+# encoders will not write over a file). Any other file in the directory is committed by hand and is
+# left alone, so a new committed fixture needs no change here. A file added to make_fixtures goes here.
+generated_fixtures=(
+  tone-mono44.wav tone-mono44.flac tone-mono44.mp3 tone-mono44.ogg tone-mono44.m4a
+  tone-stereo48.wav tone-stereo48.flac tone-stereo48.mp3 tone-stereo48.ogg tone-stereo48.m4a
+  notes22.flac notes44.flac he-aac.m4a
+)
+
 make_fixtures() {
   mkdir -p "$fixtures"
-  rm -f "$fixtures"/*
+  for name in "${generated_fixtures[@]}"; do rm -f "$fixtures/$name"; done
   make tone-mono44 44100 1 2
   make tone-stereo48 48000 2 1
   # Tones to damage: at the analysis rate (passed through) and at twice it (resampled).
@@ -103,6 +113,9 @@ make_fixtures() {
   flac --silent --force -o "$fixtures/notes44.flac" "$work/notes44.wav"
   # Declared HE-AAC: the AAC-LC source is encoded as HE-AAC v1 at a low bit rate.
   afconvert -f m4af -d aach -b 48000 "$work/tone-stereo48.wav" "$fixtures/he-aac.m4a"
+  for name in "${generated_fixtures[@]}"; do
+    [[ -f "$fixtures/$name" ]] || { echo "error: $name is listed in generated_fixtures but was not made" >&2; exit 1; }
+  done
   ls -l "$fixtures"
 }
 
