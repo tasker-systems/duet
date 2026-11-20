@@ -35,10 +35,10 @@ use anyhow::{Context as _, Result, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use duet_abc::{Dynamics, WriteOptions, off_level_velocities};
 use duet_capture::{
-    A440_CENTS, ANALYSIS_RATE, Digester, Error, Event, FileSource, Given, Hits, Kind, LaneMode,
-    Layer1, Mono, NoteModel, Performance, PerformanceFrames, PerformanceHead, Prepare, Quantized,
-    ReadNote, Source, Stage, a4_cents_of_hz, assemble, estimate, merge_collisions, quantize_apart,
-    quantize_offsets, read,
+    A440_CENTS, ANALYSIS_RATE, Digester, Error, Event, FileSource, Gap, Given, Hits, Kind,
+    LaneMode, Layer1, Mono, NoteModel, Performance, PerformanceFrames, PerformanceHead, Prepare,
+    Quantized, ReadNote, Source, Stage, a4_cents_of_hz, assemble, estimate, merge_collisions,
+    quantize_apart, quantize_offsets, read,
 };
 #[cfg(feature = "basic-pitch")]
 use duet_capture::{BasicPitch, Thresholds};
@@ -201,7 +201,7 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     let keep = args.reader == Some(ReaderArg::BasicPitch);
     #[cfg(not(feature = "basic-pitch"))]
     let keep = false;
-    let (mut events, kept, samples, audio) =
+    let (mut events, kept, samples, audio, gaps) =
         analyse(&args.input, take, args.lane.is_some(), &outputs, keep)?;
     #[cfg(not(feature = "basic-pitch"))]
     let _ = samples;
@@ -267,6 +267,15 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     };
     let mut captured = assemble(&events, ANALYSIS_RATE, &timing, key, &kind).with_context(named)?;
     captured.analysis.take = audio;
+    captured.analysis.gaps = gaps;
+    // What the decoder left out of the take is said once, and stated in the analysis (1.14).
+    for said in crate::take::gaps_said(
+        &args.input,
+        audio.map_or(1, |take| take.rate),
+        &captured.analysis.gaps,
+    ) {
+        eprintln!("{said}");
+    }
 
     // The score's grid is settled before the analysis is written, since the analysis gives
     // each note's quantize offset in its steps. A failure here is the score's, reported once
@@ -923,7 +932,8 @@ impl Analyser {
 /// The take's settled events: the file through `Prepare` and the take's analysis stage, to
 /// the end of the stream, and every chunk through the take's [`Digester`]. For a melody, the
 /// events are its onsets, and its performance file, written in full but not yet kept, and its
-/// frames come with them. The audio's digest is last: `None` when the file held no audio.
+/// frames come with them. The audio's digest and the gaps the source left out are last: `None`
+/// and empty when the file held no audio.
 fn analyse(
     input: &Path,
     take: Take,
@@ -972,6 +982,7 @@ fn analyse(
     }
     stage.finish(&mut events).with_context(named)?;
     let audio = digester.finish();
+    let gaps = source.gaps().to_vec();
     let kept = match stage {
         Analyser::Melody {
             mut file, frames, ..
@@ -981,16 +992,17 @@ fn analyse(
         }
         Analyser::Rhythm(_) => None,
     };
-    Ok((events, kept, samples, audio))
+    Ok((events, kept, samples, audio, gaps))
 }
 
 /// What [`analyse`] gives: the take's events, a melody's performance, the samples when they are
-/// kept, and the take's digest.
+/// kept, the take's digest, and the gaps the source left out.
 type Analysed = (
     Vec<Event>,
     Option<Kept>,
     Vec<f32>,
     Option<duet_capture::Take>,
+    Vec<Gap>,
 );
 
 /// A melody's performance file, written but not yet kept, and its frames: none when the take

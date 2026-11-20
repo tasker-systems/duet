@@ -145,3 +145,87 @@ pub fn add(into: &mut [f32], other: &[f32]) {
 fn frames(secs: f64) -> usize {
     (secs * f64::from(RATE)).round() as usize
 }
+
+// --- A FLAC writer, for a file a frame of which the decoder refuses ---
+
+/// FLAC blocks of a clicks take: [`BLOCK`] samples each, `blocks` of them, with a click of
+/// amplitude 0.6 every half second from 0.25 s, no click inside `reserved_block`.
+pub const BLOCK: usize = 4096;
+
+/// `blocks` blocks of the clicks take as 16-bit samples: 0.5 s a click at 120 bpm means a
+/// capture's timing is given, never estimated into ambiguity.
+fn click_samples(blocks: usize, reserved_block: usize) -> Vec<i16> {
+    let mut out = vec![0i16; blocks * BLOCK];
+    let secs = blocks * BLOCK / RATE as usize;
+    for n in 0..=2 * secs {
+        let at = frames(0.25 + 0.5 * n as f64);
+        assert!(
+            at / BLOCK != reserved_block,
+            "a click fell inside the refused block"
+        );
+        out[at] = 19_660; // 0.6 of i16's range
+    }
+    out
+}
+
+/// FLAC's CRC-8 (polynomial 0x07), over a frame header.
+fn crc8(bytes: &[u8]) -> u8 {
+    bytes.iter().fold(0u8, |mut crc, &byte| {
+        crc ^= byte;
+        for _ in 0..8 {
+            crc = if crc & 0x80 != 0 {
+                crc << 1 ^ 0x07
+            } else {
+                crc << 1
+            };
+        }
+        crc
+    })
+}
+
+/// FLAC's CRC-16 (polynomial 0x8005), over a whole frame.
+fn crc16(bytes: &[u8]) -> u16 {
+    bytes.iter().fold(0u16, |mut crc, &byte| {
+        crc ^= u16::from(byte) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                crc << 1 ^ 0x8005
+            } else {
+                crc << 1
+            };
+        }
+        crc
+    })
+}
+
+/// Writes `path` as a FLAC of the clicks take whose block number `reserved_block` is replaced
+/// by a reserved subframe under a right CRC16: the decoder refuses it, and every later block
+/// keeps its true place. Deterministic, a little over `2 × BLOCK × blocks` bytes.
+pub fn write_flac_block_refused(path: &Path, blocks: usize, reserved_block: usize) {
+    let samples = click_samples(blocks, reserved_block);
+    let total = samples.len() as u64;
+    let mut out = b"fLaC".to_vec();
+    out.extend([0x80, 0x00, 0x00, 34]); // the last block, STREAMINFO, 34 bytes
+    out.extend((BLOCK as u16).to_be_bytes());
+    out.extend((BLOCK as u16).to_be_bytes());
+    out.extend([0, 0, 0, 0, 0, 0]); // frame sizes unknown
+    let packed = (u64::from(RATE) << 44) | (15 << 36) | total; // mono, 16 bits a sample
+    out.extend(packed.to_be_bytes());
+    out.extend([0; 16]); // no MD5
+    for (number, block) in samples.chunks(BLOCK).enumerate() {
+        let mut frame = vec![0xff, 0xf8, 0xc6, 0x08, number as u8]; // block 4096, 22.05 kHz
+        frame.push(crc8(&frame));
+        if number == reserved_block {
+            frame.extend([0x08, 0xaa, 0x55, 0xaa, 0x55]); // a reserved subframe type
+        } else {
+            frame.push(0x02); // verbatim
+            for &sample in block {
+                frame.extend(sample.to_be_bytes());
+            }
+        }
+        let crc = crc16(&frame);
+        frame.extend(crc.to_be_bytes());
+        out.extend(frame);
+    }
+    std::fs::write(path, out).expect("write flac");
+}

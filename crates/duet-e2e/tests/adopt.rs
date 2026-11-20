@@ -197,7 +197,7 @@ fn project_adopt_without_apply_prints_the_plan_and_writes_nothing() {
         "take wayfaring: wayfaring.wav, copied to takes/wayfaring/wayfaring.wav",
         "take old-take: old-take.wav, copied to takes/old-take/old-take.wav",
         // Derived files go to the take whose digest they state.
-        "wayfaring.capture.duet (capture-analysis 1.13) to takes/wayfaring/wayfaring.capture.duet",
+        "wayfaring.capture.duet (capture-analysis 1.14) to takes/wayfaring/wayfaring.capture.duet",
         "wayfaring.performance.duet.jsonl (performance 1.1) to takes/wayfaring/",
         "wayfaring.duet (part 1.0) to takes/wayfaring/wayfaring.duet",
         "wayfaring.abc to takes/wayfaring/wayfaring.abc",
