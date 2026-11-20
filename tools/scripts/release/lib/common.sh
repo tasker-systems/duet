@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tools/scripts/release/lib/common.sh
 #
-# Shared by duet's release scripts: the published crates in publish order, the shared version, the
+# Shared by duet's release scripts: the published crates in publish order and those held back, the shared version, the
 # crates.io probe, the last release's one derivation, and portable helpers. Borrowed from temper's tools/scripts/release/lib/common.sh
 # and cut down to one lane: duet publishes Rust crates only.
 #
@@ -17,6 +17,52 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 # duet-e2e is `publish = false`. The two dev-dependency cycles back to duet-schemas (from duet-midi
 # and duet-drums) are path-only, so cargo strips them and they constrain nothing here.
 CRATES=(duet-core duet-midi duet-abc duet-drums duet-dsp duet-capture duet-play duet-schemas duet-bus duet-actions duet-cli)
+
+# Crates held back from this release: they stay in CRATES, so update-versions.sh still moves their
+# version with the rest, but the API check, the packaging and the publish leave them out.
+#
+# Why a crate is held: crates.io takes a crate's first version only from an API token, and attaches
+# a trusted publisher only to a crate that already exists, while every crate already published is
+# trusted-publishing-only, so no token can publish it. A new crate whose dependencies are not yet
+# on crates.io at the shared version can therefore go out by neither door in one release. It is
+# held, the release publishes the rest through CI, and its first version is then published by
+# token from a branch that empties this list (RELEASING.md, "A crate's first version").
+#
+# A crate that depends on a held crate is held too: it cannot be packaged until the held one is
+# on crates.io. held_check refuses a release that publishes such a crate.
+HELD=(duet-bus duet-actions duet-cli)
+
+# CRATES without HELD, in publish order: what the API check, the packaging and the publish act on.
+PUBLISHED=()
+for _crate in "${CRATES[@]}"; do
+    _held=false
+    for _h in ${HELD[@]+"${HELD[@]}"}; do [[ "$_h" == "$_crate" ]] && _held=true; done
+    [[ "$_held" == "true" ]] || PUBLISHED+=("$_crate")
+done
+unset _crate _held _h
+
+# Refuse when HELD names a crate CRATES does not, or when a crate this release publishes depends on
+# a held crate through a dependency that carries a version (a `.workspace = true` entry, or one with
+# `version =`): cargo keeps those in the packed manifest, so its package resolves the held crate
+# from crates.io and cannot be built. A path-only dev-dependency is stripped, and constrains nothing.
+held_check() {
+    local h c found manifest
+    for h in ${HELD[@]+"${HELD[@]}"}; do
+        found=false
+        for c in "${CRATES[@]}"; do [[ "$c" == "$h" ]] && found=true; done
+        [[ "$found" == "true" ]] || die "HELD names ${h}, which is not one of CRATES"
+    done
+    for c in "${PUBLISHED[@]}"; do
+        manifest="${REPO_ROOT}/crates/${c}/Cargo.toml"
+        [[ -f "$manifest" ]] || continue
+        for h in ${HELD[@]+"${HELD[@]}"}; do
+            if grep -E "^${h}(\.workspace[[:space:]]*=|[[:space:]]*=)" "$manifest" |
+                grep -qE 'workspace|version'; then
+                die "${c} is published by this release, but depends on ${h}, which is held; hold ${c} too"
+            fi
+        done
+    done
+}
 
 SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 

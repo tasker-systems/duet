@@ -14,7 +14,10 @@
 #   6. release-prepare.sh --dry-run runs the same check, refuses a crates.io failure and a VERSION
 #      that is not the last release, and passes cargo-semver-checks the derived baseline;
 #   7. release.yml's build-crates runs api-check.sh on the tagged candidate, from a full clone,
-#      before it packages anything.
+#      before it packages anything;
+#   8. a crate in HELD is not judged, packaged or published, and is named; a release that would
+#      publish a crate depending on a held one, through a dependency that carries a version, is
+#      refused, as is a HELD naming no crate.
 #
 # NOT CHECKED: that cargo-semver-checks finds a real break (the fake stands in for it), the real
 # crates.io API, and a real release.yml run.
@@ -34,6 +37,13 @@ export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid
 
 LIBS=(duet-core duet-midi duet-abc duet-drums duet-dsp duet-capture duet-play duet-schemas duet-bus duet-actions)
+# The library crates these release scripts judge: every one but those they hold back (HELD), read
+# from the scripts under test, so a copy with no HELD (main's, before it) judges all of LIBS.
+JUDGED=()
+while IFS= read -r crate; do JUDGED+=("$crate"); done < <(bash -c '
+    source "$1/lib/common.sh"
+    if declare -p PUBLISHED > /dev/null 2>&1; then list=("${PUBLISHED[@]}"); else list=("${CRATES[@]}"); fi
+    for c in "${list[@]}"; do [[ "$c" == duet-cli ]] || echo "$c"; done' _ "$scripts")
 
 failures=0
 ok() { echo "ok   $1"; }
@@ -113,8 +123,8 @@ d="$(fixture patch-clean)"
 tag_head "$d" 0.3.1
 run "$d" api-check.sh 0.3.1
 expect_pass "$d" "a patch with no break passes"
-if [[ "$(checks "$d")" == "${#LIBS[@]}" ]] &&
-    [[ "$(grep -c -- '--baseline-version 0.3.0 --release-type minor$' "$d/crates/cargo.log")" == "${#LIBS[@]}" ]] &&
+if [[ "$(checks "$d")" == "${#JUDGED[@]}" ]] &&
+    [[ "$(grep -c -- '--baseline-version 0.3.0 --release-type minor$' "$d/crates/cargo.log")" == "${#JUDGED[@]}" ]] &&
     ! grep -q -- '-p duet-cli' "$d/crates/cargo.log"; then
     ok "every library crate, and not duet-cli, is judged against 0.3.0 at a duet patch (--release-type minor)"
 else
@@ -219,7 +229,7 @@ commit_work "$d" c3
 tag_head "$d" 0.3.2
 for crate in "${LIBS[@]}"; do echo "versions: 0.1.0 0.2.0 0.3.0 0.3.1" > "$d/crates/$crate"; done
 run "$d" api-check.sh 0.3.2
-if [[ "$(status "$d")" == 0 ]] && [[ "$(grep -c -- '--baseline-version 0.3.1 ' "$d/crates/cargo.log")" == "${#LIBS[@]}" ]]; then
+if [[ "$(status "$d")" == 0 ]] && [[ "$(grep -c -- '--baseline-version 0.3.1 ' "$d/crates/cargo.log")" == "${#JUDGED[@]}" ]]; then
     ok "the newest release tag, 0.3.1, is the baseline, not the older 0.3.0"
 else
     bad "the newest release tag: exit $(status "$d"), $(head -n 1 "$d/crates/cargo.log" 2> /dev/null)"
@@ -254,7 +264,7 @@ if [[ "$(status "$d")" == 0 ]] && ! said "$d" "(a real run refuses here)"; then
 else
     bad "release-prepare --dry-run on a clean patch: exit $(status "$d"): $(grep -h 'refuses here' "$d/stdout" "$d/stderr" || tail -n 3 "$d/stderr")"
 fi
-if [[ "$(grep -c -- '--baseline-version 0.3.0 --release-type minor$' "$d/crates/cargo.log" 2> /dev/null || true)" == "${#LIBS[@]}" ]]; then
+if [[ "$(grep -c -- '--baseline-version 0.3.0 --release-type minor$' "$d/crates/cargo.log" 2> /dev/null || true)" == "${#JUDGED[@]}" ]]; then
     ok "release-prepare passes cargo-semver-checks the derived last release as --baseline-version"
 else
     bad "release-prepare's check-release calls carry no derived baseline: $(grep check-release "$d/crates/cargo.log" | head -n 1)"
@@ -290,6 +300,86 @@ if [[ -n "$check_line" && -n "$package_line" && "$check_line" -lt "$package_line
     ok "release.yml#build-crates runs api-check.sh from a full clone, with a pinned cargo-semver-checks, before packaging"
 else
     bad "release.yml#build-crates does not run api-check.sh before packaging, from a full clone, with a pinned cargo-semver-checks"
+fi
+
+# 8. Held crates.
+# set_held <dir> <crates...>: the scripts under test, in <dir>/work, hold exactly these crates.
+set_held() {
+    local dir="$1"
+    shift
+    sed -i.bak -E "s/^HELD=\(.*\)$/HELD=($*)/" "$dir/work/tools/scripts/release/lib/common.sh"
+}
+# manifest <dir> <crate> <line>: crates/<crate>/Cargo.toml in <dir>/work, with that dependency.
+manifest() {
+    mkdir -p "$1/work/crates/$2"
+    printf '[package]\nname = "%s"\n\n[dependencies]\n%s\n' "$2" "$3" > "$1/work/crates/$2/Cargo.toml"
+}
+
+d="$(fixture held-api)"
+tag_head "$d" 0.3.1
+run "$d" api-check.sh 0.3.1
+if [[ "$(status "$d")" == 0 ]] && said "$d" "duet-bus: held back from this release" &&
+    said "$d" "duet-actions: held back from this release" &&
+    ! grep -qE -- '-p duet-(bus|actions) ' "$d/crates/cargo.log"; then
+    ok "api-check names duet-bus and duet-actions as held, and does not judge them"
+else
+    bad "api-check judged a held crate, or did not name it: $(grep -E 'duet-(bus|actions)' "$d/stdout" "$d/crates/cargo.log" 2> /dev/null | head -n 3)"
+fi
+
+d="$(fixture held-dependent)"
+tag_head "$d" 0.3.1
+set_held "$d" duet-bus
+manifest "$d" duet-actions "duet-bus.workspace = true"
+run "$d" api-check.sh 0.3.1
+expect_refused "$d" "a published crate that depends on a held one is refused" "duet-actions is published by this release, but depends on duet-bus, which is held"
+manifest "$d" duet-actions 'duet-bus = { path = "../duet-bus", version = "0.3.0" }'
+run "$d" api-check.sh 0.3.1
+expect_refused "$d" "a versioned path dependency on a held crate is refused too" "depends on duet-bus, which is held"
+manifest "$d" duet-actions 'duet-bus = { path = "../duet-bus" }'
+run "$d" api-check.sh 0.3.1
+expect_pass "$d" "a path-only dependency on a held crate, which cargo strips, passes"
+
+d="$(fixture held-unknown)"
+tag_head "$d" 0.3.1
+set_held "$d" duet-nope
+run "$d" api-check.sh 0.3.1
+expect_refused "$d" "a HELD naming no crate is refused" "HELD names duet-nope, which is not one of CRATES"
+
+# publish-crates.sh at 0.4.0, its versions written as update-versions.sh writes them, with a target
+# dir holding a package for every crate (the fake cargo packages nothing).
+publish_fixture() {
+    local d crate
+    d="$(fixture "$1")"
+    {
+        printf '[workspace.package]\nversion = "0.4.0"\n\n[workspace.dependencies]\n'
+        for crate in "${LIBS[@]}"; do printf '%s = { path = "crates/%s", version = "0.4.0" }\n' "$crate" "$crate"; done
+    } > "$d/work/Cargo.toml"
+    mkdir -p "$d/target/package"
+    for crate in "${LIBS[@]}" duet-cli; do echo "$crate" > "$d/target/package/$crate-0.4.0.crate"; done
+    echo "$d"
+}
+
+d="$(publish_fixture held-build)"
+CARGO_TARGET_DIR="$d/target" run "$d" publish-crates.sh 0.4.0 --out "$d/dist"
+line="$(grep '^package ' "$d/crates/cargo.log" 2> /dev/null || true)"
+if [[ "$(status "$d")" == 0 ]] && [[ -n "$line" ]] && ! grep -qE -- '-p duet-(bus|actions|cli)( |$)' <<< "$line" &&
+    grep -q -- '-p duet-schemas' <<< "$line" && [[ ! -e "$d/dist/duet-bus-0.4.0.crate" ]] &&
+    [[ "$(find "$d/dist" -name '*.crate' | wc -l | tr -d ' ')" == "${#JUDGED[@]}" ]]; then
+    ok "the build stage packages every crate but the held ones, and leaves them out of dist"
+else
+    bad "the build stage packaged a held crate, or not the rest: exit $(status "$d"), $line, dist: $(find "$d/dist" -name '*.crate' -exec basename {} \; 2> /dev/null | tr '\n' ' ')"
+fi
+
+d="$(publish_fixture held-publish)"
+for crate in "${JUDGED[@]}"; do echo "versions: 0.3.0 0.4.0" > "$d/crates/$crate"; done
+rm -f "$d/crates/duet-bus" "$d/crates/duet-actions"
+mkdir -p "$d/dist"
+CARGO_TARGET_DIR="$d/target" run "$d" publish-crates.sh 0.4.0 --from "$d/dist" --dry-run
+if [[ "$(status "$d")" == 0 ]] && said "$d" "duet-bus is held back from this release" &&
+    ! grep -q '^publish' "$d/crates/cargo.log" 2> /dev/null; then
+    ok "the publish stage skips the held crates, and finishes when the rest are on crates.io"
+else
+    bad "the publish stage tried a held crate: exit $(status "$d"): $(tail -n 2 "$d/stderr")"
 fi
 
 if [[ "$failures" -gt 0 ]]; then

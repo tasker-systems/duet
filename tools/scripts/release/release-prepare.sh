@@ -42,6 +42,7 @@ git fetch --quiet origin main
 [[ "$(git branch --show-current)" == "main" ]] || refuse "not on main"
 [[ -z "$(git status --porcelain)" ]] || refuse "the working tree has changes"
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || refuse "main is not origin/main"
+held_check
 cargo semver-checks --version >/dev/null 2>&1 || die "cargo-semver-checks is not installed (cargo install cargo-semver-checks --locked)"
 command -v gh >/dev/null || [[ "$DRY_RUN" == "true" ]] || die "gh is not installed"
 
@@ -74,10 +75,10 @@ rm -f "$API_LOG"
 if [[ "$DRY_RUN" == "true" ]]; then
     log_header "packaging (at ${CURRENT}; a real run packages at ${NEXT})"
     PKG_ARGS=()
-    for crate in "${CRATES[@]}"; do PKG_ARGS+=(-p "$crate"); done
+    for crate in "${PUBLISHED[@]}"; do PKG_ARGS+=(-p "$crate"); done
     # --allow-dirty: a dry run may be run on an unfinished tree; a real run refuses one above.
     cargo package --quiet --allow-dirty "${PKG_ARGS[@]}"
-    log_info "all ${#CRATES[@]} crates package and verify"
+    log_info "all ${#PUBLISHED[@]} crates this release publishes package and verify"
     log_header "dry run: nothing changed. A real run cuts release/v${NEXT} and opens its PR."
     exit 0
 fi
@@ -94,11 +95,15 @@ git push --quiet -u origin "$BRANCH"
 
 NEW_LINE="none"
 [[ -n "$NEW_CRATES" && "$NEW_CRATES" != "none" ]] && NEW_LINE="${NEW_CRATES} (first published at ${NEXT})"
+HELD_LINE="none"
+if [[ ${#HELD[@]} -gt 0 ]]; then
+    HELD_LINE="${HELD[*]}: their version moves to ${NEXT} with the rest, but this release does not publish them (HELD in lib/common.sh). A new crate's first version is published by token after the release, from a branch that empties HELD (RELEASING.md)"
+fi
 BODY="$(mktemp)"
 cat > "$BODY" <<BODY_EOF
 ## What
 
-Release v${NEXT}: every published duet crate moves from ${CURRENT} to ${NEXT}, with VERSION, [workspace.package] and [workspace.dependencies] together.
+Release v${NEXT}: every duet crate moves from ${CURRENT} to ${NEXT}, with VERSION, [workspace.package] and [workspace.dependencies] together.
 
 ## Why
 
@@ -108,6 +113,7 @@ Merging changes VERSION on main, which release-tag.yml tags as v${NEXT} and rele
 
 - **Bump:** a ${LEVEL}. The API check (api-check.sh) passed against the last release ${CURRENT} for every library crate crates.io already has; release.yml runs it again on the tagged candidate.
 - **New on crates.io:** ${NEW_LINE}.
+- **Held back:** ${HELD_LINE}.
 - **Formats:** none.
 - **Verified:** every crate verify-packaged at ${NEXT} (\`tools/scripts/release/publish-crates.sh ${NEXT} --out\`).
 
