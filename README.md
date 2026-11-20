@@ -973,7 +973,9 @@ note settles, so a whole note is taken as held, its scoop in read as drift; and 
 into frames the performance hears as unvoiced, which the loss's `voicing` term charges.
 
 **Rhythm.** Without `--lane`, each hit is sorted by sound into `kick`, `snare` or `hh` (a closed
-hat). With `--lane`, every hit goes to that lane. Known limit: a hit has one lane. A kick and a
+hat). A kick can be a plosive "b" or a sung "un": a voiced, nasal hum low in the voice's range
+reads as a kick, so a trance-style "unce" is two hits, the "un" a kick and the "ce" a hat just
+after it. With `--lane`, every hit goes to that lane. Known limit: a hit has one lane. A kick and a
 hat sounded together, or within about 50 ms of each other, are heard as one hit and get one
 lane. Takes of different lanes are meant to be put together later; for that, give each the same
 `--tempo`, `--meter` and `--downbeat` so they line up.

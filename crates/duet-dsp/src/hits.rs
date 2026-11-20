@@ -28,6 +28,23 @@ const KICK_LOW_SHARE: f64 = 0.5;
 /// hat's centre sits above it.
 const HAT_CENTROID_HZ: f64 = 5_000.0;
 
+/// Below this, energy counts toward a voiced kick: a sung "un" has its energy in the voice's
+/// range, from about 100 Hz to here, and little in the low band once a phone's microphone has
+/// rolled its fundamental off.
+const VOICED_MAX_HZ: f64 = 1_000.0;
+/// The least share of the window's energy below `VOICED_MAX_HZ` for a voiced hit to be a kick. A
+/// snare's or hat's noise sits mostly above it. The voiced-kick constants are fitted to a
+/// synthetic "un", not yet to a real take: tune them with the owner's.
+const VOICED_KICK_SHARE: f64 = 0.8;
+/// The lowest pitch, in Hz, a voiced kick is sung at.
+const VOICED_LEAST_HZ: f64 = 60.0;
+/// The highest pitch, in Hz, a voiced kick is sung at: a low hum, below most sung melody.
+const VOICED_MOST_HZ: f64 = 300.0;
+/// The least normalised autocorrelation of the window, at a lag in the voiced kick's pitch range,
+/// for it to count as voiced. Noise limited to below `VOICED_MAX_HZ` has lost its likeness at
+/// those lags; a held tone keeps it.
+const VOICED_LEAST_CORRELATION: f64 = 0.6;
+
 /// How much of the window just before a hit is taken away from the window around it. Above 1,
 /// so the scatter between two looks at a decaying tail does not leave it standing. Task 9
 /// should tune it.
@@ -55,6 +72,10 @@ pub enum LaneMode {
 /// the 40 ms before them (`EARLIER_WEIGHT`), per bin of a Hann-windowed spectrum:
 ///
 /// - **Kick** when the share of energy below `LOW_BAND_MAX_HZ` is at least `KICK_LOW_SHARE`;
+/// - otherwise **Kick** when it is a voiced kick, a sung "un": the share of energy below
+///   `VOICED_MAX_HZ` is at least `VOICED_KICK_SHARE`, and the window is voiced, its normalised
+///   autocorrelation reaching `VOICED_LEAST_CORRELATION` at a lag for a pitch between
+///   `VOICED_LEAST_HZ` and `VOICED_MOST_HZ`;
 /// - otherwise **Hat** when the spectral centroid is at least `HAT_CENTROID_HZ`;
 /// - otherwise **Snare**.
 ///
@@ -150,7 +171,7 @@ impl Hits {
         // The low band is judged as a whole, since a tail beats from one look to the next in
         // each of its bins; the bins above it, which no kick reaches, one by one.
         let (mut low_now, mut low_earlier) = (0.0, 0.0);
-        let (mut high, mut weighted) = (0.0, 0.0);
+        let (mut high, mut weighted, mut voice) = (0.0, 0.0, 0.0);
         for (k, (now, earlier)) in now.iter().zip(&earlier).enumerate() {
             let hz = k as f64 * bin_hz;
             if hz < RUMBLE_MAX_HZ {
@@ -163,6 +184,9 @@ impl Hits {
                 let power = (now - earlier * EARLIER_WEIGHT).max(0.0);
                 high += power;
                 weighted += power * hz;
+                if hz < VOICED_MAX_HZ {
+                    voice += power;
+                }
             }
         }
         let low = (low_now - low_earlier * EARLIER_WEIGHT).max(0.0);
@@ -170,13 +194,34 @@ impl Hits {
         if total <= 0.0 {
             return HitLane::Snare;
         }
-        if low / total >= KICK_LOW_SHARE {
+        if low / total >= KICK_LOW_SHARE
+            || ((low + voice) / total >= VOICED_KICK_SHARE && self.voiced(start))
+        {
             HitLane::Kick
         } else if weighted / high.max(f64::MIN_POSITIVE) >= HAT_CENTROID_HZ {
             HitLane::Hat
         } else {
             HitLane::Snare
         }
+    }
+
+    /// Whether the window of `taper.len()` samples from stream frame `start` holds a held pitch
+    /// in the voiced kick's range: its normalised autocorrelation, at some lag for a pitch from
+    /// `VOICED_MOST_HZ` down to `VOICED_LEAST_HZ`, is at least `VOICED_LEAST_CORRELATION`.
+    fn voiced(&self, start: i64) -> bool {
+        let window: Vec<f64> = (0..self.taper.len() as i64)
+            .map(|i| f64::from(self.sample(start + i)))
+            .collect();
+        let rate = f64::from(self.rate);
+        let shortest = (rate / VOICED_MOST_HZ).floor() as usize;
+        let longest = ((rate / VOICED_LEAST_HZ).ceil() as usize).min(window.len() / 2);
+        (shortest.max(1)..=longest).any(|lag| {
+            let (head, tail) = (&window[..window.len() - lag], &window[lag..]);
+            let cross: f64 = head.iter().zip(tail).map(|(a, b)| a * b).sum();
+            let energy =
+                head.iter().map(|a| a * a).sum::<f64>() * tail.iter().map(|b| b * b).sum::<f64>();
+            energy > 0.0 && cross / energy.sqrt() >= VOICED_LEAST_CORRELATION
+        })
     }
 
     fn emit_hit(&self, frame: u64, strength: f32, out: &mut Vec<Event>) {
@@ -436,6 +481,78 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A sung "un" at `start`: a voiced tone on 110 Hz, 150 ms long, with a 10 ms rise and a
+    /// 30 ms fall. Its partials fall 6 dB an octave, a nasal formant near 250 Hz lifts them, and
+    /// a phone's microphone, rolling off 12 dB an octave below 150 Hz, weakens its fundamental,
+    /// so its energy sits between about 100 Hz and 1 kHz, mostly above 200 Hz.
+    fn un(signal: &mut [f32], start: f64, amplitude: f32) {
+        const F0: f64 = 110.0;
+        const FORMANT_HZ: f64 = 250.0;
+        const MIC_CORNER_HZ: f64 = 150.0;
+        let first = (start * f64::from(RATE)) as usize;
+        let count = (0.15 * f64::from(RATE)) as usize;
+        let (rise, fall) = (0.01 * f64::from(RATE), 0.03 * f64::from(RATE));
+        let gains: Vec<f64> = (1..=9)
+            .map(|n| {
+                let hz = F0 * f64::from(n);
+                let resonance = 1.0 / (1.0 + ((hz - FORMANT_HZ) / 120.0).powi(2));
+                let mic = (hz / MIC_CORNER_HZ).powi(2) / (1.0 + (hz / MIC_CORNER_HZ).powi(2));
+                (0.3 + resonance) / f64::from(n) * mic
+            })
+            .collect();
+        let norm: f64 = gains.iter().sum();
+        for i in 0..count {
+            let t = i as f64 / f64::from(RATE);
+            let sum: f64 = gains
+                .iter()
+                .enumerate()
+                .map(|(k, g)| g * (std::f64::consts::TAU * F0 * (k + 1) as f64 * t).sin())
+                .sum();
+            let envelope = (i as f64 / rise)
+                .min((count - 1 - i) as f64 / fall)
+                .min(1.0);
+            signal[first + i] += (sum / norm * envelope) as f32 * amplitude;
+        }
+    }
+
+    #[test]
+    fn a_voiced_unce_is_a_kick_then_a_hat() {
+        // Four "unce"s a beat apart: each "un" 150 ms, its "ce" a noise burst just after it.
+        let mut signal = synth::silence(RATE, 3.0);
+        for i in 0..4 {
+            let start = 0.25 + 0.5 * f64::from(i);
+            un(&mut signal, start, 0.6);
+            let ce =
+                synth::noise_bursts(RATE, 3.0, &[(start + 0.15, 0.08)], 4_000.0, 10_000.0, 0.3);
+            synth::add(&mut signal, &ce);
+        }
+        let reference = run(&signal, signal.len(), LaneMode::Beatbox);
+        let found = hits(&reference);
+        let lanes: Vec<HitLane> = found.iter().map(|h| h.1).collect();
+        assert_eq!(lanes, [HitLane::Kick, HitLane::Hat].repeat(4), "{found:?}");
+        for (pair, hit) in found.chunks(2).enumerate() {
+            let start = 0.25 + 0.5 * pair as f64;
+            for (hit, secs) in hit.iter().zip([start, start + 0.15]) {
+                let at = hit.0 as f64 / f64::from(RATE);
+                assert!((at - secs).abs() < 0.02, "hit at {at} s, wanted {secs} s");
+            }
+        }
+        for chunk in [1, 777, 4096] {
+            let events = run(&signal, chunk, LaneMode::Beatbox);
+            assert_eq!(hits(&events), found, "hits, chunk {chunk}");
+        }
+    }
+
+    #[test]
+    fn unvoiced_noise_in_the_voice_range_is_not_a_kick() {
+        // The band a sung "un" fills, but noise, with no held pitch: a snare, not a voiced kick.
+        let signal =
+            synth::noise_bursts(RATE, 3.0, &[(0.5, 0.1), (1.5, 0.15)], 200.0, 1_000.0, 0.8);
+        let found = hits(&run(&signal, 1024, LaneMode::Beatbox));
+        let lanes: Vec<HitLane> = found.iter().map(|h| h.1).collect();
+        assert_eq!(lanes, [HitLane::Snare, HitLane::Snare], "{found:?}");
     }
 
     #[test]
