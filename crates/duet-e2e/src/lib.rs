@@ -253,6 +253,50 @@ pub fn without_id(document: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `document` with the version in each `"tool": {"name": "duet", "version": "…"}` it states read
+/// as `<version>`, whether the document is pretty-printed or one JSON value per line. Every file
+/// duet writes names the duet that wrote it, so a golden compared byte for byte would otherwise
+/// change at every release, though what the release changed is not what the golden holds.
+#[must_use]
+pub fn without_tool_version(document: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(document.len());
+    let mut at = 0;
+    while at < document.len() {
+        if let Some((value, len)) = duet_tool_version_at(document, at) {
+            out.extend_from_slice(&document[at..value]);
+            out.extend_from_slice(b"<version>");
+            at = value + len;
+        } else {
+            out.push(document[at]);
+            at += 1;
+        }
+    }
+    out
+}
+
+/// When `"name": "duet", "version": "V"` starts at `at`, any whitespace between its tokens: where
+/// V starts, and its length.
+fn duet_tool_version_at(document: &[u8], at: usize) -> Option<(usize, usize)> {
+    let token = |i: usize, want: &[u8]| -> Option<usize> {
+        let i = i + document
+            .get(i..)?
+            .iter()
+            .take_while(|b| b.is_ascii_whitespace())
+            .count();
+        document
+            .get(i..)?
+            .starts_with(want)
+            .then_some(i + want.len())
+    };
+    let i = token(at, b"\"name\":")?;
+    let i = token(i, b"\"duet\"")?;
+    let i = token(i, b",")?;
+    let i = token(i, b"\"version\":")?;
+    let value = token(i, b"\"")?;
+    let len = document.get(value..)?.iter().position(|&b| b == b'"')?;
+    Some((value, len))
+}
+
 /// A part document's body as JSON, with its `id` left out: what two documents of one part, each
 /// with an id of its own, hold alike.
 #[must_use]
@@ -262,4 +306,35 @@ pub fn body_without_id(document: &serde_json::Value) -> serde_json::Value {
         fields.remove("id");
     }
     body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::without_tool_version;
+
+    #[test]
+    fn the_tool_version_is_masked_pretty_or_compact_and_nothing_else_is() {
+        let pretty = b"{\n  \"tool\": {\n    \"name\": \"duet\",\n    \"version\": \"0.4.0\"\n  },\n  \"version\": \"1.0\"\n}";
+        assert_eq!(
+            without_tool_version(pretty),
+            b"{\n  \"tool\": {\n    \"name\": \"duet\",\n    \"version\": \"<version>\"\n  },\n  \"version\": \"1.0\"\n}"
+        );
+        let compact = br#"{"tool":{"name":"duet","version":"0.3.0"},"x":1}"#;
+        assert_eq!(
+            without_tool_version(compact),
+            br#"{"tool":{"name":"duet","version":"<version>"},"x":1}"#
+        );
+        // Another tool's version, and a document's own, are what they say.
+        let other = br#"{"tool":{"name":"abc2midi","version":"5.14"},"version":"1.0"}"#;
+        assert_eq!(without_tool_version(other), other);
+    }
+
+    #[test]
+    fn two_releases_of_one_document_read_alike() {
+        let at = |v: &str| format!("{{\"tool\":{{\"name\":\"duet\",\"version\":\"{v}\"}}}}");
+        assert_eq!(
+            without_tool_version(at("0.3.0").as_bytes()),
+            without_tool_version(at("0.4.0").as_bytes())
+        );
+    }
 }
