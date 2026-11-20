@@ -92,5 +92,5 @@ pub use duet_dsp::{
 pub use duet_dsp::{BasicPitch, BasicPitchRead, MODEL_SHA256};
 pub use error::{Error, Result};
 pub use score::{Merge, Quantized, merge_collisions, quantize_apart};
-pub use source::{FileSource, Gap, Source};
+pub use source::{FileSource, Gap, MAX_GAPS, Source};
 pub use take::{Depth, TakeWriter, Written};

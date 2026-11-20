@@ -13,7 +13,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use duet_capture::{Digester, FileSource, Source};
+use duet_capture::{Chunk, Digester, FileSource, MAX_GAPS, Source};
 
 /// A scratch file under cargo's per-run target directory.
 fn scratch(name: &str) -> PathBuf {
@@ -302,4 +302,66 @@ fn a_whole_decode_states_no_gaps() {
         while source.next_chunk().unwrap().is_some() {}
         assert!(source.gaps().is_empty(), "{name}: {:?}", source.gaps());
     }
+}
+
+/// Reads `path` to its end, returning the chunks, or the first error.
+fn read_all(path: &Path) -> (FileSource, duet_capture::Result<Vec<Chunk>>) {
+    let mut source = FileSource::open(path).unwrap();
+    let mut chunks = Vec::new();
+    loop {
+        match source.next_chunk() {
+            Ok(Some(chunk)) => chunks.push(chunk),
+            Ok(None) => return (source, Ok(chunks)),
+            Err(e) => return (source, Err(e)),
+        }
+    }
+}
+
+#[test]
+fn a_run_of_refused_packets_is_one_gap() {
+    // A valid frame, 40 refused ones in a row, then a valid one: one gap of 40 blocks, not 40
+    // gaps, so a file of many tiny refused frames holds one entry, not one per frame.
+    let path = scratch("refused-run.flac");
+    let first = ramp(3000);
+    let last = ramp(-600_000);
+    let mut bytes = streaminfo(42 * BLOCK as u64);
+    bytes.extend(verbatim_frame(0, &first));
+    for n in 1..=40 {
+        bytes.extend(reserved_frame(n));
+    }
+    bytes.extend(verbatim_frame(41, &last));
+    fs::write(&path, bytes).unwrap();
+
+    let (source, chunks) = read_all(&path);
+    let chunks = chunks.unwrap();
+    let gaps: Vec<(u64, u64)> = source.gaps().iter().map(|g| (g.start, g.frames)).collect();
+    assert_eq!(gaps, [(BLOCK as u64, 40 * BLOCK as u64)]);
+    assert_eq!(chunks.len(), 2, "{chunks:?}");
+    assert_eq!(chunks[1].start_frame, 41 * BLOCK as u64);
+    assert_eq!(chunks[1].samples, to_f32(&last));
+}
+
+#[test]
+fn a_file_with_more_separate_gaps_than_the_bound_is_refused() {
+    // Valid and refused frames alternating: each refused frame is a separate gap. MAX_GAPS of
+    // them are stated; one more refuses the file by name.
+    let read = |holes: usize| {
+        let path = scratch(&format!("holes-{holes}.flac"));
+        let mut bytes = streaminfo((2 * holes as u64 + 1) * BLOCK as u64);
+        for n in 0..holes as u64 {
+            bytes.extend(verbatim_frame(2 * n, &ramp(n as i32)));
+            bytes.extend(reserved_frame(2 * n + 1));
+        }
+        bytes.extend(verbatim_frame(2 * holes as u64, &ramp(-1)));
+        fs::write(&path, bytes).unwrap();
+        read_all(&path)
+    };
+    let (source, chunks) = read(MAX_GAPS);
+    assert!(chunks.is_ok(), "{chunks:?}");
+    assert_eq!(source.gaps().len(), MAX_GAPS);
+
+    let (source, chunks) = read(MAX_GAPS + 1);
+    let err = chunks.expect_err("one gap past the bound refuses the file");
+    assert!(err.to_string().contains("separate gaps"), "{err}");
+    assert_eq!(source.gaps().len(), MAX_GAPS);
 }

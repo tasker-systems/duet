@@ -65,6 +65,10 @@ pub struct FileSource {
     gaps: Vec<Gap>,
 }
 
+/// The most separate gaps a [`FileSource`] states before it refuses the file: a gap that
+/// touches the one before it extends it, so this counts holes, not damaged packets.
+pub const MAX_GAPS: usize = 512;
+
 /// A span of frames the file's reader left out, filled with silence downstream: where it
 /// starts and how long it runs, counted in frames at the take's own rate.
 ///
@@ -188,6 +192,37 @@ impl FileSource {
     pub fn gaps(&self) -> &[Gap] {
         &self.gaps
     }
+
+    /// Leaves `frames` frames out at the current position, as one gap with the gap before it
+    /// when the two touch, so a run of damaged packets is one gap however many packets it
+    /// spans.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Invalid`] when this would be gap [`MAX_GAPS`] + 1: a file with that many
+    /// separate holes is broken, not damaged, and counting them would let a file of tiny
+    /// refused frames grow the list without bound.
+    fn leave_gap(&mut self, frames: u64) -> Result<()> {
+        let next = self.next_frame;
+        if let Some(last) = self.gaps.last_mut()
+            && last.start + last.frames == next
+        {
+            last.frames += frames;
+        } else if self.gaps.len() == MAX_GAPS {
+            return Err(Error::Invalid(format!(
+                "{} leaves more than {MAX_GAPS} separate gaps where its packets could not be \
+                 read; a file with that many holes is broken, not damaged",
+                self.path.display()
+            )));
+        } else {
+            self.gaps.push(Gap {
+                start: next,
+                frames,
+            });
+        }
+        self.next_frame += frames;
+        Ok(())
+    }
 }
 
 impl Source for FileSource {
@@ -208,11 +243,7 @@ impl Source for FileSource {
             {
                 let skipped = u64::try_from(packet.pts.get() - end).unwrap_or(0);
                 if skipped > 0 {
-                    self.gaps.push(Gap {
-                        start: self.next_frame,
-                        frames: skipped,
-                    });
-                    self.next_frame += skipped;
+                    self.leave_gap(skipped)?;
                 }
             }
             self.packet_end = Some(packet.pts.get().saturating_add_unsigned(packet.dur.get()));
@@ -221,11 +252,7 @@ impl Source for FileSource {
                 // A damaged packet is dropped and its frames still counted, so the start
                 // frames of what follows stay true; the stream goes on.
                 Err(DecodeFailure::DecodeError(_)) => {
-                    self.gaps.push(Gap {
-                        start: self.next_frame,
-                        frames: packet.dur.get(),
-                    });
-                    self.next_frame += packet.dur.get();
+                    self.leave_gap(packet.dur.get())?;
                     continue;
                 }
                 Err(e) => return Err(self.failed(&e)),
