@@ -25,7 +25,8 @@ ruled, and nothing here rules them.
 
 **Grounding:**
 
-- The code at `main` `ce02481` (`capture-analysis` 1.13), release build.
+- The code at `main` `ce02481` (`capture-analysis` 1.13), release build. Re-measured at `main`
+  `6037aee` (`capture-analysis` 1.14, the FLAC reader): every number below is the same.
 - `crates/duet-capture/corpus/wayfaring-stranger.flac` (CC BY 4.0), captured with `--key "Eb
   minor"`, with `--key "Eb dorian"`, with nothing given, and with `--reader rules`.
 - The ABC corpus tunes `drunken-sailor` (D Dorian), `god-rest-ye` (E minor), `amazing-grace`,
@@ -261,7 +262,7 @@ suggestion or the field does not exist, except where stated.
   note on its key is not enough and two are; a note between keys does not count toward the degree;
   one counterpart note, even between keys, blocks the suggestion; a given key gets none; Mixolydian
   over a major estimate.
-- **W7. The field round-trips,** and a 1.13 document reads as suggesting nothing
+- **W7. The field round-trips,** and a document from before the field reads as suggesting nothing
   (`crates/duet-schemas` tests and the committed schema).
 - **W8. "Wayfaring Stranger" is pinned as it reads under each reader** (HMM: Dorian; rules:
   nothing), like the manifest's listened counts. The fragility is stated on the test: one C crossing
