@@ -176,3 +176,43 @@ fn a_document_read_and_written_again_keeps_its_from() {
     assert!(json_of(&plain)["duet"].get("from").is_none());
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+#[test]
+fn a_part_written_by_duet_abc_write_reads_back_with_no_beaming_notice() {
+    let dir = scratch("from-abc-beamed");
+    let first = dir.join("first.duet");
+    let tune = "X:1\nT:Beamed\nM:6/8\nL:1/8\nK:D\nDFA dAF | GBd gdB | A3 a3 |]\n";
+    let abc = dir.join("beamed.abc");
+    std::fs::write(&abc, tune).expect("write");
+    ok(&duet(&dir, &["convert", s(&abc), s(&first)]), "in");
+    let out = dir.join("out.abc");
+    ok(
+        &duet(&dir, &["abc", "write", s(&first), s(&out)]),
+        "abc write",
+    );
+    let written = std::fs::read_to_string(&out).expect("written");
+    assert!(
+        written.lines().any(|l| l.starts_with("DFA dAF")),
+        "the writer beams by the meter's groups:\n{written}"
+    );
+    let again = dir.join("again.duet");
+    ok(&duet(&dir, &["convert", s(&out), s(&again)]), "in again");
+    let (first, again) = (json_of(&first), json_of(&again));
+    assert_eq!(
+        body_without_id(&again),
+        body_without_id(&first),
+        "the same part"
+    );
+    // The writer's beaming is the meter's, which the part carries: nothing was dropped.
+    let from = &again["duet"]["from"];
+    assert_eq!(from["format"], "abc", "{from}");
+    let notices = from["notices"].as_array().cloned().unwrap_or_default();
+    assert!(
+        notices
+            .iter()
+            .all(|n| n["construct"] != "beaming (spaces between notes)"),
+        "{from}"
+    );
+    assert_valid(&again);
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}

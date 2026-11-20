@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Present so a `command -v cargo-semver-checks` probe finds it; test-api-check.sh's fake cargo
+# answers the calls.
+set -euo pipefail
+exec cargo semver-checks "$@"

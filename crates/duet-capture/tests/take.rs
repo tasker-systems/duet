@@ -302,3 +302,103 @@ fn sixteen_bit_samples_re_encoded_at_24_bits_keep_their_digest() {
     assert_eq!(digest(&wav24), take);
     assert_eq!(digest(&flac24), take);
 }
+
+/// One 4,096-sample block of 24-bit steps: a quiet tone at `bed` of full scale, with a burst
+/// over `burst` of a tone at `pitch` of the Nyquist rate and `level` times full scale, so that
+/// it clips at both rails. A recorded beatbox take clips like this.
+fn clipped_block(bed: f32, pitch: f32, level: f32, burst: std::ops::Range<usize>) -> Vec<f32> {
+    (0..4096)
+        .map(|n| {
+            step24(if burst.contains(&n) {
+                (std::f32::consts::PI * pitch * n as f32).sin() * level
+            } else {
+                (n as f32 * 0.05).sin() * bed
+            })
+        })
+        .collect()
+}
+
+/// `x` at the nearest 24-bit step, full scale where it goes beyond.
+fn step24(x: f32) -> f32 {
+    let scale = 8_388_608.0f32;
+    (x * scale).round().clamp(-scale, scale - 1.0) / scale
+}
+
+/// Clipped 24-bit blocks, each with the bytes the reference encoder's frame of it takes:
+/// libFLAC 1.5.0's `flac -8 --no-padding --no-seektable`, the frame's bits as
+/// `flac --analyze` gives them, over 8.
+fn clipped_blocks() -> Vec<(&'static str, u16, Vec<f32>, u64)> {
+    let burst = clipped_block(0.001, 0.3, 2.0, 2048..2816);
+    let tone = clipped_block(0.0, 0.3, 4.0, 2048..4096);
+    let wide = clipped_block(0.1, 0.25, 4.0, 2048..4096);
+    // Stereo: the second channel the first a little later and half as loud.
+    let stereo: Vec<f32> = (0..4096)
+        .flat_map(|n| [wide[n], step24(wide[(n + 7) % 4096] * 0.5)])
+        .collect();
+    vec![
+        (
+            "a clipped burst in a quiet block",
+            1,
+            burst,
+            BURST_REFERENCE,
+        ),
+        (
+            "half a block of a clipped tone in silence",
+            1,
+            tone,
+            TONE_REFERENCE,
+        ),
+        (
+            "a clipped tone over a louder one, stereo",
+            2,
+            stereo,
+            STEREO_REFERENCE,
+        ),
+    ]
+}
+
+const BURST_REFERENCE: u64 = 3620;
+const TONE_REFERENCE: u64 = 3041;
+const STEREO_REFERENCE: u64 = 8686;
+
+/// The bytes before a take's first frame: the stream marker and `STREAMINFO`.
+const STREAM_HEADER: u64 = 4 + 4 + 34;
+
+/// A clipped full-scale 24-bit block is written in no more than twice the bytes of the reference
+/// encoder's frame of it, and never in more than its samples stored as they are. flacenc 0.5.1
+/// alone wrote the first block here as a 139 KB frame and a take's like it as 100 MB.
+#[test]
+fn a_clipped_block_encodes_to_a_sane_size() {
+    for (name, channels, samples, reference) in clipped_blocks() {
+        let path = scratch(&format!("clipped-{channels}-{reference}.flac"));
+        let mut writer = TakeWriter::create(&path, 48_000, channels, Depth::TwentyFour).unwrap();
+        writer.write(&samples).unwrap();
+        writer.finish().unwrap();
+        let frame = fs::metadata(&path).unwrap().len() - STREAM_HEADER;
+        assert!(
+            frame <= 2 * reference,
+            "{name}: a {frame}-byte frame, the reference's {reference}"
+        );
+        // A verbatim frame: each sample in 3 bytes, a subframe header byte for each channel,
+        // and at most 18 bytes of frame header and checksum.
+        let verbatim = samples.len() as u64 * 3 + u64::from(channels) + 18;
+        assert!(
+            frame <= verbatim,
+            "{name}: a {frame}-byte frame, raw {verbatim}"
+        );
+    }
+}
+
+/// What is written for a clipped block reads back as the samples given.
+#[test]
+fn a_clipped_block_reads_back_exactly() {
+    for (name, channels, samples, _) in clipped_blocks() {
+        let path = scratch(&format!("clipped-back-{channels}-{}.flac", name.len()));
+        let mut writer = TakeWriter::create(&path, 48_000, channels, Depth::TwentyFour).unwrap();
+        write_in_pieces(&mut writer, &samples, usize::from(channels));
+        writer.finish().unwrap();
+        let (rate, read_channels, back) = read_back(&path);
+        assert_eq!((rate, read_channels), (48_000, channels), "{name}");
+        assert!(back == samples, "{name}: read back differs");
+    }
+}

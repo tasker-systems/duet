@@ -2,7 +2,7 @@
 # tools/scripts/release/lib/common.sh
 #
 # Shared by duet's release scripts: the published crates in publish order, the shared version, the
-# crates.io probe and portable helpers. Borrowed from temper's tools/scripts/release/lib/common.sh
+# crates.io probe, the last release's one derivation, and portable helpers. Borrowed from temper's tools/scripts/release/lib/common.sh
 # and cut down to one lane: duet publishes Rust crates only.
 #
 # Source it: source "$(dirname "$0")/lib/common.sh"
@@ -48,15 +48,121 @@ workspace_dep_version() {
     sed -n -E "s/^$1 = \\{.*version = \"([^\"]+)\".*/\\1/p" "${REPO_ROOT}/Cargo.toml"
 }
 
-# True when crates.io lists $1 at version $2. Its API answers unauthenticated.
-crate_published() {
-    curl -sf -A "$USER_AGENT" "https://crates.io/api/v1/crates/$1/versions" 2>/dev/null |
-        grep -q "\"num\":\"$2\""
+# Ask crates.io for crate $1's versions. Returns 0 when crates.io has the crate, with every version
+# it lists in CRATE_VERSIONS (one per line), and 1 only on a definite 404, the one answer that
+# means "not published". Any other answer (a network error, a 5xx, a rate limit after curl's own
+# retries, a body that is not a versions list) ends the script: "I could not look" is not
+# "nothing shipped" (COMPAT-2). Its API answers unauthenticated.
+#
+# Call it directly (`if crate_lookup ...`), never inside `$(...)`: there `die` would end only the
+# subshell, and the refusal would read as an absence.
+CRATE_VERSIONS=""
+crate_lookup() {
+    local crate="$1" body code status=0
+    CRATE_VERSIONS=""
+    body="$(mktemp)"
+    code="$(curl -s --retry 3 --retry-delay 2 -o "$body" -w '%{http_code}' -A "$USER_AGENT" \
+        "https://crates.io/api/v1/crates/${crate}/versions")" || status=$?
+    if [[ "$status" -ne 0 ]]; then
+        rm -f "$body"
+        die "could not ask crates.io about ${crate} (curl exit ${status}); refusing to read that as not published"
+    fi
+    case "$code" in
+        200)
+            if ! CRATE_VERSIONS="$(jq -r '.versions | if type == "array" and length > 0
+                    then .[].num else error("no versions") end' "$body" 2>/dev/null)"; then
+                rm -f "$body"
+                die "crates.io answered 200 for ${crate} without a versions list; refusing to guess"
+            fi
+            rm -f "$body"
+            return 0 ;;
+        404)
+            rm -f "$body"
+            return 1 ;;
+        *)
+            rm -f "$body"
+            die "crates.io answered HTTP ${code} for ${crate}; only a 404 means not published" ;;
+    esac
 }
 
-# True when crates.io has the crate at all (any version).
+# True when crates.io lists $1 at version $2. Fails closed through crate_lookup.
+crate_published() {
+    crate_lookup "$1" || return 1
+    grep -qxF "$2" <<< "$CRATE_VERSIONS"
+}
+
+# True when crates.io has the crate at all (any version); false only on a definite 404.
 crate_exists() {
-    curl -sf -o /dev/null -A "$USER_AGENT" "https://crates.io/api/v1/crates/$1"
+    crate_lookup "$1"
+}
+
+# The last release before version $1: the one derivation of it (COMPAT-2), used by
+# release-prepare.sh to open the window and by api-check.sh as cargo-semver-checks' baseline.
+# Prints the version, or `none` when origin holds no release tag in HEAD's history.
+#
+# A release is a tag `v<semver>` on origin, as release-tag.yml pushes it. The one taken is the
+# tag whose commit is an ancestor of HEAD and a descendant of every other such tag; $1's own tag
+# (release.yml runs at it) is left out. It fails closed, ending the script, when the clone is
+# shallow, origin's tags cannot be listed, a listed tag's commit is not in this clone, or no one
+# tag is newest. Run it as `last="$(last_release "$v")" || exit 1`: `die` ends the subshell.
+last_release() {
+    local candidate="$1" listing name sha version t o newest="" winners=0
+    local -a names=() shas=()
+    [[ "$(git -C "$REPO_ROOT" rev-parse --is-shallow-repository)" == "false" ]] ||
+        die "this clone is shallow, so the last release cannot be placed in its history; fetch the full history"
+    listing="$(git -C "$REPO_ROOT" ls-remote --tags origin)" ||
+        die "cannot list origin's tags, so the last release cannot be shown to be the newest"
+    # One line per tag, `name commit`: an annotated tag's peeled `^{}` line names its commit.
+    while read -r name sha; do
+        version="${name#v}"
+        [[ "$name" == v* && "$version" =~ $SEMVER ]] || continue
+        [[ "$version" == "$candidate" ]] && continue
+        git -C "$REPO_ROOT" cat-file -e "${sha}^{commit}" 2>/dev/null ||
+            die "origin's tag ${name} names ${sha}, which is not in this clone; fetch tags"
+        if git -C "$REPO_ROOT" merge-base --is-ancestor "$sha" HEAD; then
+            names+=("$name")
+            shas+=("$sha")
+        fi
+    done < <(awk '{
+            ref = $2; sub("^refs/tags/", "", ref)
+            if (ref ~ /\^\{\}$/) { sub(/\^\{\}$/, "", ref); peeled[ref] = $1 } else { direct[ref] = $1 }
+        } END { for (r in direct) print r, ((r in peeled) ? peeled[r] : direct[r]) }' <<< "$listing")
+    if [[ ${#names[@]} -eq 0 ]]; then
+        echo none
+        return 0
+    fi
+    for t in "${!names[@]}"; do
+        for o in "${!names[@]}"; do
+            git -C "$REPO_ROOT" merge-base --is-ancestor "${shas[$o]}" "${shas[$t]}" || continue 2
+        done
+        newest="${names[$t]}"
+        winners=$((winners + 1))
+    done
+    [[ "$winners" -eq 1 ]] ||
+        die "no one release tag is the newest in HEAD's history (${names[*]}): cannot tell which is the last release"
+    echo "${newest#v}"
+}
+
+# The cargo-semver-checks release type that moving from version $1 to $2 admits. Below 1.0,
+# cargo's rule is that 0.y.z -> 0.(y+1).0 may break and 0.y.z -> 0.y.(z+1) may only add, and
+# cargo-semver-checks names those levels "major" and "minor". Only MAJOR.MINOR.PATCH versions are
+# classified, and $2 must be newer than $1. Run it in `$(...) || exit 1`, as last_release.
+release_type() {
+    local last="$1" next="$2" lmaj lmin lpat nmaj nmin npat
+    [[ "$last" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$next" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+        die "the API check classifies only MAJOR.MINOR.PATCH versions, not ${last} -> ${next}"
+    IFS='.' read -r lmaj lmin lpat <<< "$last"
+    IFS='.' read -r nmaj nmin npat <<< "$next"
+    if (( nmaj != lmaj )); then
+        (( nmaj > lmaj )) || die "${next} is not newer than the last release ${last}"
+        echo major
+    elif (( nmin != lmin )); then
+        (( nmin > lmin )) || die "${next} is not newer than the last release ${last}"
+        if (( nmaj == 0 )); then echo major; else echo minor; fi
+    else
+        (( npat > lpat )) || die "${next} is not newer than the last release ${last}"
+        if (( nmaj == 0 )); then echo minor; else echo patch; fi
+    fi
 }
 
 bump() {

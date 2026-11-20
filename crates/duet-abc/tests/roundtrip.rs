@@ -633,3 +633,69 @@ fn a_file_header_holds_only_the_fields_the_standard_allows_there() {
     let part = read(abc).expect("read");
     assert_eq!(part.time_sig.to_string(), "6/8");
 }
+
+/// The columns of a tune's beaming notices.
+fn beaming_cols(abc: &str) -> Vec<(usize, usize)> {
+    duet_abc::check(abc)
+        .unwrap_or_else(|e| panic!("reading: {e}\n{abc}"))
+        .iter()
+        .filter(|n| n.construct == "beaming (spaces between notes)")
+        .map(|n| (n.line, n.col))
+        .collect()
+}
+
+#[test]
+fn abc_the_writer_wrote_reads_back_with_no_beaming_notice() {
+    // The writer beams by the meter's groups, which a part carries, so reading its output
+    // back drops nothing, and the provenance has nothing to say about beaming.
+    let m = manifest();
+    let mut spaced = 0;
+    for entry in m.tune.iter().filter(|e| e.writer_refuses.is_none()) {
+        let written = write(&our_part(entry), &WriteOptions::default())
+            .unwrap_or_else(|e| panic!("{}: writing: {e}", entry.name));
+        assert_eq!(
+            beaming_cols(&written),
+            [],
+            "{}: duet's own ABC reads back with a beaming notice:\n{written}",
+            entry.name
+        );
+        if written.lines().any(|l| !l.contains(':') && l.contains(' ')) {
+            spaced += 1;
+        }
+    }
+    assert!(
+        spaced >= 20,
+        "only {spaced} written tunes have a space to judge"
+    );
+}
+
+#[test]
+fn a_space_is_a_beaming_notice_only_where_it_breaks_a_beam_the_writer_would_not() {
+    for (header, body, want) in [
+        // Beamed by the meter's groups: what the writer writes, and the part restores.
+        ("", "CD EF GA Bc | c2 B2 A4 |]", None),
+        ("M:6/8\n", "CDE FGA | c3 B3 |]", None),
+        ("M:2/4\n", "CD EF | G4 |]", None),
+        // A pickup's groups are its own meter's, as the writer writes it: 2/8 here.
+        ("M:6/8\n", "G A | CDE FGA |]", None),
+        ("", "GA | CD EF GA Bc |]", None),
+        // Beside a note of a quarter or longer, which never beams, or a bar line.
+        ("", "C3 D E2 F2 |]", None),
+        ("", "C2 D E2 F GA |]", None),
+        // Across a dynamic or a key change, still at a group's end.
+        ("", "CD !p! EF [K:G] GA Bc |]", None),
+        // Beaming the meter's groups would not give: noticed, once, at its first space.
+        ("", "CDE FGA Bc |]", Some(4)),
+        ("M:6/8\n", "CD EF GA | c3 B3 |]", Some(3)),
+        ("", "CD EF G A Bc | c8 |]", Some(8)),
+        ("M:3/4\n", "(3CD E F2 G2 |]", Some(5)),
+    ] {
+        let abc = tune(header, PLAIN, &format!("{body}\n"));
+        let line = abc.lines().count();
+        assert_eq!(
+            beaming_cols(&abc),
+            want.map(|col| (line, col)).into_iter().collect::<Vec<_>>(),
+            "{body} under {header:?}"
+        );
+    }
+}
