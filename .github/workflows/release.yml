@@ -5,7 +5,9 @@ name: Release
 #
 # Two doors, both pinned (SC-GHA-3): the call from release-tag.yml, the normal path, and
 # workflow_dispatch, to re-run a tag whose release failed partway. Re-runs are idempotent:
-# publish-crates.sh skips every version crates.io already lists.
+# publish-crates.sh skips every version crates.io already lists. Either door publishes only a tag
+# on main, and a dispatch only one whose commit passed CI on main (release-commit-check.sh), and
+# publish-crates runs in the main-only `release` environment.
 #
 # The crates lane is two jobs. build-crates runs the API check (api-check.sh) on the tagged
 # candidate, then verify-compiles every crate, which runs third-party build scripts, and holds no
@@ -46,10 +48,18 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+    # actions: read is the release-commit check asking GitHub whether CI passed on the tag's
+    # commit on main.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}
+          # The release-commit check places the tag on main: it needs origin/main and the full
+          # history, and refuses a shallow clone.
+          fetch-depth: 0
           persist-credentials: false
       # The tag arrives as an environment variable, never inside the script's text. The tagged
       # tree's VERSION must name the same version, so a dispatch cannot release a tag under
@@ -66,6 +76,17 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+      # The workflow_dispatch door takes any tag, so the tag must be on main and, for every event
+      # but the release-tag.yml call (whose event is its caller's push), its commit must have
+      # passed CI on main. A refusal here builds nothing and mints no credential: every later
+      # job needs this one. A branch's own release.yml could drop this step, which is why
+      # publish-crates also runs in the `release` environment (RELEASING.md, "Authentication").
+      - name: Check the tag is on main and passed CI there
+        env:
+          TAG: ${{ inputs.tag }}
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/scripts/release/release-commit-check.sh "$TAG" --event "$EVENT"
 
   build-crates:
     name: Verify crates
@@ -136,6 +157,11 @@ jobs:
     if: needs.build-crates.outputs.count != '0'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Only main may deploy to the `release` environment (a repository setting), and every crate's
+    # trusted publishers on crates.io name it, so the OIDC token of a run from any other ref,
+    # including a branch's own release.yml, mints no crates.io credential. Nothing in the repo
+    # checks either setting (RELEASING.md, "Authentication").
+    environment: release
     # id-token: write is crates.io trusted publishing: the auth action exchanges this job's OIDC
     # token for a short-lived upload token. No registry secret exists.
     permissions:

@@ -43,8 +43,10 @@ only add to it.
 4. **Verify.** The run is green, the Release exists, and crates.io lists every crate at the new
    version.
 
-A run that fails partway is re-run from the Actions tab with `workflow_dispatch` and the tag:
-every version crates.io already lists is skipped, so it continues where it stopped.
+A run that fails partway is re-run from the Actions tab with `workflow_dispatch` and the tag, using
+the workflow from `main`: every version crates.io already lists is skipped, so it continues where it
+stopped. A dispatch publishes only a tag on `main` whose commit passed CI there, and only from
+`main` ("Which door is guarded by what", below).
 
 ## The API check
 
@@ -70,12 +72,39 @@ comparator.
 ## Authentication
 
 **crates.io trusted publishing**, with no registry secret. Each crate's trusted publisher on
-crates.io names this repository and **two** workflow files: `release-tag.yml`, because inside the
-release-tag.yml → release.yml chain crates.io matches the calling workflow, and `release.yml`,
-for the `workflow_dispatch` re-run. A new crate needs both entries.
+crates.io names this repository, the **`release` environment**, and **two** workflow files:
+`release-tag.yml`, because inside the release-tag.yml → release.yml chain crates.io matches the
+calling workflow, and `release.yml`, for the `workflow_dispatch` re-run. A new crate needs both
+entries, each with the environment.
 
 Every crate already on crates.io is set to **trusted-publishing-only**, so no API token can
 publish it: only a run of the release workflows can.
+
+### Which door is guarded by what
+
+A release reaches `publish-crates`, the one job that can mint a crates.io credential, by two doors.
+
+| Door | Guarded by | Checked in the repo? |
+|---|---|---|
+| `release-tag.yml` on a push to `main` that changes `VERSION` | Ruleset 27260518 on `main`: a PR and a strict `CI Success`, with no bypass. So the commit it tags passed CI before it landed | No: a GitHub setting |
+| `release.yml` by `workflow_dispatch`, a tag given by hand | `release-commit-check.sh` in `determine-version`: the tag's commit must be on `main` and have a successful `ci.yml` run on a push to `main`. Every later job needs `determine-version`, so a refusal builds nothing and mints no credential | Yes: its bite test, `tools/scripts/release/test-release-commit.sh`, runs in CI with a fake `gh` |
+| Either, from a branch's own copy of the workflow | A branch can edit the check away, so `publish-crates` runs in the **`release` environment**, which only `main` may deploy from, and every crate's trusted publishers name that environment. A run from any other ref gets no deployment, so its OIDC token mints nothing | No: the environment, its deployment rule and the publishers are GitHub and crates.io settings |
+
+- **The tag must be on `main` on both doors.** On the release-tag.yml door it always is, so the
+  check costs nothing there.
+- **CI is not asked about on the release-tag.yml door.** CI's own run on that push is still
+  running when `release-tag.yml` calls `release.yml`, and the ruleset already required CI on the
+  PR. In a called workflow `github.event_name` is the caller's (`push`), and every other event is
+  asked.
+- **Both trusted publishers name the environment, not just `release.yml`'s.** The environment is
+  declared on the `publish-crates` job, and the OIDC token's `environment` claim is that job's, on
+  either door. crates.io compares it with the publisher's environment. A `release-tag.yml`
+  publisher without it would accept a token from a branch that gives its own `release-tag.yml` a
+  new trigger and drops the `environment:` line.
+- **The settings, for the record.** The `release` environment's deployment branches are
+  "Selected branches and tags", with the one rule `main` (branch). It has no secrets and no
+  reviewers. Nothing in the repo reads any of this: check it in the repository's Settings →
+  Environments, and in each crate's Settings → Trusted Publishing on crates.io.
 
 ### A crate's first version
 
@@ -93,8 +122,8 @@ CI cannot publish the new crate, so the two go out in separate steps:
    `CRATES`: `cargo publish -p <crate>`. Its dependencies are on crates.io at the shared version by
    now. A held crate that already exists on crates.io (duet-cli) is not published here: the token
    cannot, and it goes out with the next release.
-4. Add each new crate's trusted publishers (both workflow files, above), set it to
-   trusted-publishing-only, and revoke the token. Merge the branch.
+4. Add each new crate's trusted publishers (both workflow files, each with the `release`
+   environment, above), set it to trusted-publishing-only, and revoke the token. Merge the branch.
 
 The next release publishes every crate through CI.
 
@@ -108,4 +137,5 @@ that is not yet trusted-publishing-only.
 The two release workflows are the only ones that can mint a crates.io credential, so their
 triggers are fixed (SC-GHA-3): `release-tag.yml` runs only on a push to `main` that changes
 `VERSION`; `release.yml` only when `release-tag.yml` calls it, and on `workflow_dispatch`.
-Adding a trigger to either is a change to the release's security, and is reviewed as one.
+Adding a trigger to either is a change to the release's security, and is reviewed as one. What
+guards each existing door is in "Which door is guarded by what", above.

@@ -77,6 +77,8 @@ jobs:
         run: bash tools/roadmap/test.sh
       - name: Release API check bite test (COMPAT-1, COMPAT-2)
         run: bash tools/scripts/release/test-api-check.sh
+      - name: Release commit check bite test (SC-GHA-3)
+        run: bash tools/scripts/release/test-release-commit.sh
       - name: cargo deny (SC-DENY-1..3)
         run: cargo deny --locked check sources licenses bans
       - name: cargo audit (SC-ADV-1)

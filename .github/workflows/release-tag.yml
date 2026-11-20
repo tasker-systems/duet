@@ -70,10 +70,12 @@ jobs:
     needs: tag
     if: needs.tag.outputs.created == 'true'
     # A called workflow's permissions are capped by this job's. release.yml's publish job needs
-    # id-token: write for crates.io trusted publishing, and its release job contents: write.
+    # id-token: write for crates.io trusted publishing, its release job contents: write, and its
+    # determine-version job actions: read for the release-commit check.
     permissions:
       contents: write
       id-token: write
+      actions: read
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}

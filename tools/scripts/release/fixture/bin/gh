@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# A fake gh for test-release-commit.sh: answers `gh api` for ci.yml's runs from $FAKE_GH_RUNS, and
+# nothing else. The file holds the answer:
+#   fail             gh exits 1, as on an HTTP error or no network
+#   body: <text>     that text, as it is
+#   <sha> <conclusion> [<event> <branch> <path>]   one run per line; event push, branch main and
+#                    path .github/workflows/ci.yml by default
+# No file means no runs. Every call is logged to $FAKE_GH_RUNS.log.
+set -euo pipefail
+
+[[ "${1:-}" == api && $# -eq 2 ]] || { echo "fake gh: unexpected call: $*" >&2; exit 2; }
+echo "$2" >> "${FAKE_GH_RUNS}.log"
+[[ "$2" == repos/*/actions/workflows/ci.yml/runs\?* ]] || { echo "fake gh: unexpected path $2" >&2; exit 2; }
+if [[ ! -f "$FAKE_GH_RUNS" ]]; then echo '{"total_count":0,"workflow_runs":[]}'; exit 0; fi
+case "$(head -n 1 "$FAKE_GH_RUNS")" in
+    fail) echo "HTTP 502: Bad Gateway" >&2; exit 1 ;;
+    body:*) sed -n '1s/^body: //p' "$FAKE_GH_RUNS"; exit 0 ;;
+esac
+while read -r sha conclusion event branch path; do
+    jq -nc --arg sha "$sha" --arg c "$conclusion" --arg e "${event:-push}" --arg b "${branch:-main}" \
+        --arg p "${path:-.github/workflows/ci.yml}" \
+        '{head_sha: $sha, conclusion: $c, status: "completed", event: $e, head_branch: $b, path: $p}'
+done < "$FAKE_GH_RUNS" | jq -sc '{total_count: length, workflow_runs: .}'
