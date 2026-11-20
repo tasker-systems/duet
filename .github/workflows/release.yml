@@ -7,11 +7,12 @@ name: Release
 # workflow_dispatch, to re-run a tag whose release failed partway. Re-runs are idempotent:
 # publish-crates.sh skips every version crates.io already lists.
 #
-# The crates lane is two jobs. build-crates verify-compiles every crate, which runs third-party
-# build scripts, and holds no id-token. publish-crates holds id-token: write, compiles nothing,
-# and pushes only bytes it has checked against build-crates' hashes (artifact-sums.sh). When
-# crates.io already has every crate at the version, nothing is built for it to publish, and it
-# does not run: no credential is minted. That is how the first release, published from a
+# The crates lane is two jobs. build-crates runs the API check (api-check.sh) on the tagged
+# candidate, then verify-compiles every crate, which runs third-party build scripts, and holds no
+# id-token. publish-crates holds id-token: write, compiles nothing, and pushes only bytes it has
+# checked against build-crates' hashes (artifact-sums.sh). When crates.io already has every crate
+# at the version, nothing is built for it to publish, and it does not run: no credential is
+# minted. That is how the first release, published from a
 # maintainer's machine before its PR merged (RELEASING.md), still gets its tag and Release.
 #
 # Every external action is pinned by full commit SHA with its tag as a trailer (SC-GHA-1).
@@ -70,7 +71,8 @@ jobs:
     name: Verify crates
     needs: determine-version
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The API check builds rustdoc for every library crate twice, the candidate and its baseline.
+    timeout-minutes: 60
     outputs:
       sums: ${{ steps.sums.outputs.sums }}
       count: ${{ steps.sums.outputs.count }}
@@ -78,6 +80,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.determine-version.outputs.tag }}
+          # The API check places the last release in this clone's history (COMPAT-2): it needs
+          # the full history and every tag, and refuses a shallow clone.
+          fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -89,6 +94,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libasound2-dev=1.2.11-1ubuntu0.3 pkg-config=1.8.1-2build1
+      # Pinned, and at least 7 days old when pinned (SC-IN-1): 0.51.0 was published 2026-10-03.
+      # cargo-semver-checks reads rustdoc's JSON, whose format moves with the toolchain, so a new
+      # stable it cannot read refuses the release until this pin moves.
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: cargo-semver-checks@0.51.0
+      # The pre-publish API check (COMPAT-1) on the tagged candidate, before anything is packaged:
+      # each library crate against the last release on crates.io, at the bump VERSION declares.
+      # It refuses, and nothing is published, on a break the bump does not admit, and on any
+      # crates.io or tag lookup it cannot complete.
+      - name: API check against the last release
+        env:
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: ./tools/scripts/release/api-check.sh "$VERSION"
       - name: Verify-package every crate crates.io lacks
         env:
           VERSION: ${{ needs.determine-version.outputs.version }}
