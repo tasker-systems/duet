@@ -276,7 +276,7 @@ pub fn run(ctx: &crate::Context, args: ReviewArgs) -> Result<()> {
 
 /// `NAME=ANALYSIS`, as `--reading` takes it. A name is letters, digits, `-` and `_`, so it can
 /// name a clip's file.
-fn named_reading(arg: &str) -> Result<(String, PathBuf)> {
+pub(super) fn named_reading(arg: &str) -> Result<(String, PathBuf)> {
     let Some((name, path)) = arg.split_once('=') else {
         bail!("--reading {arg}: give it as NAME=ANALYSIS, such as rules=take-rules.capture.duet");
     };
@@ -294,7 +294,7 @@ fn named_reading(arg: &str) -> Result<(String, PathBuf)> {
 }
 
 /// The stem's own reading's name on the page: its reader's, as the document names it.
-fn reader_name(reading: &Reading) -> String {
+pub(super) fn reader_name(reading: &Reading) -> String {
     reading
         .reader
         .and_then(|r| serde_json::to_value(r.name).ok())

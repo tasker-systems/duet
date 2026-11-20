@@ -25,7 +25,7 @@ fn n(key: u8, start: u64, end: u64) -> ReadNote {
 }
 
 /// A stated note: its kind, side, index and the other reading's notes it sounds with.
-type Stated = (Kind, Side, usize, Vec<usize>);
+type Stated = (PlaceKind, Side, usize, Vec<usize>);
 
 /// The places' stated notes, without the stretches.
 fn stated(d: &Disagreements) -> Vec<Vec<Stated>> {
@@ -83,10 +83,10 @@ fn a_note_read_as_several_is_a_split_named_once_by_the_split_note() {
     let d = disagreements(&a, &b);
     assert_eq!(
         stated(&d),
-        [vec![(Kind::Split, Side::A, 0, vec![0, 1, 2])]],
+        [vec![(PlaceKind::Split, Side::A, 0, vec![0, 1, 2])]],
         "the pieces are not listed again"
     );
-    assert_eq!(d.places[0].kind(), Kind::Split);
+    assert_eq!(d.places[0].kind(), PlaceKind::Split);
     assert!(d.agreed.is_empty());
 }
 
@@ -96,9 +96,9 @@ fn a_split_needs_each_piece_to_sound_with_the_split_note_alone() {
     let a = [n(G3, 0, 100), n(A3, 100, 200)];
     let b = [n(G3, 0, 50), n(A3, 50, 150), n(G3, 150, 200)];
     let d = disagreements(&a, &b);
-    let kinds: Vec<Kind> = d.places[0].found.iter().map(|f| f.kind).collect();
+    let kinds: Vec<PlaceKind> = d.places[0].found.iter().map(|f| f.kind).collect();
     assert!(
-        kinds.iter().all(|&k| k == Kind::Other),
+        kinds.iter().all(|&k| k == PlaceKind::Other),
         "two chains are other, every note listed: {:?}",
         d.places[0].found
     );
@@ -110,7 +110,7 @@ fn one_note_on_another_key_is_a_key_pair_named_once_by_the_first_reading() {
     let a = [n(G3, 0, 100)];
     let b = [n(G_SHARP_3, 5, 100)];
     let d = disagreements(&a, &b);
-    assert_eq!(stated(&d), [vec![(Kind::Key, Side::A, 0, vec![0])]]);
+    assert_eq!(stated(&d), [vec![(PlaceKind::Key, Side::A, 0, vec![0])]]);
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn a_note_with_no_note_of_the_other_reading_is_only() {
     let a = [n(G3, 0, 100), n(C4, 200, 300)];
     let b = [n(G3, 0, 100)];
     let d = disagreements(&a, &b);
-    assert_eq!(stated(&d), [vec![(Kind::Only, Side::A, 1, vec![])]]);
+    assert_eq!(stated(&d), [vec![(PlaceKind::Only, Side::A, 1, vec![])]]);
     assert_eq!(d.agreed.len(), 1);
 }
 
@@ -131,13 +131,13 @@ fn a_note_overlapping_just_under_half_is_only_on_both_sides() {
     assert_eq!(
         stated(&d),
         [vec![
-            (Kind::Only, Side::A, 0, vec![]),
-            (Kind::Only, Side::B, 0, vec![])
+            (PlaceKind::Only, Side::A, 0, vec![]),
+            (PlaceKind::Only, Side::B, 0, vec![])
         ]]
     );
     // And from exactly half, they sound together: a key pair.
     let d = disagreements(&a, &[n(A3, 80, 120)]);
-    assert_eq!(stated(&d), [vec![(Kind::Key, Side::A, 0, vec![0])]]);
+    assert_eq!(stated(&d), [vec![(PlaceKind::Key, Side::A, 0, vec![0])]]);
 }
 
 #[test]
@@ -190,14 +190,14 @@ fn swapping_the_readings_swaps_the_names_and_changes_nothing_else() {
             .iter()
             .map(|f| (f.kind, f.side, f.note, f.with.clone()))
             .collect();
-        if x.kind() == Kind::Key {
+        if x.kind() == PlaceKind::Key {
             // A key pair is named by the first reading's note: the other note, swapped.
             let [(_, side, note, with)] = own.as_slice() else {
                 panic!("{own:?}")
             };
             assert_eq!(
                 swapped,
-                [(Kind::Key, side.other(), with[0], vec![*note])],
+                [(PlaceKind::Key, side.other(), with[0], vec![*note])],
                 "{x:?}"
             );
         } else {
@@ -206,7 +206,7 @@ fn swapping_the_readings_swaps_the_names_and_changes_nothing_else() {
     }
     assert_eq!(
         ab.places.iter().map(Place::kind).collect::<Vec<_>>(),
-        [Kind::Split, Kind::Key, Kind::Only]
+        [PlaceKind::Split, PlaceKind::Key, PlaceKind::Only]
     );
     assert_eq!(ab.agreed.len(), 1, "the A3 that starts 10 frames apart");
     assert_eq!(ba.agreed, {

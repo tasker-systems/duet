@@ -85,7 +85,8 @@ mod timing;
 pub use basic_pitch::{BasicPitch, BasicPitchRead, MODEL_SHA256};
 pub use breathy::{BREATHY_LEVEL_DB, BREATHY_STEP_CENTS, Breathy, breathe};
 pub use disagree::{
-    Agreed, Disagreements, Found, Kind, Place, Side, Stretch, disagreements, seams, sound_together,
+    Agreed, Disagreements, Found, Place, PlaceKind, Side, Stretch, disagreements, seams,
+    sound_together,
 };
 pub use error::{Error, Result};
 pub use event::{Event, HitLane};

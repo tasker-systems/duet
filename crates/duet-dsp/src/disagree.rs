@@ -13,7 +13,7 @@
 //! - **Two notes sound together** when at least half of the shorter overlaps the longer
 //!   ([`sound_together`]). Half is a share, not a time, so it scales with the notes, and there is
 //!   no tolerance to set.
-//! - **Each note of a place is of one [`Kind`]**, and each place is stated once: a split is named
+//! - **Each note of a place is of one [`PlaceKind`]**, and each place is stated once: a split is named
 //!   by the note that is split, and its pieces are not listed again; a key pair is named once, by
 //!   the first reading's note.
 //!
@@ -72,7 +72,7 @@ impl Stretch {
 
 /// What a note in a place is, against the other reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Kind {
+pub enum PlaceKind {
     /// It sounds together with two or more of the other reading's notes, and each of those with
     /// no other note of its own reading: the other reader read it as several notes, a candidate
     /// ornament or a slide read as notes.
@@ -87,15 +87,15 @@ pub enum Kind {
     Other,
 }
 
-impl Kind {
+impl PlaceKind {
     /// The kind as a word: the first word of a place's label.
     #[must_use]
     pub const fn word(self) -> &'static str {
         match self {
-            Kind::Split => "split",
-            Kind::Key => "key",
-            Kind::Only => "only",
-            Kind::Other => "other",
+            PlaceKind::Split => "split",
+            PlaceKind::Key => "key",
+            PlaceKind::Only => "only",
+            PlaceKind::Other => "other",
         }
     }
 }
@@ -103,7 +103,7 @@ impl Kind {
 /// A note of a place, and what it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
-    pub kind: Kind,
+    pub kind: PlaceKind,
     /// The reading the note is of.
     pub side: Side,
     /// The note, by index into its reading's notes.
@@ -125,8 +125,8 @@ pub struct Place {
 impl Place {
     /// The kind of the place's first stated note: what the place is named by.
     #[must_use]
-    pub fn kind(&self) -> Kind {
-        self.found.first().map_or(Kind::Other, |f| f.kind)
+    pub fn kind(&self) -> PlaceKind {
+        self.found.first().map_or(PlaceKind::Other, |f| f.kind)
     }
 }
 
@@ -254,16 +254,16 @@ fn classify(stretch: &Stretch, a: &[ReadNote], b: &[ReadNote]) -> Vec<Found> {
         for &i in stretch.notes(side) {
             let with = partners(side, i);
             let kind = match with.as_slice() {
-                [] => Some(Kind::Only),
-                _ if is_split(side, i, &with) => Some(Kind::Split),
+                [] => Some(PlaceKind::Only),
+                _ if is_split(side, i, &with) => Some(PlaceKind::Split),
                 &[j] if only_with(side, i, j) => {
                     let differ = notes(side)[i].key != notes(side.other())[j].key;
                     // A key pair is named once, by the first reading's note.
-                    (differ && side == Side::A).then_some(Kind::Key)
+                    (differ && side == Side::A).then_some(PlaceKind::Key)
                 }
                 // A piece of the other reading's split is stated with it, not again.
                 &[j] if is_split(side.other(), j, &partners(side.other(), j)) => None,
-                _ => Some(Kind::Other),
+                _ => Some(PlaceKind::Other),
             };
             if let Some(kind) = kind {
                 found.push(Found {
@@ -281,7 +281,7 @@ fn classify(stretch: &Stretch, a: &[ReadNote], b: &[ReadNote]) -> Vec<Found> {
         for side in [Side::A, Side::B] {
             for &i in stretch.notes(side) {
                 found.push(Found {
-                    kind: Kind::Other,
+                    kind: PlaceKind::Other,
                     side,
                     note: i,
                     with: partners(side, i),
