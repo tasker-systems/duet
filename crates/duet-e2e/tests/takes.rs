@@ -115,6 +115,32 @@ fn take_add_copies_the_file_byte_for_byte_and_journals_the_take() {
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
+/// A take a frame of which the decoder refuses: `take add` says what it reads as silence,
+/// where and how long, and the take's frames count it, so what follows keeps its time.
+/// `take list` says it again each time it checks the file. The file is made here, a block a
+/// reserved subframe under a right CRC16 (`capture/audio.rs`).
+#[test]
+fn adding_a_take_with_an_undecodable_frame_says_and_states_the_gap() {
+    let dir = scratch("take-add-gapped");
+    let root = project(&dir, "porch");
+    let flac = dir.join("gapped.flac");
+    audio::write_flac_block_refused(&flac, 16, 3);
+
+    let out = duet(&root, &["take", "add", s(&flac)]);
+    ok(&out, "take add");
+    let gap = "186 ms of audio at 0:00.6 could not be decoded and is read as silence";
+    assert!(stderr(&out).contains(gap), "{}", stderr(&out));
+
+    let doc = read_project(&root);
+    let take = &doc.takes[0].take;
+    assert_eq!((take.rate, take.channels, take.frames), (22_050, 1, 65_536));
+
+    let list = duet(&root, &["take", "list"]);
+    ok(&list, "take list");
+    assert!(stderr(&list).contains(gap), "{}", stderr(&list));
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
 #[test]
 fn a_named_take_copies_nothing_and_is_found_through_the_local_map() {
     let dir = scratch("take-named");

@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::Context;
+use crate::take::{at, span};
 use anyhow::{Context as _, Result, anyhow, bail};
 use clap::Args;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -616,22 +617,6 @@ fn pick_device(names: &[String], wanted: &str) -> Result<usize> {
             "{wanted:?} is part of more than one input's name; name one:\n{}",
             list(&mut found.iter().map(|&i| &names[i]))
         ),
-    }
-}
-
-/// A position in the take, as minutes and seconds to a tenth.
-fn at(frames: u64, rate: u32) -> String {
-    let tenths = (frames as f64 / f64::from(rate) * 10.0).round() as u64;
-    format!("{}:{:02}.{}", tenths / 600, tenths / 10 % 60, tenths % 10)
-}
-
-/// A length of input, in milliseconds: under one is said as such, never as nothing.
-fn span(frames: u64, rate: u32) -> String {
-    let ms = frames as f64 * 1000.0 / f64::from(rate);
-    if frames > 0 && ms < 1.0 {
-        "under 1 ms".to_owned()
-    } else {
-        format!("{ms:.0} ms")
     }
 }
 
