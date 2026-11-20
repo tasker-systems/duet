@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use clap::{Args, Subcommand};
-use duet_capture::{Digester, FileSource, Source as _, Take};
+use duet_capture::{Digester, FileSource, Gap, Source as _, Take};
 use duet_schemas::journal::TakeAdded;
 use duet_schemas::project::{Date, FileName, Name, ProjectTake};
 use duet_schemas::{Document, PartBody, Project as ProjectDoc, Source};
@@ -567,9 +567,44 @@ pub fn take_of(file: &Path) -> Result<Take> {
             .push(&chunk)
             .with_context(|| file.display().to_string())?;
     }
-    digester
+    let take = digester
         .finish()
-        .with_context(|| format!("{}: holds no audio, so it is no take", file.display()))
+        .with_context(|| format!("{}: holds no audio, so it is no take", file.display()))?;
+    for said in gaps_said(file, take.rate, source.gaps()) {
+        eprintln!("{said}");
+    }
+    Ok(take)
+}
+
+/// What a decode left out, one line a gap: it is read as silence, so what follows keeps its
+/// time, and the digest is over the silence-filled audio. Nothing for a whole decode.
+pub(crate) fn gaps_said(path: &Path, rate: u32, gaps: &[Gap]) -> Vec<String> {
+    gaps.iter()
+        .map(|gap| {
+            format!(
+                "{}: {} of audio at {} could not be decoded and is read as silence",
+                path.display(),
+                span(gap.frames, rate),
+                at(gap.start, rate)
+            )
+        })
+        .collect()
+}
+
+/// A position in a take, as minutes and seconds to a tenth.
+pub(crate) fn at(frames: u64, rate: u32) -> String {
+    let tenths = (frames as f64 / f64::from(rate) * 10.0).round() as u64;
+    format!("{}:{:02}.{}", tenths / 600, tenths / 10 % 60, tenths % 10)
+}
+
+/// A length of audio, in milliseconds: under one is said as such, never as nothing.
+pub(crate) fn span(frames: u64, rate: u32) -> String {
+    let ms = frames as f64 * 1000.0 / f64::from(rate);
+    if frames > 0 && ms < 1.0 {
+        "under 1 ms".to_owned()
+    } else {
+        format!("{ms:.0} ms")
+    }
 }
 
 /// A take's rate, channels and frames, for people.
