@@ -217,3 +217,27 @@ fn swapping_the_readings_swaps_the_names_and_changes_nothing_else() {
         agreed
     });
 }
+
+#[test]
+fn one_long_note_against_many_short_ones_is_one_split_found_in_bounded_work() {
+    // 20 000 pieces under one note: quadratic partner scans would take minutes.
+    let pieces: Vec<ReadNote> = (0..20_000)
+        .map(|k| n(if k % 2 == 0 { G3 } else { A3 }, k * 10, k * 10 + 10))
+        .collect();
+    let a = [n(G3, 0, 200_000)];
+    let started = std::time::Instant::now();
+    let d = disagreements(&a, &pieces);
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    assert_eq!(d.places.len(), 1);
+    assert_eq!(d.places[0].found.len(), 1);
+    assert_eq!(d.places[0].kind(), PlaceKind::Split);
+    assert_eq!(d.places[0].found[0].with.len(), 20_000);
+}
+
+#[test]
+fn notes_out_of_order_or_overlapping_are_not_in_order() {
+    assert!(in_order(&[n(G3, 0, 100), n(A3, 100, 200)]));
+    assert!(!in_order(&[n(G3, 0, 100), n(A3, 99, 200)]));
+    assert!(!in_order(&[n(A3, 100, 200), n(G3, 0, 100)]));
+    assert!(!in_order(&[n(G3, 100, 100)]));
+}

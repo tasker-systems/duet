@@ -89,7 +89,7 @@ pub use duet_dsp::{
     hold_apart, interpret, read_as_decoded, rejoin,
 };
 pub use duet_dsp::{
-    Agreed, Disagreements, Found, Place, PlaceKind, Side, Stretch, disagreements, seams,
+    Agreed, Disagreements, Found, Place, PlaceKind, Side, Stretch, disagreements, in_order, seams,
     sound_together,
 };
 #[cfg(feature = "basic-pitch")]

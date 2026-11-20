@@ -20,7 +20,7 @@
 //!   the stretch. On standard output, each moment's line, then a summary. When nothing is found
 //!   it says so and writes no file, since `review` refuses a moments file with no moment.
 //! - **What it refuses, before anything is written:** a moments file that exists; two readings
-//!   of different takes, or a reading that states no take; two readings on different tunings; a
+//!   of different takes, or a reading that states no take, or whose notes are out of order or overlap; two readings on different tunings; a
 //!   name given twice.
 
 use std::collections::BTreeMap;
@@ -30,7 +30,7 @@ use anyhow::{Context as _, Result, bail};
 use clap::Args;
 use duet_capture::{
     Analysis, Disagreements, Found, Origin, Place, PlaceKind, ReadNote, Reading, Side, Take,
-    disagreements,
+    disagreements, in_order,
 };
 use schemars::JsonSchema;
 
@@ -199,7 +199,13 @@ fn load(named: Vec<(String, PathBuf)>) -> Result<[Named; 2]> {
     let mut out = Vec::new();
     for (name, path) in named {
         let analysis = analysis(&path)?;
-        reading_of(&analysis, &path)?;
+        if !in_order(&reading_of(&analysis, &path)?.notes) {
+            bail!(
+                "{}: its notes are not in order, or one overlaps the next, as no reader reads \
+                 them; capture the melody again with duet capture melody",
+                path.display()
+            );
+        }
         if let Some(first) = out.first().filter(|f: &&Named| f.name == name) {
             bail!(
                 "two readings are named {name}, {} and {}: name the --reading apart from the \

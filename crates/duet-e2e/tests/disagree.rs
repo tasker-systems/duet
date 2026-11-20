@@ -226,7 +226,7 @@ fn refused(out: &Output, stem: &Path, what: &str) {
 }
 
 /// W5. Refusals, before anything is written: readings of different takes, a reading that
-/// states no take, two tunings, a name given twice, a moments file that exists, and a missing
+/// states no take, a reading whose notes overlap, two tunings, a name given twice, a moments file that exists, and a missing
 /// second reading.
 #[test]
 fn readings_that_cannot_be_compared_are_refused_by_name_before_anything_is_written() {
@@ -289,6 +289,34 @@ fn readings_that_cannot_be_compared_are_refused_by_name_before_anything_is_writt
         ],
     );
     refused(&out, &stem, "untaken.capture.duet states no take");
+
+    // A reading whose notes overlap, as no reader reads them.
+    let mut doc: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    let notes = doc["body"]["reading"]["notes"]
+        .as_array_mut()
+        .expect("notes");
+    let second_start = notes[1]["start"].as_u64().expect("a start");
+    notes[0]["end"] = serde_json::json!(second_start + 10);
+    let overlapping = dir.join("overlapping.capture.duet");
+    std::fs::write(&overlapping, serde_json::to_string_pretty(&doc).unwrap()).expect("write");
+    let reading = format!("rules={}", s(&overlapping));
+    let out = duet(
+        &dir,
+        &[
+            "capture",
+            "disagree",
+            s(&take),
+            "-o",
+            s(&stem),
+            "--reading",
+            &reading,
+        ],
+    );
+    refused(
+        &out,
+        &stem,
+        "overlapping.capture.duet: its notes are not in order",
+    );
 
     // Two tunings: the rules' reading with the tuning estimated.
     ok(

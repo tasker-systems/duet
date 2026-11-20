@@ -200,6 +200,9 @@ fn push(stretch: &mut Stretch, side: Side, i: usize) {
 
 /// Where readings `a` and `b` of one take, on one tuning, disagree: every stretch between their
 /// seams, as a [`Place`] when its keys differ and as [`Agreed`] when they do not.
+///
+/// Each reading's notes must be [`in_order`], as every reader reads them; out of order, a pair
+/// that sounds together may be missed. The caller refuses a reading that is not.
 #[must_use]
 pub fn disagreements(a: &[ReadNote], b: &[ReadNote]) -> Disagreements {
     let mut out = Disagreements::default();
@@ -228,41 +231,82 @@ pub fn disagreements(a: &[ReadNote], b: &[ReadNote]) -> Disagreements {
     out
 }
 
+/// Whether `notes` are in order and none overlaps the next: each starts no earlier than the one
+/// before ends. Every reader reads its notes so; [`disagreements`] needs it of both readings.
+#[must_use]
+pub fn in_order(notes: &[ReadNote]) -> bool {
+    notes.iter().all(|n| n.start < n.end) && notes.windows(2).all(|w| w[0].end <= w[1].start)
+}
+
 /// What each note of a place's stretch is, stated once each.
+///
+/// Each note's partners are found once, by a binary search over the other reading's notes in
+/// the stretch, which are in order and do not overlap ([`in_order`]), so the work grows with the
+/// notes and the pairs that overlap, never with their product.
 fn classify(stretch: &Stretch, a: &[ReadNote], b: &[ReadNote]) -> Vec<Found> {
     let notes = |side: Side| match side {
         Side::A => a,
         Side::B => b,
     };
-    // Each note's partners: the other reading's notes in the stretch it sounds together with.
-    let partners = |side: Side, i: usize| -> Vec<usize> {
-        let note = &notes(side)[i];
+    // Each note's partners, by its position in the stretch: the other reading's notes in the
+    // stretch it sounds together with, in order.
+    let partners_of = |side: Side| -> Vec<Vec<usize>> {
+        let other = stretch.notes(side.other());
+        let theirs = notes(side.other());
         stretch
-            .notes(side.other())
+            .notes(side)
             .iter()
-            .copied()
-            .filter(|&j| sound_together(note, &notes(side.other())[j]))
+            .map(|&i| {
+                let note = &notes(side)[i];
+                let lo = other.partition_point(|&j| theirs[j].end <= note.start);
+                let hi = other.partition_point(|&j| theirs[j].start < note.end);
+                other[lo..hi.max(lo)]
+                    .iter()
+                    .copied()
+                    .filter(|&j| sound_together(note, &theirs[j]))
+                    .collect()
+            })
             .collect()
     };
-    let only_with = |side: Side, i: usize, j: usize| partners(side.other(), j) == [i];
-    let is_split = |side: Side, i: usize, with: &[usize]| {
-        with.len() >= 2 && with.iter().all(|&j| only_with(side, i, j))
+    let partners = [partners_of(Side::A), partners_of(Side::B)];
+    let at = |side: Side| match side {
+        Side::A => 0,
+        Side::B => 1,
     };
+    let position = |side: Side, i: usize| -> usize {
+        stretch
+            .notes(side)
+            .binary_search(&i)
+            .expect("a partner is a note of the stretch")
+    };
+    let with = |side: Side, i: usize| -> &[usize] { &partners[at(side)][position(side, i)] };
+    let only_with = |side: Side, i: usize, j: usize| with(side.other(), j) == [i];
+    // Whether each note is split: by its position in the stretch, for each side.
+    let split: [Vec<bool>; 2] = [Side::A, Side::B].map(|side| {
+        stretch
+            .notes(side)
+            .iter()
+            .map(|&i| {
+                let w = with(side, i);
+                w.len() >= 2 && w.iter().all(|&j| only_with(side, i, j))
+            })
+            .collect()
+    });
+    let is_split = |side: Side, i: usize| split[at(side)][position(side, i)];
 
     let mut found: Vec<Found> = Vec::new();
     for side in [Side::A, Side::B] {
         for &i in stretch.notes(side) {
-            let with = partners(side, i);
-            let kind = match with.as_slice() {
+            let kind = match with(side, i) {
                 [] => Some(PlaceKind::Only),
-                _ if is_split(side, i, &with) => Some(PlaceKind::Split),
+                _ if is_split(side, i) => Some(PlaceKind::Split),
                 &[j] if only_with(side, i, j) => {
                     let differ = notes(side)[i].key != notes(side.other())[j].key;
                     // A key pair is named once, by the first reading's note.
                     (differ && side == Side::A).then_some(PlaceKind::Key)
                 }
                 // A piece of the other reading's split is stated with it, not again.
-                &[j] if is_split(side.other(), j, &partners(side.other(), j)) => None,
+                &[j] if is_split(side.other(), j) => None,
                 _ => Some(PlaceKind::Other),
             };
             if let Some(kind) = kind {
@@ -270,7 +314,7 @@ fn classify(stretch: &Stretch, a: &[ReadNote], b: &[ReadNote]) -> Vec<Found> {
                     kind,
                     side,
                     note: i,
-                    with,
+                    with: with(side, i).to_vec(),
                 });
             }
         }
@@ -284,7 +328,7 @@ fn classify(stretch: &Stretch, a: &[ReadNote], b: &[ReadNote]) -> Vec<Found> {
                     kind: PlaceKind::Other,
                     side,
                     note: i,
-                    with: partners(side, i),
+                    with: with(side, i).to_vec(),
                 });
             }
         }
