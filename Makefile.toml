@@ -4,7 +4,7 @@
 #
 # Releasing is the only thing cargo-make runs here; building and testing are plain cargo (README).
 # The tasks wire tools/scripts/release/ in, as temper's tools/cargo-make/release-tasks.toml does.
-# How a release runs, and the one-time bootstrap, are in RELEASING.md.
+# How a release runs, and a new crate's first version, are in RELEASING.md.
 #
 #   cargo make release-check          what a patch release would do; changes nothing
 #   cargo make release-check-minor    the same for a minor (below 1.0, the breaking bump)
@@ -12,7 +12,7 @@
 #   cargo make release-prepare-minor  the same at a minor
 #   cargo make release-prepare-major  the same at a major
 #   cargo make release-publish        publish the checked-out VERSION from this machine, with
-#                                     cargo's stored credential: the bootstrap, and a recovery door
+#                                     cargo's stored token: only a crate not yet trusted-only
 #
 # cargo-make tasks cannot forward arguments, so each bump level is its own task.
 
@@ -55,7 +55,7 @@ category = "Release"
 script = ["./tools/scripts/release/release-prepare.sh --major"]
 
 [tasks.release-publish]
-description = "Publish the checked-out VERSION to crates.io from this machine, with cargo's stored credential: verify-package every crate, then publish what crates.io lacks, in order. The bootstrap for crates crates.io does not have yet, and a recovery door."
+description = "Publish the checked-out VERSION to crates.io from this machine, with cargo's stored credential: verify-package every crate, then publish what crates.io lacks, in order. Only a crate not yet trusted-publishing-only can be published this way (RELEASING.md)."
 category = "Release"
 script_runner = "bash"
 script = '''
