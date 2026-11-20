@@ -1276,7 +1276,9 @@ scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's 
   is the decode tests' one-second tones in each format, `corpus` the reference corpus's
   synthetic takes (the default), `all` both. Its encoders (`lame`, `flac`, `vorbis-tools`) are
   in the `Brewfile`; the AAC and HE-AAC files use macOS's own `afconvert`. CI uses the committed
-  files, so run it only to change them.
+  files, so run it only to change them. It deletes only the files it generates (its
+  `generated_fixtures` list), so a fixture committed by hand survives a regeneration;
+  `scripts/test-capture-fixtures.sh` shows it, with fake encoders, in CI's gate.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.
