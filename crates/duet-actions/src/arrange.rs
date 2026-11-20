@@ -34,6 +34,10 @@ pub struct Arranged {
     pub stated: Vec<String>,
 }
 
+/// The most notes and controls a song is arranged into, every repeat counted. A song past it is
+/// refused before it is built, rather than filling memory.
+pub const MAX_EVENTS: u64 = 1_000_000;
+
 /// One placement's track, as it lands on the song's ticks: for the channel check.
 struct Span {
     part: Name,
@@ -49,7 +53,8 @@ struct Span {
 /// # Errors
 ///
 /// A placement naming a part that is not in `parts`, a stretch that runs past its part's end
-/// or plays nothing, or a song that places nothing, each by name.
+/// or plays nothing, a song that places nothing, or one of more than [`MAX_EVENTS`] notes and
+/// controls, each by name.
 pub fn arrange(song: &Song, parts: &[(Name, Part)]) -> Result<Arranged, String> {
     let comp = &song.composition;
     let map = comp.time_map()?;
@@ -83,6 +88,7 @@ pub fn arrange(song: &Song, parts: &[(Name, Part)]) -> Result<Arranged, String> 
     let mut stated = Vec::new();
     let mut spans: Vec<Span> = Vec::new();
     let mut end_tick = 0u64;
+    let mut events = 0u64;
     for (n, placement) in comp.placements.iter().enumerate() {
         let name = &placement.part;
         let field = format!("composition.placements[{n}]");
@@ -112,6 +118,20 @@ pub fn arrange(song: &Song, parts: &[(Name, Part)]) -> Result<Arranged, String> 
         }
         let span = to_t - from_t;
         let repeats = u64::from(placement.repeat.unwrap_or(1));
+        // Counted before anything is built, so a hand-written repeat cannot fill memory: each
+        // repeat of each track is at most its notes and controls and a program.
+        let each: u64 = part
+            .tracks
+            .iter()
+            .map(|t| (t.notes.len() + t.controls.len() + 1) as u64)
+            .sum();
+        events = events.saturating_add(each.saturating_mul(repeats));
+        if events > MAX_EVENTS {
+            return Err(format!(
+                "{field} repeats {name} {repeats} times, and the song would hold more than \
+                 {MAX_EVENTS} notes and controls by then: more than duet plays"
+            ));
+        }
         let start = tick_of(placement.at)?;
         let mut rounded = 0usize;
         let mut song_tick = |part_tick: u64| {
@@ -669,6 +689,25 @@ mod tests {
         assert_eq!(arranged.part.end, Some(pos("3.1.0")));
         assert_eq!(arranged.part.tracks[0].notes.len(), 2);
         Schedule::from_part(&arranged.part).expect("it plays");
+    }
+
+    /// A repeat that would arrange more than MAX_EVENTS notes and controls is refused before
+    /// anything is built.
+    #[test]
+    fn a_song_too_big_to_build_is_refused_before_it_is_built() {
+        let mut comp = Composition::new(120.0, "4/4".parse().expect("a meter"), None);
+        comp.placements = vec![placed("kit", "1.1.0", Some(u32::MAX))];
+        let err = arrange(&song(comp), &[(name("kit"), kit())]).expect_err("too big");
+        assert_eq!(
+            err,
+            "composition.placements[0] repeats kit 4294967295 times, and the song would hold \
+             more than 1000000 notes and controls by then: more than duet plays"
+        );
+        // At the limit, it is built.
+        let mut comp = Composition::new(120.0, "4/4".parse().expect("a meter"), None);
+        comp.placements = vec![placed("kit", "1.1.0", Some(200_000))];
+        let arranged = arrange(&song(comp), &[(name("kit"), kit())]).expect("five a repeat");
+        assert_eq!(arranged.part.tracks[0].notes.len(), 800_000);
     }
 
     /// A song that places nothing has nothing to play, and says so.
