@@ -36,7 +36,10 @@ pub trait Source {
 ///
 /// A damaged packet, whether the reader skips it or the decoder refuses it, is left out, and
 /// its frames are left as a gap in the chunks' start frames, so what follows keeps its true
-/// time. [`Prepare`](crate::Prepare) fills the gap with silence.
+/// time. [`Prepare`](crate::Prepare) fills the gap with silence. Such a frame can also be one
+/// nothing is wrong with except its size: Symphonia's FLAC reader scans at most 16 MB for a
+/// frame's end, so a valid frame longer than that is skipped with only a `log` warning to say
+/// so. Every gap left, by either path, is stated in [`gaps`](FileSource::gaps).
 ///
 /// HE-AAC is refused when the file's header declares it (audio object type 5 or 29, which
 /// is how afconvert and most encoders write it). AAC in M4A is trimmed to its true length by
@@ -58,6 +61,33 @@ pub struct FileSource {
     /// before the first frames (Vorbis's first packet yields none) are not a skip.
     started: bool,
     gapless: Option<Gapless>,
+    /// Every gap left so far, in the order it was left.
+    gaps: Vec<Gap>,
+}
+
+/// A span of frames the file's reader left out, filled with silence downstream: where it
+/// starts and how long it runs, counted in frames at the take's own rate.
+///
+/// A gap states the audio as the chunks number it: `start` is the frame number the missing
+/// audio would have begun at, and `frames` its length, so what follows keeps its true time.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Gap {
+    /// The frame number at which the missing audio starts, at the take's own rate.
+    pub start: u64,
+    /// How many frames are missing, read as silence.
+    pub frames: u64,
+}
+
+impl Gap {
+    /// A gap of `frames` frames starting at `start`, both at the take's own rate.
+    #[must_use]
+    pub const fn new(start: u64, frames: u64) -> Gap {
+        Gap { start, frames }
+    }
 }
 
 /// Encoder delay and padding still to cut from the stream, from an `iTunSMPB` tag.
@@ -146,7 +176,17 @@ impl FileSource {
             packet_end: None,
             started: false,
             gapless,
+            gaps: Vec::new(),
         })
+    }
+
+    /// Every gap left so far, in the order it was left: frames the file's reader skipped or
+    /// whose packets the decoder refused, filled with silence downstream.
+    ///
+    /// Read it once the stream has reached its end: a gap is known when the chunk after it
+    /// comes, or the stream does.
+    pub fn gaps(&self) -> &[Gap] {
+        &self.gaps
     }
 }
 
@@ -166,7 +206,14 @@ impl Source for FileSource {
             if self.started
                 && let Some(end) = self.packet_end
             {
-                self.next_frame += u64::try_from(packet.pts.get() - end).unwrap_or(0);
+                let skipped = u64::try_from(packet.pts.get() - end).unwrap_or(0);
+                if skipped > 0 {
+                    self.gaps.push(Gap {
+                        start: self.next_frame,
+                        frames: skipped,
+                    });
+                    self.next_frame += skipped;
+                }
             }
             self.packet_end = Some(packet.pts.get().saturating_add_unsigned(packet.dur.get()));
             let buffer = match self.decoder.decode(&packet) {
@@ -174,6 +221,10 @@ impl Source for FileSource {
                 // A damaged packet is dropped and its frames still counted, so the start
                 // frames of what follows stay true; the stream goes on.
                 Err(DecodeFailure::DecodeError(_)) => {
+                    self.gaps.push(Gap {
+                        start: self.next_frame,
+                        frames: packet.dur.get(),
+                    });
                     self.next_frame += packet.dur.get();
                     continue;
                 }
