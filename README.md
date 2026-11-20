@@ -285,6 +285,7 @@ duet song show wayfaring-stranger                 # its id, status, composition 
 duet song status wayfaring-stranger sketch        # idea → sketch
 duet song snapshot wayfaring-stranger first-verse --said "the verse sits"
 duet song restore wayfaring-stranger 2026-11-20-first-verse
+duet play wayfaring-stranger                      # every placed part, on the song's bars
 ```
 
 - **`song.duet` holds the song**: its `id` (minted by `duet song new`; renaming the folder or
@@ -314,6 +315,8 @@ duet song restore wayfaring-stranger 2026-11-20-first-verse
   working ones, each journalled as a `doc.written` that replaced a file. The song keeps its
   working status: only `duet song status` moves it. A snapshot whose files differ from their
   digests is refused, naming them.
+- **`duet play <song>`** plays the song as its composition places its parts, at the song's
+  tempo, stating each part whose own tempo, meter or key disagrees ([Playing a part](#playing-a-part)).
 - **A new song's composition** starts from `--tempo`, `--meter` and `--key`, or else the
   project's defaults in `.duet/project.duet`, or else 120 bpm in 4/4 with no key. `--project`
   names the project's root; it is the working directory by default.
@@ -695,6 +698,8 @@ duet play take.duet                        # through the built-in synth, to the 
 duet play take.mid --soundfont GM.sf2      # with a SoundFont of your choosing
 duet play take.duet --port "IAC Driver"    # to a MIDI port: Logic, a synth, a DAW
 duet apply take.notes -o - | duet play -   # a view's text, through apply
+duet play porch                            # a song, by its name in a project
+duet play songs/porch --port "IAC Driver"  # a song by its folder (or its song.duet), to a port
 ```
 
 - **The built-in synth** sounds the part with a General MIDI SoundFont (`.sf2`): every note
@@ -717,6 +722,20 @@ duet apply take.notes -o - | duet play -   # a view's text, through apply
   say which of two overlapping notes on one key a note-off ends, so the key is held until the
   last of them ends: each note sounds at least to its own end. The synth renders in blocks of
   64 samples, so an event sounds within 1.5 ms of its time.
+- **A song plays as its composition places its parts.** Each placed part (a drum grid as
+  `duet drums render` makes a part of it) is read in bars and beats from its own `1.1.0` and
+  put where its placement's `at` says, its `from` to its `to` or the whole part, `repeat`
+  times back to back. The composition is the clock: its tempo, meter and key maps are the
+  song's, and a part's own tempo is not applied. A note that runs past its stretch's `to` is
+  cut there, so one repeat never sounds over the next; the song ends at `composition.end`, or
+  else where the last placement ends. Each part's program is set again as each repeat starts.
+- **Disagreements are stated, never fixed.** Before anything plays, standard error says each
+  part whose own tempo, meter or key differs from the song's where it is placed ("kit is at
+  120 bpm, and the song is at 90 bpm at 9.1.0: it plays at the song's tempo"), each part
+  that changes its own tempo, meter or key, two parts that sound on one channel at once with
+  different programs, and anything a stretch or the song's stated end leaves out. No part is
+  rewritten. A song that places nothing, a placement of a part the song does not have, and a
+  name the project has no song of, are refused by name.
 
 ## Recording a take
 
@@ -1257,7 +1276,9 @@ scripts/capture-fixtures.sh [fixtures|corpus|all]   # regenerate duet-capture's 
   is the decode tests' one-second tones in each format, `corpus` the reference corpus's
   synthetic takes (the default), `all` both. Its encoders (`lame`, `flac`, `vorbis-tools`) are
   in the `Brewfile`; the AAC and HE-AAC files use macOS's own `afconvert`. CI uses the committed
-  files, so run it only to change them.
+  files, so run it only to change them. It deletes only the files it generates (its
+  `generated_fixtures` list), so a fixture committed by hand survives a regeneration;
+  `scripts/test-capture-fixtures.sh` shows it, with fake encoders, in CI's gate.
 - **`ffmpeg`**, also in the `Brewfile`, is for converting recordings to a format capture reads.
 - The Brewfile installs each tool's current version. The abc2midi oracle checks its own
   version against the corpus manifest.

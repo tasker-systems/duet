@@ -91,8 +91,9 @@ enum Command {
     /// document. What is not given is estimated, and stated on standard error and in the files.
     #[command(subcommand)]
     Capture(CaptureCommand),
-    /// Play a part: through the built-in synth with a General MIDI SoundFont, or to a
-    /// MIDI port with --port.
+    /// Play a part, or a song as its composition places its parts: through the built-in synth
+    /// with a General MIDI SoundFont, or to a MIDI port with --port. A song's disagreements
+    /// with its parts are stated first.
     Play(play::PlayArgs),
     /// Record a take from the microphone (the default input, or one named with --device) to
     /// a FLAC file, until Ctrl-C or for --seconds. `duet capture` reads it like any take.

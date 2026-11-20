@@ -808,6 +808,90 @@ struct SongPart {
 
 /// Every part in the song's `parts/`, by name. A file there that is no part or drum grid is
 /// refused, naming it and its kind.
+/// The song in `dir` and every part its composition places, each read as a part (a drum grid
+/// rendered as one, as `duet drums render` does), for `duet play`. A placement of a part the song
+/// does not have, and two parts with one name or one id, are refused by name, as `duet song show`
+/// refuses them.
+pub fn read_placed(dir: &Path) -> Result<(Song, Vec<(Name, duet_core::Part)>)> {
+    let doc = read_song(dir)?;
+    let parts = read_parts(dir)?;
+    doc.body
+        .check_parts(parts.iter().map(|p| &p.name))
+        .map_err(|why| anyhow::anyhow!("{}: {why}", dir.join(SONG_FILE).display()))?;
+    distinct_ids(
+        parts
+            .iter()
+            .filter_map(|p| p.id.as_ref().map(|id| (&p.name, id))),
+    )
+    .map_err(|why| anyhow::anyhow!("{}: {why}", dir.join("parts").display()))?;
+    let mut placed = Vec::new();
+    for placement in &doc.body.composition.placements {
+        if placed.iter().any(|(name, _)| *name == placement.part) {
+            continue;
+        }
+        let Some(part) = parts.iter().find(|p| p.name == placement.part) else {
+            continue;
+        };
+        let path = dir.join("parts").join(&part.file);
+        let read = match crate::io::read_any(&path, crate::io::Format::Duet, "duet play reads")? {
+            crate::io::Loaded::Part(part, _) => part,
+            crate::io::Loaded::Grid(grid, _) => {
+                grid.to_part().with_context(|| path.display().to_string())?
+            }
+        };
+        placed.push((part.name.clone(), read));
+    }
+    Ok((doc.body, placed))
+}
+
+/// The song folder `input` names for `duet play`, if it names one: a folder holding song.duet,
+/// a song.duet itself, or, in a project, a song's name. A folder that holds no song.duet, and a
+/// name the project has no song of, are refused by name.
+pub fn folder_for_play(project: Option<&Path>, input: &Path) -> Result<Option<PathBuf>> {
+    if input.is_dir() {
+        if input.join(SONG_FILE).is_file() {
+            return Ok(Some(input.to_path_buf()));
+        }
+        bail!(
+            "{} is a folder with no {SONG_FILE}: duet play plays a part, or a song's folder",
+            input.display()
+        );
+    }
+    if input.file_name().is_some_and(|n| n == SONG_FILE) && input.is_file() {
+        return Ok(Some(
+            input
+                .parent()
+                .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
+        ));
+    }
+    if input.exists() {
+        return Ok(None);
+    }
+    let (Some(root), Some(name)) = (project, input.to_str().and_then(|s| s.parse::<Name>().ok()))
+    else {
+        return Ok(None);
+    };
+    let dir = folder(root, &name);
+    if dir.join(SONG_FILE).is_file() {
+        return Ok(Some(dir));
+    }
+    let songs: Vec<String> = listed(root)?
+        .into_iter()
+        .filter(|l| l.song.is_ok())
+        .map(|l| l.folder)
+        .collect();
+    bail!(
+        "the project at {} has no song {name}: {} does not exist. {}",
+        root.display(),
+        dir.join(SONG_FILE).display(),
+        if songs.is_empty() {
+            "It has no songs; `duet song new` makes one".to_owned()
+        } else {
+            format!("Its songs are {}", songs.join(", "))
+        }
+    )
+}
+
 fn read_parts(dir: &Path) -> Result<Vec<SongPart>> {
     let parts_dir = dir.join("parts");
     if !parts_dir.exists() {
