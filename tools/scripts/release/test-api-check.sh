@@ -303,6 +303,8 @@ else
 fi
 
 # 8. Held crates.
+# The library crates left when duet-bus and duet-actions (and duet-cli) are held, as the cases hold them.
+UNHELD=(duet-core duet-midi duet-abc duet-drums duet-dsp duet-capture duet-play duet-schemas)
 # set_held <dir> <crates...>: the scripts under test, in <dir>/work, hold exactly these crates.
 set_held() {
     local dir="$1"
@@ -317,6 +319,7 @@ manifest() {
 
 d="$(fixture held-api)"
 tag_head "$d" 0.3.1
+set_held "$d" duet-bus duet-actions duet-cli
 run "$d" api-check.sh 0.3.1
 if [[ "$(status "$d")" == 0 ]] && said "$d" "duet-bus: held back from this release" &&
     said "$d" "duet-actions: held back from this release" &&
@@ -360,18 +363,20 @@ publish_fixture() {
 }
 
 d="$(publish_fixture held-build)"
+set_held "$d" duet-bus duet-actions duet-cli
 CARGO_TARGET_DIR="$d/target" run "$d" publish-crates.sh 0.4.0 --out "$d/dist"
 line="$(grep '^package ' "$d/crates/cargo.log" 2> /dev/null || true)"
 if [[ "$(status "$d")" == 0 ]] && [[ -n "$line" ]] && ! grep -qE -- '-p duet-(bus|actions|cli)( |$)' <<< "$line" &&
     grep -q -- '-p duet-schemas' <<< "$line" && [[ ! -e "$d/dist/duet-bus-0.4.0.crate" ]] &&
-    [[ "$(find "$d/dist" -name '*.crate' | wc -l | tr -d ' ')" == "${#JUDGED[@]}" ]]; then
+    [[ "$(find "$d/dist" -name '*.crate' | wc -l | tr -d ' ')" == "${#UNHELD[@]}" ]]; then
     ok "the build stage packages every crate but the held ones, and leaves them out of dist"
 else
     bad "the build stage packaged a held crate, or not the rest: exit $(status "$d"), $line, dist: $(find "$d/dist" -name '*.crate' -exec basename {} \; 2> /dev/null | tr '\n' ' ')"
 fi
 
 d="$(publish_fixture held-publish)"
-for crate in "${JUDGED[@]}"; do echo "versions: 0.3.0 0.4.0" > "$d/crates/$crate"; done
+set_held "$d" duet-bus duet-actions duet-cli
+for crate in "${UNHELD[@]}"; do echo "versions: 0.3.0 0.4.0" > "$d/crates/$crate"; done
 rm -f "$d/crates/duet-bus" "$d/crates/duet-actions"
 mkdir -p "$d/dist"
 CARGO_TARGET_DIR="$d/target" run "$d" publish-crates.sh 0.4.0 --from "$d/dist" --dry-run

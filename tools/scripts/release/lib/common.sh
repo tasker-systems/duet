@@ -30,7 +30,10 @@ CRATES=(duet-core duet-midi duet-abc duet-drums duet-dsp duet-capture duet-play 
 #
 # A crate that depends on a held crate is held too: it cannot be packaged until the held one is
 # on crates.io. held_check refuses a release that publishes such a crate.
-HELD=(duet-bus duet-actions duet-cli)
+#
+# Empty: duet-bus and duet-actions were held from v0.4.0 and claimed by token after it, with
+# duet-cli, which depends on both, held with them; the next release publishes every crate.
+HELD=()
 
 # CRATES without HELD, in publish order: what the API check, the packaging and the publish act on.
 PUBLISHED=()
