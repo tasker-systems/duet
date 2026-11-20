@@ -4,7 +4,7 @@
 folded into the domain model by the owner's ruling on the project design (temper
 `01a1eb60-07f8-77a6-8a0d-fb3947f0ba0d`, decision 10).
 
-**Status: Proposed; songs tasks 2 and 4 are built** (`song` 1.0, its composition, `duet song new |
+**Status: Proposed; songs tasks 2, 4 and 5 are built** (`song` 1.0, its composition, `duet song new |
 show | status`, and a part's `id` and `source`; `snapshot` 1.0 and `duet song snapshot | restore`). The domain model under it is **Ruled** (owner,
 2026-11-17, temper `01a1eb48-6b7a-7797-bb2b-68f335de87e9`, rulings 1 to 14, and 2026-11-18, temper
 `01a1ee66-f71b-763c-8117-5198cf45aa14`, rulings 15 and 16), and each point taken from it is marked
@@ -511,6 +511,12 @@ gates nothing (ruling 15, [§7](#7-lifecycles)), and a part's `source` (ruling 1
    The snapshot's `takes` stays empty until task 3 gives the song its links.
 5. **Playing a song:** `duet play` of a song, the parts at their placements on the composition's
    clock, with disagreements stated. **Needs:** 2. **Witness:** a part placed at bar 9 with
-   `repeat: 2` renders its notes at bars 9 and following, at the composition's tempo.
+   `repeat: 2` renders its notes at bars 9 and following, at the composition's tempo. **Built**
+   (temper `01a1f16d-dc03-7162-8f59-e240692e579e`): `duet play <song>`, by its name in a project,
+   its folder or its `song.duet`, arranges the song as one part (`duet_actions::arrange`) and
+   plays it through the same path as any part. A placed part is read quarter note for quarter
+   note from its own `1.1.0`, so a meter that disagrees is played beat for beat and stated, not
+   refused: refusing it is placement's, under `--force`. A note running past its stretch's `to`
+   is cut there and stated; what lies past a stated `end` is left out and stated.
 
 Comps across takes are the variants design's tasks 2 to 4, as amended.
