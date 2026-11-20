@@ -71,3 +71,17 @@ as the recording is; the notice is `wayfaring-stranger.logic-flex-pitch.mid.lice
 `tests/flex_pitch.rs` reads it through duet-midi and holds it to the take: its note count, and
 where its first note starts and its last note ends against the HMM's reading of
 `wayfaring-stranger.flac`, so a different export, or one shifted in time, fails.
+
+## Takes not yet read by a test
+
+`simple-beat.flac` is the owner beatboxing a simple beat, recorded 2026-11-17 with `duet record`
+(48 kHz 24-bit mono, 11.2 s). It is here so a test can be written against it; none reads it yet,
+since a beatboxed `[[take]]` needs a hand-checked `.notes` and has none. Its digest, as
+`duet capture` states it, is
+`sha256:0daefbc35a7366706f79be1c23d1f12774166fc81fbb15d6dd427f2fc7aff74b`, and the same digest
+computed apart from duet over libFLAC's decode agrees. The committed file is the reference
+`flac -8` encoding of the recording, with every sample kept: `duet record` wrote one block,
+4 096 frames from frame 430 080 that clip at full scale, as a 100 MB frame, and duet reads that
+frame back as silence, so the original's digest is
+`sha256:1efda451c159fb3954ddb07e1508e13baadd549edb1df119aaf810baa595bf06`, not the take's. It is
+licensed CC BY 4.0, not MIT; the notice is `simple-beat.flac.license`, beside it.
