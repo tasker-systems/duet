@@ -7,10 +7,12 @@
 use std::path::Path;
 
 use duet_core::Position;
+use duet_dsp::TakeDigest;
 use duet_schemas::journal::Id;
 use duet_schemas::project::{Defaults, Name};
 use duet_schemas::song::{
-    Composition, KeyAt, MeterAt, Placement, Section, Status, TempoAt, distinct_ids, part_names,
+    Composition, KeyAt, MeterAt, Placed, Placement, Section, Status, TakeLink, TempoAt,
+    distinct_ids, part_names,
 };
 use duet_schemas::{AnyDocument, Document, Error, Song, Tool};
 use serde_json::{Value, json};
@@ -48,6 +50,11 @@ fn id(n: u8) -> Id {
     Id::from_parts(1_795_446_245_000 + u64::from(n), [n; 10])
 }
 
+/// A take's digest, one per `n`.
+fn digest(n: u8) -> TakeDigest {
+    TakeDigest([n; 32])
+}
+
 /// A song unlike the committed example in its values: odd floats, 6/8 to 7/8, a modal key, a
 /// tick offset, a part placed inside a beat, and a title and intent that need escaping.
 fn song() -> Document<Song> {
@@ -69,6 +76,12 @@ fn song() -> Document<Song> {
     composition.placements = vec![lick];
     let mut song = Song::new(id(1), "Blood Sport — \"v2\"", composition);
     song.intent = Some("a line\nand another".into());
+    let mut estimated = TakeLink::new(name("wayfaring"), digest(1));
+    estimated.r#for = vec![name("melody")];
+    estimated.placed = Some(Placed::estimated(pos("1.1.0"), 1.057, 88.6));
+    let mut clicked = TakeLink::new(name("wayfaring-2"), digest(2));
+    clicked.placed = Some(Placed::click(pos("9.1.0"), 31.4, Some(-41.0)));
+    song.takes = vec![estimated, clicked];
     Document::new(Tool::new("duet", "0.3.0"), song)
 }
 
@@ -301,4 +314,162 @@ fn a_new_song_starts_at_idea_from_its_flags_then_the_projects_defaults() {
     let song = Song::new(id(2), "Porch", bare);
     assert_eq!(song.status, Status::Idea);
     song.check().unwrap();
+}
+
+#[test]
+fn a_song_with_no_takes_key_reads_as_linking_none_and_writes_it_empty() {
+    let mut doc: Value = serde_json::from_str(&song().write().unwrap()).unwrap();
+    doc["body"]
+        .as_object_mut()
+        .unwrap()
+        .remove("takes")
+        .unwrap();
+    let back = Document::<Song>::read(&doc.to_string()).unwrap();
+    assert!(back.body.takes.is_empty());
+    let text = back.write().unwrap();
+    assert!(text.contains("\"takes\": []"), "{text}");
+}
+
+#[test]
+fn a_placement_that_breaks_its_kind_is_refused_by_name() {
+    for (broken, says) in [
+        // A click has no tempo of its own.
+        (("takes", 1, "bpm", json!(90.0)), "takes[1].placed.bpm"),
+        (("takes", 0, "bpm", Value::Null), "takes[0].placed.bpm"),
+        (
+            ("takes", 0, "clock_ppm", json!(12.0)),
+            "takes[0].placed.clock_ppm",
+        ),
+        (
+            ("takes", 1, "at_secs", json!(-1.0)),
+            "takes[1].placed.at_secs",
+        ),
+        (("takes", 0, "bpm", json!(0.0)), "takes[0].placed.bpm"),
+    ] {
+        let (_, n, field, value) = broken.clone();
+        let message = read_broken(|body| {
+            let placed = &mut body["takes"][n]["placed"];
+            if value.is_null() {
+                placed.as_object_mut().unwrap().remove(field);
+            } else {
+                placed[field] = value.clone();
+            }
+        })
+        .to_string();
+        assert!(message.contains(says), "{broken:?}: {message}");
+    }
+    // A `set` placement needs its tempo as an estimate does.
+    let message = read_broken(|body| {
+        let placed = body["takes"][0]["placed"].as_object_mut().unwrap();
+        placed.insert("by".into(), json!("set"));
+        placed.remove("bpm");
+    })
+    .to_string();
+    assert!(
+        message.contains("takes[0].placed.bpm") && message.contains("set"),
+        "{message}"
+    );
+    // NaN is not a number in JSON, so it is built, not read: the check names it all the same.
+    let mut bad = song().body;
+    bad.takes[0].placed = Some(Placed::estimated(pos("1.1.0"), f64::NAN, 90.0));
+    let message = bad.check().unwrap_err();
+    assert!(message.contains("takes[0].placed.at_secs"), "{message}");
+}
+
+#[test]
+fn a_placement_off_the_bars_is_refused_naming_how_they_write_it() {
+    let mut composition = Composition::new(100.0, "3/4".parse().unwrap(), None);
+    let mut link = TakeLink::new(name("a"), digest(9));
+    link.placed = Some(Placed::set(pos("3.3.0"), 0.0, 100.0));
+    let mut song = Song::new(id(3), "Waltz", composition.clone());
+    song.takes = vec![link];
+    let text = Document::new(Tool::new("duet", "0.3.0"), song)
+        .write()
+        .unwrap();
+    let mut doc: Value = serde_json::from_str(&text).unwrap();
+    doc["body"]["takes"][0]["placed"]["bar"] = json!("3.4.0");
+    let message = Document::<Song>::read(&doc.to_string())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        message.contains("takes[0].placed.bar")
+            && message.contains("not how the song's bars write that place")
+            && message.contains("4.1.0"),
+        "{message}"
+    );
+    composition.end = None;
+}
+
+#[test]
+fn two_links_to_one_take_by_name_or_digest_are_refused_by_name() {
+    let message = read_broken(|body| body["takes"][1]["take"] = json!("wayfaring")).to_string();
+    assert!(
+        message.contains("takes[1]")
+            && message.contains("wayfaring")
+            && message.contains("takes[0]"),
+        "{message}"
+    );
+    let first = song().body.takes[0].digest.to_string();
+    let message = read_broken(|body| body["takes"][1]["digest"] = json!(first)).to_string();
+    assert!(
+        message.contains("takes[1]") && message.contains("digest") && message.contains("takes[0]"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_for_that_names_a_part_twice_is_refused_and_one_naming_no_part_is_only_stated() {
+    let message =
+        read_broken(|body| body["takes"][0]["for"] = json!(["melody", "melody"])).to_string();
+    assert!(
+        message.contains("takes[0].for") && message.contains("melody"),
+        "{message}"
+    );
+    let song = song().body;
+    let lines = song.check_for([&name("bass")]);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("melody"), "{lines:?}");
+    assert!(song.check_for([&name("melody")]).is_empty());
+}
+
+#[test]
+fn the_song_finds_a_link_by_name_or_digest() {
+    let mut song = song().body;
+    assert_eq!(song.link(&name("wayfaring")).unwrap().digest, digest(1));
+    assert!(song.link(&name("nothing")).is_none());
+    assert_eq!(song.linking(&digest(2)).unwrap().take, name("wayfaring-2"));
+    assert!(song.linking(&digest(3)).is_none());
+    song.link_mut(&name("wayfaring")).unwrap().placed = None;
+    assert!(song.link(&name("wayfaring")).unwrap().placed.is_none());
+}
+
+#[test]
+fn the_composition_says_what_holds_at_a_place() {
+    let mut c = Composition::new(
+        92.0,
+        "4/4".parse().unwrap(),
+        Some("G minor".parse().unwrap()),
+    );
+    c.tempo.push(TempoAt::new(pos("9.1.0"), 120.0));
+    assert_eq!(c.tempo_at(pos("1.1.0")).unwrap(), 92.0);
+    assert_eq!(c.tempo_at(pos("5.1.0")).unwrap(), 92.0);
+    assert_eq!(c.tempo_at(pos("9.1.0")).unwrap(), 120.0);
+    assert_eq!(c.meter_at(pos("5.1.0")).unwrap(), "4/4".parse().unwrap());
+    assert_eq!(c.key_at(pos("5.1.0")), Some("G minor".parse().unwrap()));
+    let bare = Composition::new(92.0, "4/4".parse().unwrap(), None);
+    assert_eq!(bare.key_at(pos("5.1.0")), None);
+
+    let near = |got: f64, want: f64| assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+    near(
+        c.secs_between(pos("1.1.0"), pos("9.1.0")).unwrap(),
+        8.0 * 4.0 * 60.0 / 92.0,
+    );
+    near(
+        c.secs_between(pos("1.1.0"), pos("10.1.0")).unwrap(),
+        8.0 * 4.0 * 60.0 / 92.0 + 4.0 * 0.5,
+    );
+    near(
+        c.secs_between(pos("9.1.0"), pos("1.1.0")).unwrap(),
+        -(8.0 * 4.0 * 60.0 / 92.0),
+    );
 }

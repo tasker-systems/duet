@@ -11,8 +11,10 @@
 //! - **The status is the owner's record** of where the song stands, a closed state machine
 //!   ([`Status`], ruling 9). It gates no command (decision 01a1ee66): only a move the machine
 //!   does not draw is refused.
-//! - **Takes and their placement** on the song's bars are songs task 3; they come into 1.0 in
-//!   place when it is built (ruling 12).
+//! - **The song links takes** ([`TakeLink`]), each by its project name and its digest. A link
+//!   may say which parts the take is for, and may be placed on the song's bars ([`Placed`]): by
+//!   the click the take was played to, by an estimate of its tempo, or by the owner's word
+//!   ([`By`]). The take's audio is never written here; the link only says where it falls.
 //!
 //! The design is `docs/superpowers/specs/2026-11-17-songs-and-composition-design.md`, §1 and §7.
 
@@ -21,6 +23,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use duet_core::{Key, Position, TimeMap, TimeSig};
+use duet_dsp::TakeDigest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +53,10 @@ pub struct Song {
     pub intent: Option<String>,
     /// How the song is written down: its bars, and where each part sits on them.
     pub composition: Composition,
+    /// The takes the song links, each by its name and digest, in the order they were linked.
+    /// Written always, and read as none when a song written before takes has no such key.
+    #[serde(default)]
+    pub takes: Vec<TakeLink>,
 }
 
 impl Song {
@@ -62,11 +69,51 @@ impl Song {
             status: Status::Idea,
             intent: None,
             composition,
+            takes: Vec::new(),
         }
     }
 
-    /// Checks what a schema cannot: the title says something, and the composition holds
-    /// ([`Composition::check`]).
+    /// The link to the take of this name, if the song has one.
+    #[must_use]
+    pub fn link(&self, take: &Name) -> Option<&TakeLink> {
+        self.takes.iter().find(|link| &link.take == take)
+    }
+
+    /// The link to the take of this name, to change, if the song has one.
+    pub fn link_mut(&mut self, take: &Name) -> Option<&mut TakeLink> {
+        self.takes.iter_mut().find(|link| &link.take == take)
+    }
+
+    /// The link to the take with this digest, if the song has one. A take is the same take
+    /// under any name, so this finds it by its audio.
+    #[must_use]
+    pub fn linking(&self, digest: &TakeDigest) -> Option<&TakeLink> {
+        self.takes.iter().find(|link| &link.digest == digest)
+    }
+
+    /// Says which links are `for` a part the song does not have, one line each. A take is
+    /// usually linked before its part is written, so this is stated and never an error.
+    #[must_use]
+    pub fn check_for<'a>(&self, parts: impl IntoIterator<Item = &'a Name>) -> Vec<String> {
+        let parts: BTreeSet<&Name> = parts.into_iter().collect();
+        let mut lines = Vec::new();
+        for link in &self.takes {
+            for part in &link.r#for {
+                if !parts.contains(part) {
+                    lines.push(format!(
+                        "the take {:?} is for the part {:?}, and the song has no part of that \
+                         name yet",
+                        link.take.as_str(),
+                        part.as_str()
+                    ));
+                }
+            }
+        }
+        lines
+    }
+
+    /// Checks what a schema cannot: the title says something, the composition holds
+    /// ([`Composition::check`]), and the takes it links hold ([`Song::check_takes`]).
     ///
     /// # Errors
     ///
@@ -75,7 +122,52 @@ impl Song {
         if self.title.trim().is_empty() {
             return Err("the song's title is empty: a song has a name for people".into());
         }
-        self.composition.check()
+        self.composition.check()?;
+        self.check_takes(&self.composition.time_map()?)
+    }
+
+    /// Checks the links: one to a take by name and one by digest; each `for` names a part
+    /// once; and each placement is as its kind says, with a `bar` the song's bars hold, written
+    /// as it falls, a finite `at_secs` of at least 0, and a tempo that is a tempo. `bpm` is
+    /// given for `estimated` and `set` and not for `click`; `clock_ppm` only for `click`.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the field and what is wrong with it.
+    pub fn check_takes(&self, map: &TimeMap) -> Result<(), String> {
+        for (n, link) in self.takes.iter().enumerate() {
+            if let Some(m) = self.takes[..n].iter().position(|had| had.take == link.take) {
+                return Err(format!(
+                    "takes[{n}] links the take {:?}, which takes[{m}] already links: a song \
+                     links a take once",
+                    link.take.as_str()
+                ));
+            }
+            if let Some(m) = self.takes[..n]
+                .iter()
+                .position(|had| had.digest == link.digest)
+            {
+                return Err(format!(
+                    "takes[{n}] links the take {:?} by the digest {}, which takes[{m}] ({:?}) \
+                     already links: a song links one take's audio once",
+                    link.take.as_str(),
+                    link.digest,
+                    self.takes[m].take.as_str()
+                ));
+            }
+            for (k, part) in link.r#for.iter().enumerate() {
+                if link.r#for[..k].contains(part) {
+                    return Err(format!(
+                        "takes[{n}].for names the part {:?} twice: each part is named once",
+                        part.as_str()
+                    ));
+                }
+            }
+            if let Some(placed) = &link.placed {
+                placed.check(&format!("takes[{n}].placed"), map)?;
+            }
+        }
+        Ok(())
     }
 
     /// Checks the placements against the song's parts, by name: every placement names one.
@@ -331,6 +423,84 @@ impl Composition {
         Ok(map)
     }
 
+    /// The tempo in force at `at`, in quarter notes per minute: the latest change at or before
+    /// it, held until the next.
+    ///
+    /// # Errors
+    ///
+    /// When the meter map is wrong, `at` is not a place the bars hold, or no tempo change is in
+    /// force there.
+    pub fn tempo_at(&self, at: Position) -> Result<f64, String> {
+        let map = self.time_map()?;
+        let tick = map.tick(at).map_err(|e| e.to_string())?;
+        let mut held = None;
+        for change in &self.tempo {
+            if map.tick(change.at).map_err(|e| e.to_string())? <= tick {
+                held = Some(change.bpm);
+            }
+        }
+        held.ok_or_else(|| format!("no tempo is in force at {at}: the first change is at 1.1.0"))
+    }
+
+    /// The meter in force at `at`.
+    ///
+    /// # Errors
+    ///
+    /// When the meter map is wrong, or `at` is not a place the bars hold.
+    pub fn meter_at(&self, at: Position) -> Result<TimeSig, String> {
+        let map = self.time_map()?;
+        let tick = map.tick(at).map_err(|e| e.to_string())?;
+        Ok(map.sig_at(tick))
+    }
+
+    /// The key in force at `at`, or none when the song states no key by then.
+    #[must_use]
+    pub fn key_at(&self, at: Position) -> Option<Key> {
+        let map = self.time_map().ok()?;
+        let tick = map.tick(at).ok()?;
+        let mut held = None;
+        for change in &self.key {
+            if map.tick(change.at).ok()? <= tick {
+                held = Some(change.key);
+            }
+        }
+        held
+    }
+
+    /// The seconds from `from` to `to` through the tempo map, each tempo held until the next
+    /// change. Negative when `to` is before `from`.
+    ///
+    /// # Errors
+    ///
+    /// When the meter map is wrong, either place is not one the bars hold, or the tempo map is
+    /// empty or holds a tempo that is not one.
+    pub fn secs_between(&self, from: Position, to: Position) -> Result<f64, String> {
+        let map = self.time_map()?;
+        let a = map.tick(from).map_err(|e| e.to_string())?;
+        let b = map.tick(to).map_err(|e| e.to_string())?;
+        let (lo, hi, sign) = if a <= b { (a, b, 1.0) } else { (b, a, -1.0) };
+        if self.tempo.is_empty() {
+            return Err("composition.tempo is empty: a song has a tempo from 1.1.0".into());
+        }
+        let mut starts = Vec::with_capacity(self.tempo.len());
+        for change in &self.tempo {
+            if !(change.bpm.is_finite() && change.bpm > 0.0) {
+                return Err(format!("the tempo {} is not a tempo", change.bpm));
+            }
+            starts.push(map.tick(change.at).map_err(|e| e.to_string())?);
+        }
+        let tpq = f64::from(self.ticks_per_quarter);
+        let mut secs = 0.0;
+        for (n, change) in self.tempo.iter().enumerate() {
+            let begin = starts[n].max(lo);
+            let end = starts.get(n + 1).map_or(hi, |next| (*next).min(hi));
+            if end > begin {
+                secs += (end - begin) as f64 / tpq * 60.0 / change.bpm;
+            }
+        }
+        Ok(sign * secs)
+    }
+
     /// Checks what a schema cannot: each map starts at `1.1.0` and runs in order, one change to
     /// a place; a meter changes only on a bar line; every tempo is a tempo; every position is
     /// written as it falls on the song's bars; and a placement repeats at least once and plays
@@ -341,18 +511,7 @@ impl Composition {
     /// A message naming the field and what is wrong with it.
     pub fn check(&self) -> Result<(), String> {
         let map = self.time_map()?;
-        let real = |field: String, at: Position| -> Result<(), String> {
-            let tick = map.tick(at).map_err(|e| format!("{field}: {e}"))?;
-            let fall = map.position(tick);
-            if fall == at {
-                Ok(())
-            } else {
-                Err(format!(
-                    "{field} is {at}, which is not how the song's bars write that place: it is \
-                     {fall}, by the meter map"
-                ))
-            }
-        };
+        let real = |field: String, at: Position| real_place(&map, field, at);
         let in_order = |field: &str, ats: &[Position]| -> Result<(), String> {
             for (n, pair) in ats.windows(2).enumerate() {
                 if pair[1] <= pair[0] {
@@ -432,6 +591,20 @@ impl Composition {
             real("composition.end".into(), end)?;
         }
         Ok(())
+    }
+}
+
+/// Checks that `at` is a place the bars hold and is written as the bars write it.
+fn real_place(map: &TimeMap, field: String, at: Position) -> Result<(), String> {
+    let tick = map.tick(at).map_err(|e| format!("{field}: {e}"))?;
+    let fall = map.position(tick);
+    if fall == at {
+        Ok(())
+    } else {
+        Err(format!(
+            "{field} is {at}, which is not how the song's bars write that place: it is \
+             {fall}, by the meter map"
+        ))
     }
 }
 
@@ -550,6 +723,174 @@ impl Placement {
             from: None,
             to: None,
         }
+    }
+}
+
+/// A take a song links: the take by its project name and its digest, the parts it is for, and
+/// where it falls on the song's bars once placed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct TakeLink {
+    /// The take's name in the project.
+    pub take: Name,
+    /// The take's digest: the song finds the take by its audio, whatever it is called.
+    pub digest: TakeDigest,
+    /// The parts the take is for, by name, each once. A part need not be written yet.
+    #[serde(default, rename = "for")]
+    pub r#for: Vec<Name>,
+    /// Where the take falls on the song's bars. Absent when the link is not placed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placed: Option<Placed>,
+}
+
+impl TakeLink {
+    /// A link to a take, for no part and not placed.
+    #[must_use]
+    pub const fn new(take: Name, digest: TakeDigest) -> Self {
+        Self {
+            take,
+            digest,
+            r#for: Vec::new(),
+            placed: None,
+        }
+    }
+}
+
+/// How a take was placed on the song's bars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum By {
+    /// The take was played to the song's click: the composition's tempo map is its tempo.
+    Click,
+    /// The take's tempo was estimated from its audio.
+    Estimated,
+    /// The owner stated the place and the tempo.
+    Set,
+}
+
+impl By {
+    /// The kind's name, as the document writes it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Click => "click",
+            Self::Estimated => "estimated",
+            Self::Set => "set",
+        }
+    }
+}
+
+impl fmt::Display for By {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Where a take falls on the song's bars: the place on the bars where its own start falls, and
+/// the seconds into the take where that place sounds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Placed {
+    /// How it was placed.
+    pub by: By,
+    /// The place on the song's bars.
+    pub bar: Position,
+    /// The seconds into the take at which `bar` falls. At least 0.
+    pub at_secs: f64,
+    /// The take's tempo in quarter notes per minute. Present for `estimated` and `set`, absent
+    /// for `click`, where the composition's tempo map is the take's tempo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    /// How far the take's clock ran from the click's, in parts per million, positive when the
+    /// take's ran fast: a moment `t` seconds after `bar` on the click's clock falls
+    /// `at_secs + t * (1 + clock_ppm / 1,000,000)` seconds into the take. For `click` only.
+    /// Absent means no drift was measured or applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_ppm: Option<f64>,
+}
+
+impl Placed {
+    /// A take played to the song's click, falling at `at_secs` into it.
+    #[must_use]
+    pub const fn click(bar: Position, at_secs: f64, clock_ppm: Option<f64>) -> Self {
+        Self {
+            by: By::Click,
+            bar,
+            at_secs,
+            bpm: None,
+            clock_ppm,
+        }
+    }
+
+    /// A take whose tempo was estimated from its audio.
+    #[must_use]
+    pub const fn estimated(bar: Position, at_secs: f64, bpm: f64) -> Self {
+        Self {
+            by: By::Estimated,
+            bar,
+            at_secs,
+            bpm: Some(bpm),
+            clock_ppm: None,
+        }
+    }
+
+    /// A take placed by the owner's word, at the tempo the owner gave.
+    #[must_use]
+    pub const fn set(bar: Position, at_secs: f64, bpm: f64) -> Self {
+        Self {
+            by: By::Set,
+            bar,
+            at_secs,
+            bpm: Some(bpm),
+            clock_ppm: None,
+        }
+    }
+
+    fn check(&self, field: &str, map: &TimeMap) -> Result<(), String> {
+        real_place(map, format!("{field}.bar"), self.bar)?;
+        if !(self.at_secs.is_finite() && self.at_secs >= 0.0) {
+            return Err(format!(
+                "{field}.at_secs is {}: a place in a take is a finite number of seconds, at \
+                 least 0",
+                self.at_secs
+            ));
+        }
+        match (self.by, self.bpm) {
+            (By::Click, Some(bpm)) => {
+                return Err(format!(
+                    "{field}.bpm is {bpm}, and a click placement has none: the song's tempo map \
+                     is the take's tempo"
+                ));
+            }
+            (By::Estimated | By::Set, None) => {
+                return Err(format!(
+                    "{field}.bpm is missing: a placement by {} gives the take's tempo",
+                    self.by
+                ));
+            }
+            (_, Some(bpm)) if !(bpm.is_finite() && bpm > 0.0) => {
+                return Err(format!(
+                    "{field}.bpm is {bpm}: a tempo is a positive number of quarter notes per \
+                     minute"
+                ));
+            }
+            _ => {}
+        }
+        if let Some(ppm) = self.clock_ppm {
+            if self.by != By::Click {
+                return Err(format!(
+                    "{field}.clock_ppm is {ppm}, and a placement by {} has none: only a click \
+                     placement states how far the take's clock ran from the click's",
+                    self.by
+                ));
+            }
+            if !ppm.is_finite() {
+                return Err(format!("{field}.clock_ppm is {ppm}: it is a finite number"));
+            }
+        }
+        Ok(())
     }
 }
 

@@ -1,5 +1,25 @@
 {
   "$defs": {
+    "By": {
+      "description": "How a take was placed on the song's bars.",
+      "oneOf": [
+        {
+          "const": "click",
+          "description": "The take was played to the song's click: the composition's tempo map is its tempo.",
+          "type": "string"
+        },
+        {
+          "const": "estimated",
+          "description": "The take's tempo was estimated from its audio.",
+          "type": "string"
+        },
+        {
+          "const": "set",
+          "description": "The owner stated the place and the tempo.",
+          "type": "string"
+        }
+      ]
+    },
     "Composition": {
       "additionalProperties": false,
       "description": "How a song is written down: the tempo, meter and key maps, the sections, and where each part\nsits. Every position is a `bar.beat.tick` [`Position`] on the song's bars, at\n`ticks_per_quarter`, written as it falls: `3.4.0` in 3/4 is refused, since that place is\n`4.1.0`.",
@@ -112,6 +132,41 @@
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
       "type": "string"
     },
+    "Placed": {
+      "additionalProperties": false,
+      "description": "Where a take falls on the song's bars: the place on the bars where its own start falls, and\nthe seconds into the take where that place sounds.",
+      "properties": {
+        "at_secs": {
+          "description": "The seconds into the take at which `bar` falls. At least 0.",
+          "format": "double",
+          "type": "number"
+        },
+        "bar": {
+          "$ref": "#/$defs/Position",
+          "description": "The place on the song's bars."
+        },
+        "bpm": {
+          "description": "The take's tempo in quarter notes per minute. Present for `estimated` and `set`, absent\nfor `click`, where the composition's tempo map is the take's tempo.",
+          "format": "double",
+          "type": "number"
+        },
+        "by": {
+          "$ref": "#/$defs/By",
+          "description": "How it was placed."
+        },
+        "clock_ppm": {
+          "description": "How far the take's clock ran from the click's, in parts per million, positive when the\ntake's ran fast: a moment `t` seconds after `bar` on the click's clock falls\n`at_secs + t * (1 + clock_ppm / 1,000,000)` seconds into the take. For `click` only.\nAbsent means no drift was measured or applied.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "by",
+        "bar",
+        "at_secs"
+      ],
+      "type": "object"
+    },
     "Placement": {
       "additionalProperties": false,
       "description": "Where a part sits on the song's bars.",
@@ -188,6 +243,14 @@
           "$ref": "#/$defs/Status",
           "description": "Where the song stands: `idea`, `sketch`, `developing` or `arranged`."
         },
+        "takes": {
+          "default": [],
+          "description": "The takes the song links, each by its name and digest, in the order they were linked.\nWritten always, and read as none when a song written before takes has no such key.",
+          "items": {
+            "$ref": "#/$defs/TakeLink"
+          },
+          "type": "array"
+        },
         "title": {
           "description": "The song's name for people. Its folder's name is its name for commands.",
           "type": "string"
@@ -218,6 +281,42 @@
           "type": "string"
         }
       ]
+    },
+    "TakeDigest": {
+      "description": "The SHA-256 of a take's decoded samples: the bytes `duet-take-1`, the rate as a little-endian u32, the channel count as a little-endian u16, then every sample, interleaved, as the little-endian bits of its f32.",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "TakeLink": {
+      "additionalProperties": false,
+      "description": "A take a song links: the take by its project name and its digest, the parts it is for, and\nwhere it falls on the song's bars once placed.",
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/TakeDigest",
+          "description": "The take's digest: the song finds the take by its audio, whatever it is called."
+        },
+        "for": {
+          "default": [],
+          "description": "The parts the take is for, by name, each once. A part need not be written yet.",
+          "items": {
+            "$ref": "#/$defs/Name"
+          },
+          "type": "array"
+        },
+        "placed": {
+          "$ref": "#/$defs/Placed",
+          "description": "Where the take falls on the song's bars. Absent when the link is not placed."
+        },
+        "take": {
+          "$ref": "#/$defs/Name",
+          "description": "The take's name in the project."
+        }
+      },
+      "required": [
+        "take",
+        "digest"
+      ],
+      "type": "object"
     },
     "TempoAt": {
       "additionalProperties": false,
