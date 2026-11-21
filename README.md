@@ -283,6 +283,9 @@ hyphens). It holds `song.duet`, a `song` 1.0 document of the song and its compos
 duet song new wayfaring-stranger --title "Wayfaring Stranger" --meter 3/4 --key "G minor"
 duet song show wayfaring-stranger                 # its id, status, composition and parts
 duet song status wayfaring-stranger sketch        # idea → sketch
+duet song link wayfaring-stranger beat --for verse  # link a project take; a captured one is placed
+duet song place wayfaring-stranger beat --bpm 90   # set a placement, keeping the values not given
+duet song place wayfaring-stranger beat --click --bar 1.1.0 --at 2.5  # played to the song's click
 duet song snapshot wayfaring-stranger first-verse --said "the verse sits"
 duet song restore wayfaring-stranger 2026-11-20-first-verse
 duet play wayfaring-stranger                      # every placed part, on the song's bars
@@ -308,6 +311,18 @@ duet play wayfaring-stranger                      # every placed part, on the so
   owner's words, the SHA-256 of every file copied, and the takes the song links, by name and
   digest. It journals a `doc.written` for each file and a `snapshot.taken`, and leaves the
   song's status as it was. One of the same name the same day is refused.
+- **`duet song link` and `duet song place` put a take on the song's bars.** `link` adds a take of
+  the project to the song's `takes` by its name and digest, and `--for` (repeatable) names the
+  parts it is for, written or not yet. A take already captured is placed `estimated` at once, at
+  `60 × rate / beat_period_frames` bpm, from its latest capture in `takes/<take>/`, and duet names
+  that analysis; one not captured is linked unplaced and the next capture places it. `link` again
+  adds the `--for` parts given and changes nothing else. `place --click --bar B --at S` says the
+  take was played to the song's click; `place --bpm`, `--bar` and `--at`, without `--click`, set it
+  (`by: set`), each value not given kept from the link, and a link with no value to keep is refused,
+  naming each flag still needed. `--bpm` with `--click` is refused. A take not in the project is
+  refused, naming `duet take add`. A refusal leaves `song.duet` as it was.
+- **`duet song show` lists the takes** the song links, each with the parts it is for and its
+  placement, and states a `for` that names no part the song has yet.
 - **`duet song show` lists the snapshots**, and reports each file in one that differs from its
   stated digest, is missing, or is not stated, naming it.
 - **`duet song restore`** first takes a snapshot of the working song

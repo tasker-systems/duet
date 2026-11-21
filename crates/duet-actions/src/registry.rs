@@ -197,6 +197,20 @@ pub const ACTIONS: &[Action] = &[
         schema::<song::StatusInput>,
     ),
     writing(
+        "song.link",
+        &["song", "link"],
+        DOC_WRITTEN,
+        writes("the song's song.duet, over itself", true),
+        schema::<song::LinkInput>,
+    ),
+    writing(
+        "song.place",
+        &["song", "place"],
+        DOC_WRITTEN,
+        writes("the song's song.duet, over itself", true),
+        schema::<song::PlaceInput>,
+    ),
+    writing(
         "song.snapshot",
         &["song", "snapshot"],
         &["doc.written", "snapshot.taken"],

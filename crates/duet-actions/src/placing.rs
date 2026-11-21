@@ -66,7 +66,7 @@ pub fn by_capture(current: Option<&Placed>, estimate: Placed) -> Replace {
 }
 
 /// A placement in a line: its kind, then its tempo when it has one, its place and its seconds.
-fn describe(placed: &Placed) -> String {
+pub(crate) fn describe(placed: &Placed) -> String {
     let mut text = format!(
         "{}: bar {} at {:.3} s",
         placed.by, placed.bar, placed.at_secs
