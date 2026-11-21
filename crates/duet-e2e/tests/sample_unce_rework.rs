@@ -70,7 +70,9 @@ fn the_sample_reads_its_take_and_each_step() {
 }
 
 /// Each step plays with its composition and its part in agreement: nothing is stated before the
-/// player is looked for (here a port no machine has, so nothing sounds).
+/// player is looked for (here a port no machine has, so nothing sounds). The port fails either
+/// by name or, where the machine has no MIDI at all (a CI runner, whose ALSA library also
+/// writes its own lines), as MIDI that could not be opened.
 #[test]
 fn each_step_plays_with_nothing_to_state() {
     let (dir, project) = sample("unce-sample-play");
@@ -82,10 +84,15 @@ fn each_step_plays_with_nothing_to_state() {
         let out = duet(&project, &["play", &song, "--port", "no such port 7f3a"]);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "{step}");
-        assert!(
-            err.starts_with("duet: no MIDI port is named"),
-            "{step}: {err}"
-        );
+        let port = err
+            .find("duet: no MIDI port is named")
+            .or_else(|| err.find("duet: opening MIDI output"))
+            .unwrap_or_else(|| panic!("{step}: the port is never looked for: {err}"));
+        let said: Vec<&str> = err[..port]
+            .lines()
+            .filter(|line| !line.starts_with("ALSA lib"))
+            .collect();
+        assert!(said.is_empty(), "{step}: stated before playing: {said:?}");
     }
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
