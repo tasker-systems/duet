@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use clap::Subcommand;
 use duet_core::{Key, Position, TimeSig};
-use duet_schemas::journal::{DocDigest, Id, RelPath, SnapshotTaken, SongStatusSet};
+use duet_schemas::journal::{DocDigest, Id, RelPath, SnapshotTaken, SongStatusSet, TakeRef};
 use duet_schemas::project::{Defaults, Name, ProjectTake};
 use duet_schemas::snapshot::{Copied, FileDigest, SNAPSHOT_FILE};
 use duet_schemas::song::{Composition, Placed, Status, TakeLink, distinct_ids, part_names};
@@ -633,6 +633,15 @@ fn take_snapshot(
             .collect(),
     );
     body.said = said;
+    // The takes the song links, by name and digest, sorted by name.
+    let mut takes: Vec<TakeRef> = doc
+        .body
+        .takes
+        .iter()
+        .map(|link| TakeRef::new(link.take.as_str(), link.digest))
+        .collect();
+    takes.sort_by(|a, b| a.take.cmp(&b.take));
+    body.takes = takes;
     body.check().map_err(anyhow::Error::msg)?;
     let snapshots = dir.join("snapshots");
     no_link(project_of(dir), &snapshots)?;

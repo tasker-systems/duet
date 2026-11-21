@@ -308,6 +308,36 @@ fn a_tempo_given_to_a_take_is_remembered_and_stated_as_given_next_time() {
 }
 
 #[test]
+fn take_forget_goes_on_past_a_song_that_does_not_read_and_names_it() {
+    let dir = scratch("take-forget-unreadable");
+    let root = project(&dir, "porch");
+    let source = wav(&dir, "beat.wav", &clicks(100.0));
+    ok(&duet(&root, &["take", "add", s(&source)]), "take add");
+    ok(&duet(&root, &["song", "new", "verse"]), "song new verse");
+    ok(
+        &duet(&root, &["song", "link", "verse", "beat"]),
+        "song link",
+    );
+    ok(&duet(&root, &["song", "new", "broken"]), "song new broken");
+    std::fs::write(root.join("songs/broken/song.duet"), "not a song").unwrap();
+
+    let out = duet(&root, &["take", "forget", "beat"]);
+    ok(&out, "take forget");
+    assert!(read_project(&root).takes.is_empty(), "the entry is dropped");
+    assert!(
+        stderr(&out).contains("songs/verse/song.duet still links the take beat"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("songs/broken/song.duet could not be read"),
+        "{}",
+        stderr(&out)
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
 fn take_forget_leaves_the_files_and_says_which_song_still_links_the_take() {
     let dir = scratch("take-forget");
     let root = project(&dir, "porch");
@@ -325,6 +355,13 @@ fn take_forget_leaves_the_files_and_says_which_song_still_links_the_take() {
         root.join("songs/groove/parts/kit.duet"),
     )
     .unwrap();
+
+    // A song that links the take through `takes`, with no part comped from it.
+    ok(&duet(&root, &["song", "new", "verse"]), "song new verse");
+    ok(
+        &duet(&root, &["song", "link", "verse", "beat"]),
+        "song link",
+    );
 
     let out = duet(&root, &["take", "forget", "beat"]);
     ok(&out, "take forget");
@@ -351,6 +388,11 @@ fn take_forget_leaves_the_files_and_says_which_song_still_links_the_take() {
     );
     assert!(
         stderr(&out).contains("songs/groove/parts/kit.duet is still comped from the take beat"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("songs/verse/song.duet still links the take beat"),
         "{}",
         stderr(&out)
     );

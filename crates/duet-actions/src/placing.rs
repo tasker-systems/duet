@@ -237,13 +237,46 @@ pub fn latest_analysis(
 ///
 /// When `songs/` cannot be listed, or a song does not read; the message names the song.
 pub fn songs_linking(root: &Path, digest: &TakeDigest) -> Result<Vec<(Name, PathBuf)>> {
+    let (found, unreadable) = scan_linking(root, digest)?;
+    match unreadable.into_iter().next() {
+        Some((_, why)) => Err(why),
+        None => Ok(found),
+    }
+}
+
+/// Like [`songs_linking`], but a song that does not read does not stop the search: the songs
+/// that link `digest` come back with the songs that could not be read, each with its name and
+/// why, so the caller can say so and go on.
+///
+/// # Errors
+///
+/// When `songs/` cannot be listed.
+pub fn songs_linking_or_unreadable(
+    root: &Path,
+    digest: &TakeDigest,
+) -> Result<LinkingOrUnreadable> {
+    let (found, unreadable) = scan_linking(root, digest)?;
+    let unreadable = unreadable
+        .into_iter()
+        .map(|(name, why)| (name, format!("{why:#}")))
+        .collect();
+    Ok((found, unreadable))
+}
+
+/// The songs that link a take, and the songs that could not be read, each with why.
+pub type LinkingOrUnreadable = (Vec<(Name, PathBuf)>, Vec<(Name, String)>);
+
+type Linking = (Vec<(Name, PathBuf)>, Vec<(Name, anyhow::Error)>);
+
+fn scan_linking(root: &Path, digest: &TakeDigest) -> Result<Linking> {
     let songs = root.join("songs");
     let entries = match fs::read_dir(&songs) {
         Ok(entries) => entries,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok((Vec::new(), Vec::new())),
         Err(e) => return Err(e).with_context(|| songs.display().to_string()),
     };
     let mut out = Vec::new();
+    let mut unreadable = Vec::new();
     for entry in entries {
         let entry = entry.with_context(|| songs.display().to_string())?;
         let folder = entry.path();
@@ -254,16 +287,21 @@ pub fn songs_linking(root: &Path, digest: &TakeDigest) -> Result<Vec<(Name, Path
         let Ok(name) = entry.file_name().to_string_lossy().parse::<Name>() else {
             continue;
         };
-        let text = fs::read_to_string(&file)
-            .with_context(|| format!("the song {name} ({})", file.display()))?;
-        let doc = Document::<Song>::read(&text)
-            .with_context(|| format!("the song {name} ({}) does not read", file.display()))?;
-        if doc.body.linking(digest).is_some() {
-            out.push((name, folder));
+        let read = fs::read_to_string(&file)
+            .with_context(|| format!("the song {name} ({})", file.display()))
+            .and_then(|text| {
+                Document::<Song>::read(&text)
+                    .with_context(|| format!("the song {name} ({}) does not read", file.display()))
+            });
+        match read {
+            Ok(doc) if doc.body.linking(digest).is_some() => out.push((name, folder)),
+            Ok(_) => {}
+            Err(why) => unreadable.push((name, why)),
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(out)
+    unreadable.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok((out, unreadable))
 }
 
 #[cfg(test)]
