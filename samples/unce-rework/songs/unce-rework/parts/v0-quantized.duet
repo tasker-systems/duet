@@ -1,0 +1,231 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/part/1.0.json",
+  "duet": {
+    "kind": "part",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.4.0"
+    }
+  },
+  "body": {
+    "id": "01a1fba2-a8ac-7b45-88fa-7e8c2602b21c",
+    "source": {
+      "by": "generated",
+      "operation": "drums render",
+      "inputs": [
+        "d63341341c5b93e5"
+      ]
+    },
+    "ticks_per_quarter": 480,
+    "tempo_bpm": 125.0,
+    "time_sig": "4/4",
+    "end": "9.1.0",
+    "tracks": [
+      {
+        "name": "Drums",
+        "channel": 10,
+        "notes": [
+          {
+            "at": "1.3.0",
+            "pitch": "C2",
+            "beats": 0.25,
+            "vel": 39
+          },
+          {
+            "at": "1.4.360",
+            "pitch": "C2",
+            "beats": 0.25,
+            "vel": 33
+          },
+          {
+            "at": "2.1.360",
+            "pitch": "C2",
+            "beats": 0.25,
+            "vel": 40
+          },
+          {
+            "at": "2.2.120",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 50
+          },
+          {
+            "at": "2.2.360",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 34
+          },
+          {
+            "at": "2.3.240",
+            "pitch": "C2",
+            "beats": 0.25,
+            "vel": 61
+          },
+          {
+            "at": "2.4.240",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 56
+          },
+          {
+            "at": "3.1.0",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 55
+          },
+          {
+            "at": "3.2.120",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 64
+          },
+          {
+            "at": "3.4.0",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 43
+          },
+          {
+            "at": "4.1.0",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 80
+          },
+          {
+            "at": "4.1.240",
+            "pitch": "C2",
+            "beats": 0.25,
+            "vel": 82
+          },
+          {
+            "at": "4.2.360",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 67
+          },
+          {
+            "at": "4.4.120",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 63
+          },
+          {
+            "at": "5.1.120",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 127
+          },
+          {
+            "at": "5.1.240",
+            "pitch": "F#2",
+            "beats": 0.25,
+            "vel": 71
+          },
+          {
+            "at": "5.1.360",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 112
+          },
+          {
+            "at": "5.2.240",
+            "pitch": "C2",
+            "beats": 0.25,
+            "vel": 97
+          },
+          {
+            "at": "5.3.240",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 73
+          },
+          {
+            "at": "5.4.360",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 67
+          },
+          {
+            "at": "6.1.360",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 71
+          },
+          {
+            "at": "6.2.0",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 54
+          },
+          {
+            "at": "6.2.120",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 73
+          },
+          {
+            "at": "6.3.240",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 49
+          },
+          {
+            "at": "6.4.0",
+            "pitch": "F#2",
+            "beats": 0.25,
+            "vel": 85
+          },
+          {
+            "at": "6.4.240",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 82
+          },
+          {
+            "at": "6.4.360",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 65
+          },
+          {
+            "at": "7.1.0",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 64
+          },
+          {
+            "at": "7.2.120",
+            "pitch": "F#2",
+            "beats": 0.25,
+            "vel": 65
+          },
+          {
+            "at": "7.2.360",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 69
+          },
+          {
+            "at": "8.1.240",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 51
+          },
+          {
+            "at": "8.2.240",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 78
+          },
+          {
+            "at": "8.3.0",
+            "pitch": "D2",
+            "beats": 0.25,
+            "vel": 97
+          }
+        ]
+      }
+    ]
+  }
+}

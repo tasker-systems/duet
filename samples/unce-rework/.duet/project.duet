@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/project/1.0.json",
+  "duet": {
+    "kind": "project",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.4.0"
+    }
+  },
+  "body": {
+    "title": "Unce rework",
+    "created": "2026-11-21",
+    "duet": "0.4",
+    "takes": [
+      {
+        "name": "unce",
+        "take": {
+          "digest": "sha256:d17c791dbeb8ffbd0a7b5aae799d79cceca7f9ad890dc333192103e35b92ff71",
+          "rate": 24000,
+          "channels": 1,
+          "frames": 360000
+        },
+        "file": "unce.flac",
+        "added": "2026-11-21"
+      }
+    ]
+  }
+}

@@ -24,5 +24,6 @@ rustc-ice-*.txt
 #.idea/
 
 # The owner's own takes, their derived output and the downloaded datasets: never committed
-# (a take may be cited in git only from crates/duet-capture/corpus, with its licence).
+# (a take may be cited in git only from crates/duet-capture/corpus or a sample project in
+# samples/, with its licence).
 /fixtures/

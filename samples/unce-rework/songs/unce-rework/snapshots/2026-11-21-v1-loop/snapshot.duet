@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/snapshot/1.0.json",
+  "duet": {
+    "kind": "snapshot",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.4.0"
+    }
+  },
+  "body": {
+    "name": "v1-loop",
+    "date": "2026-11-21",
+    "said": "bars 4-5 looped four times, a steady 8th hat under it",
+    "files": [
+      {
+        "path": "song.duet",
+        "digest": "sha256:76c996d71f019dad50bb67c1da41ab00b7c8c7033f5dff6b31d923114e1af2a4"
+      },
+      {
+        "path": "parts/v1-loop.duet",
+        "digest": "sha256:f49eadb593a11d80dda04d94e016b2b1c3bbe81a2f27307829c7c76a5a471189"
+      }
+    ],
+    "takes": []
+  }
+}
