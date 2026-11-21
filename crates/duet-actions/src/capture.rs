@@ -26,7 +26,7 @@
 pub mod compare;
 pub mod disagree;
 pub mod review;
-mod statement;
+pub(crate) mod statement;
 
 use std::fs;
 use std::io::{BufWriter, Write as _};

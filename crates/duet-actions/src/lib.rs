@@ -27,6 +27,7 @@ pub mod convert;
 pub mod drums;
 pub mod io;
 pub mod part;
+pub mod placing;
 pub mod play;
 pub mod project;
 pub mod record;
