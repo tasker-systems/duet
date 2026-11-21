@@ -1,0 +1,670 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/capture-analysis/1.14.json",
+  "duet": {
+    "kind": "capture-analysis",
+    "version": "1.14",
+    "tool": {
+      "name": "duet",
+      "version": "0.4.0"
+    }
+  },
+  "body": {
+    "rate": 22050,
+    "take": {
+      "digest": "sha256:d17c791dbeb8ffbd0a7b5aae799d79cceca7f9ad890dc333192103e35b92ff71",
+      "rate": 24000,
+      "channels": 1,
+      "frames": 360000
+    },
+    "events": [
+      {
+        "type": "onset",
+        "frame": 30336,
+        "strength": 0.013086705
+      },
+      {
+        "type": "hit",
+        "frame": 30336,
+        "lane": "kick",
+        "strength": 0.013086705
+      },
+      {
+        "type": "onset",
+        "frame": 48512,
+        "strength": 0.008724891
+      },
+      {
+        "type": "hit",
+        "frame": 48512,
+        "lane": "kick",
+        "strength": 0.008724891
+      },
+      {
+        "type": "onset",
+        "frame": 60288,
+        "strength": 0.013409306
+      },
+      {
+        "type": "hit",
+        "frame": 60288,
+        "lane": "kick",
+        "strength": 0.013409306
+      },
+      {
+        "type": "onset",
+        "frame": 65024,
+        "strength": 0.020490447
+      },
+      {
+        "type": "hit",
+        "frame": 65024,
+        "lane": "snare",
+        "strength": 0.020490447
+      },
+      {
+        "type": "onset",
+        "frame": 71296,
+        "strength": 0.009447494
+      },
+      {
+        "type": "hit",
+        "frame": 71296,
+        "lane": "snare",
+        "strength": 0.009447494
+      },
+      {
+        "type": "onset",
+        "frame": 77312,
+        "strength": 0.027592892
+      },
+      {
+        "type": "hit",
+        "frame": 77312,
+        "lane": "kick",
+        "strength": 0.027592892
+      },
+      {
+        "type": "onset",
+        "frame": 89344,
+        "strength": 0.024569163
+      },
+      {
+        "type": "hit",
+        "frame": 89344,
+        "lane": "snare",
+        "strength": 0.024569163
+      },
+      {
+        "type": "onset",
+        "frame": 94976,
+        "strength": 0.023506582
+      },
+      {
+        "type": "hit",
+        "frame": 94976,
+        "lane": "snare",
+        "strength": 0.023506582
+      },
+      {
+        "type": "onset",
+        "frame": 106112,
+        "strength": 0.029629283
+      },
+      {
+        "type": "hit",
+        "frame": 106112,
+        "lane": "snare",
+        "strength": 0.029629283
+      },
+      {
+        "type": "onset",
+        "frame": 124672,
+        "strength": 0.015515225
+      },
+      {
+        "type": "hit",
+        "frame": 124672,
+        "lane": "snare",
+        "strength": 0.015515225
+      },
+      {
+        "type": "onset",
+        "frame": 136064,
+        "strength": 0.040535096
+      },
+      {
+        "type": "hit",
+        "frame": 136064,
+        "lane": "snare",
+        "strength": 0.040535096
+      },
+      {
+        "type": "onset",
+        "frame": 141184,
+        "strength": 0.04228855
+      },
+      {
+        "type": "hit",
+        "frame": 141184,
+        "lane": "kick",
+        "strength": 0.04228855
+      },
+      {
+        "type": "onset",
+        "frame": 153216,
+        "strength": 0.032072376
+      },
+      {
+        "type": "hit",
+        "frame": 153216,
+        "lane": "snare",
+        "strength": 0.032072376
+      },
+      {
+        "type": "onset",
+        "frame": 170752,
+        "strength": 0.029578742
+      },
+      {
+        "type": "hit",
+        "frame": 170752,
+        "lane": "snare",
+        "strength": 0.029578742
+      },
+      {
+        "type": "onset",
+        "frame": 181504,
+        "strength": 0.07279251
+      },
+      {
+        "type": "onset",
+        "frame": 182784,
+        "strength": 0.034734435
+      },
+      {
+        "type": "hit",
+        "frame": 181504,
+        "lane": "snare",
+        "strength": 0.07279251
+      },
+      {
+        "type": "hit",
+        "frame": 182784,
+        "lane": "hat",
+        "strength": 0.034734435
+      },
+      {
+        "type": "onset",
+        "frame": 186752,
+        "strength": 0.06281265
+      },
+      {
+        "type": "hit",
+        "frame": 186752,
+        "lane": "snare",
+        "strength": 0.06281265
+      },
+      {
+        "type": "onset",
+        "frame": 193152,
+        "strength": 0.052324526
+      },
+      {
+        "type": "hit",
+        "frame": 193152,
+        "lane": "kick",
+        "strength": 0.052324526
+      },
+      {
+        "type": "onset",
+        "frame": 204672,
+        "strength": 0.036172703
+      },
+      {
+        "type": "hit",
+        "frame": 204672,
+        "lane": "snare",
+        "strength": 0.036172703
+      },
+      {
+        "type": "onset",
+        "frame": 216960,
+        "strength": 0.032285526
+      },
+      {
+        "type": "hit",
+        "frame": 216960,
+        "lane": "snare",
+        "strength": 0.032285526
+      },
+      {
+        "type": "onset",
+        "frame": 229120,
+        "strength": 0.034795903
+      },
+      {
+        "type": "onset",
+        "frame": 230912,
+        "strength": 0.023320567
+      },
+      {
+        "type": "hit",
+        "frame": 229120,
+        "lane": "snare",
+        "strength": 0.034795903
+      },
+      {
+        "type": "hit",
+        "frame": 230912,
+        "lane": "snare",
+        "strength": 0.023320567
+      },
+      {
+        "type": "onset",
+        "frame": 234496,
+        "strength": 0.035891593
+      },
+      {
+        "type": "hit",
+        "frame": 234496,
+        "lane": "snare",
+        "strength": 0.035891593
+      },
+      {
+        "type": "onset",
+        "frame": 246528,
+        "strength": 0.019993434
+      },
+      {
+        "type": "hit",
+        "frame": 246528,
+        "lane": "snare",
+        "strength": 0.019993434
+      },
+      {
+        "type": "onset",
+        "frame": 251136,
+        "strength": 0.044365797
+      },
+      {
+        "type": "hit",
+        "frame": 251136,
+        "lane": "hat",
+        "strength": 0.044365797
+      },
+      {
+        "type": "onset",
+        "frame": 256256,
+        "strength": 0.042303484
+      },
+      {
+        "type": "hit",
+        "frame": 256256,
+        "lane": "snare",
+        "strength": 0.042303484
+      },
+      {
+        "type": "onset",
+        "frame": 258688,
+        "strength": 0.030553281
+      },
+      {
+        "type": "hit",
+        "frame": 258688,
+        "lane": "snare",
+        "strength": 0.030553281
+      },
+      {
+        "type": "onset",
+        "frame": 262912,
+        "strength": 0.029937653
+      },
+      {
+        "type": "hit",
+        "frame": 262912,
+        "lane": "snare",
+        "strength": 0.029937653
+      },
+      {
+        "type": "onset",
+        "frame": 275456,
+        "strength": 0.030379942
+      },
+      {
+        "type": "hit",
+        "frame": 275456,
+        "lane": "hat",
+        "strength": 0.030379942
+      },
+      {
+        "type": "onset",
+        "frame": 281216,
+        "strength": 0.033276323
+      },
+      {
+        "type": "hit",
+        "frame": 281216,
+        "lane": "snare",
+        "strength": 0.033276323
+      },
+      {
+        "type": "onset",
+        "frame": 308992,
+        "strength": 0.021088507
+      },
+      {
+        "type": "hit",
+        "frame": 308992,
+        "lane": "snare",
+        "strength": 0.021088507
+      },
+      {
+        "type": "onset",
+        "frame": 320128,
+        "strength": 0.039404254
+      },
+      {
+        "type": "hit",
+        "frame": 320128,
+        "lane": "snare",
+        "strength": 0.039404254
+      },
+      {
+        "type": "onset",
+        "frame": 326656,
+        "strength": 0.052448273
+      },
+      {
+        "type": "hit",
+        "frame": 326656,
+        "lane": "snare",
+        "strength": 0.052448273
+      }
+    ],
+    "timing": {
+      "tempo_bpm": {
+        "estimated": {
+          "value": 125.0,
+          "confidence": 0.44783974
+        }
+      },
+      "tempo_alternatives": {
+        "half": 62.5,
+        "double": 250.0
+      },
+      "beat_period_frames": 10546.23754001449,
+      "meter": {
+        "estimated": {
+          "value": "4/4",
+          "confidence": 0.24695316
+        }
+      },
+      "downbeat_frame": {
+        "estimated": {
+          "value": 136064,
+          "confidence": 0.24695316
+        }
+      }
+    },
+    "beats": [
+      {
+        "beat": 0,
+        "secs": 6.170702947845805,
+        "bpm": 128.73363995140633
+      },
+      {
+        "beat": 1,
+        "secs": 6.630458049886622,
+        "bpm": 128.2161490204397
+      },
+      {
+        "beat": 2,
+        "secs": 7.090213151927438,
+        "bpm": 127.7028019118413
+      },
+      {
+        "beat": 3,
+        "secs": 7.549968253968253,
+        "bpm": 127.19354905144289
+      },
+      {
+        "beat": 4,
+        "secs": 8.00972335600907,
+        "bpm": 126.68834165270226
+      },
+      {
+        "beat": 5,
+        "secs": 8.469478458049887,
+        "bpm": 126.18713170112304
+      },
+      {
+        "beat": 6,
+        "secs": 8.94984126984127,
+        "bpm": 125.68987193904275
+      },
+      {
+        "beat": 7,
+        "secs": 9.430204081632652,
+        "bpm": 125.1965158507794
+      },
+      {
+        "beat": 8,
+        "secs": 9.910566893424036,
+        "bpm": 124.70701764812623
+      },
+      {
+        "beat": 9,
+        "secs": 10.39092970521542,
+        "bpm": 124.22133225618562
+      },
+      {
+        "beat": 10,
+        "secs": 10.89015873015873,
+        "bpm": 123.73941529953262
+      },
+      {
+        "beat": 11,
+        "secs": 11.38938775510204,
+        "bpm": 123.26122308869942
+      },
+      {
+        "beat": 12,
+        "secs": 11.92344671201814,
+        "bpm": 122.78671260697186
+      },
+      {
+        "beat": 13,
+        "secs": 12.405260770975056,
+        "bpm": 122.31584149748983
+      },
+      {
+        "beat": 14,
+        "secs": 12.887074829931972,
+        "bpm": 121.8485680506434
+      },
+      {
+        "beat": 15,
+        "secs": 13.36888888888889,
+        "bpm": 121.38485119175658
+      },
+      {
+        "beat": 16,
+        "secs": 13.850702947845805,
+        "bpm": 120.92465046905143
+      },
+      {
+        "beat": 17,
+        "secs": 14.332517006802721,
+        "bpm": 120.46792604188475
+      }
+    ],
+    "grid": "1/16",
+    "offsets": [
+      {
+        "note": 0,
+        "moved_ms": 11.957185419517563,
+        "moved_steps": 0.1
+      },
+      {
+        "note": 1,
+        "moved_ms": 24.910802957328258,
+        "moved_steps": 0.20833333333333334
+      },
+      {
+        "note": 2,
+        "moved_ms": -30.88939566708704,
+        "moved_steps": -0.25833333333333336
+      },
+      {
+        "note": 3,
+        "moved_ms": -6.975024828051912,
+        "moved_steps": -0.058333333333333334
+      },
+      {
+        "note": 4,
+        "moved_ms": -51.81447015124277,
+        "moved_steps": -0.43333333333333335
+      },
+      {
+        "note": 5,
+        "moved_ms": 33.87869202196643,
+        "moved_steps": 0.2833333333333333
+      },
+      {
+        "note": 6,
+        "moved_ms": -33.87869202196643,
+        "moved_steps": -0.2833333333333333
+      },
+      {
+        "note": 7,
+        "moved_ms": -49.821605914656516,
+        "moved_steps": -0.4166666666666667
+      },
+      {
+        "note": 8,
+        "moved_ms": 42.8465810866046,
+        "moved_steps": 0.35833333333333334
+      },
+      {
+        "note": 9,
+        "moved_ms": 37.86442049513895,
+        "moved_steps": 0.31666666666666665
+      },
+      {
+        "note": 10,
+        "moved_ms": 0.0,
+        "moved_steps": 0.0
+      },
+      {
+        "note": 11,
+        "moved_ms": 6.975024828051912,
+        "moved_steps": 0.058333333333333334
+      },
+      {
+        "note": 12,
+        "moved_ms": 58.78949497929469,
+        "moved_steps": 0.49166666666666664
+      },
+      {
+        "note": 13,
+        "moved_ms": -18.932210247569476,
+        "moved_steps": -0.15833333333333333
+      },
+      {
+        "note": 14,
+        "moved_ms": -27.900099312207647,
+        "moved_steps": -0.23333333333333334
+      },
+      {
+        "note": 15,
+        "moved_ms": 33.87869202196643,
+        "moved_steps": 0.2833333333333333
+      },
+      {
+        "note": 16,
+        "moved_ms": -26.90366719391452,
+        "moved_steps": -0.225
+      },
+      {
+        "note": 17,
+        "moved_ms": 41.85014896831147,
+        "moved_steps": 0.35
+      },
+      {
+        "note": 18,
+        "moved_ms": -2.9892963548793907,
+        "moved_steps": -0.025
+      },
+      {
+        "note": 19,
+        "moved_ms": 37.86442049513895,
+        "moved_steps": 0.31666666666666665
+      },
+      {
+        "note": 20,
+        "moved_ms": -34.87512414025956,
+        "moved_steps": -0.2916666666666667
+      },
+      {
+        "note": 21,
+        "moved_ms": 2.9892963548793907,
+        "moved_steps": 0.025
+      },
+      {
+        "note": 22,
+        "moved_ms": -39.85728473172521,
+        "moved_steps": -0.3333333333333333
+      },
+      {
+        "note": 23,
+        "moved_ms": 11.957185419517563,
+        "moved_steps": 0.1
+      },
+      {
+        "note": 24,
+        "moved_ms": 42.8465810866046,
+        "moved_steps": 0.35833333333333334
+      },
+      {
+        "note": 25,
+        "moved_ms": 49.821605914656516,
+        "moved_steps": 0.4166666666666667
+      },
+      {
+        "note": 26,
+        "moved_ms": 58.78949497929469,
+        "moved_steps": 0.49166666666666664
+      },
+      {
+        "note": 27,
+        "moved_ms": -12.953617537810693,
+        "moved_steps": -0.10833333333333334
+      },
+      {
+        "note": 28,
+        "moved_ms": 15.942913892690084,
+        "moved_steps": 0.13333333333333333
+      },
+      {
+        "note": 29,
+        "moved_ms": -5.978592709758781,
+        "moved_steps": -0.05
+      },
+      {
+        "note": 30,
+        "moved_ms": 48.82517379636338,
+        "moved_steps": 0.4083333333333333
+      },
+      {
+        "note": 31,
+        "moved_ms": 22.917938720741997,
+        "moved_steps": 0.19166666666666668
+      },
+      {
+        "note": 32,
+        "moved_ms": -34.87512414025956,
+        "moved_steps": -0.2916666666666667
+      }
+    ]
+  }
+}

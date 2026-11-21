@@ -1,0 +1,2 @@
+{"$schema":"https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/journal-index/1.0.json","duet":{"kind":"journal-index","version":"1.0","tool":{"name":"duet","version":"0.4.0"}},"head":{"project":"unce-rework","id":"01a1fba2-a873-70f5-9f7d-1aeecc6d9ea5"}}
+{"opens":{"segment":"20261121T010503606Z","id":"01a1fba2-a876-7aa2-b5c7-d827c62fc0ef","from":"2026-11-21T01:05:03.606Z"}}

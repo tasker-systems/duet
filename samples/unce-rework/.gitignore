@@ -1,0 +1,2 @@
+# duet writes its lock here while a command runs
+.duet/run/

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/snapshot/1.0.json",
+  "duet": {
+    "kind": "snapshot",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.4.0"
+    }
+  },
+  "body": {
+    "name": "v2-groove",
+    "date": "2026-11-21",
+    "said": "98 bpm, more kick, thinned and varied snares, a fill to end: I'd listen to that beat",
+    "files": [
+      {
+        "path": "song.duet",
+        "digest": "sha256:60988f1552cfde03dda803ac07f559841f894b6321d6f606c2edd7c6a9499b89"
+      },
+      {
+        "path": "parts/v2-groove.duet",
+        "digest": "sha256:12f615f43246ef396b9d1c8e5636d13041053dd5e1b02f795b52e96c478de14c"
+      }
+    ],
+    "takes": []
+  }
+}

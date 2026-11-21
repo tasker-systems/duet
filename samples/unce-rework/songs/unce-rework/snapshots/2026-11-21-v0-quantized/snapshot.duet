@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/snapshot/1.0.json",
+  "duet": {
+    "kind": "snapshot",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.4.0"
+    }
+  },
+  "body": {
+    "name": "v0-quantized",
+    "date": "2026-11-21",
+    "said": "the take as read, quantized to 1/16 at the estimated 125 bpm",
+    "files": [
+      {
+        "path": "song.duet",
+        "digest": "sha256:9f16939b9fe035f3b5c022010d90c406fceaebdbcb3b21b3fe13b108b939be04"
+      },
+      {
+        "path": "parts/v0-quantized.duet",
+        "digest": "sha256:5b6dac1040197e4f6dc96a50a54b306215b19533c1f25dfc13af65cda1c34f31"
+      }
+    ],
+    "takes": []
+  }
+}

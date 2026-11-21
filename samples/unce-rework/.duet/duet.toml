@@ -1,0 +1,16 @@
+# This project's duet config. Every line is a comment, so nothing here is set until you
+# uncomment it. It is read over your own duet.toml; .duet/duet.local.toml beside it is read
+# last, for this machine only. `duet config show` prints every value and where it came from.
+
+# [part]
+# end = "last-bar"              # or { round-up = 4 }: how a part that names no end gets one
+
+# [play]
+# soundfont = "GeneralUser.sf2"  # for `duet play`; relative to this file's directory
+
+# [journal]
+# segment-size = "1MiB"         # the journal rolls to a new segment past this size
+
+# [lanes.shaker-2]               # a drum lane added, or a gm lane changed
+# key = 82
+# aliases = ["sh2"]

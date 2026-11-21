@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tasker-systems/duet/main/crates/duet-schemas/schemas/song/1.0.json",
+  "duet": {
+    "kind": "song",
+    "version": "1.0",
+    "tool": {
+      "name": "duet",
+      "version": "0.4.0"
+    }
+  },
+  "body": {
+    "id": "01a1fba2-a8a3-7994-bb90-c402708b89b9",
+    "title": "Unce rework",
+    "status": "sketch",
+    "composition": {
+      "ticks_per_quarter": 480,
+      "tempo": [
+        {
+          "at": "1.1.0",
+          "bpm": 125.0
+        }
+      ],
+      "meter": [
+        {
+          "at": "1.1.0",
+          "sig": "4/4"
+        }
+      ],
+      "key": [],
+      "sections": [],
+      "placements": [
+        {
+          "part": "v0-quantized",
+          "at": "1.1.0"
+        }
+      ]
+    }
+  }
+}
