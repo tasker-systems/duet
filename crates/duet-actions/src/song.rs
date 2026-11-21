@@ -1041,7 +1041,9 @@ fn read_project(project: &Path) -> Result<Option<Project>> {
     Ok(Some(doc.body))
 }
 
-fn read_song(dir: &Path) -> Result<Document<Song>> {
+/// The song in `dir` (`songs/<song>`), from its `song.duet`; refused, naming `duet song new`, when
+/// there is none.
+pub(crate) fn read_song(dir: &Path) -> Result<Document<Song>> {
     let path = dir.join(SONG_FILE);
     if !path.exists() {
         bail!(

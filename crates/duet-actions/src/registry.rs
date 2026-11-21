@@ -278,8 +278,10 @@ pub const ACTIONS: &[Action] = &[
         &["capture", "melody"],
         DOC_WRITTEN,
         writes(
-            "STEM.duet, STEM.abc, STEM.capture.duet and STEM.performance.duet.jsonl, all new",
-            false,
+            "STEM.duet, STEM.abc, STEM.capture.duet and STEM.performance.duet.jsonl, all new; in \
+             a project, the song.duet of each song that links the take and is placed by it, over \
+             itself",
+            true,
         ),
         schema::<capture::TakeArgs>,
     ),
@@ -288,8 +290,9 @@ pub const ACTIONS: &[Action] = &[
         &["capture", "rhythm"],
         DOC_WRITTEN,
         writes(
-            "STEM.duet, STEM.grid.duet and STEM.capture.duet, all new",
-            false,
+            "STEM.duet, STEM.grid.duet and STEM.capture.duet, all new; in a project, the \
+             song.duet of each song that links the take and is placed by it, over itself",
+            true,
         ),
         schema::<capture::TakeArgs>,
     ),
