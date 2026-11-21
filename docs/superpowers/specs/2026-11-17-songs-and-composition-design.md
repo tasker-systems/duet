@@ -345,6 +345,11 @@ The usual case: the take was recorded against a click playing the song's tempo m
   writes the placement itself: the offset is known exactly, since duet started both.
 - **`duet song place <song> <take> --click --bar 9 --at 31.4`** places a take recorded elsewhere,
   against a click of the same tempo map.
+- **The drift between the take's clock and the click's** is measured by `duet record --song` and
+  written on the placement as `clock_ppm`, parts per million, applied wherever the take is mapped
+  onto the bars; the take is never resampled. **Ruled (owner, 2026-11-21, temper
+  `01a1fe65-a864-72ad-9543-36d81a90cb7a`, ruling 17).** The build is
+  [placing takes](2026-11-21-placing-takes-design.md).
 
 ### Estimate, then compare
 
