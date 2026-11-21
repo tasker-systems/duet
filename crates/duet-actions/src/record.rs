@@ -26,6 +26,13 @@ use cpal::{SampleFormat, SizedSample};
 use duet_capture::{Depth, TakeWriter, Written};
 use schemars::JsonSchema;
 
+// `--song` uses the click and the clock arithmetic; until it is wired in, only tests do.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "`record --song` is wired to the click next")
+)]
+mod click;
+
 /// Buffers waiting for the writer before the device's next one is counted as lost: at a
 /// typical 512 frames a buffer, about seven seconds at 48 kHz.
 const QUEUE: usize = 640;
