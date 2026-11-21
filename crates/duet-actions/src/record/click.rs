@@ -152,55 +152,150 @@ pub(crate) struct Stamp {
     pub(crate) nanos: u128,
 }
 
-/// Two stamps of one stream, the later after the earlier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Span {
-    pub(crate) first: Stamp,
-    pub(crate) last: Stamp,
+/// How long a stream's stamps take to settle: a USB input's host stamps on macOS step by about
+/// 0.9 ms in the first second, then run straight. Measured on the owner's Mac mini, 2026-11-21,
+/// a USB webcam's input against the built-in output over a 10 s take of 940 buffers: first and
+/// last stamps gave -91.5 ppm, a line through every stamp -6.6 ppm (pulled by the step), and a
+/// line through those after the first second +4.4 ppm, which the recorded ticks bear out (bar 1's
+/// and bar 3's agree to 0.2 ms). A line is fit through the stamps after it when the stream ran
+/// longer than [`SETTLED_AFTER_NANOS`].
+const SETTLE_NANOS: u128 = 1_000_000_000;
+
+/// A stream longer than this is fit after its first [`SETTLE_NANOS`]; a shorter one through all
+/// its stamps, since too few would be left.
+const SETTLED_AFTER_NANOS: u128 = 3_000_000_000;
+
+/// A line shorter than this measures no rate: a second, too short to tell a clock's rate from
+/// its stamps' jitter.
+const RATED_NANOS: u128 = 1_000_000_000;
+
+/// Running least-squares sums of stamps, each relative to the first stamp (Welford's update,
+/// so a long take loses no precision and nothing is stored).
+#[derive(Debug, Clone, Copy, Default)]
+struct Sums {
+    n: u64,
+    frame: f64,
+    nanos: f64,
+    frame_sq: f64,
+    cross: f64,
 }
 
-impl Span {
-    /// Frames per host second over the span, or none when it is under a second, too short to
-    /// tell a clock's rate from its stamps' jitter.
-    pub(crate) fn rate(&self) -> Option<f64> {
-        let nanos = self.last.nanos.checked_sub(self.first.nanos)?;
-        let frames = self.last.frame.checked_sub(self.first.frame)?;
-        if nanos < 1_000_000_000 {
-            return None;
-        }
-        Some(frames as f64 * 1e9 / nanos as f64)
+impl Sums {
+    fn add(&mut self, frame: f64, nanos: f64) {
+        self.n += 1;
+        let n = self.n as f64;
+        let d_frame = frame - self.frame;
+        self.frame += d_frame / n;
+        self.nanos += (nanos - self.nanos) / n;
+        self.frame_sq += d_frame * (frame - self.frame);
+        self.cross += d_frame * (nanos - self.nanos);
     }
 }
 
-/// The whole frames from the take's first captured frame to where bar 1 played: bar 1's
-/// playback instant on the output stream's clock, less the take's first capture instant,
-/// counted in the input's frames. Each stream's measured rate stands in for its nominal one
-/// when its span is long enough to have one.
+/// A stream's stamps, gathered one buffer at a time, off the audio thread: the line through them
+/// is [`Fit::line`].
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Fit {
+    first: Option<Stamp>,
+    last: Option<Stamp>,
+    all: Sums,
+    settled: Sums,
+}
+
+impl Fit {
+    pub(crate) fn add(&mut self, stamp: Stamp) {
+        let first = *self.first.get_or_insert(stamp);
+        let frame = stamp.frame as f64 - first.frame as f64;
+        let since = stamp.nanos.saturating_sub(first.nanos);
+        let nanos = (stamp.nanos as i128 - first.nanos as i128) as f64;
+        self.all.add(frame, nanos);
+        if since >= SETTLE_NANOS {
+            self.settled.add(frame, nanos);
+        }
+        self.last = Some(stamp);
+    }
+
+    /// The least-squares line from frames to host nanoseconds: through the stamps after the
+    /// first second when the stream ran longer than three, else through all of them. None with
+    /// fewer than two frames apart to draw it through.
+    pub(crate) fn line(&self) -> Option<Line> {
+        let (first, last) = (self.first?, self.last?);
+        let span = last.nanos.saturating_sub(first.nanos);
+        let sums = if span > SETTLED_AFTER_NANOS && self.settled.n >= 2 {
+            self.settled
+        } else {
+            self.all
+        };
+        if sums.n < 2 || sums.frame_sq <= 0.0 {
+            return None;
+        }
+        Some(Line {
+            origin: first,
+            frame: sums.frame,
+            nanos: sums.nanos,
+            per_frame: sums.cross / sums.frame_sq,
+            span,
+        })
+    }
+}
+
+/// A stream's clock as a line from its frames to host nanoseconds, fit through its stamps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Line {
+    /// The first stamp, which the line's own values are relative to.
+    origin: Stamp,
+    /// A point on the line, the stamps' mean: frames and nanoseconds after `origin`.
+    frame: f64,
+    nanos: f64,
+    /// Host nanoseconds a frame.
+    per_frame: f64,
+    /// Nanoseconds from the first stamp to the last.
+    span: u128,
+}
+
+impl Line {
+    /// The line through `stamps`, as [`Fit::line`] draws it.
+    #[cfg(test)]
+    pub(crate) fn fit(stamps: &[Stamp]) -> Option<Line> {
+        let mut fit = Fit::default();
+        for &stamp in stamps {
+            fit.add(stamp);
+        }
+        fit.line()
+    }
+
+    /// Frames per host second, or none when the stamps span under a second.
+    pub(crate) fn rate(&self) -> Option<f64> {
+        (self.span >= RATED_NANOS && self.per_frame > 0.0).then(|| 1e9 / self.per_frame)
+    }
+
+    /// The host instant, in nanoseconds, the line puts `frame` at.
+    pub(crate) fn nanos_at(&self, frame: u64) -> i128 {
+        let from_origin = frame as f64 - self.origin.frame as f64;
+        let nanos = self.nanos + (from_origin - self.frame) * self.per_frame;
+        self.origin.nanos as i128 + nanos.round() as i128
+    }
+}
+
+/// The whole frames from the take's frame 0 to where bar 1 played: bar 1's playback instant on
+/// the output's line, less the input's line at frame 0, counted at the input's measured rate
+/// (its nominal one when its line is under a second).
 ///
 /// Saturates at 0 when the take started after bar 1, which cannot happen when input starts
 /// first.
-pub(crate) fn offset_frames(
-    input: &Span,
-    output: &Span,
-    bar_one: u64,
-    nominal_in: u32,
-    nominal_out: u32,
-) -> u64 {
+pub(crate) fn offset_frames(input: &Line, output: &Line, bar_one: u64, nominal_in: u32) -> u64 {
     let r_in = input.rate().unwrap_or(f64::from(nominal_in));
-    let r_out = output.rate().unwrap_or(f64::from(nominal_out));
-    let from_first = i128::from(bar_one) - i128::from(output.first.frame);
-    let bar_one_nanos =
-        output.first.nanos as i128 + (from_first as f64 * 1e9 / r_out).round() as i128;
-    let since_input = bar_one_nanos - input.first.nanos as i128;
-    let frames = (since_input as f64 * r_in / 1e9).round() as i128 - i128::from(input.first.frame);
+    let since_input = output.nanos_at(bar_one) - input.nanos_at(0);
+    let frames = (since_input as f64 * r_in / 1e9).round() as i128;
     u64::try_from(frames.max(0)).unwrap_or(u64::MAX)
 }
 
-/// How fast the input's clock ran against the output's, in parts per million: positive when
-/// the input's ran fast. None when either span is too short to measure.
+/// How fast the input's clock ran against the output's, in parts per million, from the two
+/// lines' slopes against their nominal rates: positive when the input's ran fast. None when
+/// either line is too short to measure.
 pub(crate) fn clock_ppm(
-    input: &Span,
-    output: &Span,
+    input: &Line,
+    output: &Line,
     nominal_in: u32,
     nominal_out: u32,
 ) -> Option<f64> {
@@ -300,52 +395,56 @@ mod tests {
         assert!(peak(2000, 2000 + len) > 0.3 && peak(2000, 2000 + len) <= 0.5);
     }
 
-    fn span(frames: u64, nanos: u128) -> Span {
-        Span {
-            first: Stamp { frame: 0, nanos: 0 },
-            last: Stamp {
+    fn line(stamps: &[Stamp]) -> Line {
+        Line::fit(stamps).expect("two stamps a frame apart or more")
+    }
+
+    fn span(frames: u64, nanos: u128) -> Line {
+        line(&[
+            Stamp { frame: 0, nanos: 0 },
+            Stamp {
                 frame: frames,
                 nanos,
             },
-        }
+        ])
     }
 
     #[test]
     fn the_offset_is_bar_ones_playback_less_the_takes_first_capture_in_whole_frames() {
-        let input = Span {
-            first: Stamp { frame: 0, nanos: 0 },
-            last: Stamp {
+        let input = line(&[
+            Stamp { frame: 0, nanos: 0 },
+            Stamp {
                 frame: 48_000,
                 nanos: 1_000_000_000,
             },
-        };
-        let output = Span {
-            first: Stamp {
+        ]);
+        let output = line(&[
+            Stamp {
                 frame: 0,
                 nanos: 5_000_000,
             },
-            last: Stamp {
+            Stamp {
                 frame: 48_000,
                 nanos: 1_005_000_000,
             },
-        };
-        assert_eq!(offset_frames(&input, &output, 4800, 48_000, 48_000), 5040);
+        ]);
+        assert_eq!(offset_frames(&input, &output, 4800, 48_000), 5040);
     }
 
     #[test]
     fn a_take_that_started_after_bar_one_saturates_at_zero() {
-        let input = Span {
-            first: Stamp {
+        let input = line(&[
+            Stamp {
                 frame: 0,
                 nanos: 2_000_000_000,
             },
-            last: Stamp {
+            Stamp {
                 frame: 48_000,
                 nanos: 3_000_000_000,
             },
-        };
+        ]);
         let output = span(48_000, 1_000_000_000);
-        assert_eq!(offset_frames(&input, &output, 0, 48_000, 48_000), 0);
+        assert_eq!(offset_frames(&input, &output, 0, 48_000), 0);
     }
 
     #[test]
@@ -356,6 +455,41 @@ mod tests {
         let fast = span(48_002_400, 1_000_000_000_000);
         let ppm = clock_ppm(&fast, &output, 48_000, 48_000).unwrap();
         assert!((ppm - 50.0).abs() < 0.01, "{ppm}");
+    }
+
+    /// Every 512 frames for `secs` at 48 kHz on the host's clock from `start` nanoseconds, the
+    /// buffers of the first second stamped `early` nanoseconds early: a clock model settling, as
+    /// a USB input's does on macOS (measured 0.9 ms on the owner's Mac mini, 2026-11-21).
+    fn settling(start: u128, secs: u64, early: u128) -> Vec<Stamp> {
+        (0..secs * 48_000 / 512)
+            .map(|k| {
+                let frame = k * 512;
+                let on_line = start + u128::from(frame) * 1_000_000_000 / 48_000;
+                let nanos = if frame < 48_000 {
+                    on_line - early
+                } else {
+                    on_line
+                };
+                Stamp { frame, nanos }
+            })
+            .collect()
+    }
+
+    /// What the stamps measure the stream by.
+    fn measured(stamps: &[Stamp]) -> Line {
+        line(stamps)
+    }
+
+    #[test]
+    fn a_settling_step_in_the_first_second_moves_neither_the_offset_nor_the_drift() {
+        // The input settles 0.9 ms; the output, 5 ms behind it, runs straight. Both clocks are
+        // the host's, so there is no drift, and bar 1 (output frame 4800) plays 105 ms after the
+        // input's line puts its frame 0: 5040 frames.
+        let input = measured(&settling(1_000_000_000, 10, 900_000));
+        let output = measured(&settling(1_005_000_000, 10, 0));
+        assert_eq!(offset_frames(&input, &output, 4800, 48_000), 5040);
+        let ppm = clock_ppm(&input, &output, 48_000, 48_000).unwrap();
+        assert!(ppm.abs() < 0.01, "{ppm}");
     }
 
     #[test]

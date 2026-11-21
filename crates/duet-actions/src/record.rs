@@ -12,10 +12,11 @@
 //! take, and a gap the device leaves, measured from the capture time it stamps each buffer with.
 //!
 //! With `--song`, in a project, the same run plays the song's click on the default output
-//! (`click`), and places the take on the song's bars by it (ruling 17). Each stream's callback
-//! keeps its first and last buffer's `Stamp` in atomics, so neither locks or allocates for it;
-//! from those, once the streams stop, come where bar 1's tick played in the take's frames and how
-//! far the two clocks drifted. The click is only ever played: it is never written into the take.
+//! (`click`), and places the take on the song's bars by it (ruling 17). Every buffer's `Stamp`
+//! leaves its callback through a bounded channel: the input's with its buffer to the writing
+//! thread, the output's to a collector of its own (one the channel cannot take is counted, never
+//! waited for). Off the audio threads, each stream's stamps are fit with a line, and from the two
+//! lines come where bar 1's tick played in the take's frames and how far the clocks drifted. The click is only ever played: it is never written into the take.
 //! The speakers-on check of that placement runs on a machine with devices, opted into by
 //! `DUET_E2E_SPEAKERS` (`crates/duet-e2e/tests/placing.rs`).
 
@@ -23,13 +24,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::Context;
 use crate::take::{at, span};
 use anyhow::{Context as _, Result, anyhow, bail};
 use clap::Args;
-use click::{ClickVoice, Span, Stamp, Ticks, clock_ppm, offset_frames};
+use click::{ClickVoice, Fit, Line, Stamp, Ticks, clock_ppm, offset_frames};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use duet_capture::{Depth, TakeWriter, Written};
@@ -94,62 +96,14 @@ struct Loss {
 struct Block {
     lost_before: u64,
     samples: Vec<f32>,
-}
-
-/// A stream's first and last buffer's [`Stamp`], and the frame after its last buffer. Its one
-/// writer is the stream's callback, which only stores atomics, so it never locks or allocates;
-/// it is read once the stream has stopped.
-#[derive(Debug, Default)]
-struct Stamps {
-    seen: AtomicBool,
-    first_frame: AtomicU64,
-    first_nanos: AtomicU64,
-    last_frame: AtomicU64,
-    last_nanos: AtomicU64,
-    end: AtomicU64,
-}
-
-impl Stamps {
-    /// Notes a buffer of `frames` stamped `stamp`: the first one noted stays the first.
-    fn note(&self, stamp: Stamp, frames: u64) {
-        // Nanoseconds of the host's clock fit a u64 for five centuries of uptime.
-        let nanos = u64::try_from(stamp.nanos).unwrap_or(u64::MAX);
-        if !self.seen.load(Ordering::Acquire) {
-            self.first_frame.store(stamp.frame, Ordering::Release);
-            self.first_nanos.store(nanos, Ordering::Release);
-            self.seen.store(true, Ordering::Release);
-        }
-        self.last_frame.store(stamp.frame, Ordering::Release);
-        self.last_nanos.store(nanos, Ordering::Release);
-        self.end.store(stamp.frame + frames, Ordering::Release);
-    }
-
-    /// The first and last stamps noted, or none when no buffer came.
-    fn span(&self) -> Option<Span> {
-        self.seen.load(Ordering::Acquire).then(|| Span {
-            first: Stamp {
-                frame: self.first_frame.load(Ordering::Acquire),
-                nanos: u128::from(self.first_nanos.load(Ordering::Acquire)),
-            },
-            last: Stamp {
-                frame: self.last_frame.load(Ordering::Acquire),
-                nanos: u128::from(self.last_nanos.load(Ordering::Acquire)),
-            },
-        })
-    }
-
-    /// The frame after the last buffer noted: how many the stream got through.
-    fn end(&self) -> u64 {
-        self.end.load(Ordering::Acquire)
-    }
+    /// Where the buffer starts on the device's timeline, lost frames included, and the instant
+    /// it was captured: what the take is placed against the click by.
+    stamp: Stamp,
 }
 
 /// What the device's callbacks share with the writing thread.
 #[derive(Default)]
 struct Shared {
-    /// The first and last buffer's capture stamps, each at its frame of the device's timeline:
-    /// where the take sits against the click, with `--song`.
-    stamps: Stamps,
     /// Frames of the device's timeline so far, lost ones included: where an overrun happened.
     delivered: AtomicU64,
     /// Frames lost since the last buffer the channel took.
@@ -239,7 +193,7 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
         .play()
         .with_context(|| format!("starting input from {name}"))
         .and_then(|()| match &click {
-            Some((output, heard)) => output
+            Some((output, heard, _)) => output
                 .play()
                 .with_context(|| format!("starting the click on {}", heard.name)),
             None => Ok(()),
@@ -260,7 +214,7 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
         if channels == 1 { "" } else { "s" },
         depth.bits(),
     );
-    if let (Some((song, _, _)), Some((_, heard))) = (&song, &click) {
+    if let (Some((song, _, _)), Some((_, heard, _))) = (&song, &click) {
         say_click(song, &name, heard);
     }
 
@@ -282,9 +236,9 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
     };
     drop(stream);
     // The click stops with the take; what it played is in its stamps.
-    let heard = click.map(|(output, heard)| {
+    let heard = click.map(|(output, heard, collector)| {
         drop(output);
-        heard
+        heard.stopped(collector)
     });
     // What the device delivered before the stream stopped is part of the take.
     let drained = (|| -> Result<()> {
@@ -320,6 +274,7 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
     // In a project the take is added, whether the recording ran to its end or stopped: what
     // was written is kept either way. With --song it is linked to the song, placed when bar 1
     // played within it.
+    let captured = take.stamps.line();
     if let Some((project, name, _)) = &into {
         let take = crate::take::add_recorded(ctx, project, name, &written.path)?;
         eprintln!(
@@ -341,7 +296,7 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
             let placed = placement(
                 written.frames,
                 written.rate,
-                &shared.stamps,
+                captured,
                 heard,
                 args.no_reconcile,
             );
@@ -418,15 +373,28 @@ fn song_of(
 }
 
 /// What the run knows of the click: the output it plays from, where bar 1's tick is on that
-/// output's frames, and what its callback stamped and reported.
+/// output's frames, what its callback reported, and, once it has stopped, the line through its
+/// stamps and the frame after its last buffer.
 struct Heard {
     name: String,
     rate: u32,
     bar_one: u64,
     played: Arc<Played>,
+    line: Option<Line>,
+    end: u64,
 }
 
 impl Heard {
+    /// The click once its stream has stopped: what the collector gathered.
+    fn stopped(mut self, collector: Collector) -> Heard {
+        collector.done.store(true, Ordering::Release);
+        if let Ok((fit, end)) = collector.thread.join() {
+            self.line = fit.line();
+            self.end = end;
+        }
+        self
+    }
+
     /// Says what went wrong with the click's output, if anything did.
     fn report(&self) {
         let glitches = self.played.glitches.load(Ordering::Acquire);
@@ -441,14 +409,57 @@ impl Heard {
         if let Some(e) = self.played.failed.lock().ok().and_then(|f| f.clone()) {
             eprintln!("the click stopped before the take did: {e}");
         }
+        let dropped = self.played.dropped.load(Ordering::Acquire);
+        if dropped > 0 {
+            eprintln!(
+                "{dropped} of the click's stamps were not collected in time; its line is drawn \
+                 through the rest"
+            );
+        }
+    }
+}
+
+/// The thread that gathers the click's stamps off the audio thread, and the flag that ends it
+/// once the stream has stopped.
+struct Collector {
+    thread: JoinHandle<(Fit, u64)>,
+    done: Arc<AtomicBool>,
+}
+
+impl Collector {
+    /// Gathers each `(stamp, frames)` the click's callback sends, until the stream has stopped:
+    /// the stamps' fit, and the frame after the last buffer.
+    fn start(from_click: Receiver<(Stamp, u64)>) -> Collector {
+        let done = Arc::new(AtomicBool::new(false));
+        let stop = Arc::clone(&done);
+        let thread = std::thread::spawn(move || {
+            let (mut fit, mut end) = (Fit::default(), 0);
+            let mut take = |(stamp, frames): (Stamp, u64)| {
+                fit.add(stamp);
+                end = stamp.frame + frames;
+            };
+            loop {
+                match from_click.recv_timeout(Duration::from_millis(20)) {
+                    Ok(stamped) => take(stamped),
+                    Err(RecvTimeoutError::Timeout) if stop.load(Ordering::Acquire) => break,
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+            while let Ok(stamped) = from_click.try_recv() {
+                take(stamped);
+            }
+            (fit, end)
+        });
+        Collector { thread, done }
     }
 }
 
 /// What the click's output callback shares with the run.
 #[derive(Debug, Default)]
 struct Played {
-    /// The first and last buffer's playback stamps, each at its frame of the click.
-    stamps: Stamps,
+    /// Stamps the collector's channel had no room for.
+    dropped: AtomicU64,
     /// Underruns the output reported.
     glitches: AtomicU64,
     /// Why the output ended, when it did.
@@ -461,7 +472,7 @@ fn open_click(
     host: &cpal::Host,
     composition: &Composition,
     until_secs: f64,
-) -> Result<(cpal::Stream, Heard)> {
+) -> Result<(cpal::Stream, Heard, Collector)> {
     let device = host.default_output_device().ok_or_else(|| {
         anyhow!("no audio output device, which --song plays the click on; connect one")
     })?;
@@ -476,11 +487,12 @@ fn open_click(
     let bar_one = ticks.bar_one;
     let voice = ClickVoice::new(ticks, rate, channels);
     let played = Arc::new(Played::default());
+    let (to_collector, from_click) = mpsc::sync_channel::<(Stamp, u64)>(QUEUE);
     let stream = match supported.sample_format() {
-        SampleFormat::F32 => output::<f32>(&device, config, voice, &played),
-        SampleFormat::I16 => output::<i16>(&device, config, voice, &played),
-        SampleFormat::U16 => output::<u16>(&device, config, voice, &played),
-        SampleFormat::I32 => output::<i32>(&device, config, voice, &played),
+        SampleFormat::F32 => output::<f32>(&device, config, voice, to_collector, &played),
+        SampleFormat::I16 => output::<i16>(&device, config, voice, to_collector, &played),
+        SampleFormat::U16 => output::<u16>(&device, config, voice, to_collector, &played),
+        SampleFormat::I32 => output::<i32>(&device, config, voice, to_collector, &played),
         other => bail!("{name}'s sample format, {other}, is not one duet plays"),
     }
     .with_context(|| format!("opening {name} for the click"))?;
@@ -491,17 +503,22 @@ fn open_click(
             rate,
             bar_one,
             played,
+            line: None,
+            end: 0,
         },
+        Collector::start(from_click),
     ))
 }
 
-/// The output stream that plays the click: each buffer's playback stamp noted at the click's
-/// frame, then filled by the voice through a buffer made up front, so the callback rarely
-/// allocates. An underrun is counted; any other error ends the click, not the take.
+/// The output stream that plays the click: each buffer's playback stamp, at the click's frame,
+/// sent to the collector without waiting (one it has no room for is counted), then the buffer
+/// filled by the voice through a buffer made up front, so the callback rarely allocates. An
+/// underrun is counted; any other error ends the click, not the take.
 fn output<T: SizedSample + FromSample<f32>>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
     mut voice: ClickVoice,
+    to_collector: SyncSender<(Stamp, u64)>,
     played: &Arc<Played>,
 ) -> Result<cpal::Stream> {
     let channels = usize::from(config.channels).max(1);
@@ -514,13 +531,13 @@ fn output<T: SizedSample + FromSample<f32>>(
             config,
             move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
                 let frames = data.len() / channels;
-                stamps.stamps.note(
-                    Stamp {
-                        frame,
-                        nanos: info.timestamp().playback.as_nanos(),
-                    },
-                    frames as u64,
-                );
+                let stamp = Stamp {
+                    frame,
+                    nanos: info.timestamp().playback.as_nanos(),
+                };
+                if to_collector.try_send((stamp, frames as u64)).is_err() {
+                    stamps.dropped.fetch_add(1, Ordering::AcqRel);
+                }
                 let samples = frames * channels;
                 if scratch.len() < samples {
                     scratch.resize(samples, 0.0);
@@ -588,15 +605,15 @@ fn say_click(song: &Name, input: &str, heard: &Heard) {
 fn placement(
     frames: u64,
     rate: u32,
-    input: &Stamps,
+    input: Option<Line>,
     heard: &Heard,
     no_reconcile: bool,
 ) -> Option<Placed> {
-    let (taken, played) = (input.span()?, heard.played.stamps.span()?);
-    if heard.played.stamps.end() <= heard.bar_one {
+    let (taken, played) = (input?, heard.line?);
+    if heard.end <= heard.bar_one {
         return None;
     }
-    let offset = offset_frames(&taken, &played, heard.bar_one, rate, heard.rate);
+    let offset = offset_frames(&taken, &played, heard.bar_one, rate);
     if offset >= frames {
         return None;
     }
@@ -631,6 +648,8 @@ struct Take {
     losses: Vec<Loss>,
     /// The loudest sample, to tell a silent take from a quiet one.
     peak: f32,
+    /// Each buffer's capture stamp, as the writer takes it: the input's clock.
+    stamps: Fit,
 }
 
 impl Take {
@@ -640,6 +659,7 @@ impl Take {
             full: false,
             losses: Vec::new(),
             peak: 0.0,
+            stamps: Fit::default(),
         }
     }
 
@@ -678,6 +698,8 @@ impl Take {
         block: Block,
         spare: &SyncSender<Vec<f32>>,
     ) -> Result<()> {
+        // Past the limit too: the device's clock runs on, and the line through it is longer.
+        self.stamps.add(block.stamp);
         if !self.full {
             let limit = self.limit;
             let room =
@@ -817,13 +839,10 @@ impl Handoff {
             .delivered
             .fetch_add(gap + frames, Ordering::AcqRel);
         // The buffer starts after the gap: lost frames are on the take's timeline as silence.
-        self.shared.stamps.note(
-            Stamp {
-                frame: before + gap,
-                nanos: capture,
-            },
-            frames,
-        );
+        let stamp = Stamp {
+            frame: before + gap,
+            nanos: capture,
+        };
         let mut samples = self
             .refused
             .take()
@@ -835,6 +854,7 @@ impl Handoff {
         match self.to_writer.try_send(Block {
             lost_before,
             samples,
+            stamp,
         }) {
             Ok(()) => {}
             Err(TrySendError::Full(block) | TrySendError::Disconnected(block)) => {
@@ -1042,10 +1062,10 @@ mod tests {
     use duet_core::Position;
     use duet_schemas::song::Placed;
 
-    use super::click::Stamp;
+    use super::click::{Line, Stamp};
     use super::{
-        Block, Clock, Handoff, Heard, Loss, Played, Shared, Stamps, Take, at, pick_device,
-        placement, refuse_output, span,
+        Block, Clock, Handoff, Heard, Loss, Played, Shared, Take, at, pick_device, placement,
+        refuse_output, span,
     };
 
     fn names(list: &[&str]) -> Vec<String> {
@@ -1113,79 +1133,56 @@ mod tests {
     }
 
     #[test]
-    fn the_handoff_stamps_the_first_and_last_buffer_where_each_starts_on_the_takes_timeline() {
+    fn each_buffer_carries_its_stamp_where_it_starts_on_the_takes_timeline() {
         let shared = Arc::new(Shared::default());
-        let (to_writer, _from_device) = mpsc::sync_channel::<Block>(8);
+        let (to_writer, from_device) = mpsc::sync_channel::<Block>(8);
         let (_to_device, spare) = mpsc::sync_channel::<Vec<f32>>(1);
         let mut handoff = Handoff::new(to_writer, spare, 48_000, 1, Arc::clone(&shared));
-        assert_eq!(shared.stamps.span(), None, "no buffer yet");
         let buffer = [0.0f32; 480]; // 10 ms, mono
         handoff.hand_off(buffer.iter().copied(), 5 * TEN_MS);
         handoff.hand_off(buffer.iter().copied(), 6 * TEN_MS);
         // The device leaves 20 ms out: the last buffer starts after the gap, as the take does.
         handoff.hand_off(buffer.iter().copied(), 9 * TEN_MS);
-        let stamped = shared.stamps.span().expect("stamped");
+        let stamps: Vec<Stamp> = from_device.try_iter().map(|b| b.stamp).collect();
+        let at = |frame, nanos| Stamp { frame, nanos };
         assert_eq!(
-            stamped.first,
-            Stamp {
-                frame: 0,
-                nanos: 5 * TEN_MS
-            }
+            stamps,
+            [
+                at(0, 5 * TEN_MS),
+                at(480, 6 * TEN_MS),
+                at(480 + 480 + 960, 9 * TEN_MS)
+            ]
         );
-        assert_eq!(
-            stamped.last,
-            Stamp {
-                frame: 480 + 480 + 960,
-                nanos: 9 * TEN_MS
-            }
-        );
-        assert_eq!(shared.stamps.end(), 480 + 480 + 960 + 480);
     }
 
-    /// Stamps of a stream that ran from `first` to `last`, its last buffer `frames` long.
-    fn stamped(first: (u64, u128), last: (u64, u128), frames: u64) -> Stamps {
-        let stamps = Stamps::default();
-        stamps.note(
-            Stamp {
-                frame: first.0,
-                nanos: first.1,
-            },
-            512,
-        );
-        stamps.note(
-            Stamp {
-                frame: last.0,
-                nanos: last.1,
-            },
-            frames,
-        );
-        stamps
+    /// Two seconds of 512-frame buffers at 48 kHz from `start` nanoseconds, on the host's clock.
+    fn line_from(start: u128) -> Line {
+        let stamps: Vec<Stamp> = (0..=187)
+            .map(|k| Stamp {
+                frame: k * 512,
+                nanos: start + u128::from(k * 512) * 1_000_000_000 / 48_000,
+            })
+            .collect();
+        Line::fit(&stamps).expect("a line")
     }
 
-    /// The click's output 5 ms behind the input on one clock, bar 1 at its frame 4800, and the
-    /// output's last buffer ending at `end`.
+    /// The click's output 5 ms behind the input on one clock, bar 1 at its frame 4800, its last
+    /// buffer ending at `end`.
     fn heard(end: u64) -> Heard {
-        let last = end - 512;
-        let played = Played {
-            stamps: stamped(
-                (0, 5_000_000),
-                (last, 5_000_000 + u128::from(last) * 1_000_000_000 / 48_000),
-                512,
-            ),
-            ..Played::default()
-        };
         Heard {
             name: "out".to_owned(),
             rate: 48_000,
             bar_one: 4800,
-            played: Arc::new(played),
+            played: Arc::new(Played::default()),
+            line: Some(line_from(5_000_000)),
+            end,
         }
     }
 
     #[test]
     fn a_take_that_heard_bar_one_is_placed_by_the_click_to_the_frame() {
-        let input = stamped((0, 0), (96_000, 2_000_000_000), 512);
-        let placed = placement(96_000, 48_000, &input, &heard(96_512), false).expect("placed");
+        let input = Some(line_from(0));
+        let placed = placement(96_000, 48_000, input, &heard(96_512), false).expect("placed");
         // Bar 1 played 100 ms + 5 ms after the take's first frame: 5040 frames.
         assert_eq!(placed.by, duet_schemas::song::By::Click);
         assert_eq!(placed.bar, Position::bar(1));
@@ -1194,24 +1191,25 @@ mod tests {
             "{placed:?}"
         );
         assert!(placed.clock_ppm.expect("measured").abs() < 1e-6);
-        let unreconciled = placement(96_000, 48_000, &input, &heard(96_512), true).unwrap();
+        let unreconciled = placement(96_000, 48_000, input, &heard(96_512), true).unwrap();
         assert_eq!(unreconciled, Placed::click(Position::bar(1), 0.105, None));
     }
 
     /// Review Focus 5: a take stopped during the count-in, before bar 1 sounds, is not placed.
     #[test]
     fn a_take_that_ended_before_bar_one_is_not_placed() {
-        let input = stamped((0, 0), (96_000, 2_000_000_000), 512);
+        let input = Some(line_from(0));
         // The click never got to bar 1's frame.
-        assert_eq!(placement(96_000, 48_000, &input, &heard(4800), false), None);
+        assert_eq!(placement(96_000, 48_000, input, &heard(4800), false), None);
         // The click did, after the take's last frame.
-        assert_eq!(placement(5000, 48_000, &input, &heard(96_512), false), None);
+        assert_eq!(placement(5000, 48_000, input, &heard(96_512), false), None);
         // No click played at all.
         let silent = Heard {
-            played: Arc::new(Played::default()),
+            line: None,
+            end: 0,
             ..heard(96_512)
         };
-        assert_eq!(placement(96_000, 48_000, &input, &silent, false), None);
+        assert_eq!(placement(96_000, 48_000, input, &silent, false), None);
     }
 
     #[test]
@@ -1223,6 +1221,7 @@ mod tests {
         let block = |lost_before, value: f32| Block {
             lost_before,
             samples: vec![value; 4],
+            stamp: Stamp { frame: 0, nanos: 0 },
         };
         take.add(&mut writer, block(0, 0.5), &spare).expect("add");
         take.add(&mut writer, block(3, 0.25), &spare).expect("add");
@@ -1245,6 +1244,7 @@ mod tests {
         let block = |lost_before| Block {
             lost_before,
             samples: vec![0.5; 4],
+            stamp: Stamp { frame: 0, nanos: 0 },
         };
         take.add(&mut writer, block(0), &spare).expect("add");
         // 4 written; 3 lost then 4 more fill 7 of the 6 left: cut at 10.
