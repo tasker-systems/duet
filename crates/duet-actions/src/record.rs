@@ -10,6 +10,14 @@
 //! bounded channel. Input is lost two ways, and both are written as silence where it was, so
 //! what follows keeps its time, and said with when and how much: a buffer the channel cannot
 //! take, and a gap the device leaves, measured from the capture time it stamps each buffer with.
+//!
+//! With `--song`, in a project, the same run plays the song's click on the default output
+//! (`click`), and places the take on the song's bars by it (ruling 17). Each stream's callback
+//! keeps its first and last buffer's `Stamp` in atomics, so neither locks or allocates for it;
+//! from those, once the streams stop, come where bar 1's tick played in the take's frames and how
+//! far the two clocks drifted. The click is only ever played: it is never written into the take.
+//! The speakers-on check of that placement runs on a machine with devices, opted into by
+//! `DUET_E2E_SPEAKERS` (`crates/duet-e2e/tests/placing.rs`).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -21,21 +29,27 @@ use crate::Context;
 use crate::take::{at, span};
 use anyhow::{Context as _, Result, anyhow, bail};
 use clap::Args;
+use click::{ClickVoice, Span, Stamp, Ticks, clock_ppm, offset_frames};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{SampleFormat, SizedSample};
+use cpal::{FromSample, SampleFormat, SizedSample};
 use duet_capture::{Depth, TakeWriter, Written};
+use duet_core::Position;
+use duet_schemas::project::Name;
+use duet_schemas::song::{Composition, Placed};
 use schemars::JsonSchema;
 
-// `--song` uses the click and the clock arithmetic; until it is wired in, only tests do.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "`record --song` is wired to the click next")
-)]
 mod click;
 
 /// Buffers waiting for the writer before the device's next one is counted as lost: at a
 /// typical 512 frames a buffer, about seven seconds at 48 kHz.
 const QUEUE: usize = 640;
+
+/// The silence the click's output starts with before its count-in, in seconds: room for the
+/// output to settle before the first tick.
+const LEAD_SECS: f64 = 0.2;
+
+/// How long the click runs after bar 1 when no `--seconds` ends the take: four hours.
+const CLICK_UNTIL_SECS: f64 = 4.0 * 3600.0;
 
 #[derive(Debug, Args, JsonSchema)]
 pub struct RecordArgs {
@@ -50,6 +64,16 @@ pub struct RecordArgs {
     /// Stop after this many seconds, instead of at Ctrl-C.
     #[arg(long, value_parser = positive_seconds)]
     seconds: Option<f64>,
+    /// In a project, the song the take is recorded to. Its click plays from the default output:
+    /// one bar of count-in in its first meter, then from bar 1 at its tempo and meter, the
+    /// downbeats accented. The take is linked to the song and placed by the click at 1.1.0, to
+    /// the frame, with how far the two clocks drifted. The click is never written into the take;
+    /// from speakers it is heard in it, and headphones keep it out.
+    #[arg(long)]
+    song: Option<Name>,
+    /// With --song, leaves the clocks' measured drift out of the placement. It is still stated.
+    #[arg(long, requires = "song")]
+    no_reconcile: bool,
 }
 
 fn positive_seconds(text: &str) -> std::result::Result<f64, String> {
@@ -72,9 +96,60 @@ struct Block {
     samples: Vec<f32>,
 }
 
+/// A stream's first and last buffer's [`Stamp`], and the frame after its last buffer. Its one
+/// writer is the stream's callback, which only stores atomics, so it never locks or allocates;
+/// it is read once the stream has stopped.
+#[derive(Debug, Default)]
+struct Stamps {
+    seen: AtomicBool,
+    first_frame: AtomicU64,
+    first_nanos: AtomicU64,
+    last_frame: AtomicU64,
+    last_nanos: AtomicU64,
+    end: AtomicU64,
+}
+
+impl Stamps {
+    /// Notes a buffer of `frames` stamped `stamp`: the first one noted stays the first.
+    fn note(&self, stamp: Stamp, frames: u64) {
+        // Nanoseconds of the host's clock fit a u64 for five centuries of uptime.
+        let nanos = u64::try_from(stamp.nanos).unwrap_or(u64::MAX);
+        if !self.seen.load(Ordering::Acquire) {
+            self.first_frame.store(stamp.frame, Ordering::Release);
+            self.first_nanos.store(nanos, Ordering::Release);
+            self.seen.store(true, Ordering::Release);
+        }
+        self.last_frame.store(stamp.frame, Ordering::Release);
+        self.last_nanos.store(nanos, Ordering::Release);
+        self.end.store(stamp.frame + frames, Ordering::Release);
+    }
+
+    /// The first and last stamps noted, or none when no buffer came.
+    fn span(&self) -> Option<Span> {
+        self.seen.load(Ordering::Acquire).then(|| Span {
+            first: Stamp {
+                frame: self.first_frame.load(Ordering::Acquire),
+                nanos: u128::from(self.first_nanos.load(Ordering::Acquire)),
+            },
+            last: Stamp {
+                frame: self.last_frame.load(Ordering::Acquire),
+                nanos: u128::from(self.last_nanos.load(Ordering::Acquire)),
+            },
+        })
+    }
+
+    /// The frame after the last buffer noted: how many the stream got through.
+    fn end(&self) -> u64 {
+        self.end.load(Ordering::Acquire)
+    }
+}
+
 /// What the device's callbacks share with the writing thread.
 #[derive(Default)]
 struct Shared {
+    /// The first and last buffer's capture stamps, each at its frame of the device's timeline:
+    /// where the take sits against the click, with `--song`.
+    stamps: Stamps,
     /// Frames of the device's timeline so far, lost ones included: where an overrun happened.
     delivered: AtomicU64,
     /// Frames lost since the last buffer the channel took.
@@ -86,6 +161,11 @@ struct Shared {
 }
 
 pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
+    // Every refusal comes before any device is opened.
+    let song = match &args.song {
+        Some(song) => Some(song_of(ctx, song, &args.output)?),
+        None => None,
+    };
     let into = into_project(ctx, &args.output)?;
     if let Some((_, _, path)) = &into {
         args.output.clone_from(path);
@@ -139,17 +219,36 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
         other => bail!("{name}'s sample format, {other}, is not one duet records"),
     }
     .with_context(|| format!("opening {name} for input"))?;
+    // The click's output is built before the file exists too.
+    let click = match &song {
+        Some((_, _, body)) => Some(open_click(
+            &host,
+            &body.composition,
+            args.seconds.unwrap_or(CLICK_UNTIL_SECS),
+        )?),
+        None => None,
+    };
     if let Some((_, _, path)) = &into
         && let Some(dir) = path.parent()
     {
         std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
     }
     let mut writer = TakeWriter::create(&args.output, rate, channels, depth)?;
-    if let Err(e) = stream.play() {
+    // Input starts first, so the take holds bar 1's tick and the count-in before it.
+    let started = stream
+        .play()
+        .with_context(|| format!("starting input from {name}"))
+        .and_then(|()| match &click {
+            Some((output, heard)) => output
+                .play()
+                .with_context(|| format!("starting the click on {}", heard.name)),
+            None => Ok(()),
+        });
+    if let Err(e) = started {
         // Nothing was recorded: the empty file is not a take.
         drop(writer);
         let _ = std::fs::remove_file(&args.output);
-        return Err(e).with_context(|| format!("starting input from {name}"));
+        return Err(e);
     }
     let until = match args.seconds {
         Some(secs) => format!("for {secs} s"),
@@ -161,6 +260,9 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
         if channels == 1 { "" } else { "s" },
         depth.bits(),
     );
+    if let (Some((song, _, _)), Some((_, heard))) = (&song, &click) {
+        say_click(song, &name, heard);
+    }
 
     let limit = args.seconds.map(|s| (s * f64::from(rate)).round() as u64);
     let mut take = Take::new(limit);
@@ -179,6 +281,11 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
         }
     };
     drop(stream);
+    // The click stops with the take; what it played is in its stamps.
+    let heard = click.map(|(output, heard)| {
+        drop(output);
+        heard
+    });
     // What the device delivered before the stream stopped is part of the take.
     let drained = (|| -> Result<()> {
         while let Ok(block) = from_device.try_recv() {
@@ -204,11 +311,15 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
     );
     take.report_losses(rate, &shared);
     report_level(&written, &take);
+    if let Some(heard) = &heard {
+        heard.report();
+    }
     // A take is no document, so this records nothing; it goes through the context as every
     // write does.
     ctx.wrote(&written.path, false)?;
     // In a project the take is added, whether the recording ran to its end or stopped: what
-    // was written is kept either way.
+    // was written is kept either way. With --song it is linked to the song, placed when bar 1
+    // played within it.
     if let Some((project, name, _)) = &into {
         let take = crate::take::add_recorded(ctx, project, name, &written.path)?;
         eprintln!(
@@ -216,11 +327,299 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
             take.digest,
             crate::PROJECT_FILE
         );
+        if let (Some((song, dir, _)), Some(heard)) = (&song, &heard) {
+            let found = crate::take::read_project(&project.root)?
+                .body
+                .take(name)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "the take {name} was added and {} does not hold it",
+                        crate::PROJECT_FILE
+                    )
+                })?;
+            let placed = placement(
+                written.frames,
+                written.rate,
+                &shared.stamps,
+                heard,
+                args.no_reconcile,
+            );
+            crate::song::link_take(ctx, dir, &found, placed)?;
+            let path = dir.join(crate::song::SONG_FILE);
+            match placed {
+                Some(placed) => eprintln!(
+                    "{}: placed the take {name} by the click, bar 1.1.0 at {:.6} s ({} frames) \
+                     into the take",
+                    path.display(),
+                    placed.at_secs,
+                    (placed.at_secs * f64::from(rate)).round()
+                ),
+                None => eprintln!(
+                    "{}: bar 1 never played within the take; {}",
+                    path.display(),
+                    crate::song::next_capture(song, name)
+                ),
+            }
+        }
     }
     match ended {
         None => Ok(()),
         Some(why) => bail!("recording stopped: {why}; {}", kept(&written.path)),
     }
+}
+
+/// The song `--song` names: its name, its folder (`songs/<song>`) and the song. Refused, before
+/// any device is opened, outside a project, for an output that is a file's path and not a
+/// take's name, for a song the project does not have, naming those it has, and for a song
+/// whose composition no click can be played from.
+fn song_of(
+    ctx: &Context,
+    song: &Name,
+    output: &Path,
+) -> Result<(Name, PathBuf, duet_schemas::Song)> {
+    let Some(project) = ctx.project() else {
+        bail!(
+            "duet record --song places the take on a song in a project, and there is no project \
+             here (`duet init` makes one)"
+        );
+    };
+    if take_name(output).is_none() {
+        let take = output
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| s.parse::<Name>().is_ok())
+            .unwrap_or("<take>");
+        bail!(
+            "--song takes a take's name (lowercase words joined by hyphens, no .flac), not a \
+             file: the take is recorded into takes/<take>/<take>.flac and added to the project, \
+             such as `duet record {take} --song {song}`"
+        );
+    }
+    let dir = crate::song::folder(&project.root, song);
+    if !dir.join(crate::song::SONG_FILE).exists() {
+        let songs: Vec<String> = crate::song::listed(&project.root)?
+            .into_iter()
+            .filter(|l| l.song.is_ok())
+            .map(|l| format!("  {}", l.folder))
+            .collect();
+        let songs = if songs.is_empty() {
+            "  (none; `duet song new` makes one)".to_owned()
+        } else {
+            songs.join("\n")
+        };
+        bail!("the project has no song {song}; its songs are:\n{songs}");
+    }
+    let doc = crate::song::read_song(&dir)?;
+    // A composition the click cannot be read from is refused now, not once the devices are open.
+    Ticks::of(&doc.body.composition, 48_000, 0, 0.0)
+        .with_context(|| format!("{}: the click", dir.join(crate::song::SONG_FILE).display()))?;
+    Ok((song.clone(), dir, doc.body))
+}
+
+/// What the run knows of the click: the output it plays from, where bar 1's tick is on that
+/// output's frames, and what its callback stamped and reported.
+struct Heard {
+    name: String,
+    rate: u32,
+    bar_one: u64,
+    played: Arc<Played>,
+}
+
+impl Heard {
+    /// Says what went wrong with the click's output, if anything did.
+    fn report(&self) {
+        let glitches = self.played.glitches.load(Ordering::Acquire);
+        if glitches > 0 {
+            eprintln!(
+                "the click's output on {} glitched {glitches} time{}: where bar 1 fell is \
+                 measured from the output's timestamps, and a glitch before it may move it",
+                self.name,
+                if glitches == 1 { "" } else { "s" }
+            );
+        }
+        if let Some(e) = self.played.failed.lock().ok().and_then(|f| f.clone()) {
+            eprintln!("the click stopped before the take did: {e}");
+        }
+    }
+}
+
+/// What the click's output callback shares with the run.
+#[derive(Debug, Default)]
+struct Played {
+    /// The first and last buffer's playback stamps, each at its frame of the click.
+    stamps: Stamps,
+    /// Underruns the output reported.
+    glitches: AtomicU64,
+    /// Why the output ended, when it did.
+    failed: Mutex<Option<String>>,
+}
+
+/// Opens the default output and builds the click's stream on it: `LEAD_SECS` of silence, one
+/// bar of count-in, then bar 1 and every beat for `until_secs` after it. Not started.
+fn open_click(
+    host: &cpal::Host,
+    composition: &Composition,
+    until_secs: f64,
+) -> Result<(cpal::Stream, Heard)> {
+    let device = host.default_output_device().ok_or_else(|| {
+        anyhow!("no audio output device, which --song plays the click on; connect one")
+    })?;
+    let name = name_of(&device);
+    let supported = device
+        .default_output_config()
+        .with_context(|| format!("reading {name}'s output format"))?;
+    let config = supported.config();
+    let (rate, channels) = (config.sample_rate, config.channels);
+    let lead = (LEAD_SECS * f64::from(rate)).round() as u64;
+    let ticks = Ticks::of(composition, rate, lead, until_secs)?;
+    let bar_one = ticks.bar_one;
+    let voice = ClickVoice::new(ticks, rate, channels);
+    let played = Arc::new(Played::default());
+    let stream = match supported.sample_format() {
+        SampleFormat::F32 => output::<f32>(&device, config, voice, &played),
+        SampleFormat::I16 => output::<i16>(&device, config, voice, &played),
+        SampleFormat::U16 => output::<u16>(&device, config, voice, &played),
+        SampleFormat::I32 => output::<i32>(&device, config, voice, &played),
+        other => bail!("{name}'s sample format, {other}, is not one duet plays"),
+    }
+    .with_context(|| format!("opening {name} for the click"))?;
+    Ok((
+        stream,
+        Heard {
+            name,
+            rate,
+            bar_one,
+            played,
+        },
+    ))
+}
+
+/// The output stream that plays the click: each buffer's playback stamp noted at the click's
+/// frame, then filled by the voice through a buffer made up front, so the callback rarely
+/// allocates. An underrun is counted; any other error ends the click, not the take.
+fn output<T: SizedSample + FromSample<f32>>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    mut voice: ClickVoice,
+    played: &Arc<Played>,
+) -> Result<cpal::Stream> {
+    let channels = usize::from(config.channels).max(1);
+    let (stamps, errors) = (Arc::clone(played), Arc::clone(played));
+    let mut scratch = vec![0.0f32; 8192 * channels];
+    let mut frame = 0_u64;
+    let mut warned = false;
+    device
+        .build_output_stream(
+            config,
+            move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
+                let frames = data.len() / channels;
+                stamps.stamps.note(
+                    Stamp {
+                        frame,
+                        nanos: info.timestamp().playback.as_nanos(),
+                    },
+                    frames as u64,
+                );
+                let samples = frames * channels;
+                if scratch.len() < samples {
+                    scratch.resize(samples, 0.0);
+                }
+                let filled = &mut scratch[..samples];
+                voice.fill(filled);
+                for (out, &sample) in data.iter_mut().zip(filled.iter()) {
+                    *out = T::from_sample(sample);
+                }
+                // A partial frame at the end, which a device should never send, is silent.
+                for out in &mut data[samples..] {
+                    *out = T::from_sample(0.0);
+                }
+                frame += frames as u64;
+            },
+            move |e| match e.kind() {
+                cpal::ErrorKind::Xrun => {
+                    errors.glitches.fetch_add(1, Ordering::AcqRel);
+                }
+                cpal::ErrorKind::RealtimeDenied => {
+                    if !warned {
+                        eprintln!(
+                            "duet: real-time priority refused for the click, still playing: {e}"
+                        );
+                        warned = true;
+                    }
+                }
+                _ => {
+                    if let Ok(mut f) = errors.failed.lock() {
+                        *f = Some(e.to_string());
+                    }
+                }
+            },
+            None,
+        )
+        .map_err(Into::into)
+}
+
+/// What `record --song` says as it starts: that a click from speakers is heard in the take,
+/// that two devices' clocks may drift, and where the offset is unchecked.
+fn say_click(song: &Name, input: &str, heard: &Heard) {
+    eprintln!(
+        "the click of {song} plays on {}: one bar of count-in, then from bar 1; from speakers it \
+         is heard in the take, and headphones keep it out",
+        heard.name
+    );
+    if input != heard.name {
+        eprintln!(
+            "the input ({input}) and output ({}) are different devices: their clocks may drift, \
+             and duet measures it",
+            heard.name
+        );
+    }
+    if cfg!(not(target_os = "macos")) {
+        eprintln!(
+            "where bar 1 falls in the take is as this system reports its streams' timing, \
+             unchecked here (it is checked on macOS)"
+        );
+    }
+}
+
+/// Where bar 1 fell in a take of `frames` at `rate`, from the two streams' stamps, and the
+/// clocks' drift, stated. None when bar 1 never played within the take: the click had not reached it when the take
+/// ended, as when Ctrl-C stops it during the count-in.
+fn placement(
+    frames: u64,
+    rate: u32,
+    input: &Stamps,
+    heard: &Heard,
+    no_reconcile: bool,
+) -> Option<Placed> {
+    let (taken, played) = (input.span()?, heard.played.stamps.span()?);
+    if heard.played.stamps.end() <= heard.bar_one {
+        return None;
+    }
+    let offset = offset_frames(&taken, &played, heard.bar_one, rate, heard.rate);
+    if offset >= frames {
+        return None;
+    }
+    let ppm = clock_ppm(&taken, &played, rate, heard.rate);
+    match ppm {
+        Some(ppm) => eprintln!(
+            "the input's clock ran {ppm:+.1} ppm against the click's over the take{}",
+            if no_reconcile {
+                "; --no-reconcile leaves it out of the placement"
+            } else {
+                ", and the placement keeps it as clock_ppm"
+            }
+        ),
+        None => eprintln!(
+            "the clocks' drift was not measured: a stream ran under a second, too short to tell \
+             its rate, so the placement has no clock_ppm"
+        ),
+    }
+    Some(Placed::click(
+        Position::bar(1),
+        offset as f64 / f64::from(rate),
+        if no_reconcile { None } else { ppm },
+    ))
 }
 
 /// The writing thread's view of the take: what it has written, and what was lost.
@@ -413,9 +812,18 @@ impl Handoff {
     fn hand_off(&mut self, input: impl ExactSizeIterator<Item = f32>, capture: u128) {
         let frames = input.len() as u64 / self.channels;
         let gap = self.clock.gap(capture, frames);
-        self.shared
+        let before = self
+            .shared
             .delivered
             .fetch_add(gap + frames, Ordering::AcqRel);
+        // The buffer starts after the gap: lost frames are on the take's timeline as silence.
+        self.shared.stamps.note(
+            Stamp {
+                frame: before + gap,
+                nanos: capture,
+            },
+            frames,
+        );
         let mut samples = self
             .refused
             .take()
@@ -492,29 +900,14 @@ where
         .map_err(Into::into)
 }
 
-/// Refuses an output that exists, is not named `.flac`, or is in a directory that does not
-/// exist, before any device is opened.
 /// Where `duet record <take>` records in a project: the project, the take's name, and
 /// `takes/<take>/<take>.flac` under its root. `None` when the output is a file's path, as it
 /// is outside a project. A name the project has a take by already is refused, as is a file
 /// there already, before any device is opened.
-fn into_project(
-    ctx: &Context,
-    output: &Path,
-) -> Result<Option<(crate::Project, duet_schemas::project::Name, PathBuf)>> {
-    let named = output.extension().is_none()
-        && output.components().count() == 1
-        && output
-            .to_str()
-            .is_some_and(|s| s.parse::<duet_schemas::project::Name>().is_ok());
-    if !named {
+fn into_project(ctx: &Context, output: &Path) -> Result<Option<(crate::Project, Name, PathBuf)>> {
+    let Some(name) = take_name(output) else {
         return Ok(None);
-    }
-    let name: duet_schemas::project::Name = output
-        .to_str()
-        .unwrap_or_default()
-        .parse()
-        .map_err(anyhow::Error::msg)?;
+    };
     let Some(project) = ctx.project() else {
         bail!(
             "duet record {name} records the take {name} into a project, and there is none \
@@ -538,6 +931,16 @@ fn into_project(
     Ok(Some((project.clone(), name, path)))
 }
 
+/// The take's name `output` is, when it is one: no extension, no directory, and a name.
+fn take_name(output: &Path) -> Option<Name> {
+    if output.extension().is_some() || output.components().count() != 1 {
+        return None;
+    }
+    output.to_str()?.parse().ok()
+}
+
+/// Refuses an output that exists, is not named `.flac`, or is in a directory that does not
+/// exist, before any device is opened.
 fn refuse_output(output: &Path) -> Result<()> {
     let flac = output
         .extension()
@@ -636,7 +1039,14 @@ mod tests {
 
     use duet_capture::{Depth, FileSource, Source, TakeWriter};
 
-    use super::{Block, Clock, Handoff, Loss, Shared, Take, at, pick_device, refuse_output, span};
+    use duet_core::Position;
+    use duet_schemas::song::Placed;
+
+    use super::click::Stamp;
+    use super::{
+        Block, Clock, Handoff, Heard, Loss, Played, Shared, Stamps, Take, at, pick_device,
+        placement, refuse_output, span,
+    };
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|&n| n.to_owned()).collect()
@@ -700,6 +1110,108 @@ mod tests {
         assert_eq!(shared.lost.load(Ordering::Acquire), 0);
         assert!(handoff.refused.is_none(), "the kept buffer was reused");
         assert_eq!(shared.delivered.load(Ordering::Acquire), 4 * 480);
+    }
+
+    #[test]
+    fn the_handoff_stamps_the_first_and_last_buffer_where_each_starts_on_the_takes_timeline() {
+        let shared = Arc::new(Shared::default());
+        let (to_writer, _from_device) = mpsc::sync_channel::<Block>(8);
+        let (_to_device, spare) = mpsc::sync_channel::<Vec<f32>>(1);
+        let mut handoff = Handoff::new(to_writer, spare, 48_000, 1, Arc::clone(&shared));
+        assert_eq!(shared.stamps.span(), None, "no buffer yet");
+        let buffer = [0.0f32; 480]; // 10 ms, mono
+        handoff.hand_off(buffer.iter().copied(), 5 * TEN_MS);
+        handoff.hand_off(buffer.iter().copied(), 6 * TEN_MS);
+        // The device leaves 20 ms out: the last buffer starts after the gap, as the take does.
+        handoff.hand_off(buffer.iter().copied(), 9 * TEN_MS);
+        let stamped = shared.stamps.span().expect("stamped");
+        assert_eq!(
+            stamped.first,
+            Stamp {
+                frame: 0,
+                nanos: 5 * TEN_MS
+            }
+        );
+        assert_eq!(
+            stamped.last,
+            Stamp {
+                frame: 480 + 480 + 960,
+                nanos: 9 * TEN_MS
+            }
+        );
+        assert_eq!(shared.stamps.end(), 480 + 480 + 960 + 480);
+    }
+
+    /// Stamps of a stream that ran from `first` to `last`, its last buffer `frames` long.
+    fn stamped(first: (u64, u128), last: (u64, u128), frames: u64) -> Stamps {
+        let stamps = Stamps::default();
+        stamps.note(
+            Stamp {
+                frame: first.0,
+                nanos: first.1,
+            },
+            512,
+        );
+        stamps.note(
+            Stamp {
+                frame: last.0,
+                nanos: last.1,
+            },
+            frames,
+        );
+        stamps
+    }
+
+    /// The click's output 5 ms behind the input on one clock, bar 1 at its frame 4800, and the
+    /// output's last buffer ending at `end`.
+    fn heard(end: u64) -> Heard {
+        let last = end - 512;
+        let played = Played {
+            stamps: stamped(
+                (0, 5_000_000),
+                (last, 5_000_000 + u128::from(last) * 1_000_000_000 / 48_000),
+                512,
+            ),
+            ..Played::default()
+        };
+        Heard {
+            name: "out".to_owned(),
+            rate: 48_000,
+            bar_one: 4800,
+            played: Arc::new(played),
+        }
+    }
+
+    #[test]
+    fn a_take_that_heard_bar_one_is_placed_by_the_click_to_the_frame() {
+        let input = stamped((0, 0), (96_000, 2_000_000_000), 512);
+        let placed = placement(96_000, 48_000, &input, &heard(96_512), false).expect("placed");
+        // Bar 1 played 100 ms + 5 ms after the take's first frame: 5040 frames.
+        assert_eq!(placed.by, duet_schemas::song::By::Click);
+        assert_eq!(placed.bar, Position::bar(1));
+        assert!(
+            (placed.at_secs * 48_000.0 - 5040.0).abs() < 1e-9,
+            "{placed:?}"
+        );
+        assert!(placed.clock_ppm.expect("measured").abs() < 1e-6);
+        let unreconciled = placement(96_000, 48_000, &input, &heard(96_512), true).unwrap();
+        assert_eq!(unreconciled, Placed::click(Position::bar(1), 0.105, None));
+    }
+
+    /// Review Focus 5: a take stopped during the count-in, before bar 1 sounds, is not placed.
+    #[test]
+    fn a_take_that_ended_before_bar_one_is_not_placed() {
+        let input = stamped((0, 0), (96_000, 2_000_000_000), 512);
+        // The click never got to bar 1's frame.
+        assert_eq!(placement(96_000, 48_000, &input, &heard(4800), false), None);
+        // The click did, after the take's last frame.
+        assert_eq!(placement(5000, 48_000, &input, &heard(96_512), false), None);
+        // No click played at all.
+        let silent = Heard {
+            played: Arc::new(Played::default()),
+            ..heard(96_512)
+        };
+        assert_eq!(placement(96_000, 48_000, &input, &silent, false), None);
     }
 
     #[test]

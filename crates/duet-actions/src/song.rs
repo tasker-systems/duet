@@ -38,7 +38,7 @@ use clap::Args;
 use schemars::JsonSchema;
 
 /// A song's document in its folder.
-const SONG_FILE: &str = "song.duet";
+pub(crate) const SONG_FILE: &str = "song.duet";
 /// The project's document, under its root.
 const PROJECT_FILE: &str = ".duet/project.duet";
 
@@ -435,7 +435,7 @@ fn captured(project: &Path, take: &ProjectTake) -> Result<Option<(PathBuf, Place
 }
 
 /// The line saying the next capture places a link that is not placed.
-fn next_capture(song: &Name, take: &Name) -> String {
+pub(crate) fn next_capture(song: &Name, take: &Name) -> String {
     format!(
         "the take {take} is linked to {song} and not placed: the next `duet capture rhythm {take}` \
          (or `melody`) places it on {song}'s bars, or `duet song place {song} {take}` places it"
@@ -986,7 +986,7 @@ fn shown_snapshots(dir: &Path) -> Result<String> {
 }
 
 /// `songs/<song>/` under the project's root.
-fn folder(project: &Path, song: &Name) -> PathBuf {
+pub(crate) fn folder(project: &Path, song: &Name) -> PathBuf {
     project.join("songs").join(song.as_str())
 }
 

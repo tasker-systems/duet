@@ -286,6 +286,7 @@ duet song status wayfaring-stranger sketch        # idea → sketch
 duet song link wayfaring-stranger beat --for verse  # link a project take; a captured one is placed
 duet song place wayfaring-stranger beat --bpm 90   # set a placement, keeping the values not given
 duet song place wayfaring-stranger beat --click --bar 1.1.0 --at 2.5  # played to the song's click
+duet record verse --song wayfaring-stranger       # recorded to the song's click, and placed by it
 duet song snapshot wayfaring-stranger first-verse --said "the verse sits"
 duet song restore wayfaring-stranger 2026-11-20-first-verse
 duet play wayfaring-stranger                      # every placed part, on the song's bars
@@ -759,6 +760,7 @@ duet record idea.flac                           # from the default input, until 
 duet record idea.flac --seconds 30              # stop after 30 seconds
 duet record idea.flac --device scarlett         # an input by its name, or part of it
 duet capture melody idea.flac                   # then capture it like any take
+duet record verse --song wayfaring-stranger     # in a project: to the song's click, placed by it
 ```
 
 `duet record` keeps a take from the machine's microphone as a FLAC file, which `duet capture`
@@ -785,6 +787,21 @@ a minute.
 - **On macOS**, the terminal app needs microphone access (System Settings, Privacy & Security,
   Microphone). Without it the system records silence rather than refusing, and `duet record`
   says the take is silent throughout.
+- **`--song <song>`**, in a project, records the take to the song's click and places it on the
+  song's bars. The click plays on the default output: one bar of count-in in the song's first
+  meter, then from bar 1 through the song's tempo and meter maps, each downbeat higher. It is
+  never written into the take, but from speakers it is heard in it; headphones keep it out, and
+  `duet record` says so as it starts. When the take is written it is added to the project and
+  linked to the song, `placed: { by: click, bar: 1.1.0, at_secs, clock_ppm }`: `at_secs` is where
+  bar 1's tick played, less the take's first captured frame, a whole number of frames from the
+  two streams' timestamps, and `clock_ppm` is how far the input's clock ran from the output's,
+  always stated. **`--no-reconcile`** leaves `clock_ppm` out of the placement. An input and an
+  output that are different devices are named as it starts, since their clocks may drift; on a
+  system other than macOS, the offset is as it reports its streams' timing, unchecked there. A
+  take that ends before bar 1 plays, as when Ctrl-C stops it during the count-in, is kept and
+  linked unplaced. `--song` outside a project, with a file's path in place of a take's name, or
+  naming a song the project does not have (its songs are listed) is refused before any device
+  is opened.
 
 ## Capturing an idea
 

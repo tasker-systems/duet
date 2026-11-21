@@ -649,3 +649,200 @@ fn a_given_tempo_places_the_link_and_is_stated_as_given() {
     );
     assert!(!said.contains("tempo estimated"), "{said}");
 }
+
+// `duet record <take> --song <song>` (build task 7): the take is placed by the click it was
+// played to.
+
+/// The opt-in for the tests that play the click from the speakers and record it: they need an
+/// input and an output device and a quiet room, which CI has none of.
+const SPEAKERS: &str = "DUET_E2E_SPEAKERS";
+
+/// How far a tick heard in the take may fall from where the placement puts it.
+const TOLERANCE_MS: f64 = 2.0;
+
+/// Whether the speakers-on tests run here; when not, says why they are skipped.
+fn speakers_on() -> bool {
+    let on = std::env::var_os(SPEAKERS).is_some();
+    if !on {
+        eprintln!(
+            "skipped: set {SPEAKERS}=1 to play the click from the speakers and record it, in a \
+             quiet room with an input and an output device"
+        );
+    }
+    on
+}
+
+/// A project holding the song `s`, at 92 bpm in 4/4.
+fn with_song_s(name: &str) -> PathBuf {
+    let dir = scratch(name);
+    let root = project(&dir, "porch");
+    ok(
+        &duet(
+            &root,
+            &["song", "new", "s", "--tempo", "92", "--meter", "4/4"],
+        ),
+        "song new",
+    );
+    root
+}
+
+fn song_s(root: &Path) -> Song {
+    let text = std::fs::read_to_string(root.join("songs/s/song.duet")).unwrap();
+    Document::<Song>::read(&text).unwrap().body
+}
+
+#[test]
+fn record_song_is_refused_before_any_device_outside_a_project_for_an_unknown_song_and_for_a_file_output()
+ {
+    let dir = scratch("placing-record-refused");
+    let outside = duet(&dir, &["record", "t", "--song", "s", "--seconds", "1"]);
+    assert!(!outside.status.success());
+    let said = stderr(&outside);
+    assert!(
+        said.contains("--song") && said.contains("no project here"),
+        "outside a project: {said}"
+    );
+
+    let root = with_song_s("placing-record-refused-song");
+    let unknown = duet(&root, &["record", "t", "--song", "nope", "--seconds", "1"]);
+    assert!(!unknown.status.success());
+    let said = stderr(&unknown);
+    assert!(
+        said.contains("no song nope") && said.contains("its songs are:\n  s"),
+        "names the project's songs: {said}"
+    );
+    assert!(!root.join("takes/t").exists(), "nothing was recorded");
+
+    let file = duet(
+        &root,
+        &["record", "x.flac", "--song", "s", "--seconds", "1"],
+    );
+    assert!(!file.status.success());
+    let said = stderr(&file);
+    assert!(
+        said.contains("--song takes a take's name") && said.contains("duet record x --song s"),
+        "a file output: {said}"
+    );
+    assert!(!root.join("x.flac").exists(), "nothing was recorded");
+    assert!(song_s(&root).takes.is_empty(), "no refusal links anything");
+}
+
+/// The channel 0 samples of a FLAC take, and its rate.
+fn decoded(path: &Path) -> (Vec<f32>, u32) {
+    use duet_capture::{FileSource, Source as _};
+    let mut source = FileSource::open(path).expect("open the take");
+    let (mut samples, mut rate) = (Vec::new(), 0);
+    while let Some(chunk) = source.next_chunk().expect("read the take") {
+        rate = chunk.rate;
+        let channels = usize::from(chunk.channels.max(1));
+        samples.extend(chunk.samples.iter().step_by(channels));
+    }
+    (samples, rate)
+}
+
+/// Seconds into the take of the first sample after `from_secs` whose magnitude exceeds 8 times
+/// `floor`, the median absolute level of the take's first 100 ms.
+fn onset(samples: &[f32], rate: u32, from_secs: f64, floor: f32) -> Option<f64> {
+    let from = (from_secs.max(0.0) * f64::from(rate)).round() as usize;
+    samples
+        .iter()
+        .skip(from)
+        .position(|s| s.abs() > 8.0 * floor)
+        .map(|i| (from + i) as f64 / f64::from(rate))
+}
+
+fn median_level(samples: &[f32]) -> f32 {
+    let mut levels: Vec<f32> = samples.iter().map(|s| s.abs()).collect();
+    levels.sort_by(f32::total_cmp);
+    levels.get(levels.len() / 2).copied().unwrap_or(0.0)
+}
+
+#[test]
+fn record_song_places_the_take_by_click_and_its_ticks_land_where_it_says() {
+    use duet_core::Position;
+    if !speakers_on() {
+        return;
+    }
+    let root = with_song_s("placing-record-click");
+    // Ten seconds: bar 1 falls about 2.9 s in (0.2 s of lead and a bar of count-in), and bar 3
+    // 5.2 s after it.
+    let out = duet(&root, &["record", "t", "--song", "s", "--seconds", "10"]);
+    ok(
+        &out,
+        "record --song (it needs an input and an output device)",
+    );
+    let said = stderr(&out);
+    assert!(said.contains("headphones"), "{said}");
+
+    let song = song_s(&root);
+    assert_eq!(song.takes.len(), 1, "{said}");
+    assert_eq!(song.takes[0].take.as_str(), "t");
+    let p = song.takes[0].placed.expect("the link is placed");
+    assert_eq!(p.by, By::Click);
+    assert_eq!(p.bar, Position::bar(1));
+    assert_eq!(p.bpm, None);
+    let ppm = p.clock_ppm.expect("the drift is measured over ten seconds");
+
+    let (samples, rate) = decoded(&root.join("takes/t/t.flac"));
+    let frames = p.at_secs * f64::from(rate);
+    assert!(
+        (frames - frames.round()).abs() < 1e-6,
+        "at_secs is a whole number of frames: {frames}"
+    );
+    let floor = median_level(&samples[..(rate / 10) as usize]);
+    assert!(
+        floor > 0.0,
+        "the take's first 100 ms are digital silence: the input heard nothing"
+    );
+
+    let bar_one = onset(&samples, rate, p.at_secs - 0.05, floor).expect("bar 1's tick is heard");
+    let bar_one_ms = (bar_one - p.at_secs) * 1000.0;
+    let between = song
+        .composition
+        .secs_between(Position::bar(1), Position::bar(3))
+        .unwrap();
+    let bar_three_at = p.at_secs + between * (1.0 + ppm / 1e6);
+    let bar_three =
+        onset(&samples, rate, bar_three_at - 0.05, floor).expect("bar 3's tick is heard");
+    let bar_three_ms = (bar_three - bar_three_at) * 1000.0;
+    eprintln!(
+        "record --song: at_secs {:.6} ({} frames at {rate} Hz), clock_ppm {ppm:.2}; bar 1's tick \
+         heard {bar_one_ms:+.3} ms from it, bar 3's {bar_three_ms:+.3} ms",
+        p.at_secs,
+        frames.round()
+    );
+    assert!(
+        bar_one_ms.abs() <= TOLERANCE_MS,
+        "bar 1's tick is {bar_one_ms:+.3} ms from at_secs"
+    );
+    assert!(
+        bar_three_ms.abs() <= TOLERANCE_MS,
+        "bar 3's tick is {bar_three_ms:+.3} ms from where at_secs and clock_ppm put it"
+    );
+}
+
+#[test]
+fn record_song_with_no_reconcile_writes_no_clock_ppm() {
+    if !speakers_on() {
+        return;
+    }
+    let root = with_song_s("placing-record-no-reconcile");
+    let out = duet(
+        &root,
+        &[
+            "record",
+            "t",
+            "--song",
+            "s",
+            "--seconds",
+            "5",
+            "--no-reconcile",
+        ],
+    );
+    ok(&out, "record --song --no-reconcile");
+    let said = stderr(&out);
+    let p = song_s(&root).takes[0].placed.expect("the link is placed");
+    assert_eq!(p.by, By::Click);
+    assert_eq!(p.clock_ppm, None, "--no-reconcile leaves the drift out");
+    assert!(said.contains("ppm"), "the drift is still stated: {said}");
+}
