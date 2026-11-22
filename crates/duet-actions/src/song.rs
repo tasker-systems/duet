@@ -48,10 +48,11 @@ pub enum SongCommand {
     /// composition starts from --tempo, --meter and --key, or else the project's defaults, or
     /// else 120 bpm in 4/4 with no key.
     New(NewInput),
-    /// Show a song: its id, title, status and the moves it allows, its composition, and each of
-    /// its parts with its id, its source and where it is placed. A placement of a part the song
-    /// does not have, two parts with one name or one id, and a file in parts/ that is no part,
-    /// are refused by name.
+    /// Show a song: its id, title, status and the moves it allows, its composition, each of its
+    /// parts with its id, its source and where it is placed, and the takes it links, each with
+    /// the parts it is for and its placement. A placement of a part the song does not have, two
+    /// parts with one name or one id, and a file in parts/ that is no part, are refused by name;
+    /// a take that is for a part the song does not have yet is stated.
     Show(ShowInput),
     /// Move a song's status: idea → sketch → developing → arranged, and arranged → developing.
     /// Any other move is refused, naming the song's state and the moves it allows, and the song
@@ -108,10 +109,11 @@ pub struct NewInput {
     pub project: PathBuf,
 }
 
-/// Show a song: its id, title, status and the moves it allows, its composition, and each of
-/// its parts with its id, its source and where it is placed. A placement of a part the song
-/// does not have, two parts with one name or one id, and a file in parts/ that is no part,
-/// are refused by name.
+/// Show a song: its id, title, status and the moves it allows, its composition, each of its
+/// parts with its id, its source and where it is placed, and the takes it links, each with
+/// the parts it is for and its placement. A placement of a part the song does not have, two
+/// parts with one name or one id, and a file in parts/ that is no part, are refused by name;
+/// a take that is for a part the song does not have yet is stated.
 #[derive(Debug, Args, JsonSchema)]
 pub struct ShowInput {
     /// The song's name.

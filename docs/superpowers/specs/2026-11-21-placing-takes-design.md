@@ -178,7 +178,8 @@ reports about its latency cannot be relied on. Inside or outside a project.
   - **Align.** Each heard tick's segment, from 40 ms before its loudest sample to 60 ms after, is
     cross-correlated against the mean of the segments and moved to its correlation's peak (to a
     fraction of a frame), the mean is taken again, and so on until no segment moves (at most 8
-    passes). This times each tick against the others by its whole response.
+    passes). Each pass's median move is taken back off every segment, so the mean stays where the
+    loudest samples put it. This times each tick against the others by its whole response.
   - **Time the mean once.** The ticks' onset is the first sample of the aligned mean, from its
     segment's start to its loudest sample, whose magnitude exceeds 8 times the mean's own floor
     (the median magnitude of its first 10 ms, ahead of the tick's rise, so averaging's quieter

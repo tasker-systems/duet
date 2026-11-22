@@ -212,7 +212,7 @@ duet record wayfaring                                       # into takes/wayfari
   is missing, changed or unreadable, and `take locate` refuses a file that is not the take,
   naming both digests. Nothing is ever a symlink.
 - **`take forget`** drops the entry and its local path, and leaves every file in `takes/<take>/`
-  for you to delete. A song part still comped from the take is named.
+  for you to delete. A song part still comped from the take, and a song that still links it, are named.
 - **What you give a take is remembered.** A capture of a project's take (`duet capture rhythm
   takes/beat/beat.wav --tempo 92`) stores the tempo, meter or key it was given on the take's
   `given`, and every later capture of it uses them, stated as given. A flag still wins, and is
@@ -324,6 +324,14 @@ duet play wayfaring-stranger                      # every placed part, on the so
   refused, naming `duet take add`. A refusal leaves `song.duet` as it was.
 - **`duet song show` lists the takes** the song links, each with the parts it is for and its
   placement, and states a `for` that names no part the song has yet.
+- **A capture of a linked take places it, and says where it disagrees with the song.**
+  `duet capture melody|rhythm` of a take a song links places an unplaced link `estimated` and
+  re-places an estimated one from the new capture, saying what moved; a `click` or `set` link is
+  left as it is. For each song it states a tempo that differs from the song's at the placement's
+  bar by more than 0.5 bpm (or is near half or double it), a meter or a key that differs, and for
+  a `set` link a tempo that differs from the set `bpm`: "tempo estimated 88.6 bpm;
+  wayfaring-stranger is 92 at bar 1". Agreement is not stated. The song and the capture's own
+  estimate are never changed.
 - **`duet song show` lists the snapshots**, and reports each file in one that differs from its
   stated digest, is missing, or is not stated, naming it.
 - **`duet song restore`** first takes a snapshot of the working song
