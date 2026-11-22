@@ -164,12 +164,15 @@ Ruling 18: the offset between a device pair is measured, because what an ordinar
 reports about its latency cannot be relied on. Inside or outside a project.
 
 - **Plays duet's click** (the same voice as `--song`) from the default output, after a lead of
-  1 s: 60 bpm in 4/4, 12 ticks, the first of each 4 accented. It records the default input (or
+  1 s: 60 bpm, 12 ticks, every one the accented downbeat sound. A placement is anchored on bar 1's
+  downbeat, and an input may delay the two pitches differently (the owner's webcam: 1.3 to 1.6 ms),
+  so calibration measures the sound it anchors on. It records the default input (or
   `--device`) at the same time, into memory. Nothing is written to a take.
 - **Finds each tick in the recording.** It is searched for within 400 ms either side of where the
   stream timestamps (with the drift fitted, as `--song` does) put it. The tick is the loudest
   sample in that search, heard only when it exceeds 8 times the floor (the median magnitude of the
-  recording's first 0.5 s). It is heard at the first sample, in the 20 ms up to that loudest one,
+  recording's first 0.5 s). It is heard at the first sample, in the 50 ms up to that loudest one (the tick and an input's
+  ramp, and a reflection louder than it),
   whose magnitude reaches half of it: a point on the tick's own rise, the same however loud the
   tick arrives, which a threshold against the floor is not on an input that ramps the sound up.
   (A first crossing anywhere in the search is not used: on the owner's webcam a quieter sound
