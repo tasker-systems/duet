@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, cpal 0.18.2 (already a dependency of `duet-actions`), serde/schemars, clap, the `duet-e2e` harness.
 
-**Spec:** `docs/superpowers/specs/2026-11-21-placing-takes-design.md`, the build design. Read it first, with `docs/superpowers/specs/2026-11-17-songs-and-composition-design.md` §1 ("The song") and §4, and temper decision `01a1fe65-a864-72ad-9543-36d81a90cb7a` (ruling 17, `clock_ppm`).
+**Spec:** `docs/superpowers/specs/2026-11-21-placing-takes-design.md`, the build design. Read it first, with `docs/superpowers/specs/2026-11-17-songs-and-composition-design.md` §1 ("The song") and §4, temper decision `01a1fe65-a864-72ad-9543-36d81a90cb7a` (ruling 17, `clock_ppm`), and temper decision `01a20574-7729-7112-a582-79f8c4bb5c06` (ruling 18, calibration).
 
 **Tags.** Each task step that adds or changes behaviour is tagged CONFORM (honours something on disk, cited), EXTEND (goes beyond, authorised by a cited spec section) or AMEND (both).
 
@@ -22,6 +22,7 @@
 - `clock_ppm`: a moment `t` seconds after `bar` on the click's clock falls `at_secs + t × (1 + clock_ppm / 1_000_000)` seconds into the take. Positive means the take's clock ran fast.
 - Tempos disagree when they are more than **0.5 bpm** apart. A tempo within 0.5 bpm of half or double the song's is said to be half or double.
 - The count-in is **one bar** of the song's first meter. `record --song` places at `1.1.0`.
+- **A placement's offset comes from the stream timestamps plus the device pair's measured calibration** (ruling 18), never from a constant in code or a dependency on the host's latency properties.
 - CI gates: `cargo fmt --check`, clippy `-D warnings` (all features and no default features), rustdoc, and `cargo nextest run --profile ci`. Commits are conventional and end with the attribution line.
 
 ## Review Focus
@@ -333,6 +334,53 @@
 - [ ] **Step 4: Run** `cargo nextest run -p duet-e2e --test placing --test record` and `cargo nextest run -p duet-actions`. Then, on the Mac mini, run `DUET_E2E_SPEAKERS=1 cargo nextest run -p duet-e2e --test placing record_song --no-capture` in a quiet room with the speakers on. Expected: PASS, with both tick errors printed under 2 ms. Record those figures for the PR.
 
 - [ ] **Step 5: Commit** with `feat(record): duet record --song plays the song's click and places the take by it, to the frame, with the clocks' drift`.
+
+---
+
+### Task 7b: `duet record --calibrate`, and `record --song` applies it (ruling 18)
+
+Ruling 18 (`01a20574-7729-7112-a582-79f8c4bb5c06`, owner 2026-11-22): the offset between a device pair is measured, not taken from what the devices report. The design's "duet record --calibrate" section is the requirement; its numbers are exact. No coreaudio-rs dependency, no `unsafe`, no empirical constant in code.
+
+**Files:**
+- Create: `crates/duet-actions/src/record/calibrate.rs`, pure, no device: the calibration click's ticks, finding the ticks in a recording, and the calibration file.
+- Modify: `crates/duet-actions/src/record.rs`:
+  - `RecordArgs`: `output` becomes `Option<PathBuf>`, `required_unless_present = "calibrate"`; add `#[arg(long, conflicts_with_all = ["output", "song", "seconds", "no_reconcile"])] calibrate: bool`.
+  - `run`: a calibrate path that opens the same input and output streams as `--song` (factor the stream code; don't copy it), records channel 0 into memory, and plays the calibration click.
+  - `placement`: takes the pair's calibration offset, if any.
+- Modify: `crates/duet-actions/src/registry.rs` (record's writes gain `calibration.toml` in the user config directory, if the registry names files outside a project; CONFORM to how it states writes), `crates/duet-cli/src/main.rs` help line, `README.md`.
+- Test: unit tests in `calibrate.rs` and `record.rs`; `crates/duet-e2e/tests/placing.rs`.
+
+**Interfaces:**
+- Consumes: Task 6 and 7 (`Ticks`, `ClickVoice`, the stamp line fit, `offset_frames`, `clock_ppm`), `config::Dirs::find()` (`config.rs:63`) for the user config directory.
+- Produces, in `calibrate.rs`:
+  - `pub(crate) struct Pair { input: String, output: String, input_rate: u32, output_rate: u32 }`, the key.
+  - `pub(crate) struct Calibration { pair: Pair, offset_ms: f64, ticks: usize, spread_ms: f64, measured: <the timestamp type the journal uses> }`.
+  - `pub(crate) fn heard(samples: &[f32], rate: u32, expected_secs: &[f64]) -> Result<Heard, Unheard>`: `Heard { offset_ms, ticks, spread_ms }`; `Unheard` is one of `Silent`, `TooFew { heard, of }`, `Spread { spread_ms }`, each with the message the design gives.
+  - `pub(crate) struct Calibrations` with `read(path) -> Result<Calibrations>` (a missing file is empty; an unreadable one is an error naming the path), `find(&Pair) -> Option<&Calibration>`, `set(Calibration)` (replaces the same pair), `write(path) -> Result<()>` (temporary file and rename).
+- The file, `<user config dir>/calibration.toml`, one `[[pair]]` table per calibration, with fields `input`, `output`, `input_rate`, `output_rate`, `offset_ms`, `ticks`, `spread_ms`, `measured`.
+- **Sign:** `offset_ms` = where a tick was heard minus where the timestamps put it. Calibrated `at_secs` = `round((reported_secs + offset_ms / 1000) × rate) / rate`, a whole number of frames.
+
+- [ ] **Step 1: Write failing tests.**
+  - `calibrate.rs` unit tests:
+    - `ticks_at_a_known_error_with_noise_and_one_missing_give_that_error`: a 1 s lead of noise at 0.001 RMS, 12 ticks of `ClickVoice`'s sound at 60 bpm, each landing −8.0 ms from its expected time, one of them left out. `heard` gives `ticks == 11` and `offset_ms` within 0.05 of −8.0.
+    - `nine_ticks_heard_store_nothing` gives `TooFew { heard: 9, of: 12 }`.
+    - `ticks_spread_past_2_ms_store_nothing` gives `Spread`.
+    - `digital_silence_is_refused_as_silent`.
+    - `the_file_round_trips_replaces_a_pair_and_misses_other_rates`: write two pairs, read them back equal; `set` the first pair again with a new offset, and there are still two; `find` with the same names at 44100 is `None`.
+    - `an_unreadable_file_names_its_path`.
+  - `record.rs` unit test `a_calibration_moves_at_secs_by_its_offset_to_a_whole_frame`.
+  - `placing.rs` e2e, not gated: `record_calibrate_is_refused_before_any_device_with_a_take_with_song_and_with_seconds`, checking each clap message.
+  - `placing.rs`, gated by `DUET_E2E_SPEAKERS`:
+    - change `record_song_places_the_take_by_click_and_its_ticks_land_where_it_says`: first `duet record --calibrate`, asserting its stdout/stderr names the pair, `12 of 12` or `11 of 12` ticks heard, and the file path; then `record --song` says which calibration it applies. Its 2 ms checks stay as they are.
+    - `record_song_with_no_reconcile_writes_no_clock_ppm` (no calibration in its fresh config dir) asserts the "not calibrated" line naming `duet record --calibrate`.
+- [ ] **Step 2: Run** them; the unit tests fail to compile, and the e2e refusal test fails against `main`'s binary (`unexpected argument '--calibrate'`).
+- [ ] **Step 3: Implement.** EXTEND (design "duet record --calibrate"; ruling 18).
+  - The calibration click: a composition at 60 bpm in 4/4 built in code, `Ticks::of` it for 12 ticks, a lead of 1 s.
+  - `heard`: the floor is the median magnitude of the first 0.5 s; each tick is searched from 400 ms before to 400 ms after its expected time; heard at the first sample over 8× the floor; the offset is the median of the errors, the spread is max − min.
+  - `record --song`: read `calibration.toml` before any device opens (refuse an unreadable one, naming its path); after the streams are open and their names and rates known, find the pair; say `calibrated: <offset> ms for <input> → <output>, measured <date>` or `not calibrated for <input> → <output>: the placement is as the devices report their latency, which can be off by milliseconds; duet record --calibrate measures it`.
+  - `--calibrate`'s message when too few ticks are heard also says: if the click goes to headphones, hold one against the microphone.
+- [ ] **Step 4: Run** `cargo nextest run -p duet-actions` and `cargo nextest run -p duet-e2e --test placing --test record`. Then on the Mac mini, with the speakers on: `DUET_E2E_SPEAKERS=1 cargo nextest run -p duet-e2e --test placing record_ --no-capture`. Expected: PASS, both tick errors under 2 ms. Record the calibrate figures and both errors for the PR. Also run clippy `-D warnings` and `cargo doc --no-deps` for `duet-actions`.
+- [ ] **Step 5: Commit** with `feat(record): duet record --calibrate measures the device pair's offset, and record --song applies it`.
 
 ---
 

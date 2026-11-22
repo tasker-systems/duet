@@ -149,7 +149,42 @@ In a project only. Records the take as `duet record <take>` does today (#94: int
   drift and duet will measure it.
 - **`--count-in <bars>`** is not added; one bar is fixed for this task.
 - Refused before any device is opened: `--song` outside a project, a song the project does not
-  have, a take name in use (as today).
+  have, a take name in use (as today), and a calibration file that cannot be read (naming its
+  path).
+- **Applies the pair's calibration** (ruling 18, `01a20574-7729-7112-a582-79f8c4bb5c06`): when one
+  is stored for this input and output at these rates, `at_secs` is the timestamps' offset plus the
+  calibration's, still a whole number of frames. It says at the start which calibration it applies
+  and when it was measured. With none, it says the placement is as the devices report their
+  latency, which can be off by milliseconds, and names `duet record --calibrate`. It does not
+  refuse.
+
+### `duet record --calibrate [--device <input>]`
+
+Ruling 18: the offset between a device pair is measured, because what an ordinary microphone
+reports about its latency cannot be relied on. Inside or outside a project.
+
+- **Plays duet's click** (the same voice as `--song`) from the default output, after a lead of
+  1 s: 60 bpm in 4/4, 12 ticks, the first of each 4 accented. It records the default input (or
+  `--device`) at the same time, into memory. Nothing is written to a take.
+- **Finds each tick in the recording.** It is searched for within 400 ms either side of where the
+  stream timestamps (with the drift fitted, as `--song` does) put it. A tick is heard at the first
+  sample whose magnitude exceeds 8 times the floor, the median magnitude of the recording's first
+  0.5 s. The tick's error is where it was heard less where the timestamps put it.
+- **Stores the median error** when at least 10 of the 12 ticks are heard and their errors lie within
+  2 ms of each other, for the pair, keyed by the input's and the output's names and rates. A new
+  calibration of the same pair replaces the old. Each entry has the offset in ms, how many ticks
+  were heard, their spread in ms, and when it was measured.
+- **Says what it measured:** the pair, the offset, the ticks heard, their spread, and where it was
+  written.
+- **Refuses to store** when the floor is digital silence (the input heard nothing), when fewer than
+  10 ticks are heard (the click may be going to headphones, or the speakers are off or too quiet),
+  or when the errors spread wider than 2 ms (a noisy room). It says which, and stores nothing.
+  Too few heard also says: if the click goes to headphones, hold one against the microphone.
+- **The file** is `<user config dir>/calibration.toml` (`DUET_CONFIG_DIR`, or the platform's, as
+  `duet.toml`), written whole by duet through a temporary file and a rename. duet writes it; a
+  person does not need to.
+- Refused before any device is opened: a take or file output with `--calibrate`, and `--calibrate`
+  with `--song`, `--seconds` or `--no-reconcile`.
 
 ### Capture of a linked take
 
@@ -187,8 +222,13 @@ a separate checkout with its own `CARGO_TARGET_DIR`, run with `DUET_E2E_BIN`).
 1. **A take recorded with `--song` has its offset to the frame.**
    - The offset and drift arithmetic (buffer timestamps to frames and ppm) has unit tests with a
      fake clock: known capture and playback instants give a known whole frame count and drift.
-   - **The speakers-on check** (owner, 2026-11-21): an e2e test in `crates/duet-e2e` runs
-     `duet record <take> --song <song> --seconds 6` with the click played aloud, so the input
+   - **Calibration** has unit tests with no device: ticks placed in a synthetic recording at a known
+     error, with noise and one tick missing, give that error within 0.05 ms; too few ticks heard,
+     or a spread past 2 ms, stores nothing; the file round-trips, replaces an entry by its key, and
+     misses a pair recorded at other rates.
+   - **The speakers-on check** (owner, 2026-11-21; ruling 18): an e2e test in `crates/duet-e2e`
+     runs `duet record --calibrate`, then `duet record <take> --song <song> --seconds 10` with the
+     click played aloud, so the input
      hears it. It checks the placement is `by: click` at `1.1.0`, then finds the ticks in the take
      (duet's own onset detection) and checks bar 1's tick falls within 2 ms of `at_secs`, and a
      later bar's within 2 ms of where `at_secs` and `clock_ppm` put it. It needs a quiet room and
@@ -210,10 +250,14 @@ a separate checkout with its own `CARGO_TARGET_DIR`, run with `DUET_E2E_BIN`).
 - Tests that run the binary go in `crates/duet-e2e`.
 - `record.rs`'s device code runs only on a machine with devices; what can be tested without one
   (the click's schedule, the offset arithmetic, every refusal) is.
-- **The offset is as exact as the host's stream timestamps.** cpal does not promise that input and
-  output timestamps share an origin on every host; on CoreAudio both are host time. On a host other
-  than macOS, `record --song` says the offset is as the system reports it, unchecked there. The
-  owner does not record through Bluetooth, whose reported latency is often wrong.
+- **Uncalibrated, the offset is only as exact as the host's stream timestamps.** cpal does not
+  promise that input and output timestamps share an origin on every host; on CoreAudio both are
+  host time. On a host other than macOS, `record --song` says the offset is as the system reports
+  it, unchecked there. On the owner's Mac mini the ticks are heard a constant 7.6 to 8.5 ms before
+  where the timestamps put them: cpal 0.18.2 counts each side's buffer and safety offset twice and leaves out the
+  output stream's latency, and the webcam input under-reports its own. Ruling 18 corrects this by
+  calibration; there is no coreaudio-rs dependency and no `unsafe`. The owner does not record
+  through Bluetooth, whose reported latency is often wrong; calibration's 400 ms search covers it.
 
 ## Left to the builder
 
@@ -234,3 +278,7 @@ changing what gets built.
 - **`for` may name a part not yet in `parts/`,** stated by `song show`, never refused; `link` on a
   linked take adds `--for` parts.
 - **A tempo disagreement** is more than 0.5 bpm, comparing the measured tempo (not the rounded one).
+- **Calibration's numbers** (ruling 18 leaves them open): 60 bpm, 12 ticks, a 1 s lead, a 400 ms
+  search, 10 ticks heard and a 2 ms spread to store, keyed by device names and rates.
+- **The placement does not record whether it was calibrated.** `record --song` says it; the song
+  document is unchanged. A later task can add it if a reader needs it.
