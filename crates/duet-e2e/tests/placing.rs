@@ -770,15 +770,20 @@ fn decoded(path: &Path) -> (Vec<f32>, u32) {
     (samples, rate)
 }
 
-/// Seconds into the take of the first sample after `from_secs` whose magnitude exceeds 8 times
-/// `floor`, the median absolute level of the take's first 100 ms.
-fn onset(samples: &[f32], rate: u32, from_secs: f64, floor: f32) -> Option<f64> {
-    let from = (from_secs.max(0.0) * f64::from(rate)).round() as usize;
-    samples
-        .iter()
-        .skip(from)
-        .position(|s| s.abs() > 8.0 * floor)
-        .map(|i| (from + i) as f64 / f64::from(rate))
+/// Seconds into the take where the tick expected at `at_secs` is heard: the loudest sample within
+/// 50 ms of it is the tick, heard at the first sample in the 20 ms up to and including that one
+/// whose magnitude exceeds 8 times `floor`, the median absolute level of the take's first 100 ms.
+/// Its own code, not calibration's, so the witness does not check duet by duet's own finder.
+fn onset(samples: &[f32], rate: u32, at_secs: f64, floor: f32) -> Option<f64> {
+    let r = f64::from(rate);
+    let from = ((at_secs - 0.05).max(0.0) * r).round() as usize;
+    let to = (((at_secs + 0.05) * r).round() as usize).min(samples.len());
+    let search = samples.get(from..to)?;
+    let loudest = (0..search.len()).max_by(|&a, &b| search[a].abs().total_cmp(&search[b].abs()))?;
+    let start = loudest.saturating_sub((0.02 * r).round() as usize);
+    (start..=loudest)
+        .find(|&i| search[i].abs() > 8.0 * floor)
+        .map(|i| (from + i) as f64 / r)
 }
 
 fn median_level(samples: &[f32]) -> f32 {
@@ -846,15 +851,14 @@ fn record_song_places_the_take_by_click_and_its_ticks_land_where_it_says() {
         "the take's first 100 ms are digital silence: the input heard nothing"
     );
 
-    let bar_one = onset(&samples, rate, p.at_secs - 0.05, floor).expect("bar 1's tick is heard");
+    let bar_one = onset(&samples, rate, p.at_secs, floor).expect("bar 1's tick is heard");
     let bar_one_ms = (bar_one - p.at_secs) * 1000.0;
     let between = song
         .composition
         .secs_between(Position::bar(1), Position::bar(3))
         .unwrap();
     let bar_three_at = p.at_secs + between * (1.0 + ppm / 1e6);
-    let bar_three =
-        onset(&samples, rate, bar_three_at - 0.05, floor).expect("bar 3's tick is heard");
+    let bar_three = onset(&samples, rate, bar_three_at, floor).expect("bar 3's tick is heard");
     let bar_three_ms = (bar_three - bar_three_at) * 1000.0;
     eprintln!(
         "record --song: at_secs {:.6} ({} frames at {rate} Hz), clock_ppm {ppm:.2}; bar 1's tick \

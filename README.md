@@ -807,14 +807,16 @@ a minute.
   timestamps put it, since what an ordinary microphone reports about its own latency cannot be
   relied on. It plays 12 ticks at 60 bpm from the default output after a second's silence, with
   the speakers on, and records the input (the default, or `--device`) into memory; nothing is
-  written to a take. Each tick is searched for within 400 ms of where the timestamps put it, and
-  heard where the input first rises past 8 times the floor of its first half second. When 10 or
+  written to a take. Each tick is searched for within 400 ms of where the timestamps put it; the
+  loudest sound there is the tick, heard where the input first rises past 8 times the floor of its
+  first half second in the 20 ms up to it. When 10 or
   more are heard within 2 ms of each other, their median error is kept for the pair, by the
   input's and the output's names and rates, in `calibration.toml` in the user config directory
   (`DUET_CONFIG_DIR`, or the platform's, as for `duet.toml`), in place of an earlier one; it says
   the pair, the offset, the ticks heard, their spread and the file. An input that heard nothing,
   too few ticks (if the click goes to headphones, hold one against the microphone), or ticks
-  spread wider than 2 ms stores nothing, and says which. `record --song` applies the pair's
+  spread wider than 2 ms (a noisy room, or the input's own noise suppression moving the sound)
+  stores nothing, and says which. `record --song` applies the pair's
   calibration, a whole number of frames, and says which it applies, or that there is none and
   the placement is as the devices report their latency. `--calibrate` with a take, `--song`,
   `--seconds` or `--no-reconcile` is refused before any device is opened, as is a

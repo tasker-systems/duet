@@ -5,9 +5,9 @@
 //! recording of channel 0 against where the streams' timestamps put them; and the measured
 //! offsets are kept in `<user config dir>/calibration.toml` ([`Calibrations`]), one per pair of
 //! input and output, by their names and rates. The numbers are the design's: 60 bpm in 4/4,
-//! 12 ticks after a 1 s lead, each searched for 400 ms either side, heard at the first sample past
-//! 8 times the floor (the median magnitude of the first 0.5 s), and stored when 10 or more are
-//! heard within 2 ms of each other.
+//! 12 ticks after a 1 s lead, each searched for 400 ms either side, the loudest sample there the
+//! tick, heard at the first sample past 8 times the floor (the median magnitude of the first
+//! 0.5 s) in the 20 ms up to it, and stored when 10 or more are heard within 2 ms of each other.
 
 use std::fmt;
 use std::fs;
@@ -30,6 +30,8 @@ pub(crate) const TICKS: usize = 12;
 pub(crate) const LEAD_SECS: f64 = 1.0;
 /// How far either side of where the timestamps put a tick it is searched for, in seconds.
 pub(crate) const SEARCH_SECS: f64 = 0.4;
+/// How far before a search's loudest sample its onset is looked for, in seconds.
+const ONSET_SECS: f64 = 0.02;
 /// The start of the recording the floor is measured over, in seconds.
 const FLOOR_SECS: f64 = 0.5;
 /// A tick is heard where the magnitude first exceeds this many times the floor.
@@ -92,7 +94,8 @@ impl fmt::Display for Unheard {
             Unheard::Spread { spread_ms } => write!(
                 f,
                 "the ticks heard lie {spread_ms:.2} ms apart, wider than {WIDEST_MS} ms: the room \
-                 may be too noisy; nothing is stored"
+                 may be noisy, or the input's own processing (noise suppression) may move the \
+                 sound; nothing is stored"
             ),
         }
     }
@@ -101,7 +104,8 @@ impl fmt::Display for Unheard {
 impl std::error::Error for Unheard {}
 
 /// The ticks in `samples` (channel 0 at `rate`), each searched for within [`SEARCH_SECS`] of its
-/// `expected_secs` and heard at the first sample whose magnitude exceeds 8 times the floor.
+/// `expected_secs` and heard at its [`onset`]: the first sample over 8 times the floor in the
+/// 20 ms up to the search's loudest sample.
 ///
 /// # Errors
 ///
@@ -121,7 +125,7 @@ pub(crate) fn heard(samples: &[f32], rate: u32, expected_secs: &[f64]) -> Result
         .filter_map(|&t| {
             let from = ((t - SEARCH_SECS).max(0.0) * rate_f).round() as usize;
             let to = (((t + SEARCH_SECS) * rate_f).round() as usize).min(samples.len());
-            let at = samples.get(from..to)?.iter().position(|s| s.abs() > over)?;
+            let at = onset(samples.get(from..to)?, rate, over)?;
             Some(((from + at) as f64 / rate_f - t) * 1000.0)
         })
         .collect();
@@ -147,6 +151,25 @@ pub(crate) fn heard(samples: &[f32], rate: u32, expected_secs: &[f64]) -> Result
         ticks: errors_ms.len(),
         spread_ms,
     })
+}
+
+/// Where in `search` a tick is heard: the loudest sample is the tick, and it is heard at the first
+/// sample over `over` in the [`ONSET_SECS`] up to and including that loudest one. None when none
+/// there is over it. A first crossing anywhere in the search is not used: on the owner's webcam a
+/// quieter sound precedes each tick by 100 to 400 ms, likely the input's own processing (design,
+/// amended in e7fa1d5).
+pub(crate) fn onset(search: &[f32], rate: u32, over: f32) -> Option<usize> {
+    let loudest = search
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))?
+        .0;
+    let back = (ONSET_SECS * f64::from(rate)).round() as usize;
+    let from = loudest.saturating_sub(back);
+    search[from..=loudest]
+        .iter()
+        .position(|s| s.abs() > over)
+        .map(|i| from + i)
 }
 
 /// An input and an output, by their names and rates: what a calibration is kept for.
@@ -310,6 +333,12 @@ mod tests {
     /// A recording: noise at 0.001 RMS throughout, and a tick of `ClickVoice`'s sound at each
     /// expected time plus `errors_ms[i]`, left out where it is `None`.
     fn recording(errors_ms: &[Option<f64>]) -> Vec<f32> {
+        recording_with(errors_ms, false)
+    }
+
+    /// As [`recording`], and with `pre_sound`, a quieter sound before each tick that sounds (about
+    /// 10 times the floor, 100 to 300 ms before it), as the owner's webcam records one.
+    fn recording_with(errors_ms: &[Option<f64>], pre_sound: bool) -> Vec<f32> {
         let expected = expected();
         let len = ((expected.last().unwrap() + 1.0) * f64::from(RATE)) as usize;
         let frames: Vec<(u64, bool)> = expected
@@ -330,6 +359,22 @@ mod tests {
         ClickVoice::new(Ticks { frames, bar_one }, RATE, 1).fill(&mut out);
         // A uniform noise of half-width a has an RMS of a / sqrt(3).
         let a = 0.001 * 3.0_f64.sqrt();
+        if pre_sound {
+            // The noise's median magnitude is a / 2: ten times it, for 5 ms of 1 kHz.
+            let level = 10.0 * a / 2.0;
+            // Only before a tick that sounds: the input's processing makes it from the tick.
+            for (i, t) in expected.iter().enumerate() {
+                if errors_ms[i].is_none() {
+                    continue;
+                }
+                let before = 0.1 + 0.2 * (i as f64 / 11.0);
+                let start = ((t - before) * f64::from(RATE)).round() as usize;
+                for n in 0..(RATE as usize / 200) {
+                    let phase = std::f64::consts::TAU * 1000.0 * n as f64 / f64::from(RATE);
+                    out[start + n] += (level * phase.sin()) as f32;
+                }
+            }
+        }
         let mut seed = 0x2545_f491_u64;
         for s in &mut out {
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
@@ -356,6 +401,16 @@ mod tests {
         assert_eq!(heard.ticks, 11);
         assert!((heard.offset_ms + 8.0).abs() < 0.05, "{heard:?}");
         assert!(heard.spread_ms < 0.05, "{heard:?}");
+    }
+
+    /// Fix round 1 (design amended in e7fa1d5): a quieter sound before each tick is not the tick.
+    #[test]
+    fn a_quieter_sound_before_each_tick_is_not_heard_as_it() {
+        let mut errors = vec![Some(-8.0); 12];
+        errors[5] = None;
+        let heard = heard(&recording_with(&errors, true), RATE, &expected()).expect("heard");
+        assert_eq!(heard.ticks, 11);
+        assert!((heard.offset_ms + 8.0).abs() < 0.05, "{heard:?}");
     }
 
     #[test]
