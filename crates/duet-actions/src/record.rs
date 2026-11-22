@@ -37,7 +37,7 @@ use crate::take::{at, span};
 use anyhow::{Context as _, Result, anyhow, bail};
 use calibrate::{Calibration, Calibrations, Pair};
 use clap::Args;
-use click::{ClickVoice, Fit, Line, Stamp, Ticks, clock_ppm, offset_frames};
+use click::{ClickVoice, Fit, Line, Stamp, Ticks, clock_ppm, frames_after};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use duet_capture::{Depth, TakeWriter, Written};
@@ -837,7 +837,8 @@ fn placement(
     if heard.end <= heard.bar_one {
         return None;
     }
-    let reported = offset_frames(&taken, &played, heard.bar_one, rate) as f64;
+    // Unrounded: the offset is rounded once, to a whole frame, after the calibration's shift.
+    let reported = frames_after(&taken, &played, heard.bar_one, rate).max(0.0);
     let shift = calibration_ms.map_or(0.0, |ms| ms / 1000.0 * f64::from(rate));
     let offset = (reported + shift).round();
     if offset < 0.0 || offset >= frames as f64 {
@@ -1437,6 +1438,23 @@ mod tests {
         assert_eq!(
             placement(96_000, 48_000, input, &heard(96_512), Some(-200.0), false),
             None
+        );
+    }
+
+    /// The plan's `round((reported_secs + offset_ms / 1000) × rate)`: one rounding, not two.
+    #[test]
+    fn the_calibrated_offset_is_rounded_once() {
+        let input = Some(line_from(0));
+        // Bar 1 played 5040.48 frames after the take's first frame; the pair is heard 0.04 of a
+        // frame later. Rounded once that is 5040.52, 5041; rounded twice it would be 5040.
+        let late = Heard {
+            line: Some(line_from(5_010_000)),
+            ..heard(96_512)
+        };
+        let placed = placement(96_000, 48_000, input, &late, Some(0.04 / 48.0), false).unwrap();
+        assert!(
+            (placed.at_secs * 48_000.0 - 5041.0).abs() < 1e-6,
+            "{placed:?}"
         );
     }
 

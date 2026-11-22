@@ -286,16 +286,6 @@ pub(crate) fn frames_after(input: &Line, output: &Line, out_frame: u64, nominal_
     since_input as f64 * r_in / 1e9
 }
 
-/// The whole frames from the take's frame 0 to where bar 1 played: [`frames_after`] bar 1's
-/// output frame, rounded.
-///
-/// Saturates at 0 when the take started after bar 1, which cannot happen when input starts
-/// first.
-pub(crate) fn offset_frames(input: &Line, output: &Line, bar_one: u64, nominal_in: u32) -> u64 {
-    let frames = frames_after(input, output, bar_one, nominal_in).round() as i128;
-    u64::try_from(frames.max(0)).unwrap_or(u64::MAX)
-}
-
 /// How fast the input's clock ran against the output's, in parts per million, from the two
 /// lines' slopes against their nominal rates: positive when the input's ran fast. None when
 /// either line is too short to measure.
@@ -434,11 +424,11 @@ mod tests {
                 nanos: 1_005_000_000,
             },
         ]);
-        assert_eq!(offset_frames(&input, &output, 4800, 48_000), 5040);
+        assert_eq!(frames_after(&input, &output, 4800, 48_000).round(), 5040.0);
     }
 
     #[test]
-    fn a_take_that_started_after_bar_one_saturates_at_zero() {
+    fn a_take_that_started_after_bar_one_has_bar_one_before_its_first_frame() {
         let input = line(&[
             Stamp {
                 frame: 0,
@@ -450,7 +440,7 @@ mod tests {
             },
         ]);
         let output = span(48_000, 1_000_000_000);
-        assert_eq!(offset_frames(&input, &output, 0, 48_000), 0);
+        assert!(frames_after(&input, &output, 0, 48_000) < 0.0);
     }
 
     #[test]
@@ -493,7 +483,7 @@ mod tests {
         // input's line puts its frame 0: 5040 frames.
         let input = measured(&settling(1_000_000_000, 10, 900_000));
         let output = measured(&settling(1_005_000_000, 10, 0));
-        assert_eq!(offset_frames(&input, &output, 4800, 48_000), 5040);
+        assert_eq!(frames_after(&input, &output, 4800, 48_000).round(), 5040.0);
         let ppm = clock_ppm(&input, &output, 48_000, 48_000).unwrap();
         assert!(ppm.abs() < 0.01, "{ppm}");
     }
