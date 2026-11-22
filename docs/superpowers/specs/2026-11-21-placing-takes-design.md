@@ -169,15 +169,27 @@ reports about its latency cannot be relied on. Inside or outside a project.
   so calibration measures the sound it anchors on. It records the default input (or
   `--device`) at the same time, into memory. Nothing is written to a take.
 - **Finds each tick in the recording.** It is searched for within 400 ms either side of where the
-  stream timestamps (with the drift fitted, as `--song` does) put it. The tick is the loudest
-  sample in that search, heard only when it exceeds 8 times the floor (the median magnitude of the
-  recording's first 0.5 s). It is heard at the first sample, in the 50 ms up to that loudest one (the tick and an input's
-  ramp, and a reflection louder than it),
-  whose magnitude reaches half of it: a point on the tick's own rise, the same however loud the
-  tick arrives, which a threshold against the floor is not on an input that ramps the sound up.
-  (A first crossing anywhere in the search is not used: on the owner's webcam a quieter sound
-  precedes each tick by 100 to 400 ms, likely the input's own processing.) The tick's error is
-  where it was heard less where the timestamps put it.
+  stream timestamps (with the drift fitted, as `--song` does) put it. The tick is located at the
+  loudest sample in that search, heard only when it exceeds 8 times the floor (the median magnitude
+  of the recording's first 0.5 s). The heard ticks are not timed one at a time by a threshold: on
+  the owner's webcam each tick arrives as a weak burst and a stronger one about 6 ms later, and
+  every per-tick rule tried (a first crossing of 8 times the floor, half the peak) flips between
+  the two from tick to tick. Instead:
+  - **Align.** Each heard tick's segment, from 40 ms before its loudest sample to 60 ms after, is
+    cross-correlated against the mean of the segments and moved to its correlation's peak (to a
+    fraction of a frame), the mean is taken again, and so on until no segment moves (at most 8
+    passes). This times each tick against the others by its whole response.
+  - **Time the mean once.** The ticks' onset is the first sample of the aligned mean, from its
+    segment's start to its loudest sample, whose magnitude exceeds 8 times the mean's own floor
+    (the median magnitude of its first 10 ms, ahead of the tick's rise, so averaging's quieter
+    noise counts).
+  - **Each tick's error** is that onset placed back through the tick's alignment, less where the
+    timestamps put it.
+
+  (A first crossing anywhere in the 400 ms search is not used: on the owner's webcam a quieter
+  sound precedes each tick by 45 to 400 ms, likely the input's own processing.) The segment's
+  40 ms lead leaves 10 ms of floor ahead of a rise as long as 25 ms (the build-up fix round 1
+  saw) and stays short of that pre-sound.
 - **Stores the median error** when at least 10 of the 12 ticks are heard and their errors lie within
   2 ms of each other, for the pair, keyed by the input's and the output's names and rates. A new
   calibration of the same pair replaces the old. Each entry has the offset in ms, how many ticks

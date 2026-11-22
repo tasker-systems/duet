@@ -809,7 +809,10 @@ a minute.
   after a second's silence, with the speakers on, and records the input (the default, or
   `--device`) into memory; nothing is written to a take. Each tick is searched for within 400 ms of where the timestamps put it; the
   loudest sound there is the tick, when it rises past 8 times the floor of the input's first half
-  second, heard where the input first reaches half of it in the 50 ms up to it. When 10 or more
+  second. The ticks heard are aligned to their mean response by cross-correlation, the mean is
+  timed once, where it first rises past 8 times its own floor, and each tick is heard where that
+  falls through its alignment, so an input that passes a tick on in two bursts does not move it
+  from one to the other. When 10 or more
   are heard within 2 ms of each other, their median error is kept for the pair, by the
   input's and the output's names and rates, in `calibration.toml` in the user config directory
   (`DUET_CONFIG_DIR`, or the platform's, as for `duet.toml`), in place of an earlier one; it says

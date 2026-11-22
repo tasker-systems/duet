@@ -6,9 +6,13 @@
 //! offsets are kept in `<user config dir>/calibration.toml` ([`Calibrations`]), one per pair of
 //! input and output, by their names and rates. The numbers are the design's: 60 bpm in 4/4,
 //! 12 ticks after a 1 s lead, each searched for 400 ms either side, the loudest sample there the
-//! tick when it exceeds 8 times the floor (the median magnitude of the first 0.5 s), heard at the
-//! first sample reaching half of it in the 50 ms up to it, and stored when 10 or more are heard
-//! within 2 ms of each other.
+//! tick when it exceeds 8 times the floor (the median magnitude of the first 0.5 s), and stored
+//! when 10 or more are heard within 2 ms of each other. The ticks are not timed one at a time by
+//! a threshold: each heard tick's segment is aligned to the ticks' mean response by
+//! cross-correlation, the mean is timed once (its first sample over 8 times its own floor), and
+//! each tick is heard where that onset falls through its alignment (design, amended in fix
+//! round 4). An input that passes a tick on in two bursts, as the owner's webcam does, moves no
+//! tick from one burst to the other that way.
 
 use std::fmt;
 use std::fs;
@@ -31,11 +35,25 @@ pub(crate) const TICKS: usize = 12;
 pub(crate) const LEAD_SECS: f64 = 1.0;
 /// How far either side of where the timestamps put a tick it is searched for, in seconds.
 pub(crate) const SEARCH_SECS: f64 = 0.4;
-/// How far before a search's loudest sample its half-peak point is looked for, in seconds.
-const ONSET_SECS: f64 = 0.05;
+/// How far before a heard tick's loudest sample its segment starts, in seconds: room for the
+/// tick's rise and an input's ramp ahead of it, and how far the first alignment looks either way,
+/// so a tick whose loudest sample is a reflection up to this late is still aligned.
+const SEGMENT_BEFORE_SECS: f64 = 0.04;
+/// How far after a heard tick's loudest sample its segment ends, in seconds: the tick dies away.
+const SEGMENT_AFTER_SECS: f64 = 0.06;
+/// How far either way of where it lies the alignment looks for a segment after its first pass.
+const SETTLE_SECS: f64 = 0.002;
+/// The most passes of the alignment.
+const PASSES: usize = 8;
+/// A segment has settled when a pass moves it by no more than this, in frames.
+const SETTLED_FRAMES: f64 = 0.05;
+/// The start of the aligned mean its floor is measured over, in seconds: the first quarter of the
+/// segment's lead, ahead of a rise as long as 25 ms.
+const LEAD_IN_SECS: f64 = 0.01;
 /// The start of the recording the floor is measured over, in seconds.
 const FLOOR_SECS: f64 = 0.5;
-/// A tick is heard where the magnitude first exceeds this many times the floor.
+/// A tick is heard when its loudest sample exceeds this many times the floor, and the ticks' mean
+/// at its first sample exceeding this many times its own.
 const OVER_FLOOR: f32 = 8.0;
 /// The fewest ticks heard that a calibration is stored from.
 const FEWEST: usize = 10;
@@ -110,38 +128,56 @@ impl fmt::Display for Unheard {
 
 impl std::error::Error for Unheard {}
 
-/// The ticks in `samples` (channel 0 at `rate`), each searched for within [`SEARCH_SECS`] of its
-/// `expected_secs` and heard at its [`onset`]: the loudest sample there, when it exceeds 8 times
-/// the floor, is the tick, heard at the first sample reaching half of it in the 50 ms up to it.
+/// The ticks in `samples` (channel 0 at `rate`), against where the timestamps put them
+/// (`expected_secs`). Each is located by its loudest sample within [`SEARCH_SECS`], heard when
+/// that exceeds 8 times the floor; the heard ticks are aligned to their mean response
+/// ([`align`]), and that mean is timed once ([`onset`]). Each tick's error is the mean's onset
+/// placed back through that tick's alignment, less its expected time.
 ///
 /// # Errors
 ///
 /// [`Unheard`]: a silent floor, fewer than ten ticks heard, or their errors spread past 2 ms.
 pub(crate) fn heard(samples: &[f32], rate: u32, expected_secs: &[f64]) -> Result<Heard, Unheard> {
     let rate_f = f64::from(rate);
-    let floor_end = ((FLOOR_SECS * rate_f) as usize).min(samples.len());
-    let mut levels: Vec<f32> = samples[..floor_end].iter().map(|s| s.abs()).collect();
-    levels.sort_by(f32::total_cmp);
-    let floor = levels.get(levels.len() / 2).copied().unwrap_or(0.0);
+    let floor = floor(&samples[..((FLOOR_SECS * rate_f) as usize).min(samples.len())]);
     if floor <= 0.0 {
         return Err(Unheard::Silent);
     }
     let over = OVER_FLOOR * floor;
-    let mut errors_ms: Vec<f64> = expected_secs
+    // Locate: each tick's loudest sample in its search, with the time it was expected at.
+    let located: Vec<(usize, f64)> = expected_secs
         .iter()
         .filter_map(|&t| {
             let from = ((t - SEARCH_SECS).max(0.0) * rate_f).round() as usize;
             let to = (((t + SEARCH_SECS) * rate_f).round() as usize).min(samples.len());
-            let at = onset(samples.get(from..to)?, rate, over)?;
-            Some(((from + at) as f64 / rate_f - t) * 1000.0)
+            let (loudest, peak) = samples
+                .get(from..to)?
+                .iter()
+                .map(|s| s.abs())
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(&b.1))?;
+            (peak > over).then_some((from + loudest, t))
         })
         .collect();
-    if errors_ms.len() < FEWEST {
-        return Err(Unheard::TooFew {
-            heard: errors_ms.len(),
-            of: expected_secs.len(),
-        });
+    let too_few = |heard| Unheard::TooFew {
+        heard,
+        of: expected_secs.len(),
+    };
+    if located.len() < FEWEST {
+        return Err(too_few(located.len()));
     }
+    // Align: each segment starts its lead before its tick's loudest sample.
+    let lead = (SEGMENT_BEFORE_SECS * rate_f).round();
+    let len = (lead + (SEGMENT_AFTER_SECS * rate_f).round()) as usize;
+    let mut starts: Vec<f64> = located.iter().map(|&(at, _)| at as f64 - lead).collect();
+    let mean = align(samples, &mut starts, len, rate);
+    // Time the mean once, and place it back through each tick's alignment.
+    let at = onset(&mean, rate).ok_or_else(|| too_few(0))?;
+    let mut errors_ms: Vec<f64> = starts
+        .iter()
+        .zip(&located)
+        .map(|(start, &(_, t))| ((start + at as f64) / rate_f - t) * 1000.0)
+        .collect();
     errors_ms.sort_by(f64::total_cmp);
     let spread_ms = errors_ms[errors_ms.len() - 1] - errors_ms[0];
     if spread_ms > WIDEST_MS {
@@ -160,29 +196,130 @@ pub(crate) fn heard(samples: &[f32], rate: u32, expected_secs: &[f64]) -> Result
     })
 }
 
-/// Where in `search` a tick is heard: the loudest sample is the tick, heard only when it exceeds
-/// `over` (8 times the floor), at the first sample in the [`ONSET_SECS`] up to and including that
-/// loudest one whose magnitude reaches half of it. Half the peak is a point on the tick's own rise,
-/// the same however loud it arrives; a threshold against the floor is not, on an input that ramps
-/// the sound up over 25 ms as the owner's webcam does. A first crossing anywhere in the search is
-/// not used either: a quieter sound precedes each tick there by 100 to 400 ms (design, amended in
-/// e7fa1d5 and 2aaa244). The 50 ms look-back reaches a tick's rise when the loudest sample is a
-/// reflection after it (14cb53c).
-pub(crate) fn onset(search: &[f32], rate: u32, over: f32) -> Option<usize> {
-    let (loudest, peak) = search
+/// The median magnitude of `samples`: a floor.
+fn floor(samples: &[f32]) -> f32 {
+    let mut levels: Vec<f32> = samples.iter().map(|s| s.abs()).collect();
+    levels.sort_by(f32::total_cmp);
+    levels.get(levels.len() / 2).copied().unwrap_or(0.0)
+}
+
+/// Aligns the segments of `samples` that begin at `starts` (in frames, a fraction allowed), each
+/// `len` long, to their mean, and gives that mean. Each segment is cross-correlated against the
+/// mean and moved to its correlation's peak, to a fraction of a frame by a parabola through the
+/// peak and its neighbours; the mean is taken again, and so on, until no segment moves by more
+/// than [`SETTLED_FRAMES`] or after [`PASSES`] passes. The first pass looks as far as
+/// [`SEGMENT_BEFORE_SECS`] either way, the rest [`SETTLE_SECS`]. The median move of each pass
+/// is taken back off every segment, so the mean stays where the loudest samples put it. This
+/// times each tick against the others by its whole response, not by any one point on it.
+fn align(samples: &[f32], starts: &mut [f64], len: usize, rate: u32) -> Vec<f32> {
+    let rate_f = f64::from(rate);
+    let wide = (SEGMENT_BEFORE_SECS * rate_f).round() as isize;
+    let narrow = (SETTLE_SECS * rate_f).round() as isize;
+    for pass in 0..PASSES {
+        let mean = mean_of(samples, starts, len);
+        let reach = if pass == 0 { wide } else { narrow };
+        let mut moved: Vec<f64> = starts
+            .iter()
+            .map(|&start| best_lag(samples, start.round() as isize, &mean, reach) - start)
+            .collect();
+        let mut sorted = moved.clone();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted[sorted.len() / 2];
+        for m in &mut moved {
+            *m -= median;
+        }
+        for (start, m) in starts.iter_mut().zip(&moved) {
+            *start += m;
+        }
+        if moved.iter().all(|m| m.abs() <= SETTLED_FRAMES) {
+            break;
+        }
+    }
+    mean_of(samples, starts, len)
+}
+
+/// The mean of the segments of `samples` beginning at `starts`, each `len` long, read between
+/// frames by a straight line, and as silence outside the recording.
+fn mean_of(samples: &[f32], starts: &[f64], len: usize) -> Vec<f32> {
+    let at = |i: isize| {
+        usize::try_from(i)
+            .ok()
+            .and_then(|i| samples.get(i))
+            .copied()
+            .unwrap_or(0.0)
+    };
+    let mut mean = vec![0.0_f64; len];
+    for &start in starts {
+        let whole = start.floor();
+        let part = start - whole;
+        let whole = whole as isize;
+        for (n, m) in mean.iter_mut().enumerate() {
+            let i = whole + n as isize;
+            *m += f64::from(at(i)) * (1.0 - part) + f64::from(at(i + 1)) * part;
+        }
+    }
+    let count = starts.len().max(1) as f64;
+    mean.into_iter().map(|m| (m / count) as f32).collect()
+}
+
+/// Where in `samples` the segment best matching `mean` begins, within `reach` frames of
+/// `around`: the peak of their cross-correlation, to a fraction of a frame.
+fn best_lag(samples: &[f32], around: isize, mean: &[f32], reach: isize) -> f64 {
+    // The stretch of the recording every lag reads, silence outside it.
+    let from = around - reach;
+    let width = mean.len() + 2 * reach as usize;
+    let stretch: Vec<f32> = (0..width as isize)
+        .map(|n| {
+            usize::try_from(from + n)
+                .ok()
+                .and_then(|i| samples.get(i))
+                .copied()
+                .unwrap_or(0.0)
+        })
+        .collect();
+    let correlation: Vec<f64> = (0..=2 * reach as usize)
+        .map(|k| {
+            stretch[k..k + mean.len()]
+                .iter()
+                .zip(mean)
+                .map(|(a, b)| f64::from(*a) * f64::from(*b))
+                .sum()
+        })
+        .collect();
+    let (k, _) = correlation
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .unwrap_or((reach as usize, &0.0));
+    let part = match (k.checked_sub(1), correlation.get(k + 1)) {
+        (Some(before), Some(&after)) => {
+            let (before, here) = (correlation[before], correlation[k]);
+            let bend = before - 2.0 * here + after;
+            if bend < 0.0 {
+                0.5 * (before - after) / bend
+            } else {
+                0.0
+            }
+        }
+        _ => 0.0,
+    };
+    (from + k as isize) as f64 + part
+}
+
+/// Where the aligned `mean` of the ticks' segments is heard: the first sample, from the
+/// segment's start to the mean's loudest, whose magnitude exceeds 8 times the mean's own floor
+/// (the median magnitude of its first [`LEAD_IN_SECS`]). The mean's floor is lower than the
+/// recording's, since averaging quietens noise that is not the tick's, so the onset is found
+/// lower on the tick's rise than a single tick's could be. None when nothing exceeds it.
+fn onset(mean: &[f32], rate: u32) -> Option<usize> {
+    let lead_in = ((LEAD_IN_SECS * f64::from(rate)).round() as usize).min(mean.len());
+    let over = OVER_FLOOR * floor(&mean[..lead_in]);
+    let (loudest, _) = mean
         .iter()
         .map(|s| s.abs())
         .enumerate()
         .max_by(|a, b| a.1.total_cmp(&b.1))?;
-    if peak <= over {
-        return None;
-    }
-    let back = (ONSET_SECS * f64::from(rate)).round() as usize;
-    let from = loudest.saturating_sub(back);
-    search[from..=loudest]
-        .iter()
-        .position(|s| s.abs() >= peak / 2.0)
-        .map(|i| from + i)
+    mean[..=loudest].iter().position(|s| s.abs() > over)
 }
 
 /// An input and an output, by their names and rates: what a calibration is kept for.
@@ -415,7 +552,7 @@ mod tests {
         errors[5] = None;
         let heard = heard(&recording(&errors), RATE, &expected()).expect("heard");
         assert_eq!(heard.ticks, 11);
-        // A sharp attack: half its peak is within 0.3 ms of where it starts (fix round 2).
+        // A clean, sharp attack: heard within 0.3 ms of where it starts (fix rounds 2 and 4).
         assert!((heard.offset_ms + 8.0).abs() < 0.3, "{heard:?}");
         assert!(heard.spread_ms < 0.05, "{heard:?}");
     }
@@ -427,7 +564,7 @@ mod tests {
         errors[5] = None;
         let heard = heard(&recording_with(&errors, true), RATE, &expected()).expect("heard");
         assert_eq!(heard.ticks, 11);
-        // A sharp attack: half its peak is within 0.3 ms of where it starts (fix round 2).
+        // A clean, sharp attack: heard within 0.3 ms of where it starts (fix rounds 2 and 4).
         assert!((heard.offset_ms + 8.0).abs() < 0.3, "{heard:?}");
     }
 
@@ -450,14 +587,10 @@ mod tests {
     }
 
     /// Ruling of fix round 2 (design amended in 2aaa244): a tick whose sound ramps up is heard at
-    /// the same point on its rise however loud it arrives.
+    /// the same point on its rise however loud it arrives. Since fix round 4 that point is where
+    /// the ramp leaves the ticks' mean's floor, near its start, not where it reaches half its peak.
     #[test]
     fn ramped_ticks_at_levels_four_times_apart_are_heard_at_one_point_on_their_rise() {
-        // Where on its own rise a ramped tick reaches half its peak: the known lag of its sound.
-        let shape = ramped_tick(1.0);
-        let peak = shape.iter().fold(0.0_f32, |p, s| p.max(s.abs()));
-        let lag_ms = shape.iter().position(|s| s.abs() >= peak / 2.0).unwrap() as f64 * 1000.0
-            / f64::from(RATE);
         let expected = expected();
         // Noise only, then a pre-sound before every tick, and the ramped ticks 8 ms early.
         let mut out = recording(&[None; 12]);
@@ -471,13 +604,56 @@ mod tests {
         }
         let heard = heard(&out, RATE, &expected).expect("heard");
         assert_eq!(heard.ticks, 12);
-        // The half-peak point falls on a crest of the tone, 0.284 ms apart at 1760 Hz: noise can
-        // move it a crest either way (fix round 3).
         assert!(heard.spread_ms <= 1.0, "{heard:?}");
-        assert!(
-            (heard.offset_ms - (-8.0 + lag_ms)).abs() < 0.1,
-            "{heard:?}, the half-peak lag {lag_ms:.3} ms"
-        );
+        // The ramp's start, to where it first rises out of the mean's floor.
+        assert!((heard.offset_ms + 8.0).abs() < 0.3, "{heard:?}");
+    }
+
+    /// A burst of the downbeat's 1760 Hz tone at `level`, starting at full level and dying away
+    /// over `secs`: a sharp attack.
+    fn burst(level: f64, secs: f64) -> impl Iterator<Item = f32> {
+        let rate = f64::from(RATE);
+        let len = (secs * rate) as usize;
+        (0..len).map(move |n| {
+            let left = 1.0 - n as f64 / len as f64;
+            let phase = std::f64::consts::TAU * 1760.0 * n as f64 / rate;
+            (level * left * left * phase.sin()) as f32
+        })
+    }
+
+    /// Ruling of fix round 4: a tick as the owner's webcam passes it on, a weak burst and then a
+    /// stronger one 6 ms later, whose first burst lies near half the second's peak, is heard at
+    /// its first burst's onset however its bursts' levels vary from tick to tick.
+    #[test]
+    fn two_bursts_a_tick_are_heard_at_the_first_bursts_onset() {
+        let expected = expected();
+        let mut out = recording(&[None; 12]);
+        // A pre-sound 45 ms before every tick, 5 ms of 1 kHz at 10 times the floor.
+        let level = 10.0 * 0.001 * 3.0_f64.sqrt() / 2.0;
+        for t in &expected {
+            let start = ((t - 0.008 - 0.045) * f64::from(RATE)).round() as usize;
+            for n in 0..(RATE as usize / 200) {
+                let phase = std::f64::consts::TAU * 1000.0 * n as f64 / f64::from(RATE);
+                out[start + n] += (level * phase.sin()) as f32;
+            }
+        }
+        for (i, t) in expected.iter().enumerate() {
+            // The second burst at 0.02 to 0.04 (2 times apart); the first at 0.4 to 0.6 of it.
+            let main = 0.02 + 0.02 * ((i * 5) % 12) as f64 / 11.0;
+            let first = main * (0.4 + 0.2 * ((i * 7) % 12) as f64 / 11.0);
+            let start = ((t - 0.008) * f64::from(RATE)).round() as usize;
+            for (n, s) in burst(first, 0.004).enumerate() {
+                out[start + n] += s;
+            }
+            let later = start + (0.006 * f64::from(RATE)) as usize;
+            for (n, s) in burst(main, 0.03).enumerate() {
+                out[later + n] += s;
+            }
+        }
+        let heard = heard(&out, RATE, &expected).expect("heard");
+        assert_eq!(heard.ticks, 12);
+        assert!((heard.offset_ms + 8.0).abs() < 0.3, "{heard:?}");
+        assert!(heard.spread_ms <= 1.0, "{heard:?}");
     }
 
     #[test]

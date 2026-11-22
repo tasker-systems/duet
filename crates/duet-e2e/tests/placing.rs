@@ -770,24 +770,17 @@ fn decoded(path: &Path) -> (Vec<f32>, u32) {
     (samples, rate)
 }
 
-/// Seconds into the take where the tick expected at `at_secs` is heard: the loudest sample within
-/// 50 ms of it is the tick, heard only when it exceeds 8 times `floor` (the median absolute level of
-/// the take's first 100 ms), at the first sample in the 50 ms up to and including that one whose
-/// magnitude reaches half of it. Its own code, not calibration's, so the witness does not check
-/// duet by duet's own finder.
+/// Seconds into the take where the tick expected at `at_secs` is heard: the first sample from
+/// 50 ms before it whose magnitude exceeds 8 times `floor` (the median absolute level of the
+/// take's first 100 ms), the rule Task 7 measured the stamps' error by. Its own code, not
+/// calibration's, so the witness does not check duet by duet's own finder.
 fn onset(samples: &[f32], rate: u32, at_secs: f64, floor: f32) -> Option<f64> {
     let r = f64::from(rate);
     let from = ((at_secs - 0.05).max(0.0) * r).round() as usize;
-    let to = (((at_secs + 0.05) * r).round() as usize).min(samples.len());
-    let search = samples.get(from..to)?;
-    let loudest = (0..search.len()).max_by(|&a, &b| search[a].abs().total_cmp(&search[b].abs()))?;
-    let peak = search[loudest].abs();
-    if peak <= 8.0 * floor {
-        return None;
-    }
-    let start = loudest.saturating_sub((0.05 * r).round() as usize);
-    (start..=loudest)
-        .find(|&i| search[i].abs() >= peak / 2.0)
+    samples
+        .iter()
+        .skip(from)
+        .position(|s| s.abs() > 8.0 * floor)
         .map(|i| (from + i) as f64 / r)
 }
 
