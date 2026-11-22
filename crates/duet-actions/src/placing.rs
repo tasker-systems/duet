@@ -230,23 +230,10 @@ pub fn latest_analysis(
 }
 
 /// The songs under `root`'s `songs/` that link the take with this digest, each by its name and
-/// its folder (`songs/<song>`), sorted by name. A folder with no `song.duet`, or whose name is
-/// no song's, is no song and is passed over.
-///
-/// # Errors
-///
-/// When `songs/` cannot be listed, or a song does not read; the message names the song.
-pub fn songs_linking(root: &Path, digest: &TakeDigest) -> Result<Vec<(Name, PathBuf)>> {
-    let (found, unreadable) = scan_linking(root, digest)?;
-    match unreadable.into_iter().next() {
-        Some((_, why)) => Err(why),
-        None => Ok(found),
-    }
-}
-
-/// Like [`songs_linking`], but a song that does not read does not stop the search: the songs
-/// that link `digest` come back with the songs that could not be read, each with its name and
-/// why, so the caller can say so and go on.
+/// its folder (`songs/<song>`), sorted by name; a folder with no `song.duet`, or whose name is
+/// no song's, is no song and is passed over. A song that does not read does not stop the search:
+/// the songs that could not be read come back with it, each with its name and why, so the caller
+/// can say so and go on.
 ///
 /// # Errors
 ///
@@ -579,7 +566,9 @@ mod tests {
         write_song(&root, "amazing-grace", &[("b", DIGEST), ("c", OTHER)]);
         write_song(&root, "unrelated", &[("c", OTHER)]);
         fs::create_dir_all(root.join("songs").join("empty")).expect("a folder");
-        let found = songs_linking(&root, &digest(DIGEST)).expect("reads");
+        let (found, unreadable) =
+            songs_linking_or_unreadable(&root, &digest(DIGEST)).expect("lists");
+        assert!(unreadable.is_empty());
         assert_eq!(
             found,
             [
@@ -591,13 +580,18 @@ mod tests {
             ]
         );
         assert!(
-            songs_linking(&scratch("none"), &digest(DIGEST))
-                .expect("reads")
+            songs_linking_or_unreadable(&scratch("none"), &digest(DIGEST))
+                .expect("lists")
+                .0
                 .is_empty()
         );
 
         fs::write(root.join("songs/unrelated/song.duet"), "not a song").expect("writes");
-        let err = songs_linking(&root, &digest(DIGEST)).expect_err("a song that does not read");
-        assert!(format!("{err:#}").contains("unrelated"), "{err:#}");
+        let (found, unreadable) =
+            songs_linking_or_unreadable(&root, &digest(DIGEST)).expect("lists");
+        assert_eq!(found.len(), 2, "the readable songs are still found");
+        assert_eq!(unreadable.len(), 1);
+        assert_eq!(unreadable[0].0, name("unrelated"));
+        assert!(unreadable[0].1.contains("unrelated"), "{}", unreadable[0].1);
     }
 }

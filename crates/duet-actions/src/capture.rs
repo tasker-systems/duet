@@ -334,8 +334,18 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     );
     // A take that songs link is placed on their bars, and its disagreements with them stated,
     // before the part is built, so the part states them too.
-    let placed_said = place_in_songs(ctx, &captured.analysis)?;
-    let part_said = [said.clone(), vec![lead_in.clone()], placed_said].concat();
+    let project_doc = match ctx.project() {
+        Some(project) => Some(crate::take::read_project(&project.root)?),
+        None => None,
+    };
+    let songs = match &project_doc {
+        Some(doc) => place_in_songs(ctx, &captured.analysis, doc)?,
+        None => SongPlacing {
+            lines: Vec::new(),
+            writes: Vec::new(),
+        },
+    };
+    let part_said = [said.clone(), vec![lead_in.clone()], songs.lines.clone()].concat();
     // The part is the take's reading: a one-take comp, naming the take by its digest and the
     // reader that read it. A take that held no audio has no digest, and its part was made by
     // capture from nothing.
@@ -370,6 +380,7 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
         eprintln!("{advice}");
     }
     write_all(&[(&outputs.part, &part), (&outputs.analysis, &analysis)])?;
+    songs.write(ctx);
     if let Some(performance) = performance {
         ctx.wrote(&performance.keep(), false)?;
     }
@@ -407,50 +418,79 @@ pub fn run(ctx: &Context, command: CaptureCommand) -> Result<()> {
     ctx.wrote(&outputs.score, false)
 }
 
-/// Places the analysed take on the bars of each song in the project that links it (by its
-/// digest), and returns the lines to state: for each song, the placement made, when one was,
-/// and every disagreement with the song's composition at the placement (songs design §4,
-/// "Estimate, then compare"; the placing-takes design, "Capture of a linked take").
+/// The placing a capture works out for the songs that link its take: the lines to state, and the
+/// song writes still to make, which wait until the capture's own outputs are on disk.
+struct SongPlacing<'a> {
+    lines: Vec<String>,
+    writes: Vec<SongWrite<'a>>,
+}
+
+/// One song's placement, not yet written.
+struct SongWrite<'a> {
+    dir: PathBuf,
+    take: &'a duet_schemas::project::ProjectTake,
+    placed: duet_schemas::song::Placed,
+    /// The line to state if the write is refused.
+    refused: String,
+}
+
+impl SongPlacing<'_> {
+    /// Writes each placement through the song's own write; one that is refused is stated on
+    /// stderr, and the other songs are still written.
+    fn write(self, ctx: &Context) {
+        for write in self.writes {
+            if let Err(e) = crate::song::link_take(ctx, &write.dir, write.take, Some(write.placed))
+            {
+                eprintln!("{}: {e:#}", write.refused);
+            }
+        }
+    }
+}
+
+/// Works out the placing of the analysed take on the bars of each song in the project that links
+/// it (by its digest): the lines to state, for each song, the placement made, when one was, and
+/// every disagreement with the song's composition at the placement (songs design §4, "Estimate,
+/// then compare"; the placing-takes design, "Capture of a linked take").
 ///
-/// An unplaced or `estimated` link is placed from this analysis's estimate and written through
-/// the song's own write ([`crate::song::link_take`]); a `click` or `set` one is kept, and the song
-/// is not written. Neither the composition nor the analysis changes. Outside a project, or for
-/// audio no take of the project holds, nothing is placed and nothing said. A linking song that
-/// refuses the placement or cannot be written is named in a line, and the other songs are still
-/// placed. A song under `songs/` that does not read stops the search for linking songs
-/// ([`songs_linking`](crate::placing::songs_linking)): the line names it, and no song is placed.
+/// An unplaced or `estimated` link is to be placed from this analysis's estimate and written
+/// through the song's own write ([`crate::song::link_take`]) by [`SongPlacing::write`], after the
+/// capture's own outputs are written; a `click` or `set` one is kept, and the song is not
+/// written. Neither the composition nor the analysis changes. Outside a project, or for audio no
+/// take of the project holds, nothing is placed and nothing said. A linking song that refuses
+/// the placement or cannot be written is named in a line, and the other songs are still placed.
+/// A song under `songs/` that does not read is named in a line too (it may link the take), and
+/// every song that does read is still placed
+/// ([`songs_linking_or_unreadable`](crate::placing::songs_linking_or_unreadable)).
 ///
 /// # Errors
 ///
 /// When the project's document does not read.
-fn place_in_songs(ctx: &Context, analysis: &duet_capture::Analysis) -> Result<Vec<String>> {
+fn place_in_songs<'a>(
+    ctx: &Context,
+    analysis: &duet_capture::Analysis,
+    doc: &'a Document<duet_schemas::Project>,
+) -> Result<SongPlacing<'a>> {
     use crate::placing::{
-        Replace, by_capture, disagreements, estimate, placed_said, songs_linking,
+        Replace, by_capture, disagreements, estimate, placed_said, songs_linking_or_unreadable,
     };
 
-    let (Some(project), Some(audio)) = (ctx.project(), analysis.take.as_ref()) else {
-        return Ok(Vec::new());
+    let mut plan = SongPlacing {
+        lines: Vec::new(),
+        writes: Vec::new(),
     };
-    let doc = crate::take::read_project(&project.root)?;
+    let (Some(project), Some(audio)) = (ctx.project(), analysis.take.as_ref()) else {
+        return Ok(plan);
+    };
     let Some(take) = doc
         .body
         .takes
         .iter()
         .find(|t| t.take.digest == audio.digest)
     else {
-        return Ok(Vec::new());
+        return Ok(plan);
     };
-    let songs = match songs_linking(&project.root, &audio.digest) {
-        Ok(songs) => songs,
-        Err(e) => {
-            return Ok(vec![format!(
-                "the take {} was placed on no song's bars: {e:#}",
-                take.name
-            )]);
-        }
-    };
+    let (songs, unreadable) = songs_linking_or_unreadable(&project.root, &audio.digest)?;
     let estimated = estimate(analysis);
-    let mut lines = Vec::new();
     for (song, dir) in songs {
         let not_placed = |e: anyhow::Error| {
             format!(
@@ -461,7 +501,7 @@ fn place_in_songs(ctx: &Context, analysis: &duet_capture::Analysis) -> Result<Ve
         let held = match crate::song::read_song(&dir) {
             Ok(doc) => doc.body,
             Err(e) => {
-                lines.push(not_placed(e));
+                plan.lines.push(not_placed(e));
                 continue;
             }
         };
@@ -472,24 +512,33 @@ fn place_in_songs(ctx: &Context, analysis: &duet_capture::Analysis) -> Result<Ve
         let placement = match by_capture(before.as_ref(), estimated) {
             Replace::Keep(_) => before.unwrap_or(estimated),
             Replace::Place(placed) => {
-                if let Err(e) = crate::song::link_take(ctx, &dir, take, Some(placed)) {
-                    lines.push(not_placed(e));
-                    continue;
-                }
                 if before != Some(placed) {
-                    lines.push(placed_said(&song, &link.take, before.as_ref(), &placed));
+                    plan.lines
+                        .push(placed_said(&song, &link.take, before.as_ref(), &placed));
                 }
+                plan.writes.push(SongWrite {
+                    dir,
+                    take,
+                    placed,
+                    refused: format!("the take {} was not placed on {song}'s bars", take.name),
+                });
                 placed
             }
         };
-        lines.extend(disagreements(
+        plan.lines.extend(disagreements(
             &song,
             &held.composition,
             &placement,
             analysis,
         ));
     }
-    Ok(lines)
+    for (name, why) in unreadable {
+        plan.lines.push(format!(
+            "songs/{name} could not be read, so the take {} may be linked there and was not placed on it: {why}",
+            take.name
+        ));
+    }
+    Ok(plan)
 }
 
 /// Where a capture's outputs go in a project, as their stem: `-o`'s, or else

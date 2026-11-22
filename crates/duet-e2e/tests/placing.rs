@@ -631,6 +631,32 @@ fn a_song_that_cannot_be_written_is_named_and_the_other_is_still_placed() {
 }
 
 #[test]
+fn a_song_that_does_not_read_is_stated_and_the_linking_song_is_still_placed() {
+    let root = with_song_and_take("placing-capture-unreadable");
+    ok(&duet(&root, &["song", "link", "wayfaring", "beat"]), "link");
+    let broken = root.join("songs/broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("song.duet"), "not a song").unwrap();
+
+    let out = duet(&root, &["capture", "rhythm", "beat"]);
+    ok(&out, "the capture itself succeeds");
+    let said = stderr(&out);
+    assert_eq!(
+        placed(&root).by,
+        By::Estimated,
+        "the linking song is placed"
+    );
+    assert!(
+        said.contains("placed the take beat on wayfaring's bars"),
+        "{said}"
+    );
+    assert!(
+        said.contains("songs/broken could not be read, so the take may be linked there and was not placed on it"),
+        "names the unreadable song: {said}"
+    );
+}
+
+#[test]
 fn a_given_tempo_places_the_link_and_is_stated_as_given() {
     let root = with_song_at_and_take("placing-capture-given", "100");
     ok(&duet(&root, &["song", "link", "wayfaring", "beat"]), "link");
