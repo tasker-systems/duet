@@ -513,8 +513,12 @@ fn place_in_songs<'a>(
             Replace::Keep(_) => before.unwrap_or(estimated),
             Replace::Place(placed) => {
                 if before != Some(placed) {
-                    plan.lines
-                        .push(placed_said(&song, &link.take, before.as_ref(), &placed));
+                    let mut said = placed_said(&song, &link.take, before.as_ref(), &placed);
+                    // The placement is `estimated` either way; say when the tempo was given.
+                    if matches!(analysis.timing.tempo_bpm, duet_capture::Origin::Given(_)) {
+                        said.push_str(" (tempo given)");
+                    }
+                    plan.lines.push(said);
                 }
                 plan.writes.push(SongWrite {
                     dir,

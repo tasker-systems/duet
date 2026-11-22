@@ -82,8 +82,8 @@ pub(crate) fn describe(placed: &Placed) -> String {
 
 /// States a new placement and, when the link had one, what moved:
 /// `placed the take wayfaring on wayfaring-stranger's bars, estimated: bar 1.1.0 at 1.057 s,
-/// 88.6 bpm (was 88.2 bpm, bar 1.1.0 at 1.061 s)`. The earlier placement's kind is named only
-/// when it is not the new one's.
+/// 88.6 bpm (was estimated: bar 1.1.0 at 1.061 s, 88.2 bpm)`. The earlier placement is
+/// described as any placement is, so a drift it carried is shown, not dropped without a word.
 #[must_use]
 pub fn placed_said(song: &Name, take: &Name, before: Option<&Placed>, after: &Placed) -> String {
     let mut line = format!(
@@ -91,18 +91,7 @@ pub fn placed_said(song: &Name, take: &Name, before: Option<&Placed>, after: &Pl
         describe(after)
     );
     if let Some(before) = before {
-        let kind = if before.by == after.by {
-            String::new()
-        } else {
-            format!("{}, ", before.by)
-        };
-        let tempo = before
-            .bpm
-            .map_or_else(String::new, |bpm| format!("{} bpm, ", number(bpm)));
-        line.push_str(&format!(
-            " (was {kind}{tempo}bar {} at {:.3} s)",
-            before.bar, before.at_secs
-        ));
+        line.push_str(&format!(" (was {})", describe(before)));
     }
     line
 }
@@ -479,7 +468,14 @@ mod tests {
                 &after
             ),
             "placed the take wayfaring on wayfaring-stranger's bars, estimated: bar 1.1.0 at \
-             1.057 s, 88.6 bpm (was 88.2 bpm, bar 1.1.0 at 1.061 s)"
+             1.057 s, 88.6 bpm (was estimated: bar 1.1.0 at 1.061 s, 88.2 bpm)"
+        );
+        let click = Placed::click(Position::bar(1), 2.5, Some(4.3));
+        let set = Placed::set(Position::bar(1), 2.5, 90.0);
+        assert!(
+            placed_said(&name("s"), &name("t"), Some(&click), &set)
+                .ends_with("(was click: bar 1.1.0 at 2.500 s, clock +4.3 ppm)"),
+            "a dropped drift is shown"
         );
         assert_eq!(
             placed_said(

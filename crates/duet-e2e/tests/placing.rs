@@ -786,6 +786,11 @@ fn a_given_tempo_places_the_link_and_is_stated_as_given() {
         "{said}"
     );
     assert!(!said.contains("tempo estimated"), "{said}");
+    assert!(
+        said.contains("placed the take beat on wayfaring's bars, estimated:")
+            && said.contains("(tempo given)"),
+        "the placement line says the tempo was given: {said}"
+    );
 }
 
 // `duet record <take> --song <song>` (build task 7): the take is placed by the click it was
