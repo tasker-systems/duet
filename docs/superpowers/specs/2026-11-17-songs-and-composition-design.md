@@ -342,7 +342,9 @@ The usual case: the take was recorded against a click playing the song's tempo m
 - **The offset is per song,** in the song's link, because one take can serve two songs at different
   bars.
 - **`duet record` in a song** (`--song wayfaring-stranger`) plays the click from the composition and
-  writes the placement itself: the offset is known exactly, since duet started both.
+  writes the placement itself: duet started both streams and works the offset out from their
+  timestamps, corrected by the pair's calibration (ruling 18; the placing-takes design says what
+  it leaves out).
 - **`duet song place <song> <take> --click --bar 9 --at 31.4`** places a take recorded elsewhere,
   against a click of the same tempo map.
 - **The drift between the take's clock and the click's** is measured by `duet record --song` and

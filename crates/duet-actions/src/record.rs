@@ -80,9 +80,11 @@ pub struct RecordArgs {
     seconds: Option<f64>,
     /// In a project, the song the take is recorded to. Its click plays from the default output:
     /// one bar of count-in in its first meter, then from bar 1 at its tempo and meter, the
-    /// downbeats accented. The take is linked to the song and placed by the click at 1.1.0, to
-    /// the frame, with how far the two clocks drifted. The click is never written into the take;
-    /// from speakers it is heard in it, and headphones keep it out.
+    /// downbeats accented. The take is linked to the song and placed by the click at 1.1.0, from
+    /// the two streams' timestamps, with how far the two clocks drifted. About 25 ppm of the
+    /// drift goes unmeasured on the owner's Mac mini, so the placement holds 2 ms for roughly
+    /// the first 80 s. The click is never written into the take; from speakers it is heard in
+    /// it, and headphones keep it out.
     #[arg(long)]
     song: Option<Name>,
     /// With --song, leaves the clocks' measured drift out of the placement. It is still stated.

@@ -317,10 +317,14 @@ duet play wayfaring-stranger                      # every placed part, on the so
   parts it is for, written or not yet. A take already captured is placed `estimated` at once, at
   `60 × rate / beat_period_frames` bpm, from its latest capture in `takes/<take>/`, and duet names
   that analysis; one not captured is linked unplaced and the next capture places it. `link` again
-  adds the `--for` parts given and changes nothing else. `place --click --bar B --at S` says the
+  adds the `--for` parts given, and places the link from the latest capture if it was not placed
+  and the take has one; it changes nothing else. `place --click --bar B --at S` says the
   take was played to the song's click; `place --bpm`, `--bar` and `--at`, without `--click`, set it
   (`by: set`), each value not given kept from the link, and a link with no value to keep is refused,
-  naming each flag still needed. `--bpm` with `--click` is refused. A take not in the project is
+  naming each flag still needed. A `click` placement has no bpm to keep, so `--at` or `--bar` alone
+  on one is refused, naming `--click --bar B --at S`, which keeps it a click placement. `--bar`
+  reads a bare number as that bar's first beat (`--bar 9` is `9.1.0`). `--bpm` with `--click` is
+  refused. A take not in the project is
   refused, naming `duet take add`. A refusal leaves `song.duet` as it was.
 - **`duet song show` lists the takes** the song links, each with the parts it is for and its
   placement, and states a `for` that names no part the song has yet.
@@ -804,7 +808,10 @@ a minute.
   linked to the song, `placed: { by: click, bar: 1.1.0, at_secs, clock_ppm }`: `at_secs` is where
   bar 1's tick played, less the take's first captured frame, a whole number of frames from the
   two streams' timestamps, and `clock_ppm` is how far the input's clock ran from the output's,
-  always stated. **`--no-reconcile`** leaves `clock_ppm` out of the placement. An input and an
+  always stated. **`--no-reconcile`** leaves `clock_ppm` out of the placement. `clock_ppm` is the
+  drift the host's stamps show: on the owner's Mac mini about 25 ppm of the real drift goes
+  unmeasured, so the placement holds within 2 ms for roughly the first 80 s of a take, and is
+  about 4.5 ms off at 3 minutes. An input and an
   output that are different devices are named as it starts, since their clocks may drift; on a
   system other than macOS, the offset is as it reports its streams' timing, unchecked there. A
   take that ends before bar 1 plays, as when Ctrl-C stops it during the count-in, is kept and

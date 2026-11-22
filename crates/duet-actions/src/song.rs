@@ -62,14 +62,17 @@ pub enum SongCommand {
     /// for (--for, repeatable). A take already captured is placed on the song's bars at once,
     /// estimated from its latest capture, naming the analysis it used; one not captured is linked
     /// unplaced, and the next capture places it. A take already linked gains the --for parts
-    /// given and changes in nothing else. A take not in the project is refused, naming `duet take
-    /// add`, and the song is left as it was.
+    /// given and, if it was not placed and has a capture, is placed from the latest one; it
+    /// changes in nothing else. A take not in the project is refused, naming `duet take add`, and
+    /// the song is left as it was.
     Link(LinkInput),
     /// Place a take on a song's bars. --click --bar B --at S says it was played to the song's
     /// click; --bpm, --bar and --at, any of them without --click, set it, each value not given
     /// keeping the link's current one. A take not yet linked is linked first. A link with no
     /// current value for one not given is refused, naming each flag still needed, and the song
-    /// is left as it was.
+    /// is left as it was. A click placement has no bpm to keep, so --at or --bar alone on one is
+    /// refused, naming --click --bar B --at S. --bar reads a bare number as that bar's first
+    /// beat (9 is 9.1.0).
     Place(PlaceInput),
     /// Take a snapshot: copy song.duet and every part the composition places, byte for byte,
     /// into `snapshots/<date>-<name>/`, beside a snapshot.duet stating each copy's digest. A part
@@ -140,8 +143,8 @@ pub struct StatusInput {
 /// Link a take of the project to a song, by its name and digest, and say which parts it is for
 /// (--for, repeatable). A take already captured is placed on the song's bars at once, estimated
 /// from its latest capture, naming the analysis it used; one not captured is linked unplaced,
-/// and the next capture places it. A take already linked gains the --for parts given and
-/// changes in nothing else. A take not in the project is refused, naming `duet take add`, and
+/// and the next capture places it. A take already linked gains the --for parts given and, if it
+/// was not placed and has a capture, is placed from the latest one; it changes in nothing else. A take not in the project is refused, naming `duet take add`, and
 /// the song is left as it was.
 #[derive(Debug, Args, JsonSchema)]
 pub struct LinkInput {

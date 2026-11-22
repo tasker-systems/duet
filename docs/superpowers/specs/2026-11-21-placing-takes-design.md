@@ -44,7 +44,9 @@ plainly where it hears a different tempo, meter or key from the song.
 
 - **A. duet plays a short tick on the audio output in the same run as it records the input.**
   The offset is worked out from the times the system stamps on each input buffer (capture) and
-  output buffer (playback), so it is exact to the frame, with nothing to measure. **Picked.**
+  output buffer (playback), so it is worked out to a whole frame from the stamps, with nothing
+  of the room to measure; the stamps themselves are corrected by calibration (ruling 18) and
+  leave out some drift (Constraints). **Picked.**
 - B. The click as a MIDI part, through the SoundFont or a port. Reuses `duet play`, but a DAW
   port's latency is unknown, so the offset would be a guess.
 - C. Record the click acoustically and detect it. Measures real latency, but needs speakers, and
@@ -240,7 +242,7 @@ such song:
 Each is authored in the build and shown to fail against `main`'s binary (CLAUDE.md: build `main` in
 a separate checkout with its own `CARGO_TARGET_DIR`, run with `DUET_E2E_BIN`).
 
-1. **A take recorded with `--song` has its offset to the frame.**
+1. **A take recorded with `--song` has its offset worked out to a whole frame.**
    - The offset and drift arithmetic (buffer timestamps to frames and ppm) has unit tests with a
      fake clock: known capture and playback instants give a known whole frame count and drift.
    - **Calibration** has unit tests with no device: ticks placed in a synthetic recording at a known
@@ -257,8 +259,8 @@ a separate checkout with its own `CARGO_TARGET_DIR`, run with `DUET_E2E_BIN`).
      why, without one, as on CI's Linux runners (as the unce sample's play check does, #122). It
      runs for real on the owner's Mac mini, and the PR states its result there.
 2. **A take with no click is placed `estimated` with capture's tempo, and `duet song place --bpm`
-   makes it `set`:** e2e, on a committed FLAC fixture; the estimate's `bpm` equals the analysis's
-   `timing.tempo_bpm`, and after `place --bpm 90`, `by` is `set` with `bpm` 90 and the other values
+   makes it `set`:** e2e, on a generated WAV fixture; the estimate's `bpm` is the measured tempo,
+   `60 × rate / beat_period_frames` (not the rounded `timing.tempo_bpm`), and after `place --bpm 90`, `by` is `set` with `bpm` 90 and the other values
    kept. A later capture leaves the `set` placement as it is.
 3. **A capture of a placed take states a tempo that disagrees with the song, and changes neither:**
    e2e; the song's bytes and the analysis's tempo are unchanged, and the statement names both
@@ -279,6 +281,15 @@ a separate checkout with its own `CARGO_TARGET_DIR`, run with `DUET_E2E_BIN`).
   output stream's latency, and the webcam input under-reports its own. Ruling 18 corrects this by
   calibration; there is no coreaudio-rs dependency and no `unsafe`. The owner does not record
   through Bluetooth, whose reported latency is often wrong; calibration's 400 ms search covers it.
+- **`clock_ppm` leaves out part of the drift, so a placement holds near the start of a take.**
+  `clock_ppm` is the drift the host's stamps show. On the owner's Mac mini, with the built-in
+  output and a USB input, the ticks heard in a take drift about 25 ppm more than the stamps do
+  (their errors rise about 0.026 ms a second, in calibration and in takes alike), and `clock_ppm`
+  reads about +4.3, so about 25 ppm goes unmeasured. A reader that maps a take with `at_secs` and
+  `clock_ppm` stays within 2 ms of a heard tick for roughly the first 80 s, and is about 4.5 ms off
+  at 3 minutes. The speakers-on witness checks only bar 3, about 5 s in, so it cannot see this.
+  Nothing yet reads `clock_ppm` to place notes. A follow-up (measure the drift from the heard
+  ticks, or check a late bar of a 60 to 120 s take) is filed before comps rely on a late bar.
 
 ## Left to the builder
 
@@ -297,7 +308,14 @@ changing what gets built.
 - **`placed.bar` from `record --song` is always `1.1.0`;** starting a recording at a later bar is
   not in this task.
 - **`for` may name a part not yet in `parts/`,** stated by `song show`, never refused; `link` on a
-  linked take adds `--for` parts.
+  linked take adds `--for` parts. `link` on a linked take that is not placed also places it from
+  the latest capture, if the take has one, and says so, as `link` does for a new link; a placed
+  link is left as it is.
+- **`--bar` reads a bare number as that bar's first beat:** `--bar 9` is `9.1.0`, as the songs
+  design writes it.
+- **`song place --at` (or `--bar`) on a `click` placement is refused**, since a click placement
+  has no bpm to keep and a `set` needs one: the refusal names `--click --bar B --at S`, which moves
+  it and keeps it a click placement, and `--bpm`, which sets it.
 - **A tempo disagreement** is more than 0.5 bpm, comparing the measured tempo (not the rounded one).
 - **Calibration's numbers** (ruling 18 leaves them open): 60 bpm, 12 ticks, a 1 s lead, a 400 ms
   search, 10 ticks heard and a 2 ms spread to store, keyed by device names and rates.
