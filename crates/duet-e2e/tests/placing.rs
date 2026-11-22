@@ -727,6 +727,36 @@ fn record_song_is_refused_before_any_device_outside_a_project_for_an_unknown_son
     assert!(song_s(&root).takes.is_empty(), "no refusal links anything");
 }
 
+#[test]
+fn record_calibrate_is_refused_before_any_device_with_a_take_with_song_and_with_seconds() {
+    let dir = scratch("placing-calibrate-refused");
+    for (args, with) in [
+        (&["record", "--calibrate", "t"][..], "'[OUTPUT]'"),
+        (
+            &["record", "--calibrate", "--song", "s"][..],
+            "'--song <SONG>'",
+        ),
+        (
+            &["record", "--calibrate", "--seconds", "3"][..],
+            "'--seconds <SECONDS>'",
+        ),
+    ] {
+        let out = duet(&dir, args);
+        assert!(!out.status.success(), "{args:?}");
+        let said = stderr(&out);
+        assert!(
+            said.contains(&format!(
+                "the argument '--calibrate' cannot be used with {with}"
+            )),
+            "{args:?}: {said}"
+        );
+    }
+    assert!(
+        !dir.join("no-config/calibration.toml").exists(),
+        "nothing was calibrated"
+    );
+}
+
 /// The channel 0 samples of a FLAC take, and its rate.
 fn decoded(path: &Path) -> (Vec<f32>, u32) {
     use duet_capture::{FileSource, Source as _};
@@ -764,6 +794,23 @@ fn record_song_places_the_take_by_click_and_its_ticks_land_where_it_says() {
         return;
     }
     let root = with_song_s("placing-record-click");
+    // Ruling 18: the pair is calibrated first, into the run's own config directory.
+    let calibrated = duet(&root, &["record", "--calibrate"]);
+    ok(
+        &calibrated,
+        "record --calibrate (it needs an input and an output device)",
+    );
+    let told = format!("{}{}", stdout(&calibrated), stderr(&calibrated));
+    eprintln!("record --calibrate: {}", stdout(&calibrated).trim());
+    assert!(told.contains(" → "), "names the pair: {told}");
+    assert!(
+        told.contains("12 of 12 ticks heard") || told.contains("11 of 12 ticks heard"),
+        "{told}"
+    );
+    let file = root.join("no-config/calibration.toml");
+    assert!(told.contains(s(&file)), "names the file: {told}");
+    assert!(file.is_file());
+
     // Ten seconds: bar 1 falls about 2.9 s in (0.2 s of lead and a bar of count-in), and bar 3
     // 5.2 s after it.
     let out = duet(&root, &["record", "t", "--song", "s", "--seconds", "10"]);
@@ -773,6 +820,10 @@ fn record_song_places_the_take_by_click_and_its_ticks_land_where_it_says() {
     );
     let said = stderr(&out);
     assert!(said.contains("headphones"), "{said}");
+    assert!(
+        said.contains("calibrated: "),
+        "says the calibration it applies: {said}"
+    );
 
     let song = song_s(&root);
     assert_eq!(song.takes.len(), 1, "{said}");
@@ -841,6 +892,10 @@ fn record_song_with_no_reconcile_writes_no_clock_ppm() {
     );
     ok(&out, "record --song --no-reconcile");
     let said = stderr(&out);
+    assert!(
+        said.contains("not calibrated for ") && said.contains("duet record --calibrate"),
+        "a fresh config directory holds no calibration: {said}"
+    );
     let p = song_s(&root).takes[0].placed.expect("the link is placed");
     assert_eq!(p.by, By::Click);
     assert_eq!(p.clock_ppm, None, "--no-reconcile leaves the drift out");

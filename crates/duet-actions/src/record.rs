@@ -16,9 +16,14 @@
 //! leaves its callback through a bounded channel: the input's with its buffer to the writing
 //! thread, the output's to a collector of its own (one the channel cannot take is counted, never
 //! waited for). Off the audio threads, each stream's stamps are fit with a line, and from the two
-//! lines come where bar 1's tick played in the take's frames and how far the clocks drifted. The click is only ever played: it is never written into the take.
-//! The speakers-on check of that placement runs on a machine with devices, opted into by
-//! `DUET_E2E_SPEAKERS` (`crates/duet-e2e/tests/placing.rs`).
+//! lines come where bar 1's tick played in the take's frames and how far the clocks drifted. The
+//! click is only ever played: it is never written into the take.
+//!
+//! With `--calibrate` (ruling 18) the same two streams play the calibration click and record
+//! channel 0 into memory; `calibrate` finds the ticks and keeps the pair's measured offset in
+//! `calibration.toml`, which `--song` applies to its placement. The speakers-on check of both
+//! runs on a machine with devices, opted into by `DUET_E2E_SPEAKERS`
+//! (`crates/duet-e2e/tests/placing.rs`).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -30,16 +35,19 @@ use std::time::Duration;
 use crate::Context;
 use crate::take::{at, span};
 use anyhow::{Context as _, Result, anyhow, bail};
+use calibrate::{Calibration, Calibrations, Pair};
 use clap::Args;
 use click::{ClickVoice, Fit, Line, Stamp, Ticks, clock_ppm, offset_frames};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use duet_capture::{Depth, TakeWriter, Written};
 use duet_core::Position;
+use duet_schemas::journal::At;
 use duet_schemas::project::Name;
-use duet_schemas::song::{Composition, Placed};
+use duet_schemas::song::Placed;
 use schemars::JsonSchema;
 
+mod calibrate;
 mod click;
 
 /// Buffers waiting for the writer before the device's next one is counted as lost: at a
@@ -53,12 +61,16 @@ const LEAD_SECS: f64 = 0.2;
 /// How long the click runs after bar 1 when no `--seconds` ends the take: four hours.
 const CLICK_UNTIL_SECS: f64 = 4.0 * 3600.0;
 
+/// The file in the user config directory each device pair's calibration is kept in.
+const CALIBRATION_FILE: &str = "calibration.toml";
+
 #[derive(Debug, Args, JsonSchema)]
 pub struct RecordArgs {
     /// The FLAC file to write the take to. It must not exist: a take never replaces a file. In
     /// a project, a take's name instead (lowercase words joined by hyphens, no .flac): the take
     /// is recorded into takes/TAKE/TAKE.flac and added to the project.
-    output: PathBuf,
+    #[arg(required_unless_present = "calibrate")]
+    output: Option<PathBuf>,
     /// The input device to record from: its name, or a part of it only one input's name
     /// holds. Without it, the system's default input.
     #[arg(long)]
@@ -76,6 +88,13 @@ pub struct RecordArgs {
     /// With --song, leaves the clocks' measured drift out of the placement. It is still stated.
     #[arg(long, requires = "song")]
     no_reconcile: bool,
+    /// Measure the offset between the input (the default, or --device) and the default output,
+    /// which --song then applies: the click plays 12 ticks from the speakers, the input hears
+    /// them, and where they are heard against where the timestamps put them is kept for the pair
+    /// in calibration.toml in the user config directory. Inside or outside a project; nothing is
+    /// written to a take.
+    #[arg(long, conflicts_with_all = ["output", "song", "seconds", "no_reconcile"])]
+    calibrate: bool,
 }
 
 fn positive_seconds(text: &str) -> std::result::Result<f64, String> {
@@ -114,72 +133,48 @@ struct Shared {
     failed: Mutex<Option<String>>,
 }
 
-pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
+pub fn run(ctx: &Context, args: RecordArgs) -> Result<()> {
+    if args.calibrate {
+        return calibrate(ctx, args.device.as_deref());
+    }
+    let mut output = args
+        .output
+        .clone()
+        .ok_or_else(|| anyhow!("duet record needs a take's name or a .flac file to record to"))?;
     // Every refusal comes before any device is opened.
     let song = match &args.song {
-        Some(song) => Some(song_of(ctx, song, &args.output)?),
+        Some(song) => Some(song_of(ctx, song, &output)?),
         None => None,
     };
-    let into = into_project(ctx, &args.output)?;
+    // The pair's calibration is read now, so a file that does not read is refused here.
+    let calibrations = match &song {
+        Some(_) => match calibration_file()? {
+            Some(path) => Calibrations::read(&path)?,
+            None => Calibrations::default(),
+        },
+        None => Calibrations::default(),
+    };
+    let into = into_project(ctx, &output)?;
     if let Some((_, _, path)) = &into {
-        args.output.clone_from(path);
+        output.clone_from(path);
     }
     if into.is_none() {
-        refuse_output(&args.output)?;
+        refuse_output(&output)?;
     }
-    let stop = Arc::new(AtomicBool::new(false));
-    {
-        let stop = Arc::clone(&stop);
-        ctrlc::set_handler(move || stop.store(true, Ordering::Release))
-            .context("catching Ctrl-C")?;
-    }
+    let stop = catch_ctrl_c()?;
     let host = cpal::default_host();
-    let device = match &args.device {
-        Some(wanted) => {
-            let devices: Vec<cpal::Device> = host
-                .input_devices()
-                .context("listing the audio inputs")?
-                .collect();
-            let names: Vec<String> = devices.iter().map(name_of).collect();
-            devices
-                .into_iter()
-                .nth(pick_device(&names, wanted)?)
-                .expect("picked among them")
-        }
-        None => host.default_input_device().ok_or_else(|| {
-            anyhow!("no audio input device; connect a microphone, or name one with --device")
-        })?,
-    };
-    let name = name_of(&device);
-    let supported = device
-        .default_input_config()
-        .with_context(|| format!("reading {name}'s input format"))?;
-    let config = supported.config();
-    let depth = depth_of(supported.sample_format())?;
-    let (rate, channels) = (config.sample_rate, config.channels);
-
-    let shared = Arc::new(Shared::default());
-    let (to_writer, from_device) = mpsc::sync_channel::<Block>(QUEUE);
-    // Buffers handed back for reuse, so the callback rarely allocates. One the device has no
-    // room for is dropped.
-    let (to_device, spare) = mpsc::sync_channel::<Vec<f32>>(QUEUE);
-    let handoff = Handoff::new(to_writer, spare, rate, channels, Arc::clone(&shared));
-    // The stream is built before the file exists, so a device that refuses leaves nothing.
-    let stream = match supported.sample_format() {
-        SampleFormat::F32 => input::<f32>(&device, config, handoff, &shared),
-        SampleFormat::I16 => input::<i16>(&device, config, handoff, &shared),
-        SampleFormat::U16 => input::<u16>(&device, config, handoff, &shared),
-        SampleFormat::I32 => input::<i32>(&device, config, handoff, &shared),
-        other => bail!("{name}'s sample format, {other}, is not one duet records"),
-    }
-    .with_context(|| format!("opening {name} for input"))?;
+    let input = open_input(&host, args.device.as_deref())?;
+    let (name, rate, channels) = (input.name.clone(), input.rate, input.channels);
+    let depth = depth_of(input.format)?;
     // The click's output is built before the file exists too.
     let click = match &song {
-        Some((_, _, body)) => Some(open_click(
-            &host,
-            &body.composition,
-            args.seconds.unwrap_or(CLICK_UNTIL_SECS),
-        )?),
+        Some((_, _, body)) => {
+            let until = args.seconds.unwrap_or(CLICK_UNTIL_SECS);
+            Some(open_click(&host, |rate| {
+                let lead = (LEAD_SECS * f64::from(rate)).round() as u64;
+                Ticks::of(&body.composition, rate, lead, until)
+            })?)
+        }
         None => None,
     };
     if let Some((_, _, path)) = &into
@@ -187,21 +182,11 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
     {
         std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
     }
-    let mut writer = TakeWriter::create(&args.output, rate, channels, depth)?;
-    // Input starts first, so the take holds bar 1's tick and the count-in before it.
-    let started = stream
-        .play()
-        .with_context(|| format!("starting input from {name}"))
-        .and_then(|()| match &click {
-            Some((output, heard, _)) => output
-                .play()
-                .with_context(|| format!("starting the click on {}", heard.name)),
-            None => Ok(()),
-        });
-    if let Err(e) = started {
+    let mut writer = TakeWriter::create(&output, rate, channels, depth)?;
+    if let Err(e) = start(&input, click.as_ref()) {
         // Nothing was recorded: the empty file is not a take.
         drop(writer);
-        let _ = std::fs::remove_file(&args.output);
+        let _ = std::fs::remove_file(&output);
         return Err(e);
     }
     let until = match args.seconds {
@@ -210,14 +195,30 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
     };
     eprintln!(
         "recording {} from {name} ({rate} Hz, {channels} channel{}, {}-bit) {until}",
-        args.output.display(),
+        output.display(),
         if channels == 1 { "" } else { "s" },
         depth.bits(),
     );
+    let mut calibration = None;
     if let (Some((song, _, _)), Some((_, heard, _))) = (&song, &click) {
         say_click(song, &name, heard);
+        let pair = Pair {
+            input: name.clone(),
+            output: heard.name.clone(),
+            input_rate: rate,
+            output_rate: heard.rate,
+        };
+        calibration = calibrations.find(&pair).cloned();
+        say_calibration(&pair, calibration.as_ref());
     }
 
+    let Input {
+        stream,
+        shared,
+        from_device,
+        to_device,
+        ..
+    } = input;
     let limit = args.seconds.map(|s| (s * f64::from(rate)).round() as u64);
     let mut take = Take::new(limit);
     let kept = |path: &Path| {
@@ -231,7 +232,7 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
         Err(e) => {
             drop(stream);
             take.report_losses(rate, &shared);
-            return Err(e).context(kept(&args.output));
+            return Err(e).context(kept(&output));
         }
     };
     drop(stream);
@@ -249,13 +250,13 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
     })();
     if let Err(e) = drained {
         take.report_losses(rate, &shared);
-        return Err(e).context(kept(&args.output));
+        return Err(e).context(kept(&output));
     }
     let written = match writer.finish() {
         Ok(written) => written,
         Err(e) => {
             take.report_losses(rate, &shared);
-            return Err(e).context(kept(&args.output));
+            return Err(e).context(kept(&output));
         }
     };
     eprintln!(
@@ -298,6 +299,7 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
                 written.rate,
                 captured,
                 heard,
+                calibration.as_ref().map(|c| c.offset_ms),
                 args.no_reconcile,
             );
             crate::song::link_take(ctx, dir, &found, placed)?;
@@ -322,6 +324,224 @@ pub fn run(ctx: &Context, mut args: RecordArgs) -> Result<()> {
         None => Ok(()),
         Some(why) => bail!("recording stopped: {why}; {}", kept(&written.path)),
     }
+}
+
+/// Sets Ctrl-C to raise the flag it returns, so a recording stops and keeps what it has.
+fn catch_ctrl_c() -> Result<Arc<AtomicBool>> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let raise = Arc::clone(&stop);
+    ctrlc::set_handler(move || raise.store(true, Ordering::Release)).context("catching Ctrl-C")?;
+    Ok(stop)
+}
+
+/// The input stream, built and not started, and what the run reads from it: its buffers through
+/// `from_device`, handed back for reuse through `to_device`.
+struct Input {
+    stream: cpal::Stream,
+    name: String,
+    rate: u32,
+    channels: u16,
+    format: SampleFormat,
+    shared: Arc<Shared>,
+    from_device: Receiver<Block>,
+    to_device: SyncSender<Vec<f32>>,
+}
+
+/// Opens the input `wanted` names (see [`pick_device`]), or the default one, and builds its
+/// stream: what a take and a calibration record from.
+fn open_input(host: &cpal::Host, wanted: Option<&str>) -> Result<Input> {
+    let device = match wanted {
+        Some(wanted) => {
+            let devices: Vec<cpal::Device> = host
+                .input_devices()
+                .context("listing the audio inputs")?
+                .collect();
+            let names: Vec<String> = devices.iter().map(name_of).collect();
+            devices
+                .into_iter()
+                .nth(pick_device(&names, wanted)?)
+                .expect("picked among them")
+        }
+        None => host.default_input_device().ok_or_else(|| {
+            anyhow!("no audio input device; connect a microphone, or name one with --device")
+        })?,
+    };
+    let name = name_of(&device);
+    let supported = device
+        .default_input_config()
+        .with_context(|| format!("reading {name}'s input format"))?;
+    let format = supported.sample_format();
+    let config = supported.config();
+    let (rate, channels) = (config.sample_rate, config.channels);
+    let shared = Arc::new(Shared::default());
+    let (to_writer, from_device) = mpsc::sync_channel::<Block>(QUEUE);
+    // Buffers handed back for reuse, so the callback rarely allocates. One the device has no
+    // room for is dropped.
+    let (to_device, spare) = mpsc::sync_channel::<Vec<f32>>(QUEUE);
+    let handoff = Handoff::new(to_writer, spare, rate, channels, Arc::clone(&shared));
+    // The stream is built before any file exists, so a device that refuses leaves nothing.
+    let stream = match format {
+        SampleFormat::F32 => input::<f32>(&device, config, handoff, &shared),
+        SampleFormat::I16 => input::<i16>(&device, config, handoff, &shared),
+        SampleFormat::U16 => input::<u16>(&device, config, handoff, &shared),
+        SampleFormat::I32 => input::<i32>(&device, config, handoff, &shared),
+        other => bail!("{name}'s sample format, {other}, is not one duet records"),
+    }
+    .with_context(|| format!("opening {name} for input"))?;
+    Ok(Input {
+        stream,
+        name,
+        rate,
+        channels,
+        format,
+        shared,
+        from_device,
+        to_device,
+    })
+}
+
+/// Starts the input, then the click: input first, so the recording holds the click's first tick.
+fn start(input: &Input, click: Option<&(cpal::Stream, Heard, Collector)>) -> Result<()> {
+    input
+        .stream
+        .play()
+        .with_context(|| format!("starting input from {}", input.name))?;
+    if let Some((output, heard, _)) = click {
+        output
+            .play()
+            .with_context(|| format!("starting the click on {}", heard.name))?;
+    }
+    Ok(())
+}
+
+/// `<user config dir>/calibration.toml`, or none when there is no user config directory.
+fn calibration_file() -> Result<Option<PathBuf>> {
+    Ok(crate::config::Dirs::find()?
+        .user
+        .map(|(dir, _)| dir.join(CALIBRATION_FILE)))
+}
+
+/// Says which calibration `record --song` applies for `pair`, or that it has none.
+fn say_calibration(pair: &Pair, calibration: Option<&Calibration>) {
+    match calibration {
+        Some(c) => eprintln!(
+            "calibrated: {:+.2} ms for {} → {}, measured {}",
+            c.offset_ms, pair.input, pair.output, c.measured
+        ),
+        None => eprintln!(
+            "not calibrated for {} → {}: the placement is as the devices report their latency, \
+             which can be off by milliseconds; duet record --calibrate measures it",
+            pair.input, pair.output
+        ),
+    }
+}
+
+/// Now, to the millisecond, as the journal stamps an entry.
+fn now() -> At {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    At::from_unix_ms(ms)
+}
+
+/// `duet record --calibrate`: plays the calibration click from the default output while the input
+/// records channel 0 into memory, finds each tick against where the streams' lines put it, and
+/// keeps the median error for the pair in `calibration.toml`. Stores nothing when the input heard
+/// nothing, too few ticks, or ticks too far apart.
+fn calibrate(ctx: &Context, device: Option<&str>) -> Result<()> {
+    let path = calibration_file()?.ok_or_else(|| {
+        anyhow!(
+            "there is no user config directory to keep calibration.toml in; set {} to one",
+            crate::config::CONFIG_DIR_VAR
+        )
+    })?;
+    // Refused before any device opens when it does not read.
+    let mut held = Calibrations::read(&path)?;
+    let stop = catch_ctrl_c()?;
+    let host = cpal::default_host();
+    let input = open_input(&host, device)?;
+    let click = open_click(&host, calibrate::ticks)?;
+    let pair = Pair {
+        input: input.name.clone(),
+        output: click.1.name.clone(),
+        input_rate: input.rate,
+        output_rate: click.1.rate,
+    };
+    start(&input, Some(&click))?;
+    eprintln!(
+        "calibrating {pair}: the click plays {} ticks from {} after a second's silence, for the \
+         microphone to hear; keep the room quiet",
+        calibrate::TICKS,
+        pair.output
+    );
+    let (output, heard, collector) = click;
+    let last = heard.ticks.last().copied().unwrap_or(0) as f64 / f64::from(heard.rate);
+    let wanted = ((last + calibrate::SEARCH_SECS + 0.5) * f64::from(input.rate)).ceil() as u64;
+    let listened = listen(&input, wanted, &stop);
+    drop(input.stream);
+    drop(output);
+    let heard = heard.stopped(collector);
+    heard.report();
+    let (samples, captured) = listened?;
+    let (Some(taken), Some(played)) = (captured.line(), heard.line) else {
+        bail!("the streams gave no timestamps to calibrate by; nothing is stored");
+    };
+    let rate = f64::from(input.rate);
+    let expected: Vec<f64> = heard
+        .ticks
+        .iter()
+        .map(|&f| click::frames_after(&taken, &played, f, input.rate) / rate)
+        .collect();
+    let found = calibrate::heard(&samples, input.rate, &expected).map_err(anyhow::Error::new)?;
+    let existed = path.exists();
+    held.set(Calibration {
+        pair: pair.clone(),
+        offset_ms: found.offset_ms,
+        ticks: found.ticks,
+        spread_ms: found.spread_ms,
+        measured: now(),
+    });
+    held.write(&path)?;
+    ctx.wrote(&path, existed)?;
+    println!(
+        "calibrated {pair}: {:+.2} ms, {} of {} ticks heard, {:.2} ms apart; written to {}",
+        found.offset_ms,
+        found.ticks,
+        expected.len(),
+        found.spread_ms,
+        path.display()
+    );
+    Ok(())
+}
+
+/// Channel 0 of the input until it holds `frames`, input lost as silence where it was, and the
+/// line through its buffers' stamps.
+fn listen(input: &Input, frames: u64, stop: &AtomicBool) -> Result<(Vec<f32>, Fit)> {
+    let channels = usize::from(input.channels.max(1));
+    let mut samples = Vec::with_capacity(usize::try_from(frames).unwrap_or(0));
+    let mut stamps = Fit::default();
+    while (samples.len() as u64) < frames {
+        if stop.load(Ordering::Acquire) {
+            bail!("the calibration was stopped before its last tick; nothing is stored");
+        }
+        if let Some(e) = input.shared.failed.lock().ok().and_then(|f| f.clone()) {
+            bail!("the input stopped: {e}; nothing is stored");
+        }
+        match input.from_device.recv_timeout(Duration::from_millis(20)) {
+            Ok(block) => {
+                stamps.add(block.stamp);
+                let lost = usize::try_from(block.lost_before).unwrap_or(usize::MAX);
+                samples.extend(std::iter::repeat_n(0.0, lost));
+                samples.extend(block.samples.iter().step_by(channels));
+                let _ = input.to_device.try_send(block.samples);
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                bail!("the input stream closed; nothing is stored")
+            }
+        }
+    }
+    Ok((samples, stamps))
 }
 
 /// The song `--song` names: its name, its folder (`songs/<song>`) and the song. Refused, before
@@ -378,6 +598,8 @@ fn song_of(
 struct Heard {
     name: String,
     rate: u32,
+    /// Each tick's output frame.
+    ticks: Vec<u64>,
     bar_one: u64,
     played: Arc<Played>,
     line: Option<Line>,
@@ -466,25 +688,24 @@ struct Played {
     failed: Mutex<Option<String>>,
 }
 
-/// Opens the default output and builds the click's stream on it: `LEAD_SECS` of silence, one
-/// bar of count-in, then bar 1 and every beat for `until_secs` after it. Not started.
+/// Opens the default output and builds a click's stream on it, its ticks from `ticks_at` at the
+/// output's rate: what `--song` and `--calibrate` play. Not started.
 fn open_click(
     host: &cpal::Host,
-    composition: &Composition,
-    until_secs: f64,
+    ticks_at: impl FnOnce(u32) -> Result<Ticks>,
 ) -> Result<(cpal::Stream, Heard, Collector)> {
-    let device = host.default_output_device().ok_or_else(|| {
-        anyhow!("no audio output device, which --song plays the click on; connect one")
-    })?;
+    let device = host
+        .default_output_device()
+        .ok_or_else(|| anyhow!("no audio output device, which the click plays on; connect one"))?;
     let name = name_of(&device);
     let supported = device
         .default_output_config()
         .with_context(|| format!("reading {name}'s output format"))?;
     let config = supported.config();
     let (rate, channels) = (config.sample_rate, config.channels);
-    let lead = (LEAD_SECS * f64::from(rate)).round() as u64;
-    let ticks = Ticks::of(composition, rate, lead, until_secs)?;
+    let ticks = ticks_at(rate)?;
     let bar_one = ticks.bar_one;
+    let frames = ticks.frames.iter().map(|&(f, _)| f).collect();
     let voice = ClickVoice::new(ticks, rate, channels);
     let played = Arc::new(Played::default());
     let (to_collector, from_click) = mpsc::sync_channel::<(Stamp, u64)>(QUEUE);
@@ -501,6 +722,7 @@ fn open_click(
         Heard {
             name,
             rate,
+            ticks: frames,
             bar_one,
             played,
             line: None,
@@ -599,22 +821,26 @@ fn say_click(song: &Name, input: &str, heard: &Heard) {
     }
 }
 
-/// Where bar 1 fell in a take of `frames` at `rate`, from the two streams' stamps, and the
-/// clocks' drift, stated. None when bar 1 never played within the take: the click had not reached it when the take
+/// Where bar 1 fell in a take of `frames` at `rate`, from the two streams' stamps moved by the
+/// pair's calibration offset in ms, if it has one, to a whole frame, and the clocks' drift,
+/// stated. None when bar 1 never played within the take: the click had not reached it when the take
 /// ended, as when Ctrl-C stops it during the count-in.
 fn placement(
     frames: u64,
     rate: u32,
     input: Option<Line>,
     heard: &Heard,
+    calibration_ms: Option<f64>,
     no_reconcile: bool,
 ) -> Option<Placed> {
     let (taken, played) = (input?, heard.line?);
     if heard.end <= heard.bar_one {
         return None;
     }
-    let offset = offset_frames(&taken, &played, heard.bar_one, rate);
-    if offset >= frames {
+    let reported = offset_frames(&taken, &played, heard.bar_one, rate) as f64;
+    let shift = calibration_ms.map_or(0.0, |ms| ms / 1000.0 * f64::from(rate));
+    let offset = (reported + shift).round();
+    if offset < 0.0 || offset >= frames as f64 {
         return None;
     }
     let ppm = clock_ppm(&taken, &played, rate, heard.rate);
@@ -634,7 +860,7 @@ fn placement(
     }
     Some(Placed::click(
         Position::bar(1),
-        offset as f64 / f64::from(rate),
+        offset / f64::from(rate),
         if no_reconcile { None } else { ppm },
     ))
 }
@@ -1172,6 +1398,7 @@ mod tests {
         Heard {
             name: "out".to_owned(),
             rate: 48_000,
+            ticks: vec![4800],
             bar_one: 4800,
             played: Arc::new(Played::default()),
             line: Some(line_from(5_000_000)),
@@ -1182,7 +1409,7 @@ mod tests {
     #[test]
     fn a_take_that_heard_bar_one_is_placed_by_the_click_to_the_frame() {
         let input = Some(line_from(0));
-        let placed = placement(96_000, 48_000, input, &heard(96_512), false).expect("placed");
+        let placed = placement(96_000, 48_000, input, &heard(96_512), None, false).expect("placed");
         // Bar 1 played 100 ms + 5 ms after the take's first frame: 5040 frames.
         assert_eq!(placed.by, duet_schemas::song::By::Click);
         assert_eq!(placed.bar, Position::bar(1));
@@ -1191,8 +1418,26 @@ mod tests {
             "{placed:?}"
         );
         assert!(placed.clock_ppm.expect("measured").abs() < 1e-6);
-        let unreconciled = placement(96_000, 48_000, input, &heard(96_512), true).unwrap();
+        let unreconciled = placement(96_000, 48_000, input, &heard(96_512), None, true).unwrap();
         assert_eq!(unreconciled, Placed::click(Position::bar(1), 0.105, None));
+    }
+
+    /// Ruling 18: a pair's calibration moves `at_secs` by its offset, to a whole frame.
+    #[test]
+    fn a_calibration_moves_at_secs_by_its_offset_to_a_whole_frame() {
+        let input = Some(line_from(0));
+        // The timestamps put bar 1 at 5040 frames (0.105 s); the pair is heard 8.01 ms earlier:
+        // 4655.52 frames, to the frame 4656.
+        let placed =
+            placement(96_000, 48_000, input, &heard(96_512), Some(-8.01), false).expect("placed");
+        let frames = placed.at_secs * 48_000.0;
+        assert!((frames - 4656.0).abs() < 1e-9, "{placed:?}");
+        assert_eq!(placed.at_secs, 4656.0 / 48_000.0);
+        // A calibration that would put bar 1 before the take's first frame places nothing.
+        assert_eq!(
+            placement(96_000, 48_000, input, &heard(96_512), Some(-200.0), false),
+            None
+        );
     }
 
     /// Review Focus 5: a take stopped during the count-in, before bar 1 sounds, is not placed.
@@ -1200,16 +1445,22 @@ mod tests {
     fn a_take_that_ended_before_bar_one_is_not_placed() {
         let input = Some(line_from(0));
         // The click never got to bar 1's frame.
-        assert_eq!(placement(96_000, 48_000, input, &heard(4800), false), None);
+        assert_eq!(
+            placement(96_000, 48_000, input, &heard(4800), None, false),
+            None
+        );
         // The click did, after the take's last frame.
-        assert_eq!(placement(5000, 48_000, input, &heard(96_512), false), None);
+        assert_eq!(
+            placement(5000, 48_000, input, &heard(96_512), None, false),
+            None
+        );
         // No click played at all.
         let silent = Heard {
             line: None,
             end: 0,
             ..heard(96_512)
         };
-        assert_eq!(placement(96_000, 48_000, input, &silent, false), None);
+        assert_eq!(placement(96_000, 48_000, input, &silent, None, false), None);
     }
 
     #[test]

@@ -277,16 +277,22 @@ impl Line {
     }
 }
 
-/// The whole frames from the take's frame 0 to where bar 1 played: bar 1's playback instant on
-/// the output's line, less the input's line at frame 0, counted at the input's measured rate
-/// (its nominal one when its line is under a second).
+/// The input frames, unrounded, from the input's frame 0 to where the output's frame
+/// `out_frame` played: its playback instant on the output's line, less the input's line at frame
+/// 0, counted at the input's measured rate (its nominal one when its line is under a second).
+pub(crate) fn frames_after(input: &Line, output: &Line, out_frame: u64, nominal_in: u32) -> f64 {
+    let r_in = input.rate().unwrap_or(f64::from(nominal_in));
+    let since_input = output.nanos_at(out_frame) - input.nanos_at(0);
+    since_input as f64 * r_in / 1e9
+}
+
+/// The whole frames from the take's frame 0 to where bar 1 played: [`frames_after`] bar 1's
+/// output frame, rounded.
 ///
 /// Saturates at 0 when the take started after bar 1, which cannot happen when input starts
 /// first.
 pub(crate) fn offset_frames(input: &Line, output: &Line, bar_one: u64, nominal_in: u32) -> u64 {
-    let r_in = input.rate().unwrap_or(f64::from(nominal_in));
-    let since_input = output.nanos_at(bar_one) - input.nanos_at(0);
-    let frames = (since_input as f64 * r_in / 1e9).round() as i128;
+    let frames = frames_after(input, output, bar_one, nominal_in).round() as i128;
     u64::try_from(frames.max(0)).unwrap_or(u64::MAX)
 }
 

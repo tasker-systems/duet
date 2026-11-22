@@ -323,14 +323,16 @@ pub const ACTIONS: &[Action] = &[
     reads("play", &["play"], schema::<play::PlayArgs>),
     // In a project, `duet record <take>` records into takes/<take>/<take>.flac and adds the
     // take, which rewrites the project's document; with --song it also links the take to the
-    // song and places it, which rewrites the song's song.duet.
+    // song and places it, which rewrites the song's song.duet. With --calibrate it writes only
+    // the pair's calibration, in calibration.toml in the user config directory.
     writing(
         "record",
         &["record"],
         TAKE_ADDED,
         writes(
             "a new FLAC take; in a project, under takes/<take>/, and .duet/project.duet over \
-             itself; with --song, the song's song.duet over itself",
+             itself; with --song, the song's song.duet over itself; with --calibrate, \
+             calibration.toml in the user config directory, over itself",
             true,
         ),
         schema::<record::RecordArgs>,
