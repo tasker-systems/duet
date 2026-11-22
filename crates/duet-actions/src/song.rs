@@ -29,7 +29,7 @@ use duet_core::{Key, Position, TimeSig};
 use duet_schemas::journal::{DocDigest, Id, RelPath, SnapshotTaken, SongStatusSet, TakeRef};
 use duet_schemas::project::{Defaults, Name, ProjectTake};
 use duet_schemas::snapshot::{Copied, FileDigest, SNAPSHOT_FILE};
-use duet_schemas::song::{Composition, Placed, Status, TakeLink, distinct_ids, part_names};
+use duet_schemas::song::{By, Composition, Placed, Status, TakeLink, distinct_ids, part_names};
 use duet_schemas::{AnyDocument, Document, Project, Snapshot, Song, Source};
 
 use crate::Context;
@@ -157,6 +157,18 @@ pub struct LinkInput {
     pub project: PathBuf,
 }
 
+/// A bar for `--bar`: a position such as `3.2.240`, or a bare bar number, which is that bar's
+/// first beat (`9` is `9.1.0`), as the songs design writes `--bar 9`.
+fn bar_position(text: &str) -> Result<Position, String> {
+    let text = text.trim();
+    let full = if text.chars().all(|c| c.is_ascii_digit()) && !text.is_empty() {
+        format!("{text}.1.0")
+    } else {
+        text.to_string()
+    };
+    full.parse::<Position>().map_err(|e| e.to_string())
+}
+
 /// Place a take on a song's bars. --click --bar B --at S says it was played to the song's
 /// click; --bpm, --bar and --at, any of them without --click, set it, each value not given
 /// keeping the link's current one. A take not yet linked is linked first. A link with no
@@ -173,7 +185,7 @@ pub struct PlaceInput {
     #[arg(long)]
     pub click: bool,
     /// The place on the song's bars where the take's own start falls, such as 1.1.0.
-    #[arg(long)]
+    #[arg(long, value_parser = bar_position)]
     pub bar: Option<Position>,
     /// The seconds into the take at which --bar falls.
     #[arg(long)]
@@ -333,7 +345,7 @@ fn project_take(project: &Path, take: &Name) -> Result<ProjectTake> {
     doc.body.take(take).cloned().ok_or_else(|| {
         let (add, _) = crate::take::add_line(Path::new("<file>"));
         anyhow::anyhow!(
-            "{take} is not a take in this project ({}): `{add}` adds one, under the name {take}",
+            "{take} is not a take in this project ({}): `{add} --name {take}` adds one, under the name {take}",
             project.display()
         )
     })
@@ -440,7 +452,8 @@ fn captured(project: &Path, take: &ProjectTake) -> Result<Option<(PathBuf, Place
 pub(crate) fn next_capture(song: &Name, take: &Name) -> String {
     format!(
         "the take {take} is linked to {song} and not placed: the next `duet capture rhythm {take}` \
-         (or `melody`) places it on {song}'s bars, or `duet song place {song} {take}` places it"
+         (or `melody`) places it on {song}'s bars, or `duet song place {song} {take} --click --bar \
+         1.1.0 --at <secs>` (played to the click) or `--bpm <bpm> --bar <bar> --at <secs>` places it"
     )
 }
 
@@ -525,18 +538,15 @@ fn place(ctx: &Context, input: PlaceInput) -> Result<()> {
     };
     let placed = if click {
         let missing = wants(&[("--bar", bar.is_none()), ("--at", at.is_none())]);
-        if !missing.is_empty() {
+        let (Some(bar), Some(at)) = (bar, at) else {
             bail!(
                 "{}: --click says where the click's bar falls in the take, and needs {missing} \
                  too; the song is left as it was",
                 path.display()
             );
-        }
-        let (Some(bar), Some(at)) = (bar, at) else {
-            unreachable!("both are given: the missing list is empty");
         };
         // A drift measured for a click placement stays: it is the take's clock against the click's.
-        let ppm = current.filter(|c| c.by == duet_schemas::song::By::Click);
+        let ppm = current.filter(|c| c.by == By::Click);
         Placed::click(bar, at, ppm.and_then(|c| c.clock_ppm))
     } else {
         if bar.is_none() && at.is_none() && bpm.is_none() {
@@ -554,6 +564,18 @@ fn place(ctx: &Context, input: PlaceInput) -> Result<()> {
             ("--at", at.is_none()),
             ("--bpm", bpm.is_none()),
         ]);
+        if let (Some(c), Some(bar), Some(at), None) =
+            (current.filter(|c| c.by == By::Click), bar, at, bpm)
+        {
+            bail!(
+                "{}: the take {take} is placed by the click, which has no bpm: `--click --bar \
+                 {bar} --at {at}` moves it and keeps it a click placement (its place now: bar \
+                 {} at {:.3} s), or give --bpm to set it; the song is left as it was",
+                path.display(),
+                c.bar,
+                c.at_secs
+            );
+        }
         let (Some(bar), Some(at), Some(bpm)) = (bar, at, bpm) else {
             bail!(
                 "{}: the take {take} has no placement to keep a value from, so {missing} must \
@@ -568,10 +590,13 @@ fn place(ctx: &Context, input: PlaceInput) -> Result<()> {
     if is_new {
         eprintln!("linked the take {take} to {song}");
     }
+    // A link made now had no placement to replace: `current` was only what linking would have
+    // estimated, to fill the flags not given.
+    let replaced = if is_new { None } else { current.as_ref() };
     println!(
         "{}: {}",
         path.display(),
-        crate::placing::placed_said(&song, &take, current.as_ref(), &placed)
+        crate::placing::placed_said(&song, &take, replaced, &placed)
     );
     Ok(())
 }

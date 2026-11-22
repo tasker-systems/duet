@@ -285,6 +285,114 @@ fn place_click_with_bar_and_at_places_it_by_click_and_refuses_bpm_with_click() {
 }
 
 #[test]
+fn place_at_on_a_click_placement_names_the_click_form_and_not_a_missing_placement() {
+    let root = with_song_and_take("placing-place-click-at");
+    ok(&duet(&root, &["song", "link", "wayfaring", "beat"]), "link");
+    ok(
+        &duet(
+            &root,
+            &[
+                "song",
+                "place",
+                "wayfaring",
+                "beat",
+                "--click",
+                "--bar",
+                "1.1.0",
+                "--at",
+                "2.5",
+            ],
+        ),
+        "place --click",
+    );
+    let before = song_bytes(&root);
+
+    let out = duet(
+        &root,
+        &["song", "place", "wayfaring", "beat", "--at", "2.51"],
+    );
+    assert!(!out.status.success(), "a click has no bpm to keep");
+    let said = stderr(&out);
+    assert!(
+        !said.contains("no placement"),
+        "the take has a placement: {said}"
+    );
+    assert!(
+        said.contains("--click --bar 1.1.0 --at 2.51"),
+        "names the form that keeps it a click: {said}"
+    );
+    assert_eq!(song_bytes(&root), before, "the song is left as it was");
+
+    ok(
+        &duet(
+            &root,
+            &[
+                "song",
+                "place",
+                "wayfaring",
+                "beat",
+                "--click",
+                "--bar",
+                "1.1.0",
+                "--at",
+                "2.51",
+            ],
+        ),
+        "the named form",
+    );
+    let p = placed(&root);
+    assert_eq!((p.by, p.at_secs), (By::Click, 2.51));
+}
+
+#[test]
+fn place_reads_a_bare_bar_number_as_its_first_beat() {
+    let root = with_song_and_take("placing-place-bare-bar");
+    let out = duet(
+        &root,
+        &[
+            "song",
+            "place",
+            "wayfaring",
+            "beat",
+            "--bpm",
+            "90",
+            "--bar",
+            "1",
+            "--at",
+            "0.5",
+        ],
+    );
+    ok(&out, "--bar 1");
+    assert_eq!(placed(&root).bar.to_string(), "1.1.0");
+}
+
+#[test]
+fn place_on_a_take_not_yet_linked_does_not_say_it_replaced_a_placement() {
+    let root = with_song_and_take("placing-place-new-link");
+    capture(&root);
+    let out = duet(
+        &root,
+        &["song", "place", "wayfaring", "beat", "--bpm", "90"],
+    );
+    ok(&out, "place --bpm on an unlinked, captured take");
+    let said = format!("{}{}", stdout(&out), stderr(&out));
+    assert!(said.contains("set:"), "{said}");
+    assert!(!said.contains("(was"), "there was no placement: {said}");
+}
+
+#[test]
+fn the_not_placed_hint_names_a_command_that_places() {
+    let root = with_song_and_take("placing-hint");
+    let out = duet(&root, &["song", "link", "wayfaring", "beat"]);
+    ok(&out, "link");
+    let said = stderr(&out);
+    assert!(
+        said.contains("duet song place wayfaring beat --click --bar 1.1.0 --at <secs>"),
+        "{said}"
+    );
+}
+
+#[test]
 fn place_on_an_unplaced_link_without_every_value_is_refused_naming_each_and_leaves_the_song() {
     let root = with_song_and_take("placing-place-partial");
     ok(&duet(&root, &["song", "link", "wayfaring", "beat"]), "link");
@@ -358,6 +466,10 @@ fn link_refuses_a_take_not_in_the_project_naming_take_add() {
     let said = stderr(&out);
     assert!(said.contains("duet take add"), "names the command: {said}");
     assert!(said.contains("nothing"), "{said}");
+    assert!(
+        said.contains("duet take add <file> --name nothing"),
+        "names the take as it will be called: {said}"
+    );
     assert_eq!(song_bytes(&root), before);
 
     let out = duet(
@@ -651,7 +763,7 @@ fn a_song_that_does_not_read_is_stated_and_the_linking_song_is_still_placed() {
         "{said}"
     );
     assert!(
-        said.contains("songs/broken could not be read, so the take may be linked there and was not placed on it"),
+        said.contains("songs/broken could not be read, so the take beat may be linked there and was not placed on it"),
         "names the unreadable song: {said}"
     );
 }
