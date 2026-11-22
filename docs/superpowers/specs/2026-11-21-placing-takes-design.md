@@ -167,9 +167,12 @@ reports about its latency cannot be relied on. Inside or outside a project.
   1 s: 60 bpm in 4/4, 12 ticks, the first of each 4 accented. It records the default input (or
   `--device`) at the same time, into memory. Nothing is written to a take.
 - **Finds each tick in the recording.** It is searched for within 400 ms either side of where the
-  stream timestamps (with the drift fitted, as `--song` does) put it. A tick is heard at the first
-  sample whose magnitude exceeds 8 times the floor, the median magnitude of the recording's first
-  0.5 s. The tick's error is where it was heard less where the timestamps put it.
+  stream timestamps (with the drift fitted, as `--song` does) put it. The tick is the loudest
+  sample in that search; it is heard at the first sample, in the 20 ms before that loudest one,
+  whose magnitude exceeds 8 times the floor, the median magnitude of the recording's first 0.5 s.
+  (A first crossing anywhere in the search is not used: on the owner's webcam a quieter sound
+  precedes each tick by 100 to 400 ms, likely the input's own processing.) The tick's error is
+  where it was heard less where the timestamps put it.
 - **Stores the median error** when at least 10 of the 12 ticks are heard and their errors lie within
   2 ms of each other, for the pair, keyed by the input's and the output's names and rates. A new
   calibration of the same pair replaces the old. Each entry has the offset in ms, how many ticks
@@ -178,7 +181,7 @@ reports about its latency cannot be relied on. Inside or outside a project.
   written.
 - **Refuses to store** when the floor is digital silence (the input heard nothing), when fewer than
   10 ticks are heard (the click may be going to headphones, or the speakers are off or too quiet),
-  or when the errors spread wider than 2 ms (a noisy room). It says which, and stores nothing.
+  or when the errors spread wider than 2 ms (a noisy room, or an input whose own processing moves the sound). It says which, and stores nothing.
   Too few heard also says: if the click goes to headphones, hold one against the microphone.
 - **The file** is `<user config dir>/calibration.toml` (`DUET_CONFIG_DIR`, or the platform's, as
   `duet.toml`), written whole by duet through a temporary file and a rename. duet writes it; a
