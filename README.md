@@ -805,12 +805,12 @@ a minute.
   is opened.
 - **`--calibrate`** measures where an input hears the output's click against where the streams'
   timestamps put it, since what an ordinary microphone reports about its own latency cannot be
-  relied on. It plays 12 ticks at 60 bpm from the default output after a second's silence, with
-  the speakers on, and records the input (the default, or `--device`) into memory; nothing is
-  written to a take. Each tick is searched for within 400 ms of where the timestamps put it; the
-  loudest sound there is the tick, heard where the input first rises past 8 times the floor of its
-  first half second in the 20 ms up to it. When 10 or
-  more are heard within 2 ms of each other, their median error is kept for the pair, by the
+  relied on. It plays 12 ticks at 60 bpm, each in the downbeat's sound, from the default output
+  after a second's silence, with the speakers on, and records the input (the default, or
+  `--device`) into memory; nothing is written to a take. Each tick is searched for within 400 ms of where the timestamps put it; the
+  loudest sound there is the tick, when it rises past 8 times the floor of the input's first half
+  second, heard where the input first reaches half of it in the 50 ms up to it. When 10 or more
+  are heard within 2 ms of each other, their median error is kept for the pair, by the
   input's and the output's names and rates, in `calibration.toml` in the user config directory
   (`DUET_CONFIG_DIR`, or the platform's, as for `duet.toml`), in place of an earlier one; it says
   the pair, the offset, the ticks heard, their spread and the file. An input that heard nothing,

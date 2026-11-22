@@ -6,8 +6,9 @@
 //! offsets are kept in `<user config dir>/calibration.toml` ([`Calibrations`]), one per pair of
 //! input and output, by their names and rates. The numbers are the design's: 60 bpm in 4/4,
 //! 12 ticks after a 1 s lead, each searched for 400 ms either side, the loudest sample there the
-//! tick, heard at the first sample past 8 times the floor (the median magnitude of the first
-//! 0.5 s) in the 20 ms up to it, and stored when 10 or more are heard within 2 ms of each other.
+//! tick when it exceeds 8 times the floor (the median magnitude of the first 0.5 s), heard at the
+//! first sample reaching half of it in the 50 ms up to it, and stored when 10 or more are heard
+//! within 2 ms of each other.
 
 use std::fmt;
 use std::fs;
@@ -30,8 +31,8 @@ pub(crate) const TICKS: usize = 12;
 pub(crate) const LEAD_SECS: f64 = 1.0;
 /// How far either side of where the timestamps put a tick it is searched for, in seconds.
 pub(crate) const SEARCH_SECS: f64 = 0.4;
-/// How far before a search's loudest sample its onset is looked for, in seconds.
-const ONSET_SECS: f64 = 0.02;
+/// How far before a search's loudest sample its half-peak point is looked for, in seconds.
+const ONSET_SECS: f64 = 0.05;
 /// The start of the recording the floor is measured over, in seconds.
 const FLOOR_SECS: f64 = 0.5;
 /// A tick is heard where the magnitude first exceeds this many times the floor.
@@ -42,7 +43,7 @@ const FEWEST: usize = 10;
 const WIDEST_MS: f64 = 2.0;
 
 /// The calibration click at `rate`: [`LEAD_SECS`] of silence, then [`TICKS`] ticks at 60 bpm in
-/// 4/4, the first of each four accented.
+/// 4/4, every one in the downbeat's sound.
 ///
 /// # Errors
 ///
@@ -53,7 +54,13 @@ pub(crate) fn ticks(rate: u32) -> Result<Ticks> {
     let lead = (LEAD_SECS * f64::from(rate)).round() as u64;
     // A bar of count-in is four ticks; bar 1 and the seven beats after it make twelve.
     let after_bar_one = (TICKS - 4) as f64 - 0.5;
-    Ticks::of(&composition, rate, lead, after_bar_one * 60.0 / BPM)
+    let mut ticks = Ticks::of(&composition, rate, lead, after_bar_one * 60.0 / BPM)?;
+    // Every tick is the downbeat's sound: a placement anchors on bar 1's downbeat, so that is the
+    // sound the calibration measures (design, amended in 14cb53c).
+    for tick in &mut ticks.frames {
+        tick.1 = true;
+    }
+    Ok(ticks)
 }
 
 /// What a calibration heard: the median of the ticks' errors (where each was heard less where
@@ -104,8 +111,8 @@ impl fmt::Display for Unheard {
 impl std::error::Error for Unheard {}
 
 /// The ticks in `samples` (channel 0 at `rate`), each searched for within [`SEARCH_SECS`] of its
-/// `expected_secs` and heard at its [`onset`]: the first sample over 8 times the floor in the
-/// 20 ms up to the search's loudest sample.
+/// `expected_secs` and heard at its [`onset`]: the loudest sample there, when it exceeds 8 times
+/// the floor, is the tick, heard at the first sample reaching half of it in the 50 ms up to it.
 ///
 /// # Errors
 ///
@@ -153,22 +160,28 @@ pub(crate) fn heard(samples: &[f32], rate: u32, expected_secs: &[f64]) -> Result
     })
 }
 
-/// Where in `search` a tick is heard: the loudest sample is the tick, and it is heard at the first
-/// sample over `over` in the [`ONSET_SECS`] up to and including that loudest one. None when none
-/// there is over it. A first crossing anywhere in the search is not used: on the owner's webcam a
-/// quieter sound precedes each tick by 100 to 400 ms, likely the input's own processing (design,
-/// amended in e7fa1d5).
+/// Where in `search` a tick is heard: the loudest sample is the tick, heard only when it exceeds
+/// `over` (8 times the floor), at the first sample in the [`ONSET_SECS`] up to and including that
+/// loudest one whose magnitude reaches half of it. Half the peak is a point on the tick's own rise,
+/// the same however loud it arrives; a threshold against the floor is not, on an input that ramps
+/// the sound up over 25 ms as the owner's webcam does. A first crossing anywhere in the search is
+/// not used either: a quieter sound precedes each tick there by 100 to 400 ms (design, amended in
+/// e7fa1d5 and 2aaa244). The 50 ms look-back reaches a tick's rise when the loudest sample is a
+/// reflection after it (14cb53c).
 pub(crate) fn onset(search: &[f32], rate: u32, over: f32) -> Option<usize> {
-    let loudest = search
+    let (loudest, peak) = search
         .iter()
+        .map(|s| s.abs())
         .enumerate()
-        .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))?
-        .0;
+        .max_by(|a, b| a.1.total_cmp(&b.1))?;
+    if peak <= over {
+        return None;
+    }
     let back = (ONSET_SECS * f64::from(rate)).round() as usize;
     let from = loudest.saturating_sub(back);
     search[from..=loudest]
         .iter()
-        .position(|s| s.abs() > over)
+        .position(|s| s.abs() >= peak / 2.0)
         .map(|i| from + i)
 }
 
@@ -344,14 +357,9 @@ mod tests {
         let frames: Vec<(u64, bool)> = expected
             .iter()
             .zip(errors_ms)
-            .enumerate()
-            .filter_map(|(i, (t, e))| {
-                e.map(|e| {
-                    (
-                        ((t + e / 1000.0) * f64::from(RATE)).round() as u64,
-                        i % 4 == 0,
-                    )
-                })
+            .filter_map(|(t, e)| {
+                // Every calibration tick is the downbeat's sound.
+                e.map(|e| (((t + e / 1000.0) * f64::from(RATE)).round() as u64, true))
             })
             .collect();
         let bar_one = frames.first().map_or(0, |f| f.0);
@@ -360,20 +368,9 @@ mod tests {
         // A uniform noise of half-width a has an RMS of a / sqrt(3).
         let a = 0.001 * 3.0_f64.sqrt();
         if pre_sound {
-            // The noise's median magnitude is a / 2: ten times it, for 5 ms of 1 kHz.
-            let level = 10.0 * a / 2.0;
             // Only before a tick that sounds: the input's processing makes it from the tick.
-            for (i, t) in expected.iter().enumerate() {
-                if errors_ms[i].is_none() {
-                    continue;
-                }
-                let before = 0.1 + 0.2 * (i as f64 / 11.0);
-                let start = ((t - before) * f64::from(RATE)).round() as usize;
-                for n in 0..(RATE as usize / 200) {
-                    let phase = std::f64::consts::TAU * 1000.0 * n as f64 / f64::from(RATE);
-                    out[start + n] += (level * phase.sin()) as f32;
-                }
-            }
+            let sounds: Vec<bool> = errors_ms.iter().map(Option::is_some).collect();
+            add_pre_sounds(&mut out, &expected, &sounds);
         }
         let mut seed = 0x2545_f491_u64;
         for s in &mut out {
@@ -384,13 +381,32 @@ mod tests {
         out
     }
 
+    /// Adds 5 ms of 1 kHz at 10 times the noise's median magnitude (a / 2), 100 to 300 ms before
+    /// each expected tick `sounds` marks.
+    fn add_pre_sounds(out: &mut [f32], expected: &[f64], sounds: &[bool]) {
+        let level = 10.0 * 0.001 * 3.0_f64.sqrt() / 2.0;
+        for (i, t) in expected.iter().enumerate() {
+            if !sounds[i] {
+                continue;
+            }
+            let before = 0.1 + 0.2 * (i as f64 / 11.0);
+            let start = ((t - before) * f64::from(RATE)).round() as usize;
+            for n in 0..(RATE as usize / 200) {
+                let phase = std::f64::consts::TAU * 1000.0 * n as f64 / f64::from(RATE);
+                out[start + n] += (level * phase.sin()) as f32;
+            }
+        }
+    }
+
     #[test]
-    fn the_calibration_click_is_twelve_ticks_at_60_bpm_after_a_second() {
+    fn the_calibration_click_is_twelve_downbeats_at_60_bpm_after_a_second() {
         let t = expected();
         assert_eq!(t.len(), 12);
         for (k, secs) in t.iter().enumerate() {
             assert!((secs - (1.0 + k as f64)).abs() < 1e-9, "{t:?}");
         }
+        // Every one in the downbeat's sound, which a placement anchors on.
+        assert!(ticks(RATE).unwrap().frames.iter().all(|&(_, down)| down));
     }
 
     #[test]
@@ -399,7 +415,8 @@ mod tests {
         errors[5] = None;
         let heard = heard(&recording(&errors), RATE, &expected()).expect("heard");
         assert_eq!(heard.ticks, 11);
-        assert!((heard.offset_ms + 8.0).abs() < 0.05, "{heard:?}");
+        // A sharp attack: half its peak is within 0.3 ms of where it starts (fix round 2).
+        assert!((heard.offset_ms + 8.0).abs() < 0.3, "{heard:?}");
         assert!(heard.spread_ms < 0.05, "{heard:?}");
     }
 
@@ -410,7 +427,57 @@ mod tests {
         errors[5] = None;
         let heard = heard(&recording_with(&errors, true), RATE, &expected()).expect("heard");
         assert_eq!(heard.ticks, 11);
-        assert!((heard.offset_ms + 8.0).abs() < 0.05, "{heard:?}");
+        // A sharp attack: half its peak is within 0.3 ms of where it starts (fix round 2).
+        assert!((heard.offset_ms + 8.0).abs() < 0.3, "{heard:?}");
+    }
+
+    /// A tick as the owner's webcam passes it on: the downbeat's 1760 Hz tone whose level ramps up linearly
+    /// over 25 ms to `level`, then dies away over 20 ms.
+    fn ramped_tick(level: f64) -> Vec<f32> {
+        let rate = f64::from(RATE);
+        let (rise, fall) = ((0.025 * rate) as usize, (0.020 * rate) as usize);
+        (0..rise + fall)
+            .map(|n| {
+                let envelope = if n < rise {
+                    n as f64 / rise as f64
+                } else {
+                    1.0 - (n - rise) as f64 / fall as f64
+                };
+                let phase = std::f64::consts::TAU * 1760.0 * n as f64 / rate;
+                (level * envelope * phase.sin()) as f32
+            })
+            .collect()
+    }
+
+    /// Ruling of fix round 2 (design amended in 2aaa244): a tick whose sound ramps up is heard at
+    /// the same point on its rise however loud it arrives.
+    #[test]
+    fn ramped_ticks_at_levels_four_times_apart_are_heard_at_one_point_on_their_rise() {
+        // Where on its own rise a ramped tick reaches half its peak: the known lag of its sound.
+        let shape = ramped_tick(1.0);
+        let peak = shape.iter().fold(0.0_f32, |p, s| p.max(s.abs()));
+        let lag_ms = shape.iter().position(|s| s.abs() >= peak / 2.0).unwrap() as f64 * 1000.0
+            / f64::from(RATE);
+        let expected = expected();
+        // Noise only, then a pre-sound before every tick, and the ramped ticks 8 ms early.
+        let mut out = recording(&[None; 12]);
+        add_pre_sounds(&mut out, &expected, &[true; 12]);
+        for (i, t) in expected.iter().enumerate() {
+            let level = 0.1 + 0.3 * ((i * 5) % 12) as f64 / 11.0; // 0.1 to 0.4
+            let start = ((t - 0.008) * f64::from(RATE)).round() as usize;
+            for (n, s) in ramped_tick(level).into_iter().enumerate() {
+                out[start + n] += s;
+            }
+        }
+        let heard = heard(&out, RATE, &expected).expect("heard");
+        assert_eq!(heard.ticks, 12);
+        // The half-peak point falls on a crest of the tone, 0.284 ms apart at 1760 Hz: noise can
+        // move it a crest either way (fix round 3).
+        assert!(heard.spread_ms <= 1.0, "{heard:?}");
+        assert!(
+            (heard.offset_ms - (-8.0 + lag_ms)).abs() < 0.1,
+            "{heard:?}, the half-peak lag {lag_ms:.3} ms"
+        );
     }
 
     #[test]
