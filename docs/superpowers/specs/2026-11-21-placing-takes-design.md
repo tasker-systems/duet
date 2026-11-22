@@ -168,8 +168,10 @@ reports about its latency cannot be relied on. Inside or outside a project.
   `--device`) at the same time, into memory. Nothing is written to a take.
 - **Finds each tick in the recording.** It is searched for within 400 ms either side of where the
   stream timestamps (with the drift fitted, as `--song` does) put it. The tick is the loudest
-  sample in that search; it is heard at the first sample, in the 20 ms before that loudest one,
-  whose magnitude exceeds 8 times the floor, the median magnitude of the recording's first 0.5 s.
+  sample in that search, heard only when it exceeds 8 times the floor (the median magnitude of the
+  recording's first 0.5 s). It is heard at the first sample, in the 20 ms up to that loudest one,
+  whose magnitude reaches half of it: a point on the tick's own rise, the same however loud the
+  tick arrives, which a threshold against the floor is not on an input that ramps the sound up.
   (A first crossing anywhere in the search is not used: on the owner's webcam a quieter sound
   precedes each tick by 100 to 400 ms, likely the input's own processing.) The tick's error is
   where it was heard less where the timestamps put it.
