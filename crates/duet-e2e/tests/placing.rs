@@ -914,12 +914,12 @@ fn decoded(path: &Path) -> (Vec<f32>, u32) {
 }
 
 /// Seconds into the take where the tick expected at `at_secs` is heard: the first sample from
-/// 50 ms before it whose magnitude exceeds 8 times `floor` (the median absolute level of the
+/// 30 ms before it whose magnitude exceeds 8 times `floor` (the median absolute level of the
 /// take's first 100 ms), the rule Task 7 measured the stamps' error by. Its own code, not
 /// calibration's, so the witness does not check duet by duet's own finder.
 fn onset(samples: &[f32], rate: u32, at_secs: f64, floor: f32) -> Option<f64> {
     let r = f64::from(rate);
-    let from = ((at_secs - 0.05).max(0.0) * r).round() as usize;
+    let from = ((at_secs - 0.03).max(0.0) * r).round() as usize;
     samples
         .iter()
         .skip(from)

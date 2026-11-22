@@ -172,7 +172,8 @@ pub fn disagreements(
 }
 
 /// Of the `*.capture.duet` files in `take_dir` whose analysis is of the take with this digest,
-/// the one modified most recently, with its path. A file that does not read, or that states no
+/// the one modified most recently, with its path. Two modified at the same time (a coarse
+/// filesystem clock) are told apart by path, the later name winning. A file that does not read, or that states no
 /// take, is skipped. A `take_dir` that does not exist holds none.
 ///
 /// # Errors
@@ -496,9 +497,17 @@ mod tests {
         dir
     }
 
-    fn write_analysis(dir: &Path, file: &str, a: &Analysis) {
+    /// Writes the analysis with its modification time set, so no test depends on how finely the
+    /// filesystem keeps time.
+    fn write_analysis(dir: &Path, file: &str, a: &Analysis, modified: SystemTime) {
         let text = Document::new(tool(), a.clone()).write().expect("writes");
-        fs::write(dir.join(file), text).expect("writes");
+        let path = dir.join(file);
+        fs::write(&path, text).expect("writes");
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(modified))
+            .expect("sets the modification time");
     }
 
     #[test]
@@ -507,12 +516,11 @@ mod tests {
         let older = analysis(90.0, est(90.0), four_four(), None, DIGEST);
         let newer = analysis(91.0, est(91.0), four_four(), None, DIGEST);
         let other = analysis(70.0, est(70.0), four_four(), None, OTHER);
-        write_analysis(&dir, "t.rules.capture.duet", &older);
-        std::thread::sleep(Duration::from_millis(50));
-        write_analysis(&dir, "t.basic-pitch.capture.duet", &newer);
-        std::thread::sleep(Duration::from_millis(50));
+        let at = |secs: u64| SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000 + secs);
+        write_analysis(&dir, "t.rules.capture.duet", &older, at(0));
+        write_analysis(&dir, "t.basic-pitch.capture.duet", &newer, at(10));
         // Newest of all, but of another take; and one that does not read.
-        write_analysis(&dir, "t.other.capture.duet", &other);
+        write_analysis(&dir, "t.other.capture.duet", &other, at(20));
         fs::write(dir.join("t.broken.capture.duet"), "not a document").expect("writes");
 
         let (path, found) = latest_analysis(&dir, &digest(DIGEST))
