@@ -97,6 +97,8 @@ pub(crate) enum Unheard {
     Silent,
     /// Fewer than ten ticks were heard.
     TooFew { heard: usize, of: usize },
+    /// Ticks were located, but their mean response has no clear onset: a noisy lead-in.
+    NoOnset { located: usize, of: usize },
     /// The ticks' errors spread wider than 2 ms.
     Spread { spread_ms: f64 },
 }
@@ -115,6 +117,12 @@ impl fmt::Display for Unheard {
                 "heard {heard} of {of} ticks, and a calibration needs {FEWEST}: the click may be \
                  going to headphones, or the speakers are off or too quiet; if the click goes to \
                  headphones, hold one against the microphone; nothing is stored"
+            ),
+            Unheard::NoOnset { located, of } => write!(
+                f,
+                "heard {located} of {of} ticks, but their mean response has no clear onset: the \
+                 sound just before each tick may be as loud as the tick, as a noisy room's is; \
+                 nothing is stored"
             ),
             Unheard::Spread { spread_ms } => write!(
                 f,
@@ -172,7 +180,10 @@ pub(crate) fn heard(samples: &[f32], rate: u32, expected_secs: &[f64]) -> Result
     let mut starts: Vec<f64> = located.iter().map(|&(at, _)| at as f64 - lead).collect();
     let mean = align(samples, &mut starts, len, rate);
     // Time the mean once, and place it back through each tick's alignment.
-    let at = onset(&mean, rate).ok_or_else(|| too_few(0))?;
+    let at = onset(&mean, rate).ok_or(Unheard::NoOnset {
+        located: located.len(),
+        of: expected_secs.len(),
+    })?;
     let mut errors_ms: Vec<f64> = starts
         .iter()
         .zip(&located)
@@ -547,13 +558,29 @@ mod tests {
     }
 
     #[test]
+    fn a_mean_with_a_noisy_lead_in_has_no_onset_and_is_not_said_to_be_unheard() {
+        // A lead-in as loud as the tick: nothing rises 8 times over it.
+        let mut mean = vec![0.5_f32; 4800];
+        mean[2000] = 0.6;
+        assert_eq!(onset(&mean, RATE), None);
+        let said = Unheard::NoOnset {
+            located: 11,
+            of: 12,
+        }
+        .to_string();
+        assert!(said.contains("heard 11 of 12 ticks"), "{said}");
+        assert!(said.contains("no clear onset"), "{said}");
+        assert!(!said.contains("headphones"), "{said}");
+    }
+
+    #[test]
     fn ticks_at_a_known_error_with_noise_and_one_missing_give_that_error() {
         let mut errors = vec![Some(-8.0); 12];
         errors[5] = None;
         let heard = heard(&recording(&errors), RATE, &expected()).expect("heard");
         assert_eq!(heard.ticks, 11);
-        // A clean, sharp attack: heard within 0.3 ms of where it starts (fix rounds 2 and 4).
-        assert!((heard.offset_ms + 8.0).abs() < 0.3, "{heard:?}");
+        // The design's witness 1: within 0.05 ms.
+        assert!((heard.offset_ms + 8.0).abs() < 0.05, "{heard:?}");
         assert!(heard.spread_ms < 0.05, "{heard:?}");
     }
 
