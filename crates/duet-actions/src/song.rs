@@ -25,11 +25,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use clap::Subcommand;
-use duet_core::{Key, TimeSig};
-use duet_schemas::journal::{DocDigest, Id, RelPath, SnapshotTaken, SongStatusSet};
-use duet_schemas::project::{Defaults, Name};
+use duet_core::{Key, Position, TimeSig};
+use duet_schemas::journal::{DocDigest, Id, RelPath, SnapshotTaken, SongStatusSet, TakeRef};
+use duet_schemas::project::{Defaults, Name, ProjectTake};
 use duet_schemas::snapshot::{Copied, FileDigest, SNAPSHOT_FILE};
-use duet_schemas::song::{Composition, Status, distinct_ids, part_names};
+use duet_schemas::song::{By, Composition, Placed, Status, TakeLink, distinct_ids, part_names};
 use duet_schemas::{AnyDocument, Document, Project, Snapshot, Song, Source};
 
 use crate::Context;
@@ -38,7 +38,7 @@ use clap::Args;
 use schemars::JsonSchema;
 
 /// A song's document in its folder.
-const SONG_FILE: &str = "song.duet";
+pub(crate) const SONG_FILE: &str = "song.duet";
 /// The project's document, under its root.
 const PROJECT_FILE: &str = ".duet/project.duet";
 
@@ -48,15 +48,32 @@ pub enum SongCommand {
     /// composition starts from --tempo, --meter and --key, or else the project's defaults, or
     /// else 120 bpm in 4/4 with no key.
     New(NewInput),
-    /// Show a song: its id, title, status and the moves it allows, its composition, and each of
-    /// its parts with its id, its source and where it is placed. A placement of a part the song
-    /// does not have, two parts with one name or one id, and a file in parts/ that is no part,
-    /// are refused by name.
+    /// Show a song: its id, title, status and the moves it allows, its composition, each of its
+    /// parts with its id, its source and where it is placed, and the takes it links, each with
+    /// the parts it is for and its placement. A placement of a part the song does not have, two
+    /// parts with one name or one id, and a file in parts/ that is no part, are refused by name;
+    /// a take that is for a part the song does not have yet is stated.
     Show(ShowInput),
     /// Move a song's status: idea → sketch → developing → arranged, and arranged → developing.
     /// Any other move is refused, naming the song's state and the moves it allows, and the song
     /// is left as it was.
     Status(StatusInput),
+    /// Link a take of the project to a song, by its name and digest, and say which parts it is
+    /// for (--for, repeatable). A take already captured is placed on the song's bars at once,
+    /// estimated from its latest capture, naming the analysis it used; one not captured is linked
+    /// unplaced, and the next capture places it. A take already linked gains the --for parts
+    /// given and, if it was not placed and has a capture, is placed from the latest one; it
+    /// changes in nothing else. A take not in the project is refused, naming `duet take add`, and
+    /// the song is left as it was.
+    Link(LinkInput),
+    /// Place a take on a song's bars. --click --bar B --at S says it was played to the song's
+    /// click; --bpm, --bar and --at, any of them without --click, set it, each value not given
+    /// keeping the link's current one. A take not yet linked is linked first. A link with no
+    /// current value for one not given is refused, naming each flag still needed, and the song
+    /// is left as it was. A click placement has no bpm to keep, so --at or --bar alone on one is
+    /// refused, naming --click --bar B --at S. --bar reads a bare number as that bar's first
+    /// beat (9 is 9.1.0).
+    Place(PlaceInput),
     /// Take a snapshot: copy song.duet and every part the composition places, byte for byte,
     /// into `snapshots/<date>-<name>/`, beside a snapshot.duet stating each copy's digest. A part
     /// placed nowhere is not copied. The song's status is left as it is, and a snapshot is never
@@ -95,10 +112,11 @@ pub struct NewInput {
     pub project: PathBuf,
 }
 
-/// Show a song: its id, title, status and the moves it allows, its composition, and each of
-/// its parts with its id, its source and where it is placed. A placement of a part the song
-/// does not have, two parts with one name or one id, and a file in parts/ that is no part,
-/// are refused by name.
+/// Show a song: its id, title, status and the moves it allows, its composition, each of its
+/// parts with its id, its source and where it is placed, and the takes it links, each with
+/// the parts it is for and its placement. A placement of a part the song does not have, two
+/// parts with one name or one id, and a file in parts/ that is no part, are refused by name;
+/// a take that is for a part the song does not have yet is stated.
 #[derive(Debug, Args, JsonSchema)]
 pub struct ShowInput {
     /// The song's name.
@@ -117,6 +135,67 @@ pub struct StatusInput {
     pub song: Name,
     /// The state to move to: idea, sketch, developing or arranged.
     pub state: Status,
+    /// The project's root. Default: the working directory.
+    #[arg(long, default_value = ".")]
+    pub project: PathBuf,
+}
+
+/// Link a take of the project to a song, by its name and digest, and say which parts it is for
+/// (--for, repeatable). A take already captured is placed on the song's bars at once, estimated
+/// from its latest capture, naming the analysis it used; one not captured is linked unplaced,
+/// and the next capture places it. A take already linked gains the --for parts given and, if it
+/// was not placed and has a capture, is placed from the latest one; it changes in nothing else. A take not in the project is refused, naming `duet take add`, and
+/// the song is left as it was.
+#[derive(Debug, Args, JsonSchema)]
+pub struct LinkInput {
+    /// The song's name.
+    pub song: Name,
+    /// The take's name in the project.
+    pub take: Name,
+    /// A part the take is for, by name. The part need not be written yet. Repeatable.
+    #[arg(long = "for")]
+    pub r#for: Vec<Name>,
+    /// The project's root. Default: the working directory.
+    #[arg(long, default_value = ".")]
+    pub project: PathBuf,
+}
+
+/// A bar for `--bar`: a position such as `3.2.240`, or a bare bar number, which is that bar's
+/// first beat (`9` is `9.1.0`), as the songs design writes `--bar 9`.
+fn bar_position(text: &str) -> Result<Position, String> {
+    let text = text.trim();
+    let full = if text.chars().all(|c| c.is_ascii_digit()) && !text.is_empty() {
+        format!("{text}.1.0")
+    } else {
+        text.to_string()
+    };
+    full.parse::<Position>().map_err(|e| e.to_string())
+}
+
+/// Place a take on a song's bars. --click --bar B --at S says it was played to the song's
+/// click; --bpm, --bar and --at, any of them without --click, set it, each value not given
+/// keeping the link's current one. A take not yet linked is linked first. A link with no
+/// current value for one not given is refused, naming each flag still needed, and the song is
+/// left as it was.
+#[derive(Debug, Args, JsonSchema)]
+pub struct PlaceInput {
+    /// The song's name.
+    pub song: Name,
+    /// The take's name in the project.
+    pub take: Name,
+    /// The take was played to the song's click: its tempo is the composition's. Needs --bar
+    /// and --at, and refuses --bpm.
+    #[arg(long)]
+    pub click: bool,
+    /// The place on the song's bars where the take's own start falls, such as 1.1.0.
+    #[arg(long, value_parser = bar_position)]
+    pub bar: Option<Position>,
+    /// The seconds into the take at which --bar falls.
+    #[arg(long)]
+    pub at: Option<f64>,
+    /// The take's tempo, in quarter notes per minute. Refused with --click.
+    #[arg(long, conflicts_with = "click")]
+    pub bpm: Option<f64>,
     /// The project's root. Default: the working directory.
     #[arg(long, default_value = ".")]
     pub project: PathBuf,
@@ -238,6 +317,8 @@ pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
             println!("{}: {was} → {}", path.display(), doc.body.status);
             Ok(())
         }
+        SongCommand::Link(input) => link(ctx, input),
+        SongCommand::Place(input) => place(ctx, input),
         SongCommand::Snapshot(SnapshotInput {
             song,
             name,
@@ -259,6 +340,268 @@ pub fn run(ctx: &Context, command: SongCommand) -> Result<()> {
             project,
         }) => restore(ctx, &folder(&project, &song), &song, &snapshot),
     }
+}
+
+/// The project's take of this name, or a refusal naming the `duet take add` that adds one.
+fn project_take(project: &Path, take: &Name) -> Result<ProjectTake> {
+    let doc = crate::take::read_project(project)?;
+    doc.body.take(take).cloned().ok_or_else(|| {
+        let (add, _) = crate::take::add_line(Path::new("<file>"));
+        anyhow::anyhow!(
+            "{take} is not a take in this project ({}): `{add} --name {take}` adds one, under the name {take}",
+            project.display()
+        )
+    })
+}
+
+/// What [`link_with`] found and did.
+struct Linked {
+    path: PathBuf,
+    /// The link was made now.
+    new: bool,
+    /// The parts it gained, in the order given.
+    gained: Vec<Name>,
+    /// Whether `song.duet` was written: only when its content would change.
+    wrote: bool,
+}
+
+/// Finds the song's link to `take`, or makes it; adds the `parts` it is not yet for; and, when
+/// `placed` is given, replaces the link's placement with it. A link already there keeps its
+/// placement when `placed` is `None`. The song is checked before it is written, and written only
+/// when the bytes would change.
+fn link_with(
+    ctx: &Context,
+    song_dir: &Path,
+    take: &ProjectTake,
+    parts: &[Name],
+    placed: Option<Placed>,
+) -> Result<Linked> {
+    let path = song_dir.join(SONG_FILE);
+    let mut doc = read_song(song_dir)?;
+    let was = doc.body.clone();
+    let new = doc.body.link(&take.name).is_none();
+    if new {
+        doc.body
+            .takes
+            .push(TakeLink::new(take.name.clone(), take.take.digest));
+    }
+    let Some(link) = doc.body.link_mut(&take.name) else {
+        bail!("{}: the link to {} was not made", path.display(), take.name);
+    };
+    if link.digest != take.take.digest {
+        bail!(
+            "{}: the song links the take {} by the digest {}, and the project's {} has the digest \
+             {}: they are not the same audio",
+            path.display(),
+            take.name,
+            link.digest,
+            take.name,
+            take.take.digest
+        );
+    }
+    let mut gained = Vec::new();
+    for part in parts {
+        if !link.r#for.contains(part) {
+            link.r#for.push(part.clone());
+            gained.push(part.clone());
+        }
+    }
+    if let Some(placed) = placed {
+        link.placed = Some(placed);
+    }
+    doc.body
+        .check()
+        .map_err(|why| anyhow::anyhow!("{}: {why}", path.display()))?;
+    let wrote = doc.body != was;
+    if wrote {
+        doc.tool = tool();
+        write_song(ctx, &path, &doc)?;
+    }
+    Ok(Linked {
+        path,
+        new,
+        gained,
+        wrote,
+    })
+}
+
+/// Links `take` to the song in `song_dir` (`songs/<song>`), or finds the link, and writes its
+/// placement, then `song.duet`. With `placed` `None` an existing link keeps its placement; with
+/// `Some` the link's placement is replaced. `song.duet` is written only when its bytes would
+/// change. A refusal happens before anything is written.
+///
+/// # Errors
+///
+/// When the song does not read or hold, or cannot be written.
+pub(crate) fn link_take(
+    ctx: &Context,
+    song_dir: &Path,
+    take: &ProjectTake,
+    placed: Option<Placed>,
+) -> Result<()> {
+    link_with(ctx, song_dir, take, &[], placed).map(|_| ())
+}
+
+/// The estimate the take's latest capture gives, and the analysis it came from.
+fn captured(project: &Path, take: &ProjectTake) -> Result<Option<(PathBuf, Placed)>> {
+    let dir = project
+        .join(crate::take::TAKES_DIR)
+        .join(take.name.as_str());
+    Ok(crate::placing::latest_analysis(&dir, &take.take.digest)?
+        .map(|(path, analysis)| (path, crate::placing::estimate(&analysis))))
+}
+
+/// The line saying the next capture places a link that is not placed.
+pub(crate) fn next_capture(song: &Name, take: &Name) -> String {
+    format!(
+        "the take {take} is linked to {song} and not placed: the next `duet capture rhythm {take}` \
+         (or `melody`) places it on {song}'s bars, or `duet song place {song} {take} --click --bar \
+         1.1.0 --at <secs>` (played to the click) or `--bpm <bpm> --bar <bar> --at <secs>` places it"
+    )
+}
+
+fn link(ctx: &Context, input: LinkInput) -> Result<()> {
+    let LinkInput {
+        song,
+        take,
+        r#for: parts,
+        project,
+    } = input;
+    let dir = folder(&project, &song);
+    let doc = read_song(&dir)?;
+    let found = project_take(&project, &take)?;
+    // A link with no placement is placed from the latest capture, if the take has one.
+    let unplaced = doc.body.link(&take).is_none_or(|l| l.placed.is_none());
+    let estimate = if unplaced {
+        captured(&project, &found)?
+    } else {
+        None
+    };
+    let linked = link_with(
+        ctx,
+        &dir,
+        &found,
+        &parts,
+        estimate.as_ref().map(|(_, placed)| *placed),
+    )?;
+    let path = linked.path.display();
+    if !linked.wrote {
+        println!("{path}: the take {take} is linked already; nothing changed");
+    } else if linked.new {
+        println!("{path}: linked the take {take}");
+    } else if linked.gained.is_empty() {
+        println!("{path}: placed the take {take}");
+    } else {
+        println!("{path}: the take {take} is now for more parts");
+    }
+    if let Some((analysis, placed)) = &estimate {
+        eprintln!(
+            "{} (from {})",
+            crate::placing::placed_said(&song, &take, None, placed),
+            analysis.display()
+        );
+    }
+    let now = read_song(&dir)?;
+    if now.body.link(&take).is_some_and(|l| l.placed.is_none()) {
+        eprintln!("{}", next_capture(&song, &take));
+    }
+    let parts_in_song = read_parts(&dir)?;
+    for line in now.body.check_for(parts_in_song.iter().map(|p| &p.name)) {
+        eprintln!("{line}");
+    }
+    Ok(())
+}
+
+fn place(ctx: &Context, input: PlaceInput) -> Result<()> {
+    let PlaceInput {
+        song,
+        take,
+        click,
+        bar,
+        at,
+        bpm,
+        project,
+    } = input;
+    let dir = folder(&project, &song);
+    let path = dir.join(SONG_FILE);
+    let doc = read_song(&dir)?;
+    let found = project_take(&project, &take)?;
+    // What the link holds now, or what linking it would place from the latest capture.
+    let current = match doc.body.link(&take) {
+        Some(link) => link.placed,
+        None => captured(&project, &found)?.map(|(_, placed)| placed),
+    };
+    let wants = |flags: &[(&str, bool)]| -> String {
+        flags
+            .iter()
+            .filter(|(_, missing)| *missing)
+            .map(|(flag, _)| *flag)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let placed = if click {
+        let missing = wants(&[("--bar", bar.is_none()), ("--at", at.is_none())]);
+        let (Some(bar), Some(at)) = (bar, at) else {
+            bail!(
+                "{}: --click says where the click's bar falls in the take, and needs {missing} \
+                 too; the song is left as it was",
+                path.display()
+            );
+        };
+        // A drift measured for a click placement stays: it is the take's clock against the click's.
+        let ppm = current.filter(|c| c.by == By::Click);
+        Placed::click(bar, at, ppm.and_then(|c| c.clock_ppm))
+    } else {
+        if bar.is_none() && at.is_none() && bpm.is_none() {
+            bail!(
+                "{}: nothing to place: give --click with --bar and --at, or any of --bpm, --bar \
+                 and --at; the song is left as it was",
+                path.display()
+            );
+        }
+        let bar = bar.or_else(|| current.map(|c| c.bar));
+        let at = at.or_else(|| current.map(|c| c.at_secs));
+        let bpm = bpm.or_else(|| current.and_then(|c| c.bpm));
+        let missing = wants(&[
+            ("--bar", bar.is_none()),
+            ("--at", at.is_none()),
+            ("--bpm", bpm.is_none()),
+        ]);
+        if let (Some(c), Some(bar), Some(at), None) =
+            (current.filter(|c| c.by == By::Click), bar, at, bpm)
+        {
+            bail!(
+                "{}: the take {take} is placed by the click, which has no bpm: `--click --bar \
+                 {bar} --at {at}` moves it and keeps it a click placement (its place now: bar \
+                 {} at {:.3} s), or give --bpm to set it; the song is left as it was",
+                path.display(),
+                c.bar,
+                c.at_secs
+            );
+        }
+        let (Some(bar), Some(at), Some(bpm)) = (bar, at, bpm) else {
+            bail!(
+                "{}: the take {take} has no placement to keep a value from, so {missing} must \
+                 be given too; the song is left as it was",
+                path.display()
+            );
+        };
+        Placed::set(bar, at, bpm)
+    };
+    let is_new = doc.body.link(&take).is_none();
+    link_take(ctx, &dir, &found, Some(placed))?;
+    if is_new {
+        eprintln!("linked the take {take} to {song}");
+    }
+    // A link made now had no placement to replace: `current` was only what linking would have
+    // estimated, to fill the flags not given.
+    let replaced = if is_new { None } else { current.as_ref() };
+    println!(
+        "{}: {}",
+        path.display(),
+        crate::placing::placed_said(&song, &take, replaced, &placed)
+    );
+    Ok(())
 }
 
 /// A snapshot just taken: its folder, how many files it copied, and the song's status, which
@@ -320,6 +663,15 @@ fn take_snapshot(
             .collect(),
     );
     body.said = said;
+    // The takes the song links, by name and digest, sorted by name.
+    let mut takes: Vec<TakeRef> = doc
+        .body
+        .takes
+        .iter()
+        .map(|link| TakeRef::new(link.take.as_str(), link.digest))
+        .collect();
+    takes.sort_by(|a, b| a.take.cmp(&b.take));
+    body.takes = takes;
     body.check().map_err(anyhow::Error::msg)?;
     let snapshots = dir.join("snapshots");
     no_link(project_of(dir), &snapshots)?;
@@ -664,7 +1016,7 @@ fn shown_snapshots(dir: &Path) -> Result<String> {
 }
 
 /// `songs/<song>/` under the project's root.
-fn folder(project: &Path, song: &Name) -> PathBuf {
+pub(crate) fn folder(project: &Path, song: &Name) -> PathBuf {
     project.join("songs").join(song.as_str())
 }
 
@@ -728,7 +1080,9 @@ fn read_project(project: &Path) -> Result<Option<Project>> {
     Ok(Some(doc.body))
 }
 
-fn read_song(dir: &Path) -> Result<Document<Song>> {
+/// The song in `dir` (`songs/<song>`), from its `song.duet`; refused, naming `duet song new`, when
+/// there is none.
+pub(crate) fn read_song(dir: &Path) -> Result<Document<Song>> {
     let path = dir.join(SONG_FILE);
     if !path.exists() {
         bail!(
@@ -1057,6 +1411,30 @@ fn shown(name: &Name, song: &Song, parts: &[SongPart]) -> String {
             "  {} ({}), {id}, {source}, {placed}",
             part.name, part.kind
         );
+    }
+    if song.takes.is_empty() {
+        let _ = writeln!(out, "takes none");
+    } else {
+        let _ = writeln!(out, "takes");
+    }
+    for link in &song.takes {
+        let parts = if link.r#for.is_empty() {
+            "none".to_owned()
+        } else {
+            link.r#for
+                .iter()
+                .map(Name::as_str)
+                .collect::<Vec<_>>()
+                .join(" and ")
+        };
+        let placed = link
+            .placed
+            .as_ref()
+            .map_or_else(|| "unplaced".to_owned(), crate::placing::describe);
+        let _ = writeln!(out, "  {}, for {parts}, {placed}", link.take);
+    }
+    for line in song.check_for(parts.iter().map(|p| &p.name)) {
+        let _ = writeln!(out, "  {line}");
     }
     out
 }

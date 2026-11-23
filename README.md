@@ -212,7 +212,7 @@ duet record wayfaring                                       # into takes/wayfari
   is missing, changed or unreadable, and `take locate` refuses a file that is not the take,
   naming both digests. Nothing is ever a symlink.
 - **`take forget`** drops the entry and its local path, and leaves every file in `takes/<take>/`
-  for you to delete. A song part still comped from the take is named.
+  for you to delete. A song part still comped from the take, and a song that still links it, are named.
 - **What you give a take is remembered.** A capture of a project's take (`duet capture rhythm
   takes/beat/beat.wav --tempo 92`) stores the tempo, meter or key it was given on the take's
   `given`, and every later capture of it uses them, stated as given. A flag still wins, and is
@@ -283,6 +283,10 @@ hyphens). It holds `song.duet`, a `song` 1.0 document of the song and its compos
 duet song new wayfaring-stranger --title "Wayfaring Stranger" --meter 3/4 --key "G minor"
 duet song show wayfaring-stranger                 # its id, status, composition and parts
 duet song status wayfaring-stranger sketch        # idea → sketch
+duet song link wayfaring-stranger beat --for verse  # link a project take; a captured one is placed
+duet song place wayfaring-stranger beat --bpm 90   # set a placement, keeping the values not given
+duet song place wayfaring-stranger beat --click --bar 1.1.0 --at 2.5  # played to the song's click
+duet record verse --song wayfaring-stranger       # recorded to the song's click, and placed by it
 duet song snapshot wayfaring-stranger first-verse --said "the verse sits"
 duet song restore wayfaring-stranger 2026-11-20-first-verse
 duet play wayfaring-stranger                      # every placed part, on the song's bars
@@ -308,6 +312,30 @@ duet play wayfaring-stranger                      # every placed part, on the so
   owner's words, the SHA-256 of every file copied, and the takes the song links, by name and
   digest. It journals a `doc.written` for each file and a `snapshot.taken`, and leaves the
   song's status as it was. One of the same name the same day is refused.
+- **`duet song link` and `duet song place` put a take on the song's bars.** `link` adds a take of
+  the project to the song's `takes` by its name and digest, and `--for` (repeatable) names the
+  parts it is for, written or not yet. A take already captured is placed `estimated` at once, at
+  `60 × rate / beat_period_frames` bpm, from its latest capture in `takes/<take>/`, and duet names
+  that analysis; one not captured is linked unplaced and the next capture places it. `link` again
+  adds the `--for` parts given, and places the link from the latest capture if it was not placed
+  and the take has one; it changes nothing else. `place --click --bar B --at S` says the
+  take was played to the song's click; `place --bpm`, `--bar` and `--at`, without `--click`, set it
+  (`by: set`), each value not given kept from the link, and a link with no value to keep is refused,
+  naming each flag still needed. A `click` placement has no bpm to keep, so `--at` or `--bar` alone
+  on one is refused, naming `--click --bar B --at S`, which keeps it a click placement. `--bar`
+  reads a bare number as that bar's first beat (`--bar 9` is `9.1.0`). `--bpm` with `--click` is
+  refused. A take not in the project is
+  refused, naming `duet take add`. A refusal leaves `song.duet` as it was.
+- **`duet song show` lists the takes** the song links, each with the parts it is for and its
+  placement, and states a `for` that names no part the song has yet.
+- **A capture of a linked take places it, and says where it disagrees with the song.**
+  `duet capture melody|rhythm` of a take a song links places an unplaced link `estimated` and
+  re-places an estimated one from the new capture, saying what moved; a `click` or `set` link is
+  left as it is. For each song it states a tempo that differs from the song's at the placement's
+  bar by more than 0.5 bpm (or is near half or double it), a meter or a key that differs, and for
+  a `set` link a tempo that differs from the set `bpm`: "tempo estimated 88.6 bpm;
+  wayfaring-stranger is 92 at bar 1". Agreement is not stated. The song and the capture's own
+  estimate are never changed.
 - **`duet song show` lists the snapshots**, and reports each file in one that differs from its
   stated digest, is missing, or is not stated, naming it.
 - **`duet song restore`** first takes a snapshot of the working song
@@ -744,6 +772,8 @@ duet record idea.flac                           # from the default input, until 
 duet record idea.flac --seconds 30              # stop after 30 seconds
 duet record idea.flac --device scarlett         # an input by its name, or part of it
 duet capture melody idea.flac                   # then capture it like any take
+duet record verse --song wayfaring-stranger     # in a project: to the song's click, placed by it
+duet record --calibrate                         # measure this input and output's offset, for --song
 ```
 
 `duet record` keeps a take from the machine's microphone as a FLAC file, which `duet capture`
@@ -770,6 +800,47 @@ a minute.
 - **On macOS**, the terminal app needs microphone access (System Settings, Privacy & Security,
   Microphone). Without it the system records silence rather than refusing, and `duet record`
   says the take is silent throughout.
+- **`--song <song>`**, in a project, records the take to the song's click and places it on the
+  song's bars. The click plays on the default output: one bar of count-in in the song's first
+  meter, then from bar 1 through the song's tempo and meter maps, each downbeat higher. It is
+  never written into the take, but from speakers it is heard in it; headphones keep it out, and
+  `duet record` says so as it starts. When the take is written it is added to the project and
+  linked to the song, `placed: { by: click, bar: 1.1.0, at_secs, clock_ppm }`: `at_secs` is where
+  bar 1's tick played, less the take's first captured frame, a whole number of frames from the
+  two streams' timestamps, and `clock_ppm` is how far the input's clock ran from the output's,
+  always stated. **`--no-reconcile`** leaves `clock_ppm` out of the placement. `clock_ppm` is the
+  drift the host's stamps show: on the owner's Mac mini about 25 ppm of the real drift goes
+  unmeasured, so the placement holds within 2 ms for roughly the first 80 s of a take, and is
+  about 4.5 ms off at 3 minutes. An input and an
+  output that are different devices are named as it starts, since their clocks may drift, with
+  the advice to record long takes through one device (an audio interface, a USB mic with a
+  headphone jack, or on macOS an aggregate device with drift correction); on a
+  system other than macOS, the offset is as it reports its streams' timing, unchecked there. A
+  take that ends before bar 1 plays, as when Ctrl-C stops it during the count-in, is kept and
+  linked unplaced. `--song` outside a project, with a file's path in place of a take's name, or
+  naming a song the project does not have (its songs are listed) is refused before any device
+  is opened.
+- **`--calibrate`** measures where an input hears the output's click against where the streams'
+  timestamps put it, since what an ordinary microphone reports about its own latency cannot be
+  relied on. It plays 12 ticks at 60 bpm, each in the downbeat's sound, from the default output
+  after a second's silence, with the speakers on, and records the input (the default, or
+  `--device`) into memory; nothing is written to a take. Each tick is searched for within 400 ms of where the timestamps put it; the
+  loudest sound there is the tick, when it rises past 8 times the floor of the input's first half
+  second. The ticks heard are aligned to their mean response by cross-correlation, the mean is
+  timed once, where it first rises past 8 times its own floor, and each tick is heard where that
+  falls through its alignment, so an input that passes a tick on in two bursts does not move it
+  from one to the other. When 10 or more
+  are heard within 2 ms of each other, their median error is kept for the pair, by the
+  input's and the output's names and rates, in `calibration.toml` in the user config directory
+  (`DUET_CONFIG_DIR`, or the platform's, as for `duet.toml`), in place of an earlier one; it says
+  the pair, the offset, the ticks heard, their spread and the file. An input that heard nothing,
+  too few ticks (if the click goes to headphones, hold one against the microphone), or ticks
+  spread wider than 2 ms (a noisy room, or the input's own noise suppression moving the sound)
+  stores nothing, and says which. `record --song` applies the pair's
+  calibration, a whole number of frames, and says which it applies, or that there is none and
+  the placement is as the devices report their latency. `--calibrate` with a take, `--song`,
+  `--seconds` or `--no-reconcile` is refused before any device is opened, as is a
+  `calibration.toml` that does not read, naming its path.
 
 ## Capturing an idea
 

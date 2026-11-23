@@ -55,3 +55,17 @@ fn seconds_are_above_zero() {
     assert!(!dir.join("take.flac").exists());
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
+
+#[test]
+fn no_reconcile_needs_a_song() {
+    let dir = scratch("record-no-reconcile");
+    let out = duet(
+        &dir,
+        &["record", s(&dir.join("take.flac")), "--no-reconcile"],
+    );
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--song"), "{err}");
+    assert!(!dir.join("take.flac").exists());
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}

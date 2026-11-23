@@ -85,6 +85,32 @@
         }
       ],
       "end": "29.1.0"
-    }
+    },
+    "takes": [
+      {
+        "take": "wayfaring",
+        "digest": "sha256:9f2c41d07b3e8a65c1f0d92e4b7a3c58e06d1f9a2b4c7e8d3f5a6b0c9d1e2f34",
+        "for": [
+          "melody"
+        ],
+        "placed": {
+          "by": "estimated",
+          "bar": "1.1.0",
+          "at_secs": 1.057,
+          "bpm": 88.6
+        }
+      },
+      {
+        "take": "wayfaring-2",
+        "digest": "sha256:0707070707070707070707070707070707070707070707070707070707070707",
+        "for": [],
+        "placed": {
+          "by": "click",
+          "bar": "9.1.0",
+          "at_secs": 31.4,
+          "clock_ppm": -41.0
+        }
+      }
+    ]
   }
 }

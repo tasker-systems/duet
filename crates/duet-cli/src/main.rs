@@ -96,7 +96,10 @@ enum Command {
     /// with its parts are stated first.
     Play(play::PlayArgs),
     /// Record a take from the microphone (the default input, or one named with --device) to
-    /// a FLAC file, until Ctrl-C or for --seconds. `duet capture` reads it like any take.
+    /// a FLAC file, until Ctrl-C or for --seconds. `duet capture` reads it like any take. With
+    /// --song, in a project, the song's click plays on the default output and the take is
+    /// placed on the song's bars by it. --calibrate measures the input and output's offset,
+    /// which --song applies.
     Record(record::RecordArgs),
     /// Show duet's configuration: where its duet.toml files are, and what they set.
     #[command(subcommand)]

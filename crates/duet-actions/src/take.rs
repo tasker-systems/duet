@@ -210,15 +210,23 @@ fn locate(project: &Project, input: &LocateInput) -> Result<()> {
 fn forget(ctx: &Context, project: &Project, input: &ForgetInput) -> Result<()> {
     let mut doc = read_project(&project.root)?;
     let take = taken(&doc.body, &input.take)?.clone();
-    let linked = linked_by(&project.root, &take)?;
+    let (linked, unreadable) = linked_by(&project.root, &take)?;
     doc.body.takes.retain(|t| t.name != take.name);
     write_project(ctx, &project.root, &mut doc)?;
     set_local(&project.root, &take.name, None)?;
-    for part in &linked {
+    for what in &linked {
+        let how = if what.ends_with("/song.duet") {
+            "still links"
+        } else {
+            "is still comped from"
+        };
         eprintln!(
-            "{part} is still comped from the take {} ({}), which the project no longer names",
+            "{what} {how} the take {} ({}), which the project no longer names",
             take.name, take.take.digest
         );
+    }
+    for line in &unreadable {
+        eprintln!("{line}");
     }
     let dir = Path::new(TAKES_DIR).join(take.name.as_str());
     let mut left = Vec::new();
@@ -805,12 +813,29 @@ fn write_local(local: &toml::Table) -> Result<String> {
     Ok(format!("{LOCAL_HEADER}\n{}", toml::to_string(local)?))
 }
 
-/// The song parts comped from `take`, by its digest: `songs/<song>/parts/<part>.duet`.
-fn linked_by(root: &Path, take: &ProjectTake) -> Result<Vec<String>> {
+/// What still names `take`, by its digest, one line each, sorted: the songs whose `takes` link it
+/// (`songs/<song>/song.duet`), and the song parts comped from it (`songs/<song>/parts/<part>.duet`).
+/// A song that does not read is not skipped in silence: it comes back as the second list, for the
+/// caller to say, since it may link the take.
+fn linked_by(root: &Path, take: &ProjectTake) -> Result<(Vec<String>, Vec<String>)> {
     let songs = root.join("songs");
     let mut out = Vec::new();
+    let (linking, unreadable) =
+        crate::placing::songs_linking_or_unreadable(root, &take.take.digest)?;
+    for (name, _) in linking {
+        out.push(format!("songs/{name}/song.duet"));
+    }
+    let unreadable = unreadable
+        .into_iter()
+        .map(|(name, why)| {
+            format!(
+                "songs/{name}/song.duet could not be read, so it may link the take {}: {why}",
+                take.name
+            )
+        })
+        .collect();
     let Ok(entries) = fs::read_dir(&songs) else {
-        return Ok(out);
+        return Ok((out, unreadable));
     };
     for song in entries.flatten() {
         let parts = song.path().join("parts");
@@ -840,7 +865,7 @@ fn linked_by(root: &Path, take: &ProjectTake) -> Result<Vec<String>> {
         }
     }
     out.sort();
-    Ok(out)
+    Ok((out, unreadable))
 }
 
 /// Adds a take recorded straight into `takes/<name>/<file>` to the project: `duet record` in a

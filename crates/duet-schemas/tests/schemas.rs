@@ -21,7 +21,7 @@ use duet_capture::Analysis;
 use duet_core::{
     Control, Key, Note, Part, Pitch, Position, TempoChange, TimeChange, TimeSig, Track,
 };
-use duet_dsp::{FrameBlock, PerformanceHead};
+use duet_dsp::{FrameBlock, PerformanceHead, TakeDigest};
 use duet_schemas::journal::{
     AskAnswered, AskAsked, AskWithdrawn, At, Audience, By, Closes, Concerns, DocDigest, DocWritten,
     Entry, EventInfo, Id, IndexLine, Indexed, MomentPlayed, Opens, Party, RelPath, SegmentStamp,
@@ -30,7 +30,9 @@ use duet_schemas::journal::{
 use duet_schemas::part::CompedTake;
 use duet_schemas::project::{Defaults, Given, ProjectTake};
 use duet_schemas::snapshot::{Copied, FileDigest};
-use duet_schemas::song::{Composition, KeyAt, MeterAt, Placement, Section, Status, TempoAt};
+use duet_schemas::song::{
+    Composition, KeyAt, MeterAt, Placed, Placement, Section, Status, TakeLink, TempoAt,
+};
 use duet_schemas::{
     AnyDocument, Document, ENVELOPE, ENVELOPE_INFO, EVENTS, Framing, From, IndexHead, Journal,
     JournalHead, JournalIndex, KINDS, KindInfo, Notice, PartBody, Project, Snapshot, Song, Source,
@@ -805,6 +807,15 @@ fn example_song() -> Song {
     ];
     composition.end = Some(pos("29.1.0"));
     let mut song = Song::new(id(30), "Wayfaring Stranger", composition);
+    let mut wayfaring = TakeLink::new(
+        "wayfaring".parse().unwrap(),
+        EXAMPLE_DIGEST.parse().unwrap(),
+    );
+    wayfaring.r#for = vec!["melody".parse().unwrap()];
+    wayfaring.placed = Some(Placed::estimated(pos("1.1.0"), 1.057, 88.6));
+    let mut second = TakeLink::new("wayfaring-2".parse().unwrap(), TakeDigest([7; 32]));
+    second.placed = Some(Placed::click(pos("9.1.0"), 31.4, Some(-41.0)));
+    song.takes = vec![wayfaring, second];
     song.status = Status::Sketch;
     song.intent = Some("slow and bare; voice first, the bass enters in the second verse".into());
     song

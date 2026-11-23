@@ -197,6 +197,20 @@ pub const ACTIONS: &[Action] = &[
         schema::<song::StatusInput>,
     ),
     writing(
+        "song.link",
+        &["song", "link"],
+        DOC_WRITTEN,
+        writes("the song's song.duet, over itself", true),
+        schema::<song::LinkInput>,
+    ),
+    writing(
+        "song.place",
+        &["song", "place"],
+        DOC_WRITTEN,
+        writes("the song's song.duet, over itself", true),
+        schema::<song::PlaceInput>,
+    ),
+    writing(
         "song.snapshot",
         &["song", "snapshot"],
         &["doc.written", "snapshot.taken"],
@@ -264,8 +278,10 @@ pub const ACTIONS: &[Action] = &[
         &["capture", "melody"],
         DOC_WRITTEN,
         writes(
-            "STEM.duet, STEM.abc, STEM.capture.duet and STEM.performance.duet.jsonl, all new",
-            false,
+            "STEM.duet, STEM.abc, STEM.capture.duet and STEM.performance.duet.jsonl, all new; in \
+             a project, the song.duet of each song that links the take and is placed by it, over \
+             itself",
+            true,
         ),
         schema::<capture::TakeArgs>,
     ),
@@ -274,8 +290,9 @@ pub const ACTIONS: &[Action] = &[
         &["capture", "rhythm"],
         DOC_WRITTEN,
         writes(
-            "STEM.duet, STEM.grid.duet and STEM.capture.duet, all new",
-            false,
+            "STEM.duet, STEM.grid.duet and STEM.capture.duet, all new; in a project, the \
+             song.duet of each song that links the take and is placed by it, over itself",
+            true,
         ),
         schema::<capture::TakeArgs>,
     ),
@@ -305,14 +322,17 @@ pub const ACTIONS: &[Action] = &[
     ),
     reads("play", &["play"], schema::<play::PlayArgs>),
     // In a project, `duet record <take>` records into takes/<take>/<take>.flac and adds the
-    // take, which rewrites the project's document.
+    // take, which rewrites the project's document; with --song it also links the take to the
+    // song and places it, which rewrites the song's song.duet. With --calibrate it writes only
+    // the pair's calibration, in calibration.toml in the user config directory.
     writing(
         "record",
         &["record"],
         TAKE_ADDED,
         writes(
             "a new FLAC take; in a project, under takes/<take>/, and .duet/project.duet over \
-             itself",
+             itself; with --song, the song's song.duet over itself; with --calibrate, \
+             calibration.toml in the user config directory, over itself",
             true,
         ),
         schema::<record::RecordArgs>,

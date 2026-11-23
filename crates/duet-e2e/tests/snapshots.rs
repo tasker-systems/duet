@@ -266,6 +266,37 @@ fn a_snapshot_copies_the_song_and_every_placed_part_byte_for_byte_and_states_the
 }
 
 #[test]
+fn a_snapshot_names_the_takes_the_song_links_by_name_and_digest() {
+    let dir = scratch("snapshot-takes");
+    let root = porch(&dir);
+    let one = format!("sha256:{}", "1".repeat(64));
+    let two = format!("sha256:{}", "2".repeat(64));
+    edit_song(&root, |body| {
+        body["takes"] = json!([
+            { "take": "verse", "digest": two },
+            { "take": "chorus", "digest": one },
+        ]);
+    });
+    ok(
+        &duet(&root, &["song", "snapshot", "porch", "linked"]),
+        "snapshot",
+    );
+
+    let snapshot = read_snapshot(&snapshot_dir(&root, "linked"));
+    let taken: Vec<(String, String)> = snapshot
+        .takes
+        .iter()
+        .map(|t| (t.take.clone(), t.digest.to_string()))
+        .collect();
+    assert_eq!(
+        taken,
+        vec![("chorus".to_owned(), one), ("verse".to_owned(), two)],
+        "the song's links as (take, digest), sorted by take"
+    );
+    std::fs::remove_dir_all(&dir).expect("clean up");
+}
+
+#[test]
 fn taking_a_snapshot_leaves_the_songs_status_and_document_unchanged() {
     let dir = scratch("snapshot-status");
     let root = porch(&dir);

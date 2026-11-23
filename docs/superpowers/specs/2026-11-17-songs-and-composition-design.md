@@ -342,9 +342,24 @@ The usual case: the take was recorded against a click playing the song's tempo m
 - **The offset is per song,** in the song's link, because one take can serve two songs at different
   bars.
 - **`duet record` in a song** (`--song wayfaring-stranger`) plays the click from the composition and
-  writes the placement itself: the offset is known exactly, since duet started both.
+  writes the placement itself: duet started both streams and works the offset out from their
+  timestamps, corrected by the pair's calibration (ruling 18; the placing-takes design says what
+  it leaves out).
 - **`duet song place <song> <take> --click --bar 9 --at 31.4`** places a take recorded elsewhere,
   against a click of the same tempo map.
+- **The drift between the take's clock and the click's** is measured by `duet record --song` and
+  written on the placement as `clock_ppm`, parts per million, applied wherever the take is mapped
+  onto the bars; the take is never resampled. **Ruled (owner, 2026-11-21, temper
+  `01a1fe65-a864-72ad-9543-36d81a90cb7a`, ruling 17).** The build is
+  [placing takes](2026-11-21-placing-takes-design.md).
+- **The offset between an input and an output is measured, not taken from the system:**
+  `duet record --calibrate` plays a click from the speakers, hears it in the input, and keeps
+  where it was heard against where the streams' timestamps put it, for that pair, in
+  `calibration.toml` in the user config directory; `duet record --song` applies it to `at_secs`,
+  a whole number of frames, and says so. What an ordinary microphone reports about its own
+  latency cannot be relied on. **Ruled (owner, 2026-11-21, temper
+  `01a20574-7729-7112-a582-79f8c4bb5c06`, ruling 18).** The build is
+  [placing takes](2026-11-21-placing-takes-design.md).
 
 ### Estimate, then compare
 
@@ -501,14 +516,22 @@ gates nothing (ruling 15, [§7](#7-lifecycles)), and a part's `source` (ruling 1
    the composition. **Needs:** 2. **Witnesses:** a take recorded with `--song` has its offset to the
    frame; a take with no click is placed `estimated` with capture's tempo, and `duet song place`
    with `--bpm` makes it `set`; a capture of a placed take states a tempo that disagrees with the
-   song, and changes neither.
+   song, and changes neither. **Built** (temper
+   `01a1f16d-a1da-7622-b0f9-e3cbe11f4a3c`, build design
+   [placing takes](2026-11-21-placing-takes-design.md)): `song` 1.0's `takes`, each link with its
+   `for` parts and an optional `placed` (`click`, `estimated` or `set`, with `clock_ppm` on a click
+   placement); `duet song link` and `duet song place`; `duet record <take> --song <song>` plays
+   the click and places the take by it, with `--no-reconcile`, and `duet record --calibrate`
+   measures a device pair's offset for it to apply (ruling 18). Capture of a linked take places an
+   unplaced or estimated link and states a tempo that disagrees by more than 0.5 bpm, a meter or a
+   key, changing neither; `duet take forget` and `duet song snapshot` read the links.
 4. **Snapshots:** `duet song snapshot` and restore. **Needs:** 2. **Witnesses:** every copied file is
    byte for byte its source; restore takes a snapshot first; a changed file in a snapshot is reported;
    taking a snapshot leaves the song's status unchanged. **Built** (temper
    `01a1f16d-c35d-751e-b1db-78e91037af6e`): `duet song restore <song> <snapshot>`, and the
    snapshot taken first is `before-restoring-<snapshot>`. A restore keeps the working song's status,
    so the journal and `song.duet` still agree. A copied file's digest is the SHA-256 of its bytes.
-   The snapshot's `takes` stays empty until task 3 gives the song its links.
+   The snapshot's `takes` holds the song's links, by name and digest, since task 3 gave the song them.
 5. **Playing a song:** `duet play` of a song, the parts at their placements on the composition's
    clock, with disagreements stated. **Needs:** 2. **Witness:** a part placed at bar 9 with
    `repeat: 2` renders its notes at bars 9 and following, at the composition's tempo. **Built**
