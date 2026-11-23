@@ -809,9 +809,16 @@ fn say_click(song: &Name, input: &str, heard: &Heard) {
         heard.name
     );
     if input != heard.name {
+        let one_clock = if cfg!(target_os = "macos") {
+            "one device (an audio interface, or a USB mic with a headphone jack), or an aggregate \
+             device with drift correction in Audio MIDI Setup"
+        } else {
+            "one device (an audio interface, or a USB mic with a headphone jack)"
+        };
         eprintln!(
             "the input ({input}) and output ({}) are different devices: their clocks may drift, \
-             and duet measures it",
+             and duet measures it, but the placement can still slide by around 1.5 ms a minute; \
+             for long takes, record through {one_clock}",
             heard.name
         );
     }

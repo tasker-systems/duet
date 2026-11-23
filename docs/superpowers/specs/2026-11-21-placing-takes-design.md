@@ -148,7 +148,9 @@ In a project only. Records the take as `duet record <take>` does today (#94: int
 - **Says at the start** that a click from speakers will be heard in the take, and that headphones
   keep it out. It does not refuse.
 - **Warns at the start when the input and output are different devices,** that their clocks may
-  drift and duet will measure it.
+  drift and duet will measure it, that the placement can still slide by around 1.5 ms a minute
+  (the unmeasured drift, below), and that long takes want one device: an audio interface, a USB
+  mic with a headphone jack, or on macOS an aggregate device with drift correction.
 - **`--count-in <bars>`** is not added; one bar is fixed for this task.
 - Refused before any device is opened: `--song` outside a project, a song the project does not
   have, a take name in use (as today), and a calibration file that cannot be read (naming its

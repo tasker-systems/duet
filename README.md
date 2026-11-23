@@ -812,7 +812,9 @@ a minute.
   drift the host's stamps show: on the owner's Mac mini about 25 ppm of the real drift goes
   unmeasured, so the placement holds within 2 ms for roughly the first 80 s of a take, and is
   about 4.5 ms off at 3 minutes. An input and an
-  output that are different devices are named as it starts, since their clocks may drift; on a
+  output that are different devices are named as it starts, since their clocks may drift, with
+  the advice to record long takes through one device (an audio interface, a USB mic with a
+  headphone jack, or on macOS an aggregate device with drift correction); on a
   system other than macOS, the offset is as it reports its streams' timing, unchecked there. A
   take that ends before bar 1 plays, as when Ctrl-C stops it during the count-in, is kept and
   linked unplaced. `--song` outside a project, with a file's path in place of a take's name, or
