@@ -45,14 +45,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/marks":
             return self._json(404, {"error": "only /marks takes a POST"})
+        # Only the page itself may write: a JSON content type cannot come from a cross-site form
+        # without a preflight this server never answers, and a browser's Origin must be ours.
+        origin = self.headers.get("Origin")
+        host = f"http://{self.headers.get('Host', '')}"
+        if not self.headers.get("Content-Type", "").startswith("application/json") or (origin and origin != host):
+            return self._json(403, {"error": "only the page served here may write marks"})
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         try:
-            entry = json.loads(body)
-            assert isinstance(entry, dict) and entry.get("kind") in ("mark", "reply", "edit")
+            raw = json.loads(body)
+            assert isinstance(raw, dict) and raw.get("kind") in ("mark", "reply", "edit")
+            entry = {"kind": raw["kind"]}
+            if raw.get("on") is not None:
+                entry["on"] = str(raw["on"])[:64]
+            if raw.get("from") is not None:
+                entry["from"], entry["to"] = float(raw["from"]), float(raw["to"])
+            if raw.get("note"):
+                entry["note"] = str(raw["note"])[:4000]
         except Exception:
             return self._json(400, {"error": "expected a JSON object with kind mark, reply or edit"})
         entry["by"] = "owner"
-        entry.setdefault("id", "m-" + uuid.uuid4().hex[:8])
+        entry["id"] = "m-" + uuid.uuid4().hex[:8]
         entry["at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
         with MARKS.open("a") as f:
             f.write(json.dumps(entry) + "\n")

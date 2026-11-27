@@ -338,13 +338,14 @@ function renderSel() {
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function entryHtml(m) {
-  const span = m.from != null ? ` <span class=meta>${(+m.from).toFixed(3)}–${(+m.to).toFixed(3)}</span>` : "";
-  return `<div class="entry ${m.by} ${m._fresh ? "fresh" : ""}"><span class="who ${m.by}">${m.by === "claude" ? "✦ Claude" : "owner"}</span> <span class=meta>${m.kind} · ${esc(m.at)}</span>${span}<br>${esc(m.note)}</div>`;
+  const span = m.from != null ? ` <span class=meta>${Number(m.from).toFixed(3)}–${Number(m.to).toFixed(3)}</span>` : "";
+  const by = m.by === "claude" ? "claude" : "owner";
+  return `<div class="entry ${by} ${m._fresh ? "fresh" : ""}"><span class="who ${by}">${by === "claude" ? "✦ Claude" : "owner"}</span> <span class=meta>${esc(m.kind)} · ${esc(m.at)}</span>${span}<br>${esc(m.note)}</div>`;
 }
 function renderThreads() {
   $("threads").innerHTML = roots().slice().reverse().map((r) => {
     const t = threadOf(r.id), sp = currentSpan(r), fresh = t.some((m) => m._fresh);
-    return `<div class="thread ${selThread === r.id ? "sel" : ""}" data-id="${r.id}">${entryHtml(r)}<span class=meta>${t.length - 1} after · now ${sp.a.toFixed(3)}–${sp.b.toFixed(3)}${fresh ? " · new" : ""}</span></div>`;
+    return `<div class="thread ${selThread === r.id ? "sel" : ""}" data-id="${esc(r.id)}">${entryHtml(r)}<span class=meta>${t.length - 1} after · now ${sp.a.toFixed(3)}–${sp.b.toFixed(3)}${fresh ? " · new" : ""}</span></div>`;
   }).join("") || '<span class=meta>no marks yet</span>';
   document.querySelectorAll(".thread").forEach((d) => d.onclick = () => {
     const r = roots().find((m) => m.id === d.dataset.id); selThread = r.id;
