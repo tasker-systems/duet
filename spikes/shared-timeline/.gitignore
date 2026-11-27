@@ -1,0 +1,3 @@
+# Everything build.sh makes is regenerated from the take; only the marks are kept.
+data/*
+!data/marks.jsonl

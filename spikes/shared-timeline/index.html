@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared Timeline Spike</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #77736b; --line: #e2ded5; --panel: #f2efe8;
+    --take: #4a5568; --rules: #c05621; --hmm: #2b6cb0; --trace: #a0a0a0;
+    --moment: #6b8e23; --owner: #805ad5; --claude: #d53f8c; --sel: rgba(128, 90, 213, .16);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1917; --fg: #ebe8e1; --muted: #9a958b; --line: #34322e; --panel: #24231f;
+      --take: #a0aec0; --rules: #ed8936; --hmm: #63b3ed; --trace: #5f5f5f;
+      --moment: #9acd32; --owner: #b794f4; --claude: #f687b3; --sel: rgba(183, 148, 244, .18); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .muted { color: var(--muted); }
+  #wrap { position: relative; padding: 0 16px; }
+  canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  button { font: inherit; padding: 3px 9px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 5px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--owner); color: #fff; border-color: var(--owner); }
+  label { display: inline-flex; gap: 4px; align-items: center; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+  #span { font-variant-numeric: tabular-nums; min-width: 14em; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 12px 16px 40px; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
+  textarea { width: 100%; font: inherit; padding: 6px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 5px; min-height: 56px; }
+  .thread { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; cursor: pointer; }
+  .thread.sel { border-color: var(--owner); }
+  .entry { padding: 4px 0 4px 8px; border-left: 3px solid var(--owner); margin: 4px 0; }
+  .entry.claude { border-left-color: var(--claude); }
+  .entry.fresh { background: var(--sel); }
+  .who { font-weight: 600; } .who.claude { color: var(--claude); } .who.owner { color: var(--owner); }
+  .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #status { color: var(--muted); }
+  kbd { border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Shared timeline — Wayfaring Stranger</h1>
+  <span class="muted">drag to mark a span · wheel to zoom · shift+wheel or trackpad to pan · click a moment or mark to select it · <kbd>space</kbd> plays the span</span>
+  <span id="status"></span>
+</header>
+<div class="bar">
+  <span id="span">no span</span>
+  <button id="play" class="primary">▶ play span</button>
+  <button id="stop">■</button>
+  <label><input type="checkbox" id="loop"> loop</label>
+  <span class="muted">hear:</span>
+  <label><input type="checkbox" id="hTake" checked><span class="sw" style="background:var(--take)"></span>take</label>
+  <label><input type="checkbox" id="hRules"><span class="sw" style="background:var(--rules)"></span>rules sine</label>
+  <label><input type="checkbox" id="hHmm"><span class="sw" style="background:var(--hmm)"></span>hmm sine</label>
+  <span class="muted">nudge:</span>
+  <button data-n="from,-0.01">⟵from</button><button data-n="from,0.01">from⟶</button>
+  <button data-n="to,-0.01">⟵to</button><button data-n="to,0.01">to⟶</button>
+  <button id="zoomSel">zoom to span</button><button id="zoomAll">whole take</button>
+</div>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<main>
+  <section>
+    <h2>This span</h2>
+    <div id="selInfo" class="meta">Drag on the timeline, or click a moment or a mark.</div>
+    <textarea id="note" placeholder="What do you hear here? (becomes a new mark, or a reply/edit on the selected thread)"></textarea>
+    <div style="display:flex; gap:8px; margin-top:6px; flex-wrap: wrap">
+      <button id="newMark" class="primary">mark this span</button>
+      <button id="reply">reply on selected thread</button>
+      <button id="edit">save nudged span to selected thread</button>
+    </div>
+    <h2 style="margin-top:16px">Selected thread (its history)</h2>
+    <div id="threadView" class="meta">none selected</div>
+  </section>
+  <section>
+    <h2>Threads in marks.jsonl</h2>
+    <div id="threads"></div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const keyName = (k) => NAMES[k % 12] + (Math.floor(k / 12) - 1);
+
+let TL, buffer, ctx, marks = [], seen = new Set(), firstLoad = true;
+let view = { a: 0, b: 1 }, sel = null, selThread = null, playing = null;
+const cv = $("cv"), g = cv.getContext("2d");
+const LANES = [];   // computed in layout(): {id, y, h, label}
+let W = 0;
+
+async function load() {
+  TL = await (await fetch("data/timeline.json")).json();
+  view = { a: 0, b: TL.duration };
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    buffer = await ctx.decodeAudioData(await (await fetch("data/" + TL.take)).arrayBuffer());
+  } catch (e) { $("status").textContent = "could not decode the take: " + e; }
+  peaks = computePeaks();
+  await pollMarks();
+  setInterval(pollMarks, 2000);
+  layout(); draw();
+}
+
+// ---------- marks file ----------
+async function pollMarks() {
+  try {
+    const next = await (await fetch("marks", { cache: "no-store" })).json();
+    const fresh = next.filter((m) => !seen.has(m.id));
+    if (fresh.length || next.length !== marks.length) {
+      fresh.forEach((m) => seen.add(m.id));
+      if (!firstLoad) fresh.forEach((m) => (m._fresh = true));
+      // keep fresh flags across polls
+      const old = new Map(marks.map((m) => [m.id, m]));
+      next.forEach((m) => { if (old.get(m.id)?._fresh) m._fresh = true; });
+      marks = next.map((m) => fresh.find((f) => f.id === m.id) || m);
+      if (!firstLoad && fresh.some((m) => m.by === "claude")) $("status").textContent = "Claude wrote " + fresh.filter(m => m.by === "claude").length + " new";
+      layout(); draw(); renderThreads();
+    }
+    firstLoad = false;
+  } catch (e) { $("status").textContent = "no helper: run tools/serve.py and open the page through it"; }
+}
+async function post(entry) {
+  const r = await fetch("marks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+  if (!r.ok) { $("status").textContent = "write failed: " + (await r.text()); return null; }
+  const e = await r.json(); await pollMarks(); return e;
+}
+const roots = () => marks.filter((m) => m.kind === "mark");
+const threadOf = (id) => marks.filter((m) => m.id === id || m.on === id);
+function currentSpan(root) {       // a thread's span is its latest edit's, else the root's
+  const eds = threadOf(root.id).filter((m) => m.kind === "edit" && m.from != null);
+  const last = eds[eds.length - 1] || root;
+  return { a: last.from, b: last.to };
+}
+
+// ---------- layout & drawing ----------
+let peaks = null;
+function computePeaks() {
+  if (!buffer) return null;
+  const d = buffer.getChannelData(0), n = 4000, step = Math.floor(d.length / n), out = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let m = 0; for (let j = i * step; j < (i + 1) * step; j++) m = Math.max(m, Math.abs(d[j])); out[i] = m; }
+  return out;
+}
+function rowsFor(spans) {           // pack spans into rows that never overlap
+  const rows = [];
+  spans.forEach((s) => {
+    let r = rows.findIndex((end) => end <= s.a);
+    if (r < 0) { r = rows.length; rows.push(0); }
+    rows[r] = s.b; s.row = r;
+  });
+  return Math.max(rows.length, 1);
+}
+function layout() {
+  W = cv.clientWidth;
+  const momentSpans = TL.moments.map((m) => ({ a: m.from, b: m.to, m }));
+  const markSpans = roots().map((m) => ({ ...currentSpan(m), m }));
+  const mr = rowsFor(momentSpans), kr = rowsFor(markSpans);
+  LANES.length = 0;
+  let y = 0;
+  const add = (id, h, label, extra) => { LANES.push({ id, y, h, label, ...extra }); y += h + 4; };
+  add("ruler", 18, "");
+  add("take", 60, "take");
+  TL.readings.forEach((r) => add("reading", 120, r.reader + " reading", { r }));
+  add("moments", mr * 16 + 4, "moments", { spans: momentSpans });
+  add("marks", kr * 16 + 4, "marks", { spans: markSpans });
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.height = y + "px"; cv.width = W * dpr; cv.height = y * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+const X = (t) => ((t - view.a) / (view.b - view.a)) * W;
+const T = (x) => view.a + (x / W) * (view.b - view.a);
+
+function draw() {
+  if (!TL) return;
+  g.clearRect(0, 0, W, cv.height);
+  const keys = TL.readings.flatMap((r) => r.notes.map((n) => n.key));
+  const kLo = Math.min(...keys) - 2, kHi = Math.max(...keys) + 2;
+  const off = TL.readings[0].tuning_cents - 6900;
+  for (const L of LANES) {
+    g.fillStyle = css("--panel"); if (L.id !== "ruler") g.fillRect(0, L.y, W, L.h);
+    if (L.id === "ruler") drawRuler(L);
+    if (L.id === "take" && peaks) {
+      g.fillStyle = css("--take"); const mid = L.y + L.h / 2;
+      for (let x = 0; x < W; x++) {
+        const i = Math.floor((T(x) / TL.duration) * peaks.length);
+        if (i < 0 || i >= peaks.length) continue;
+        const h = peaks[i] * (L.h / 2) * 1.6; g.fillRect(x, mid - h, 1, h * 2);
+      }
+    }
+    if (L.id === "reading") {
+      const yOf = (k) => L.y + L.h - ((k - kLo) / (kHi - kLo)) * L.h;
+      g.strokeStyle = css("--line"); g.fillStyle = css("--muted"); g.font = "10px system-ui"; g.lineWidth = 1;
+      for (let k = kLo; k <= kHi; k++) if (k % 12 === 0 || k % 12 === 3 || k % 12 === 7) {
+        g.beginPath(); g.moveTo(0, yOf(k)); g.lineTo(W, yOf(k)); g.stroke(); g.fillText(keyName(k), W - 26, yOf(k) - 2);
+      }
+      const color = css(L.r.reader === "hmm" ? "--hmm" : "--rules");
+      const kh = L.h / (kHi - kLo);
+      for (const n of L.r.notes) {
+        if (n.to < view.a || n.from > view.b) continue;
+        const x0 = X(n.from), x1 = X(n.to);
+        g.fillStyle = color; g.globalAlpha = n.between_keys ? 0.45 : 0.8;
+        g.fillRect(x0, yOf(n.key) - kh / 2, Math.max(1, x1 - x0 - 1), kh);
+        if (n.held_from) { g.globalAlpha = 0.3; g.fillRect(x0, yOf(n.key) + kh / 2, X(n.held_from) - x0, 2); }
+        g.globalAlpha = 1;
+        if (x1 - x0 > 26) { g.fillStyle = "#fff"; g.font = "10px system-ui"; g.fillText(keyName(n.key), x0 + 2, yOf(n.key) + 3); }
+      }
+      g.strokeStyle = css("--trace"); g.lineWidth = 1.2; g.beginPath(); let pen = false;
+      for (const [t, c, v] of TL.trace) {
+        if (t < view.a - 0.05 || t > view.b + 0.05) continue;
+        if (c == null || v < 0.3) { pen = false; continue; }
+        const y = yOf((c - off) / 100);
+        if (pen) g.lineTo(X(t), y); else g.moveTo(X(t), y); pen = true;
+      }
+      g.stroke();
+    }
+    if (L.id === "moments" || L.id === "marks") {
+      for (const s of L.spans) {
+        const x0 = X(s.a), x1 = X(s.b), y = L.y + 2 + s.row * 16;
+        const color = L.id === "moments" ? css("--moment") : css(s.m.by === "claude" ? "--claude" : "--owner");
+        g.fillStyle = color; g.globalAlpha = (L.id === "marks" && selThread === s.m.id) ? 1 : 0.65;
+        g.fillRect(x0, y, Math.max(2, x1 - x0), 13); g.globalAlpha = 1;
+        g.fillStyle = "#fff"; g.font = "10px system-ui";
+        const text = L.id === "moments" ? s.m.label : (s.m.by === "claude" ? "✦ " : "") + (s.m.note || "");
+        g.save(); g.beginPath(); g.rect(x0, y, Math.max(0, x1 - x0), 13); g.clip(); g.fillText(text, x0 + 3, y + 10); g.restore();
+      }
+    }
+    if (L.label) { g.fillStyle = css("--muted"); g.font = "11px system-ui"; g.fillText(L.label, 4, L.y + 12); }
+  }
+  if (sel) {
+    g.fillStyle = css("--sel"); g.fillRect(X(sel.a), 18, X(sel.b) - X(sel.a), cv.clientHeight);
+    g.strokeStyle = css("--owner"); g.lineWidth = 1;
+    [sel.a, sel.b].forEach((t) => { g.beginPath(); g.moveTo(X(t), 18); g.lineTo(X(t), cv.clientHeight); g.stroke(); });
+  }
+  if (playing && playing.head != null) {
+    g.strokeStyle = css("--fg"); g.beginPath(); g.moveTo(X(playing.head), 0); g.lineTo(X(playing.head), cv.clientHeight); g.stroke();
+  }
+}
+function drawRuler(L) {
+  const span = view.b - view.a;
+  const step = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5].find((s) => W / (span / s) > 60) || 5;
+  g.fillStyle = css("--muted"); g.strokeStyle = css("--line"); g.font = "10px system-ui";
+  for (let t = Math.ceil(view.a / step) * step; t <= view.b; t += step) {
+    const x = X(t); g.beginPath(); g.moveTo(x, 12); g.lineTo(x, 18); g.stroke();
+    g.fillText(t.toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0) + "s", x + 2, 10);
+  }
+}
+
+// ---------- interaction ----------
+let drag = null;
+cv.addEventListener("pointerdown", (e) => {
+  const y = e.offsetY, t = T(e.offsetX);
+  const L = LANES.find((l) => y >= l.y && y < l.y + l.h);
+  if (L && (L.id === "moments" || L.id === "marks")) {
+    const hit = L.spans.find((s) => t >= s.a && t <= s.b && y >= L.y + 2 + s.row * 16 && y < L.y + 15 + s.row * 16);
+    if (hit) {
+      sel = { a: s4(hit.a), b: s4(hit.b) };
+      if (L.id === "marks") { selThread = hit.m.id; hit.m._fresh = false; }
+      else { selThread = null; $("note").placeholder = "Moment: " + hit.m.label; }
+      update(); return;
+    }
+  }
+  drag = { t0: t }; sel = { a: t, b: t }; cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", (e) => {
+  if (!drag) return; const t = T(e.offsetX);
+  sel = { a: Math.max(0, Math.min(drag.t0, t)), b: Math.min(TL.duration, Math.max(drag.t0, t)) }; draw(); showSpan();
+});
+cv.addEventListener("pointerup", () => {
+  if (!drag) return; drag = null;
+  if (sel.b - sel.a < 0.02) sel = null; else { sel = { a: s4(sel.a), b: s4(sel.b) }; selThread = null; }
+  update();
+});
+cv.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const span = view.b - view.a;
+  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    const d = ((e.shiftKey ? e.deltaY : e.deltaX) / W) * span; setView(view.a + d, view.b + d);
+  } else {
+    const t = T(e.offsetX), f = Math.exp(e.deltaY * 0.002);
+    setView(t - (t - view.a) * f, t + (view.b - t) * f);
+  }
+}, { passive: false });
+function setView(a, b) {
+  const span = Math.min(TL.duration, Math.max(0.2, b - a));
+  a = Math.max(0, Math.min(TL.duration - span, a)); view = { a, b: a + span }; draw();
+}
+const s4 = (t) => Math.round(t * 1000) / 1000;
+window.addEventListener("resize", () => { layout(); draw(); });
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "TEXTAREA") return;
+  if (e.code === "Space") { e.preventDefault(); playing ? stop() : play(); }
+});
+document.querySelectorAll("[data-n]").forEach((b) => b.addEventListener("click", () => {
+  if (!sel) return; const [edge, d] = b.dataset.n.split(",");
+  const k = edge === "from" ? "a" : "b"; sel[k] = s4(sel[k] + parseFloat(d));
+  if (sel.b <= sel.a) sel[k] = s4(sel[k] - parseFloat(d));
+  update(); if (playing) { stop(); play(); }
+}));
+$("zoomSel").onclick = () => sel && setView(sel.a - 0.15 * (sel.b - sel.a), sel.b + 0.15 * (sel.b - sel.a));
+$("zoomAll").onclick = () => setView(0, TL.duration);
+$("play").onclick = () => play();
+$("stop").onclick = () => stop();
+$("newMark").onclick = async () => {
+  if (!sel) return alertStatus("mark a span first");
+  const note = $("note").value.trim(); if (!note) return alertStatus("type a note first");
+  const e = await post({ kind: "mark", from: sel.a, to: sel.b, note });
+  if (e) { selThread = e.id; $("note").value = ""; update(); }
+};
+$("reply").onclick = async () => {
+  if (!selThread) return alertStatus("select a thread first");
+  const note = $("note").value.trim(); if (!note) return alertStatus("type a note first");
+  if (await post({ kind: "reply", on: selThread, note })) { $("note").value = ""; update(); }
+};
+$("edit").onclick = async () => {
+  if (!selThread || !sel) return alertStatus("select a thread and nudge its span first");
+  if (await post({ kind: "edit", on: selThread, from: sel.a, to: sel.b, note: $("note").value.trim() || undefined })) { $("note").value = ""; update(); }
+};
+const alertStatus = (s) => ($("status").textContent = s);
+
+function showSpan() {
+  $("span").textContent = sel ? `${sel.a.toFixed(3)}–${sel.b.toFixed(3)} s (${Math.round((sel.b - sel.a) * 1000)} ms)` : "no span";
+}
+function update() { showSpan(); layout(); draw(); renderThreads(); renderSel(); }
+function renderSel() {
+  if (!sel) { $("selInfo").textContent = "Drag on the timeline, or click a moment or a mark."; return; }
+  const lines = TL.readings.map((r) => {
+    const ns = r.notes.filter((n) => n.to > sel.a && n.from < sel.b);
+    return `<b style="color:var(--${r.reader})">${r.reader}</b>: ` + (ns.map((n) => `${keyName(n.key)}${n.between_keys ? "?" : ""} <span class=meta>${n.from.toFixed(2)}–${n.to.toFixed(2)}</span>`).join(" · ") || "no notes");
+  });
+  const ms = TL.moments.filter((m) => m.to > sel.a && m.from < sel.b).map((m) => `<span style="color:var(--moment)">moment</span> ${m.from}–${m.to}: ${esc(m.label)}`);
+  $("selInfo").innerHTML = lines.concat(ms).join("<br>");
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function entryHtml(m) {
+  const span = m.from != null ? ` <span class=meta>${(+m.from).toFixed(3)}–${(+m.to).toFixed(3)}</span>` : "";
+  return `<div class="entry ${m.by} ${m._fresh ? "fresh" : ""}"><span class="who ${m.by}">${m.by === "claude" ? "✦ Claude" : "owner"}</span> <span class=meta>${m.kind} · ${esc(m.at)}</span>${span}<br>${esc(m.note)}</div>`;
+}
+function renderThreads() {
+  $("threads").innerHTML = roots().slice().reverse().map((r) => {
+    const t = threadOf(r.id), sp = currentSpan(r), fresh = t.some((m) => m._fresh);
+    return `<div class="thread ${selThread === r.id ? "sel" : ""}" data-id="${r.id}">${entryHtml(r)}<span class=meta>${t.length - 1} after · now ${sp.a.toFixed(3)}–${sp.b.toFixed(3)}${fresh ? " · new" : ""}</span></div>`;
+  }).join("") || '<span class=meta>no marks yet</span>';
+  document.querySelectorAll(".thread").forEach((d) => d.onclick = () => {
+    const r = roots().find((m) => m.id === d.dataset.id); selThread = r.id;
+    sel = currentSpan(r); threadOf(r.id).forEach((m) => (m._fresh = false)); update();
+  });
+  const st = selThread && threadOf(selThread);
+  $("threadView").innerHTML = st ? st.map(entryHtml).join("") : "none selected";
+}
+
+// ---------- audio ----------
+function freqOf(r, key) { return 440 * Math.pow(2, ((key * 100 + (r.tuning_cents - 6900)) - 6900) / 1200); }
+function play() {
+  if (!sel || !ctx) return;
+  stop(); ctx.resume();
+  const a = sel.a, b = sel.b, dur = b - a, when = ctx.currentTime + 0.05;
+  const nodes = [];
+  if ($("hTake").checked && buffer) {
+    const s = ctx.createBufferSource(); s.buffer = buffer; s.connect(ctx.destination); s.start(when, a, dur); nodes.push(s);
+  }
+  TL.readings.forEach((r) => {
+    if (!$(r.reader === "hmm" ? "hHmm" : "hRules").checked) return;
+    for (const n of r.notes) {
+      if (n.to <= a || n.from >= b) continue;
+      const t0 = when + Math.max(0, n.from - a), t1 = when + Math.min(dur, n.to - a);
+      const o = ctx.createOscillator(), gn = ctx.createGain();
+      o.frequency.value = freqOf(r, n.key); o.type = "sine";
+      gn.gain.setValueAtTime(0, t0); gn.gain.linearRampToValueAtTime(0.18, t0 + 0.008);
+      gn.gain.setValueAtTime(0.18, Math.max(t0 + 0.008, t1 - 0.008)); gn.gain.linearRampToValueAtTime(0, t1);
+      o.connect(gn).connect(ctx.destination); o.start(t0); o.stop(t1 + 0.01); nodes.push(o);
+    }
+  });
+  playing = { nodes, when, a, dur, head: a };
+  const tick = () => {
+    if (!playing) return;
+    const p = ctx.currentTime - playing.when;
+    if (p >= playing.dur) { if ($("loop").checked) { play(); } else { stop(); } return; }
+    playing.head = playing.a + Math.max(0, p); draw(); playing.raf = requestAnimationFrame(tick);
+  };
+  playing.raf = requestAnimationFrame(tick);
+}
+function stop() {
+  if (!playing) return;
+  cancelAnimationFrame(playing.raf); playing.nodes.forEach((n) => { try { n.stop(); } catch (e) {} });
+  playing = null; draw();
+}
+load();
+</script>
+</body>
+</html>
