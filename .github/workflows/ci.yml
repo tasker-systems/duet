@@ -62,7 +62,7 @@ jobs:
           toolchain: stable
           components: rustfmt
       # Tool versions are pinned, and each was at least 7 days old when pinned (SC-IN-1).
-      - uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
         with:
           tool: cargo-deny@0.20.2,cargo-audit@0.22.2
       - name: Lockfile matches the manifests (SC-IN-3)
