@@ -31,4 +31,4 @@ thiserror = "2"
 [dev-dependencies]
 # Validates every committed example and every round-trip document against its committed schema.
 # No default features: no HTTP or file resolver, so every reference resolves to a committed file.
-jsonschema = { version = "0.61.2", default-features = false }
+jsonschema = { version = "0.62.0", default-features = false }

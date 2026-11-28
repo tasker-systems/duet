@@ -21,7 +21,7 @@ audioadapter-buffers = "5.2.0"
 # The basic-pitch reader (feature `basic-pitch`): Spotify's Basic Pitch through an unofficial port,
 # its model embedded from models/basic-pitch. 0.1.0, not 0.2.0: 0.2.0 is under seven days old, and
 # differs only in its `ort` backend, which duet does not use.
-basic-pitch-rs = { version = "=0.1.0", default-features = false, features = ["tract"], optional = true }
+basic-pitch-rs = { version = "=0.2.0", default-features = false, features = ["tract"], optional = true }
 duet-core.workspace = true
 rubato = "5.1.0"
 rustfft = "6.4.1"

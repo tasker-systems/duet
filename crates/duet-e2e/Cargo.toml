@@ -31,4 +31,4 @@ midly = "0.5.3"
 toml = "1"
 # Validates the documents duet writes against their committed schemas, envelope included. No
 # default features: no HTTP or file resolver.
-jsonschema = { version = "0.61.2", default-features = false }
+jsonschema = { version = "0.62.0", default-features = false }

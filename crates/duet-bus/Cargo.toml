@@ -25,5 +25,5 @@ thiserror = "2"
 [dev-dependencies]
 # Validates every line the writer writes against the committed schemas. No default features: no
 # HTTP or file resolver, so every reference resolves to a committed file.
-jsonschema = { version = "0.61.2", default-features = false }
+jsonschema = { version = "0.62.0", default-features = false }
 serde_json = { version = "1", features = ["float_roundtrip"] }
